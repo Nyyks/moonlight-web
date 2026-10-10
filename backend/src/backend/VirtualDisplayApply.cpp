@@ -17,6 +17,7 @@
 
 #include "backend/VirtualDisplayApply.h"
 
+#include "backend/DriverPackage.h"
 #include "backend/VirtualDisplay.h"
 #include "common/Logger.h"
 
@@ -120,118 +121,8 @@ QString lastErrorText(DWORD err = GetLastError())
     return QStringLiteral("0x%1 %2").arg(err, 8, 16, QLatin1Char('0')).arg(text);
 }
 
-QString fileSha256(const QString& path)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) return QString();
-    QCryptographicHash h(QCryptographicHash::Sha256);
-    if (!h.addData(&f)) return QString();
-    return QString::fromLatin1(h.result().toHex());
-}
-
-// ── Trusted Publishers, for the duration of the install ────────────────────
-//
-// A user-mode driver package installs without a prompt only when the
-// catalog's signer is a trusted publisher. The signer is pinned by thumbprint
-// (VirtualDisplay::catalogSignerThumbprint); the certificate itself is taken
-// from inside the catalog we just hashed, never from anywhere else, added to
-// the machine store for the install, and deleted again unless it was already
-// there before us. Nothing signed by anyone else is ever trusted, and the
-// trust does not outlive this process.
-
-struct PublisherTrust
-{
-    HCERTSTORE store = nullptr;
-    PCCERT_CONTEXT added = nullptr; // the copy in the store, when WE added it
-    bool preexisting = false;
-
-    ~PublisherTrust()
-    {
-        if (added) {
-            // CertDeleteCertificateFromStore frees the context either way.
-            if (!CertDeleteCertificateFromStore(added))
-                Logger::warning(
-                    QStringLiteral("[vdisplay-apply] could not untrust the publisher: %1")
-                        .arg(lastErrorText()));
-            else
-                Logger::info(QStringLiteral("[vdisplay-apply] publisher untrusted again"));
-            added = nullptr;
-        }
-        if (store) CertCloseStore(store, 0);
-    }
-};
-
-bool trustCatalogSigner(const QString& catPath, PublisherTrust& trust, QString* error)
-{
-    const QByteArray wanted =
-        QByteArray::fromHex(VirtualDisplay::catalogSignerThumbprint().toLatin1());
-
-    HCERTSTORE catStore = nullptr;
-    HCRYPTMSG msg = nullptr;
-    const std::wstring wpath = QDir::toNativeSeparators(catPath).toStdWString();
-    if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, wpath.c_str(),
-                          CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED | CERT_QUERY_CONTENT_FLAG_CERT,
-                          CERT_QUERY_FORMAT_FLAG_ALL, 0, nullptr, nullptr, nullptr, &catStore, &msg,
-                          nullptr)) {
-        *error = QStringLiteral("cannot read the catalog's signature: %1").arg(lastErrorText());
-        return false;
-    }
-    if (msg) CryptMsgClose(msg);
-
-    PCCERT_CONTEXT match = nullptr;
-    for (PCCERT_CONTEXT c = CertEnumCertificatesInStore(catStore, nullptr); c;
-         c = CertEnumCertificatesInStore(catStore, c)) {
-        BYTE hash[20];
-        DWORD len = sizeof(hash);
-        if (!CertGetCertificateContextProperty(c, CERT_SHA1_HASH_PROP_ID, hash, &len)) continue;
-        if (QByteArray(reinterpret_cast<const char*>(hash), int(len)) == wanted) {
-            match = CertDuplicateCertificateContext(c);
-            CertFreeCertificateContext(c);
-            break;
-        }
-    }
-    CertCloseStore(catStore, 0);
-    if (!match) {
-        *error = QStringLiteral("the catalog is not signed by the pinned publisher");
-        return false;
-    }
-
-    trust.store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
-                                CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_OPEN_EXISTING_FLAG,
-                                L"TrustedPublisher");
-    if (!trust.store)
-        trust.store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, CERT_SYSTEM_STORE_LOCAL_MACHINE,
-                                    L"TrustedPublisher");
-    if (!trust.store) {
-        CertFreeCertificateContext(match);
-        *error =
-            QStringLiteral("cannot open the Trusted Publishers store: %1").arg(lastErrorText());
-        return false;
-    }
-
-    CRYPT_HASH_BLOB blob{DWORD(wanted.size()),
-                         reinterpret_cast<BYTE*>(const_cast<char*>(wanted.constData()))};
-    if (PCCERT_CONTEXT existing =
-            CertFindCertificateInStore(trust.store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
-                                       CERT_FIND_SHA1_HASH, &blob, nullptr)) {
-        // Already trusted on this machine (the driver's own installer does the
-        // same thing, permanently): not ours to remove afterwards.
-        CertFreeCertificateContext(existing);
-        CertFreeCertificateContext(match);
-        trust.preexisting = true;
-        Logger::info(QStringLiteral("[vdisplay-apply] publisher already trusted"));
-        return true;
-    }
-    const BOOL ok =
-        CertAddCertificateContextToStore(trust.store, match, CERT_STORE_ADD_NEW, &trust.added);
-    CertFreeCertificateContext(match);
-    if (!ok) {
-        *error = QStringLiteral("cannot trust the publisher: %1").arg(lastErrorText());
-        return false;
-    }
-    Logger::info(QStringLiteral("[vdisplay-apply] publisher trusted for this install"));
-    return true;
-}
+// The pinned hashes and the catalog signer's trust: DriverPackage.h, shared
+// with "MoonlightWeb Virtual HID".
 
 // ── Device nodes ────────────────────────────────────────────────────────────
 
@@ -648,7 +539,7 @@ int stageDriver(Context& ctx)
         QString infPath, catPath;
         for (const VirtualDisplay::DriverFile& f : VirtualDisplay::driverFiles()) {
             const QString path = dir + QLatin1Char('/') + QLatin1String(f.name);
-            if (fileSha256(path) != QLatin1String(f.sha256))
+            if (DriverPackage::fileSha256(path) != QLatin1String(f.sha256))
                 return failAt(ctx, stage,
                               QStringLiteral("%1 is missing or does not match its pinned hash")
                                   .arg(QLatin1String(f.name)));
@@ -661,8 +552,10 @@ int stageDriver(Context& ctx)
         bool wrote = false;
         if (!writeSettings(0, 0, 0, &wrote, &error)) return failAt(ctx, stage, error);
 
-        PublisherTrust trust;
-        if (!trustCatalogSigner(catPath, trust, &error)) return failAt(ctx, stage, error);
+        DriverPackage::PublisherTrust trust;
+        if (!DriverPackage::trustCatalogSigner(catPath, VirtualDisplay::catalogSignerThumbprint(),
+                                               "[vdisplay-apply]", trust, &error))
+            return failAt(ctx, stage, error);
         SP_DEVINFO_DATA data{};
         if (!createOurNode(nodes.set, data, &error)) return failAt(ctx, stage, error);
         bool reboot = false;

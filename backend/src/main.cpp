@@ -99,6 +99,7 @@
 #include "backend/streambackend/NativeProbeService.h"
 #include "backend/VirtualDisplay.h"
 #include "backend/VirtualDisplayApply.h"
+#include "backend/VirtualHidApply.h"
 #include "backend/VirtualDisplayJob.h"
 #include "backend/streambackend/NativeHostBackend.h"
 #include "Limelight.h" // SCM_* codec-support masks
@@ -1514,6 +1515,7 @@ int main(int argc, char* argv[])
                                                    "--worker-service-remove",
                                                    "--native-probe",
                                                    "--vdisplay-apply",
+                                                   "--vhid-apply",
                                                    "--status",
                                                    "--new-pin",
                                                    "--enable-internet",
@@ -1556,7 +1558,7 @@ int main(int argc, char* argv[])
         // service passes the console user's instead, and it has to be read here
         // with the rest, before the first line is written.
         QString workerDataDir;
-        bool probe = false, worker = false, transient = false, vdisplay = false;
+        bool probe = false, worker = false, transient = false, vdisplay = false, vhid = false;
         bool service = false;
         for (int i = 1; i < argc; ++i) {
             // --log <path> and --log=<path>, the two spellings QCommandLineParser
@@ -1571,6 +1573,9 @@ int main(int argc, char* argv[])
                 worker = true;
             else if (qstrcmp(argv[i], "--vdisplay-apply") == 0)
                 vdisplay = true;
+            else if (qstrcmp(argv[i], "--vhid-apply") == 0 ||
+                     qstrncmp(argv[i], "--vhid-apply=", 13) == 0)
+                vhid = true;
             else if (qstrcmp(argv[i], "--worker-service") == 0)
                 service = true;
             else if (qstrcmp(argv[i], "--worker-data-dir") == 0 && i + 1 < argc)
@@ -1624,6 +1629,9 @@ int main(int argc, char* argv[])
             // The elevated helper: its own file, so a driver install that went
             // wrong can be read without the server's log interleaved.
             Logger::instance()->setLogFile(logDir + QStringLiteral("/moonlightweb-vdisplay.log"));
+        } else if (vhid) {
+            // The HID driver's install, the same way.
+            Logger::instance()->setLogFile(logDir + QStringLiteral("/moonlightweb-vhid.log"));
         } else if (!transient) {
             Logger::instance()->setLogFile(logDir + QStringLiteral("/moonlightweb.log"));
         }
@@ -1796,6 +1804,17 @@ int main(int argc, char* argv[])
                                          "With --vdisplay-apply: the staging directory", "dir");
     parser.addOption(vdisplayDirOption);
 
+    // "MoonlightWeb Virtual HID", the HID passthrough's Windows driver: the
+    // installer's elevated half (VirtualHidApply.h).
+    QCommandLineOption vhidApplyOption(
+        "vhid-apply",
+        "Install or remove the HID passthrough's driver (internal: run by the installer).",
+        "install|uninstall");
+    parser.addOption(vhidApplyOption);
+    QCommandLineOption vhidDirOption("vhid-dir",
+                                     "With --vhid-apply: the driver package's directory", "dir");
+    parser.addOption(vhidDirOption);
+
     // Development instance: isolated state (see the applicationName switch at
     // startup), no single-instance lock, and alternate default ports — so it can
     // run alongside an installed service without touching it. Never for production.
@@ -1881,6 +1900,8 @@ int main(int argc, char* argv[])
     if (parser.isSet(vdisplayApplyOption))
         return VirtualDisplayApply::run(parser.value(vdisplayStageOption),
                                         parser.value(vdisplayDirOption));
+    if (parser.isSet(vhidApplyOption))
+        return VirtualHidApply::run(parser.value(vhidApplyOption), parser.value(vhidDirOption));
 
     // ── The stream-worker launcher service ──────────────────────────────────
     // Before the lock too: the service is a second process of this binary, and

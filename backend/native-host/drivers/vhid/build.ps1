@@ -11,16 +11,30 @@
 #
 #   .\build.ps1                 build and test-sign into build\package\
 #   .\build.ps1 -Configuration Debug
+#   .\build.ps1 -Sign Product -CertThumbprint <sha1> [-TimestampUrl <url>]
 #
-# Signing: a self-signed certificate made once with openssl into build\testcert\ (never committed).
-# Installing it needs a machine in test mode (bcdedit /set testsigning on), with the certificate in
-# its LocalMachine Root and TrustedPublisher stores; install.ps1 does that part.
+# Signing, test (the default): a self-signed certificate made once with openssl into build\testcert\
+# (never committed). Installing it needs a machine in test mode (bcdedit /set testsigning on), with
+# the certificate in its LocalMachine Root and TrustedPublisher stores; install.ps1 does that part.
+#
+# Signing, product: a code-signing certificate from a public CA, already in the user's certificate
+# store (or on its token), named by thumbprint, timestamped. A user-mode driver needs nothing more
+# (no EV, no Microsoft attestation: the virtual display's driver is signed that way). The package
+# then goes to backend\installer\drivers\vhid, and the hashes and thumbprint printed at the end go
+# to src\backend\VirtualHidApply.h: the installer installs only files that match them.
 
 param(
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
-    [string]$Version = '0.1.0.0'
+    [string]$Version = '0.1.0.0',
+    [ValidateSet('Test', 'Product')]
+    [string]$Sign = 'Test',
+    [string]$CertThumbprint = '',
+    [string]$TimestampUrl = 'http://timestamp.digicert.com'
 )
+if ($Sign -eq 'Product' -and $CertThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+    throw '-Sign Product needs -CertThumbprint: the SHA-1 thumbprint of the code-signing certificate'
+}
 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -131,6 +145,30 @@ Step 'Inf2Cat'
 Remove-Item (Join-Path $package 'MoonlightWebVHid.cat') -ErrorAction SilentlyContinue
 Run (Join-Path $wdk "bin\$kitDir\x86\Inf2Cat.exe") @("/driver:$package", '/os:10_X64', '/uselocaltime')
 
+$signtool = Join-Path $sdkBin 'x64\signtool.exe'
+$cat = Join-Path $package 'MoonlightWebVHid.cat'
+
+# ── Product signature ───────────────────────────────────────────────────────
+if ($Sign -eq 'Product') {
+    Step 'product signature'
+    Remove-Item (Join-Path $package 'MoonlightWebVHid-test.cer') -ErrorAction SilentlyContinue
+    foreach ($f in @($dll, $cat)) {
+        Run $signtool @('sign', '/q', '/sha1', $CertThumbprint, '/fd', 'sha256',
+            '/tr', $TimestampUrl, '/td', 'sha256', $f)
+        Run $signtool @('verify', '/q', '/pa', $f)
+    }
+    # What VirtualHidApply.h pins: the installer refuses anything else.
+    Step 'pins for src\backend\VirtualHidApply.h'
+    foreach ($name in 'MoonlightWebVHid.inf', 'MoonlightWebVHid.cat', 'MoonlightWebVHid.dll') {
+        $h = (Get-FileHash -Algorithm SHA256 (Join-Path $package $name)).Hash.ToLowerInvariant()
+        Write-Host "    {`"$name`", `"$h`"},"
+    }
+    Write-Host "    catalog signer: $($CertThumbprint.ToLowerInvariant())"
+    Step "done: $package (copy it to backend\installer\drivers\vhid)"
+    Get-ChildItem $package | Format-Table Name, Length -AutoSize
+    return
+}
+
 # ── Test signature ──────────────────────────────────────────────────────────
 Step 'test signature'
 $certDir = Join-Path $out 'testcert'
@@ -160,8 +198,7 @@ if (-not (Test-Path $pfx)) {
     Remove-Item $key
 }
 $pass = (Get-Content $passFile -Raw).Trim()
-$signtool = Join-Path $sdkBin 'x64\signtool.exe'
-foreach ($f in @($dll, (Join-Path $package 'MoonlightWebVHid.cat'))) {
+foreach ($f in @($dll, $cat)) {
     Run $signtool @('sign', '/q', '/fd', 'sha256', '/f', $pfx, '/p', $pass, $f)
 }
 Copy-Item $cer $package -Force

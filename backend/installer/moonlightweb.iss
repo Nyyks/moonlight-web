@@ -1152,6 +1152,23 @@ begin
   Log(Format('virtual display helper (%s): exit %d', [verb, rc]));
 end;
 
+// "MoonlightWeb Virtual HID", the HID passthrough's driver: the app's elevated
+// helper again. `install` re-hashes the package under {app}\drivers\vhid
+// against the constants compiled into the exe, then creates or updates the
+// driver's node; `uninstall` removes it once no MoonlightWeb edition that
+// installed it is left. Best-effort like ViGEmBus: without the driver the
+// passthrough is simply unavailable, so nothing here may fail the setup. A
+// build that bundles no signed package (until the product signature exists)
+// skips it entirely.
+procedure RunVirtualHidHelper(verb: String);
+var
+  rc: Integer;
+begin
+  Exec(ExpandConstant('{app}\{#MyAppExe}'), '--vhid-apply ' + verb,
+       ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, rc);
+  Log(Format('virtual HID helper (%s): exit %d', [verb, rc]));
+end;
+
 // Release the files under {app} before the copy: a running server holds its exe
 // and Qt DLLs open and Inno would fail (or defer to a reboot) on every one.
 procedure StopRunningInstance();
@@ -1583,6 +1600,10 @@ begin
     RegWriteDWordValue(HKEY_LOCAL_MACHINE, VDisplaySetupKey, 'VirtualDisplayAccepted', 1);
   if RegValueExists(HKEY_LOCAL_MACHINE, VDisplaySetupKey, 'VirtualDisplayAccepted') then
     RunVirtualDisplayHelper('install');
+  // The HID passthrough's driver, with the native host it serves; again on
+  // every update, which is how a newer driver arrives.
+  if FileExists(ExpandConstant('{app}\drivers\vhid\MoonlightWebVHid.inf')) then
+    RunVirtualHidHelper('install');
 
   // provisioning.json — consumed and removed by the server on first run.
   // An update skips it: the server is already provisioned, and replaying a
@@ -1756,6 +1777,8 @@ begin
     // while the exe and the driver files are still under {app}.
     RunVirtualDisplayHelper('uninstall');
     RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE, VDisplaySetupKey);
+    // The HID passthrough's driver, unless another edition still uses it.
+    RunVirtualHidHelper('uninstall');
     // The virtual display helper task and its staging directory.
     Exec('schtasks.exe', '/Delete /TN "' + VDisplayTaskName + '" /F', '', SW_HIDE,
          ewWaitUntilTerminated, rc);

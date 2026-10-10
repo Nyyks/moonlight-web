@@ -284,6 +284,8 @@ add_executable(mw-server
     src/backend/VirtualDisplayRules.cpp
     src/backend/VirtualDisplayJob.cpp
     src/backend/VirtualDisplayApply.cpp
+    src/backend/DriverPackage.cpp
+    src/backend/VirtualHidApply.cpp
     # Listed as a source although it is a header: it declares a Q_OBJECT with no
     # .cpp of its own (it is the pure media-engine interface), and AUTOMOC only
     # moc's a header it can see in the target.
@@ -487,8 +489,9 @@ if(WIN32)
     # from the service (ConsoleSession.cpp).
     # taskschd + ole32 + oleaut32: the logon Scheduled Task toggled from the
     # tray and the admin page (Autostart.cpp).
-    # setupapi + newdev + cfgmgr32: the virtual display driver's device node,
-    # created and removed by the --vdisplay-apply helper (VirtualDisplayApply.cpp).
+    # setupapi + newdev + cfgmgr32: the virtual display's and the virtual HID's
+    # device nodes, created and removed by the --vdisplay-apply and --vhid-apply
+    # helpers (VirtualDisplayApply.cpp, VirtualHidApply.cpp).
     # advapi32 + shell32: the LocalSystem launcher service — the SCM, the pipe
     # DACLs and the console user's AppData (WorkerService.cpp).
     target_link_libraries(mw-server PRIVATE ws2_32 winmm Bcrypt Crypt32 iphlpapi Dbghelp avrt
@@ -580,6 +583,9 @@ if(MW_BUILD_TESTS)
         # settings it writes. Pure Qt Core, verified here on every platform.
         tests/test_virtual_display.cpp
         src/backend/VirtualDisplayRules.cpp
+        # The pinned-hash gate in front of SetupAPI, and the HID driver's pins.
+        tests/test_driver_package.cpp
+        src/backend/DriverPackage.cpp
         src/common/Edition.cpp
         src/server/ConnectionGuard.cpp
         src/server/HttpParser.cpp
@@ -600,6 +606,10 @@ if(MW_BUILD_TESTS)
     set_target_properties(mw-security-tests PROPERTIES AUTOMOC ON)
     target_include_directories(mw-security-tests PRIVATE src tests)
     target_link_libraries(mw-security-tests PRIVATE Qt6::Core Qt6::Network OpenSSL::Crypto)
+    if(WIN32)
+        # DriverPackage.cpp's catalog signer check (CryptQueryObject).
+        target_link_libraries(mw-security-tests PRIVATE Crypt32)
+    endif()
     add_test(NAME security-tnr COMMAND mw-security-tests)
 endif()
 
@@ -641,6 +651,14 @@ if(WIN32)
         endif()
     endforeach()
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vdd" DESTINATION drivers)
+    # "MoonlightWeb Virtual HID": the HID passthrough's driver, built and signed
+    # apart (native-host/drivers/vhid/build.ps1 -Sign Product) and dropped here
+    # only once signed for the product. Absent — today — the installer has
+    # nothing to set up and the passthrough reports itself unavailable, as on a
+    # machine without the driver. Its files are pinned in VirtualHidApply.cpp.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid/MoonlightWebVHid.inf")
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid" DESTINATION drivers)
+    endif()
 endif()
 
 set(CPACK_PACKAGE_NAME "moonlightweb")
