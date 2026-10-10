@@ -19,6 +19,7 @@
 
 #include "InputPolicy.h"
 
+#include <QJsonObject>
 #include <QObject>
 #include <memory>
 #include <string>
@@ -109,10 +110,16 @@ public:
     /// Same delivery guarantee as notifyClientTakenOver().
     virtual void notifyClientSessionEnded() {}
 
-    /// Restrict what this session's client may send to the host. Set once,
-    /// before the relay starts, from the share activation the player joined
-    /// with; the owner's own sessions leave it unrestricted.
-    void setInputPolicy(const InputMsg::Policy& policy) { m_InputPolicy = policy; }
+    /// Restrict what this session's client may send to the host. Set before
+    /// the relay starts, from the share activation the player joined with (the
+    /// owner's own sessions leave it unrestricted), and again whenever the
+    /// owner moves the player's boxes on the sharing board.
+    void setInputPolicy(const InputMsg::Policy& policy)
+    {
+        const bool hidMoved = m_InputPolicy.hid != policy.hid;
+        m_InputPolicy = policy;
+        if (hidMoved) onHidPolicyChanged();
+    }
     const InputMsg::Policy& inputPolicy() const { return m_InputPolicy; }
 
     /// Request an IDR frame from Sunshine (keyframe).
@@ -155,6 +162,23 @@ signals:
     void sessionEnded();
 
 protected:
+    /// The HID passthrough was given or taken under a running stream. Runs on
+    /// the thread that set the policy, after it is in place. The relays tell
+    /// the page again (hidcaps) and, when it was taken, remove the devices
+    /// already recreated: dropping their reports alone would leave them
+    /// plugged in on the host, at rest. Also runs for the policy set before
+    /// the start, where there is no page and nothing attached yet.
+    virtual void onHidPolicyChanged() {}
+
+    /// The devices one page may have recreated at once (slots 0..7 of
+    /// hidattach), mw::native::HidPassthrough::kMaxSlots on the host side.
+    static constexpr int kHidSlots = 8;
+
+    /// The hidcaps message both relays send: whether this host recreates WebHID
+    /// devices for this player (`available`, else `why`), with force feedback
+    /// (`ffb`) and the Linux HID++ relay (`hidpp`).
+    static QJsonObject hidCapsMessage(const InputMsg::Policy& policy, IMediaEngine& engine);
+
     /// Apply the UPnP host-candidate rewrite and the IPv6 suppression, then
     /// emit signalingIceCandidate. Both relays call this from their
     /// onLocalCandidate handler; the logic used to be duplicated verbatim in

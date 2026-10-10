@@ -124,7 +124,58 @@ describe('ShareBoard', () => {
         expect(BackendClient.sharePermissions).toHaveBeenCalledWith(2, {
             gamepad: false,
             keyboardMouse: true,
+            hid: false,
         });
+    });
+
+    it('offers the HID box only with the gamepad, and sends it', async () => {
+        await openBoard([slot(2, { state: 'shared' }), slot(3), slot(4)]);
+        const gamepad = rowFor(2).querySelector('.share-perm-gamepad');
+        const hid = rowFor(2).querySelector('.share-perm-hid');
+        // A wheel sent as itself is a game controller: no gamepad, no box.
+        expect(hid.disabled).toBe(true);
+        expect(hid.checked).toBe(false);
+
+        gamepad.checked = true;
+        gamepad.dispatchEvent(new Event('change'));
+        expect(hid.disabled).toBe(false);
+        hid.checked = true;
+        hid.dispatchEvent(new Event('change'));
+        await vi.waitFor(() =>
+            expect(BackendClient.sharePermissions).toHaveBeenLastCalledWith(2, {
+                gamepad: true,
+                keyboardMouse: false,
+                hid: true,
+            }),
+        );
+
+        // Taking the gamepad back takes the wheel with it.
+        gamepad.checked = false;
+        gamepad.dispatchEvent(new Event('change'));
+        expect(hid.checked).toBe(false);
+        expect(hid.disabled).toBe(true);
+        await vi.waitFor(() =>
+            expect(BackendClient.sharePermissions).toHaveBeenLastCalledWith(2, {
+                gamepad: false,
+                keyboardMouse: false,
+                hid: false,
+            }),
+        );
+    });
+
+    it('paints a granted HID box from the server', async () => {
+        await openBoard([
+            slot(2, {
+                state: 'shared',
+                permissions: { gamepad: true, keyboardMouse: false, hid: true },
+                access_level: 'gamer',
+            }),
+            slot(3),
+            slot(4),
+        ]);
+        const hid = rowFor(2).querySelector('.share-perm-hid');
+        expect(hid.checked).toBe(true);
+        expect(hid.disabled).toBe(false);
     });
 
     it('records an idle row’s choice at once, so the poll cannot undo it', async () => {
@@ -140,6 +191,7 @@ describe('ShareBoard', () => {
             expect(BackendClient.sharePermissions).toHaveBeenCalledWith(2, {
                 gamepad: true,
                 keyboardMouse: false,
+                hid: false,
             }),
         );
     });

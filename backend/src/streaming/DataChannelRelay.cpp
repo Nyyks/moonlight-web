@@ -1281,23 +1281,9 @@ void DataChannelRelay::createDataChannels()
                 ClipboardBridge::instance()->requestAnnounce();
             }
 
-            // Whether this host recreates WebHID devices: the page shows its
-            // "Transmit a device" panel from this answer.
-            {
-                const QString why = !m_InputPolicy.hid
-                                        ? QStringLiteral("not allowed for this player")
-                                        : m_Shim->hidUnavailableReason();
-                QJsonObject caps{
-                    {QStringLiteral("type"), QStringLiteral("hidcaps")},
-                    {QStringLiteral("available"), why.isEmpty()},
-                    {QStringLiteral("ffb"), why.isEmpty() && m_Shim->hidForceFeedback()},
-                    {QStringLiteral("hidpp"), why.isEmpty() && m_Shim->hidRelaysHidpp()},
-                    {QStringLiteral("why"), why}};
-                const QByteArray j = QJsonDocument(caps).toJson(QJsonDocument::Compact);
-                try {
-                    m_InputDc->send(std::string(j.constData(), j.size()));
-                } catch (const std::exception&) {}
-            }
+            // Whether this host recreates WebHID devices: the page sends the
+            // devices it was asked to from this answer.
+            sendHidCaps();
 
             // Start periodic stats timer — marshal to the Qt main thread:
             // this callback runs on a libdatachannel thread and QTimer::start()
@@ -2775,6 +2761,27 @@ void DataChannelRelay::sendExitNotice(const char* type)
     if (!exitnotice::sendAndFlush(m_InputDc, std::string(json.constData(), json.size()))) {
         qWarning() << "[DataChannelRelay] Exit notice" << type << "not flushed before teardown";
     }
+}
+
+void DataChannelRelay::sendHidCaps()
+{
+    if (!m_InputDc || !m_InputDc->isOpen() || !m_Shim || m_Stopping.load()) return;
+    const QJsonObject caps = hidCapsMessage(m_InputPolicy, *m_Shim);
+    const QByteArray j = QJsonDocument(caps).toJson(QJsonDocument::Compact);
+    try {
+        m_InputDc->send(std::string(j.constData(), j.size()));
+    } catch (const std::exception&) {}
+}
+
+void DataChannelRelay::onHidPolicyChanged()
+{
+    // Under m_InputMutex when the stream is up (see setInputPolicy), the lock
+    // the hid channel's reports and the page's hidattach are handled under.
+    if (!m_Shim) return;
+    if (!m_InputPolicy.hid)
+        for (int slot = 0; slot < kHidSlots; ++slot)
+            m_Shim->hidDetach(slot);
+    sendHidCaps();
 }
 
 void DataChannelRelay::stop()

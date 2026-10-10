@@ -17,6 +17,7 @@
 
 #include "RelayBase.h"
 
+#include "IMediaEngine.h"
 #include "IcePriority.h"
 #include "server/NetClassify.h"
 
@@ -195,4 +196,15 @@ void RelayBase::emitLocalCandidate(const rtc::Candidate& candidate, const char* 
 
     emit signalingIceCandidate(std::string(modCandidate.candidate()),
                                std::string(modCandidate.mid()));
+}
+
+QJsonObject RelayBase::hidCapsMessage(const InputMsg::Policy& policy, IMediaEngine& engine)
+{
+    const QString why =
+        !policy.hid ? QStringLiteral("not allowed for this player") : engine.hidUnavailableReason();
+    return QJsonObject{{QStringLiteral("type"), QStringLiteral("hidcaps")},
+                       {QStringLiteral("available"), why.isEmpty()},
+                       {QStringLiteral("ffb"), why.isEmpty() && engine.hidForceFeedback()},
+                       {QStringLiteral("hidpp"), why.isEmpty() && engine.hidRelaysHidpp()},
+                       {QStringLiteral("why"), why}};
 }

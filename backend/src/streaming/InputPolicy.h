@@ -38,8 +38,8 @@ struct Policy
     bool keyboardMouse = true;
     /// The HID passthrough (hidattach, hiddetach and the 'hid' channel): a
     /// device recreated on the host is more than a gamepad, so it has a switch
-    /// of its own. The owner has it; an invited player only when the share
-    /// says so, which none does yet (absent reads as false in the worker).
+    /// of its own. The owner has it; an invited player only when the sharing
+    /// board's box says so (absent reads as false in the worker).
     bool hid = true;
 
     bool unrestricted() const { return gamepad && keyboardMouse; }

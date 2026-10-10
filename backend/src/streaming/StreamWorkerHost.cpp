@@ -242,19 +242,20 @@ void StreamWorkerHost::sendJson(const QJsonObject& msg)
     writeLine(QJsonDocument(msg).toJson(QJsonDocument::Compact) + "\n");
 }
 
-void StreamWorkerHost::setInputPolicy(bool gamepad, bool keyboardMouse)
+void StreamWorkerHost::setInputPolicy(bool gamepad, bool keyboardMouse, bool hid)
 {
     // Logged at every hop it makes, because a policy that quietly fails to
     // arrive is indistinguishable from one that was never sent, and the thing
     // it governs is whether a guest can drive the machine.
     qInfo() << "[StreamWorkerHost] policy → worker: gamepad=" << gamepad
-            << "keyboardMouse=" << keyboardMouse << "running=" << isRunning();
+            << "keyboardMouse=" << keyboardMouse << "hid=" << hid << "running=" << isRunning();
     // Fire-and-forget, unlike the teardown commands: nothing here kills the
     // worker, and a worker that has already exited simply has no policy left to
     // change.
     sendJson(QJsonObject{{QStringLiteral("cmd"), QStringLiteral("setPolicy")},
                          {QStringLiteral("gamepad"), gamepad},
-                         {QStringLiteral("keyboardMouse"), keyboardMouse}});
+                         {QStringLiteral("keyboardMouse"), keyboardMouse},
+                         {QStringLiteral("hid"), hid}});
 }
 
 void StreamWorkerHost::requestQuit()

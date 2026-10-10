@@ -903,6 +903,8 @@
         "working": "En cours...",
         "gamepad": "Manette",
         "keyboardMouse": "Clavier / Souris",
+        "hid": "Volant / Radio",
+        "hidDesc": "Les volants, radios et joysticks que le joueur envoie tels quels (Chrome ou Edge sur ordinateur, vers un hôte MoonlightWeb natif). Va avec la manette.",
         "linkLabel": "Lien",
         "pinLabel": "Code PIN",
         "pinHint": "Envoie le code séparément du lien : ensemble ils ouvrent la session, séparés ils ne servent à rien.",

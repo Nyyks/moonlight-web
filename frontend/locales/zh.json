@@ -903,6 +903,8 @@
         "working": "处理中...",
         "gamepad": "手柄",
         "keyboardMouse": "键盘 / 鼠标",
+        "hid": "方向盘 / 遥控器",
+        "hidDesc": "玩家原样发送的方向盘、遥控器和摇杆（电脑上的 Chrome 或 Edge，发往原生 MoonlightWeb 主机）。需同时允许手柄。",
         "linkLabel": "链接",
         "pinLabel": "PIN 码",
         "pinHint": "请将 PIN 与链接分开发送：两者合在一起才能进入，分开则毫无用处。",

@@ -105,6 +105,11 @@ private:
     // Best-effort exit notice ({"type": ...}) on the input DC before stop().
     void sendExitNotice(const char* type);
 
+    // hidcaps on the input DC, when it is open: whether this host recreates
+    // WebHID devices for this player, and why not.
+    void sendHidCaps();
+    void onHidPolicyChanged() override;
+
     void setupPeerConnection(const rtc::Configuration& config);
     void createTracksAndChannels();
     void onInputMessage(const std::string& message);

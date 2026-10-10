@@ -95,6 +95,7 @@ QJsonObject ShareManager::Permissions::toJson() const
     QJsonObject obj;
     obj[QStringLiteral("gamepad")] = gamepad;
     obj[QStringLiteral("keyboardMouse")] = keyboardMouse;
+    obj[QStringLiteral("hid")] = hid;
     return obj;
 }
 
@@ -103,6 +104,10 @@ ShareManager::Permissions ShareManager::Permissions::fromJson(const QJsonObject&
     Permissions p;
     p.gamepad = obj.value(QStringLiteral("gamepad")).toBool(false);
     p.keyboardMouse = obj.value(QStringLiteral("keyboardMouse")).toBool(false);
+    // A file or a request from before the box reads as no passthrough, and a
+    // passthrough without the gamepad is none at all: the device would reach
+    // the game while its own controller is refused.
+    p.hid = p.gamepad && obj.value(QStringLiteral("hid")).toBool(false);
     return p;
 }
 
@@ -302,18 +307,14 @@ bool ShareManager::setPermissions(int slot, const Permissions& perms)
     // board's own poll free to repaint the row from a server that had never
     // been told — the tick came back off a second after the owner made it.
     if (!s->activation.live()) {
-        if (s->lastPermissions.gamepad == perms.gamepad &&
-            s->lastPermissions.keyboardMouse == perms.keyboardMouse)
-            return true;
+        if (s->lastPermissions == perms) return true;
         s->lastPermissions = perms;
         save();
         emit slotChanged(slot);
         return true;
     }
 
-    if (s->activation.permissions.gamepad == perms.gamepad &&
-        s->activation.permissions.keyboardMouse == perms.keyboardMouse)
-        return true;
+    if (s->activation.permissions == perms) return true;
 
     s->activation.permissions = perms;
     s->lastPermissions = perms; // remembered for the next opening
@@ -324,7 +325,7 @@ bool ShareManager::setPermissions(int slot, const Permissions& perms)
     // Down to the worker before the board hears about it: a demotion that shows
     // in the UI before it takes effect on the host is a lie for as long as the
     // round trip lasts.
-    emit permissionsChanged(slot, perms.gamepad, perms.keyboardMouse);
+    emit permissionsChanged(slot, perms.gamepad, perms.keyboardMouse, perms.hid);
     emit slotChanged(slot);
     return true;
 }

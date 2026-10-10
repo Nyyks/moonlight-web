@@ -482,21 +482,7 @@ void MediaTrackRelay::createTracksAndChannels()
                     ClipboardBridge::instance()->requestAnnounce();
                 }
 
-                {
-                    const QString why = !m_InputPolicy.hid
-                                            ? QStringLiteral("not allowed for this player")
-                                            : m_Shim->hidUnavailableReason();
-                    QJsonObject caps{
-                        {QStringLiteral("type"), QStringLiteral("hidcaps")},
-                        {QStringLiteral("available"), why.isEmpty()},
-                        {QStringLiteral("ffb"), why.isEmpty() && m_Shim->hidForceFeedback()},
-                        {QStringLiteral("hidpp"), why.isEmpty() && m_Shim->hidRelaysHidpp()},
-                        {QStringLiteral("why"), why}};
-                    const QByteArray j = QJsonDocument(caps).toJson(QJsonDocument::Compact);
-                    try {
-                        m_InputDc->send(std::string(j.constData(), j.size()));
-                    } catch (const std::exception&) {}
-                }
+                sendHidCaps();
 
                 // Start periodic stats timer on the relay's own thread: this
                 // callback runs on a libdatachannel thread and QTimer::start()
@@ -1118,6 +1104,27 @@ void MediaTrackRelay::sendExitNotice(const char* type)
     if (!exitnotice::sendAndFlush(m_InputDc, std::string(json.constData(), json.size()))) {
         qWarning() << "[MediaTrackRelay] Exit notice" << type << "not flushed before teardown";
     }
+}
+
+void MediaTrackRelay::sendHidCaps()
+{
+    if (!m_InputDc || !m_InputDc->isOpen() || !m_Shim || m_Stopping.load()) return;
+    const QJsonObject caps = hidCapsMessage(m_InputPolicy, *m_Shim);
+    const QByteArray j = QJsonDocument(caps).toJson(QJsonDocument::Compact);
+    try {
+        m_InputDc->send(std::string(j.constData(), j.size()));
+    } catch (const std::exception&) {}
+}
+
+void MediaTrackRelay::onHidPolicyChanged()
+{
+    // On the relay thread, where the hid channel's reports and the page's
+    // hidattach are handled too.
+    if (!m_Shim) return;
+    if (!m_InputPolicy.hid)
+        for (int slot = 0; slot < kHidSlots; ++slot)
+            m_Shim->hidDetach(slot);
+    sendHidCaps();
 }
 
 void MediaTrackRelay::stop()

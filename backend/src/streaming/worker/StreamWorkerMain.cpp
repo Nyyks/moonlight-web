@@ -609,7 +609,7 @@ int runStreamWorker(QCoreApplication& app)
         policy.hid = pol["hid"].toBool(false);
         session->setInputPolicy(policy);
         qInfo() << "[StreamWorker] Input policy: gamepad=" << policy.gamepad
-                << "keyboardMouse=" << policy.keyboardMouse;
+                << "keyboardMouse=" << policy.keyboardMouse << "hid=" << policy.hid;
     }
     // What the media path revealed about the host's OS. Only the parent keeps a
     // host list, so this is the only way the observation outlives the stream —
@@ -709,7 +709,7 @@ int runStreamWorker(QCoreApplication& app)
                 policy.keyboardMouse = msg["keyboardMouse"].toBool(false);
                 policy.hid = msg["hid"].toBool(false);
                 qInfo() << "[StreamWorker] Input policy now: gamepad=" << policy.gamepad
-                        << "keyboardMouse=" << policy.keyboardMouse;
+                        << "keyboardMouse=" << policy.keyboardMouse << "hid=" << policy.hid;
                 QMetaObject::invokeMethod(
                     qApp,
                     [policy]() {

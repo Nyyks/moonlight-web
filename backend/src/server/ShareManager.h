@@ -117,6 +117,17 @@ public:
     {
         bool gamepad = false;
         bool keyboardMouse = false;
+        /// The HID passthrough: a wheel, radio or joystick the guest's
+        /// browser sends as itself (WebHID), recreated on the host. Only ever
+        /// with the gamepad, since it is one too as far as the game is
+        /// concerned; fromJson() drops it otherwise. Not part of the badge.
+        bool hid = false;
+
+        bool operator==(const Permissions& o) const
+        {
+            return gamepad == o.gamepad && keyboardMouse == o.keyboardMouse && hid == o.hid;
+        }
+        bool operator!=(const Permissions& o) const { return !(*this == o); }
 
         /// The badge the board shows. A real table over both flags: keyboard
         /// and mouse without a gamepad is "desktop", not "full" — the two are
@@ -304,7 +315,7 @@ signals:
     /// The input policy of a slot changed. main.cpp forwards it to the slot's
     /// worker, which swaps it under the running stream — no reconnect, and the
     /// keys held under the old policy are released on the way.
-    void permissionsChanged(int slot, bool gamepad, bool keyboardMouse);
+    void permissionsChanged(int slot, bool gamepad, bool keyboardMouse, bool hid);
 
     /// The owner picked another height for the guests' picture.
     void feedHeightChanged(int height);

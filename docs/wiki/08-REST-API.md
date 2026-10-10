@@ -104,7 +104,7 @@ the moment it is created: an invitation is opened tonight or tomorrow, and
 refusing to mint one over a thirty-second blip would be absurd. `remote_reachable`
 on the board is what says the machine is not answering right now; the link itself
 stays valid and stays the same characters.
-| `POST /api/share/slots/:n/permissions` | 🔑 | `{gamepad, keyboardMouse}`, accepted **at any time**, mid-stream included — the new policy is pushed down to the live worker. **409** only when the slot has no activation. |
+| `POST /api/share/slots/:n/permissions` | 🔑 | `{gamepad, keyboardMouse, hid}`, accepted **at any time**, mid-stream included — the new policy is pushed down to the live worker. `hid` (wheels and radios sent as themselves) only counts with `gamepad`; granting or taking it mid-stream plugs the guest's devices in or pulls them out. **409** only when the slot has no activation. |
 | `POST /api/share/slots/:n/ttl` | 🔑 | `{ttl_secs}` ∈ 3600 / 14400 / 28800 / 86400 / 172800 / 0 (unlimited). **400** otherwise. Shortening below the time already served expires the invitation on the spot. |
 | `POST /api/share/slots/:n/name` | 🔑 | `{name}` — the row's label, 32 chars, empty restores "Player N". Player slots only: **404** for an owner slot. |
 | `POST /api/share/slots/:n/deactivate` | 🔑 | Disconnect the player and revoke link, PIN and cookies. |

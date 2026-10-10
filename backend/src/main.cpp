@@ -2421,10 +2421,10 @@ int main(int argc, char* argv[])
     // picture, and a promotion must not cost them a reconnect. A slot with no
     // worker needs nothing: the policy travels in its config when it starts.
     QObject::connect(&shareManager, &ShareManager::permissionsChanged, qApp,
-                     [&g_Pool](int slot, bool gamepad, bool keyboardMouse) {
+                     [&g_Pool](int slot, bool gamepad, bool keyboardMouse, bool hid) {
                          if (slot < kOwnerSlots || slot >= kTotalSlots) return;
                          if (auto* worker = g_Pool.workerAs<StreamWorkerHost>(slot))
-                             worker->setInputPolicy(gamepad, keyboardMouse);
+                             worker->setInputPolicy(gamepad, keyboardMouse, hid);
                      });
 
     // Suspend host polling whenever a relay is active, so we stop hammering

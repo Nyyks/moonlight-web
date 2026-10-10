@@ -14,6 +14,7 @@
 
 #include <QDateTime>
 #include <QFile>
+#include <QJsonObject>
 #include <QObject>
 #include <QStandardPaths>
 #include <QString>
@@ -188,7 +189,7 @@ void test_permissions_follow_the_board_live()
 
     QVector<QPair<bool, bool>> pushed;
     QObject::connect(mgr, &ShareManager::permissionsChanged,
-                     [&pushed](int, bool gamepad, bool km) { pushed.append({gamepad, km}); });
+                     [&pushed](int, bool gamepad, bool km, bool) { pushed.append({gamepad, km}); });
 
     QString token, pin;
     ShareManager::SlotStatus st;
@@ -249,6 +250,53 @@ void test_permissions_follow_the_board_live()
     CHECK(!st2.permissions.keyboardMouse);
 
     delete mgr;
+}
+
+void test_hid_box_rides_with_the_gamepad()
+{
+    SECTION("share: the HID box travels to the worker, and only with the gamepad");
+
+    // Absent (a file or a page from before the box) is no passthrough, and so
+    // is one without the gamepad: the device would reach the game while the
+    // guest's own controller is refused.
+    CHECK(!ShareManager::Permissions::fromJson(QJsonObject{{"gamepad", true}}).hid);
+    CHECK(!ShareManager::Permissions::fromJson(QJsonObject{{"hid", true}}).hid);
+    const ShareManager::Permissions wheel =
+        ShareManager::Permissions::fromJson(QJsonObject{{"gamepad", true}, {"hid", true}});
+    CHECK(wheel.hid);
+    CHECK(ShareManager::Permissions::fromJson(wheel.toJson()) == wheel);
+    // Not a badge of its own: a gamer with a wheel is still a gamer.
+    CHECK_EQ(wheel.accessLevel(), QStringLiteral("gamer"));
+
+    ShareManager* mgr = freshManager();
+    QVector<bool> pushed;
+    QObject::connect(mgr, &ShareManager::permissionsChanged,
+                     [&pushed](int, bool, bool, bool hid) { pushed.append(hid); });
+
+    QString token, pin;
+    ShareManager::SlotStatus st;
+    mgr->activate(kSlot, kHost, kApp, kTtl, token, pin, st);
+    CHECK(!st.permissions.hid);
+
+    ShareManager::Permissions gamer;
+    gamer.gamepad = true;
+    CHECK(mgr->setPermissions(kSlot, gamer));
+    // The box alone is a change, and the worker hears it: it is what plugs
+    // the guest's wheel in on the host, or pulls it out.
+    CHECK(mgr->setPermissions(kSlot, wheel));
+    CHECK(mgr->setPermissions(kSlot, gamer));
+    CHECK_EQ(pushed.size(), 3);
+    CHECK(!pushed.at(0));
+    CHECK(pushed.at(1));
+    CHECK(!pushed.at(2));
+
+    // Remembered for the next opening and across a restart, like the others.
+    CHECK(mgr->setPermissions(kSlot, wheel));
+    delete mgr;
+    auto* restarted = new ShareManager();
+    CHECK(restarted->permissions(kSlot).hid);
+    restarted->deactivateAll(ShareManager::EndReason::OwnerStop);
+    delete restarted;
 }
 
 void test_one_device_per_invitation()
@@ -630,6 +678,7 @@ void run_share_manager_tests()
     test_rate_limit_locks_a_single_caller();
     test_access_level_reads_both_flags();
     test_permissions_follow_the_board_live();
+    test_hid_box_rides_with_the_gamepad();
     test_one_device_per_invitation();
     test_lifetime_is_per_player();
     test_rows_can_be_named();

@@ -289,6 +289,7 @@ export class ShareBoard {
                 s.name,
                 s.permissions?.gamepad,
                 s.permissions?.keyboardMouse,
+                s.permissions?.hid,
                 s.streaming,
                 s.ttl_secs,
                 s.devices?.length,
@@ -486,7 +487,7 @@ export class ShareBoard {
         const state = row.state || 'off';
         const live = state !== 'off';
         const name = row.name || t('sharing.playerN', { n: index + 1 });
-        const perms = row.permissions || { gamepad: false, keyboardMouse: false };
+        const perms = row.permissions || { gamepad: false, keyboardMouse: false, hid: false };
         const level = row.access_level || 'viewer';
 
         // Header and detail are one block, not two stacked ones: the status rail
@@ -515,6 +516,12 @@ export class ShareBoard {
                         <input type="checkbox" class="share-perm-km"
                                ${perms.keyboardMouse ? 'checked' : ''} ${busy ? 'disabled' : ''}>
                         <span>${escapeHtml(t('sharing.keyboardMouse'))}</span>
+                    </label>
+                    <label class="share-check" title="${escapeHtml(t('sharing.hidDesc'))}">
+                        <input type="checkbox" class="share-perm-hid"
+                               ${perms.gamepad && perms.hid ? 'checked' : ''}
+                               ${busy || !perms.gamepad ? 'disabled' : ''}>
+                        <span>${escapeHtml(t('sharing.hid'))}</span>
                     </label>
                 </span>
                 <span class="share-access-badge" data-level="${escapeHtml(level)}">${escapeHtml(
@@ -794,8 +801,17 @@ export class ShareBoard {
 
         const gamepad = /** @type {HTMLInputElement} */ (el.querySelector('.share-perm-gamepad'));
         const km = /** @type {HTMLInputElement} */ (el.querySelector('.share-perm-km'));
+        const hid = /** @type {HTMLInputElement} */ (el.querySelector('.share-perm-hid'));
         const pushPerms = async () => {
-            const perms = { gamepad: gamepad.checked, keyboardMouse: km.checked };
+            // A wheel sent as itself is a game controller too: without the
+            // gamepad the box is off and greyed, and the backend agrees.
+            hid.disabled = !gamepad.checked;
+            if (!gamepad.checked) hid.checked = false;
+            const perms = {
+                gamepad: gamepad.checked,
+                keyboardMouse: km.checked,
+                hid: gamepad.checked && hid.checked,
+            };
             // Repaint the badge from the boxes immediately: the owner is
             // watching the label, and a round trip before it moves reads as a
             // click that did not register.
@@ -828,6 +844,7 @@ export class ShareBoard {
         };
         gamepad.addEventListener('change', pushPerms);
         km.addEventListener('change', pushPerms);
+        hid.addEventListener('change', pushPerms);
 
         el.querySelector('.share-toggle-btn').addEventListener('click', () => {
             if (row.state === 'off') this._openRow(slot);

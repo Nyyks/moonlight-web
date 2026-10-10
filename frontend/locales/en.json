@@ -903,6 +903,8 @@
         "working": "Working...",
         "gamepad": "Gamepad",
         "keyboardMouse": "Keyboard / Mouse",
+        "hid": "Wheel / Radio",
+        "hidDesc": "Wheels, radios and joysticks the player sends as themselves (Chrome or Edge on a computer, to a native MoonlightWeb host). Comes with the gamepad.",
         "linkLabel": "Link",
         "pinLabel": "PIN code",
         "pinHint": "Send the PIN separately from the link - together they let someone in, apart they are useless.",

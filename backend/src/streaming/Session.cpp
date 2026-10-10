@@ -1054,7 +1054,7 @@ void StreamSession::applyInputPolicy(const InputMsg::Policy& policy)
     }
 
     qInfo() << "[Session] Input policy changed — gamepad:" << policy.gamepad
-            << "keyboard/mouse:" << policy.keyboardMouse;
+            << "keyboard/mouse:" << policy.keyboardMouse << "hid:" << policy.hid;
 }
 
 // Read the TTL of the host's own packets and, if it settles an OS we could not
