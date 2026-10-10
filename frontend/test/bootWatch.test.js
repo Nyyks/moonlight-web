@@ -34,6 +34,7 @@ describe('bootWatch', () => {
         reload = vi.fn();
         vi.stubGlobal('PerformanceObserver', FakeObserver);
         vi.stubGlobal('location', { reload });
+        window.stop = vi.fn();
         sessionStorage.clear();
         delete window.mwBooted;
         document.body.innerHTML = '<main id="main-content"></main>';
@@ -61,10 +62,11 @@ describe('bootWatch', () => {
         expect(reload).not.toHaveBeenCalled();
     });
 
-    it('reloads once when no file arrived for 10 s', () => {
+    it('reloads once when no file arrived for 10 s, the hung requests dropped first', () => {
         vi.advanceTimersByTime(9000);
         expect(reload).not.toHaveBeenCalled();
         vi.advanceTimersByTime(2000);
+        expect(window.stop).toHaveBeenCalled();
         expect(reload).toHaveBeenCalledTimes(1);
         expect(sessionStorage.getItem('mw-boot-retry')).not.toBeNull();
         vi.advanceTimersByTime(30000);
@@ -82,8 +84,13 @@ describe('bootWatch', () => {
 
     it('says so instead of reloading again after a recent retry', () => {
         sessionStorage.setItem('mw-boot-retry', String(Date.now() - 5000));
+        // A stylesheet that never arrived (no sheet) would keep the page unpainted.
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        document.head.appendChild(link);
         vi.advanceTimersByTime(11000);
         expect(reload).not.toHaveBeenCalled();
+        expect(link.isConnected).toBe(false);
         const main = document.getElementById('main-content');
         expect(main.querySelector('.hosts-error')).not.toBeNull();
         main.querySelector('.btn-reload').click();

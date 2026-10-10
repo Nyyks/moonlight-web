@@ -33,7 +33,9 @@
  * of reloading in a loop.
  *
  * A separate file and not an inline <script>: the page's policy is
- * `script-src 'self'`.
+ * `script-src 'self'`. So index.html asks for it before anything else: past
+ * six hung requests, the browser's per-host connections are all taken and
+ * every later file waits behind them, this one too.
  */
 (function () {
     'use strict';
@@ -115,6 +117,11 @@
         view.appendChild(header);
         view.appendChild(box);
         main.replaceChildren(view);
+        // A stylesheet that never arrived holds the whole page unpainted, this
+        // message with it: drop it, the message shows with what did arrive.
+        for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+            if (!link.sheet) link.remove();
+        }
     }
 
     let lastProgress = performance.now();
@@ -152,6 +159,10 @@
     function recover(detail) {
         stop();
         console.warn('[MW] Boot stalled:', detail);
+        // Drop the requests that hang first: past six of them they hold every
+        // connection to this host, and the reload's own request would wait
+        // behind them for good.
+        if (typeof window.stop === 'function') window.stop();
         const now = Date.now();
         const last = readRetry();
         if (!last || now - last > RETRY_WINDOW_MS) {

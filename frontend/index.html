@@ -18,6 +18,12 @@
         <meta name="apple-mobile-web-app-title" content="MoonlightWeb" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="theme-color" content="#05080b" />
+        <!-- The first file the page asks for, and owing nothing to the module
+             graph: if a file of it never arrives, it reloads once, then says so
+             (js/bootWatch.js). First, because a browser opens at most six
+             connections to a host: once six files hang, every later request
+             waits behind them, and a watchdog asked for last never arrives. -->
+        <script async src="/js/bootWatch.js?v=__MW_VERSION__"></script>
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="apple-touch-icon" sizes="180x180" href="/assets/icon-180.png" />
         <!-- Cyberpunk-style display + mono fonts, served from this machine.
@@ -123,9 +129,6 @@
             </footer>
         </div>
 
-        <!-- First, and owing nothing to the module graph: if a file of it never
-             arrives, it reloads once, then says so (js/bootWatch.js). -->
-        <script async src="/js/bootWatch.js?v=__MW_VERSION__"></script>
         <script type="module" src="/js/app.js?v=__MW_VERSION__"></script>
     </body>
 </html>
