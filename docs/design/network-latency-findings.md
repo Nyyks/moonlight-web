@@ -1666,6 +1666,57 @@ loopback gaps, the audio engine's discontinuities and skipped frames
 - still open: the flag is not found in the N95's window by cable (0 flags in
   all four passes), so no sound − picture offset yet.
 
+### 10/10/2026 — W2.6, SCTP's packet size: 1,500-byte MTU against 1,280 (UM790Pro, cable then Wi-Fi)
+
+Bruno's go via session 59. New bench key `sctpmtu=<1280-1500>` (`a01b6b3b`):
+libdatachannel's `Configuration::mtu` for the native host's connection, from
+which usrsctp sizes its packets (mtu − 108, path-MTU discovery off) and DTLS
+fragments its handshake (mtu − 48). DualRTX `--dev` (`build\` at `88c27d78`,
+Arc, the page at 240, Auto, `relaylog=1`, B and W2.5 at their defaults) → the
+UM790Pro under Windows, by cable (18:51-19:11), then on its Wi-Fi with the
+cable off (19:12-19:33, the same link as the W2 entry above: 5 GHz channel
+44, 802.11ax, 1,081-1,201 Mbit/s, 99 %). Base / `sctpmtu=1500`, three rounds,
+order turned (`bench-out/wifi/w26-um-run.sh cable|wifi`). Every pass took the
+direct IPv6 pair, the 1,500-byte ones too: the DTLS handshake and Chrome's
+SCTP take the bigger packets.
+
+- **The packets grow as meant**: 1,105-1,117 bytes of video per DATA chunk at
+  1,280 against 1,290-1,308 at 1,500 (video bytes from `relay.csv` over
+  usrsctp's "data chunks sent"), so ~15 % fewer packets and ~15 % fewer SACKs
+  (Chrome still SACKs every second packet).
+- **Where it shows: the way down, relay → arrived in the page**. That leg is
+  read frame by frame, with the host's capture → relay taken out (it moved by
+  3.9-4.7 ms from pass to pass, more than any gap here). Median of each pass,
+  in ms:
+
+  | | 1,280 (three passes) | 1,500 (three passes) | Frames > 32 KB |
+  |---|---|---|---|
+  | cable | 1.24 / 1.19 / 1.21 | 1.22 / 1.21 / 1.24 | 1.75 → 1.67 |
+  | Wi-Fi | 3.01 / 2.98 / 2.85 | 2.63 / 2.69 / 2.52 | 3.83 → 3.47 |
+
+  - On cable, nothing to read: ~0.08 ms on the biggest frames, the host's few
+    µs a packet.
+  - **In Wi-Fi, −0.33 ms at the median**: every 1,500 pass is below every
+    1,280 pass. −0.26 ms for 8-32 KB frames, −0.36 ms above 32 KB, −0.14 ms
+    under 8 KB. The mean gains 0.22 ms, the p90 nothing (~5 ms).
+  - A likely reading, not measured: fewer packets cost less on the air
+    (per-packet overhead, fewer SACKs contending upstream) and in the client's
+    receive path.
+- **The click shows nothing reliable**: Wi-Fi 29.1 → 25.9 ms (means of three),
+  cable 24.1 → 26.1, both inside the ±3 ms the passes vary by. Frame age from
+  capture is drowned by the host's own spread. No retransmission timeout, the
+  same few resends (≤ 0.04 %), the same bitrate (28-30 Mbit/s), 0 UDP receive
+  errors on the client.
+- **The cost is a risk, not a measure**: one MTU for the whole connection. A
+  path that does not hold 1,500 bytes (IPv6 routers never fragment) drops
+  every full packet, the DTLS handshake's first (1,452-byte fragments): the
+  session would not connect at all. The internet path and mesh VPNs (1,280)
+  are such paths; a home LAN usually is not.
+- Not measured: a lossy, overflowing Wi-Fi (the Mac, W1 bis), where fewer,
+  bigger datagrams might also ease Chrome's socket buffer. The association's
+  ceiling with heavy frames (`ultra=synthetic`) was not passed either: Ultra
+  is closed.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
@@ -1726,8 +1777,10 @@ What the measurements support, in order of the path:
   UM790Pro on a clean Wi-Fi too, 10/10; neither link was shown to overflow).
 - SCTP's MTU: libdatachannel's default 1,280 (1,172-byte SCTP packets)
   against 1,400 on the audio road, whose host pays ~12.4 µs a packet (POC
-  Ultra §6.41). Fewer, bigger packets on a LAN that holds 1,500: less host
-  cost, fewer packets to SACK in Wi-Fi? Never tried (10/10 entry above).
+  Ultra §6.41). Tried on 10/10 (W2.6, §3): at 1,500, −0.33 ms on the way down
+  in a clean Wi-Fi, nothing on cable. Open: the Mac's lossy Wi-Fi, and how a
+  product would know a path holds 1,500 before the DTLS handshake (one MTU for
+  the connection; a failed handshake is a session that never connects).
 - Whether the N95's SCTP losses are the same mechanism (pacing changed nothing
   there; no kernel counter).
 - Why "two windows in a row" or a minimum count was not needed for
@@ -1790,6 +1843,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `linkhold=<ms>` | hold the picture after a backlog that long (Windows) | `dc7f9c72`, `a511bdd3` |
 | `sctpburst=<n>` | usrsctp's max burst in packets, 0 no limit; **0 by default on the Windows native host**, 10 elsewhere | `01717368`, `2ef56bfe` |
 | `sctpss=0..5` | usrsctp's stream scheduler (4 = fair bandwidth) | `0c21bd5a` |
+| `sctpmtu=1280..1500` | the connection's path MTU: SCTP packets of mtu − 108 bytes (1,172 at libdatachannel's 1,280), DTLS handshake fragments of mtu − 48 | `a01b6b3b` |
 | `namedrops=0\|1` | name the relay's dropped delta to the encoder | `25bf8c48` |
 | `audiolog=1` | each audio packet's way through the host (pacer tick and queue, peak, relay thread, RTP track), `relay-audio-*.csv` | `1489e114` |
 | `audioframe=5\|10\|20` | the native host's Opus frame in ms (5 the product): half or a quarter of the packets, 5 or 15 ms more before each | `ced222aa` |
