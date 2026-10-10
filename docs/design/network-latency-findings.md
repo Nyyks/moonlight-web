@@ -1693,8 +1693,8 @@ quiet; the station's own ping at 50 a second in the load's class:
 - the class changes nothing here, as expected: the ping shares the load's
   class and station. What a class buys is measured between two stations (the
   stream's client and this one), which is D3;
-- the calibration against the real iPhone playing a video is still to do,
-  with Bruno.
+- the calibration against the real iPhone playing a video: done the same
+  evening, below (the profile is about half as heavy as the real thing).
 
 ### 10/10/2026 — The stream beside the load: a download hurts, the house's own noise as much (audio + DSCP plan, D1)
 
@@ -1735,6 +1735,37 @@ alternated, 19:56-20:46:
   ec:68:b4, the access point the bench switch hangs off, which puts every
   class in BE (06/10). A mark only counts for a client reached through the
   Wi-Fi 7 link (the router 07:1d), and Windows cannot pin a BSSID.
+
+### 10/10/2026 — The "iPhone video" load against the real iPhone (audio + DSCP plan, D1)
+
+Bruno's iPhone (cellular data off, near the 2nd-floor repeater the N95
+associates to, channel 44) playing YouTube full screen at its best quality,
+against `load.py`'s video profile (11 Mbit/s, a 5.5 MB segment every 4 s).
+The N95's Wi-Fi pings DualRTX at 50 a second (DF) through six two-minute
+passes, 22:36-22:50:
+
+| Pass | N95 ping: median / p90 / p99 / max (ms) | pings > 8 ms |
+|---|---|---|
+| nothing | 2.5 / 3.4 / 7.1 / 25 | — |
+| **the iPhone** | 2.6 / 7.0 / 16.9 / 60 | 8.1 % |
+| synthetic, on the N95 | 2.6 / 3.9 / 15.3 / 160 | 5.2 % |
+| synthetic, on the N95 | 2.6 / 4.9 / 14.6 / 30 | 4.0 % |
+| **the iPhone** | 2.6 / 7.8 / 18.9 / 53 | 9.6 % |
+| nothing | 2.5 / 3.2 / 5.3 / 13 | — |
+
+- **The real iPhone hurts about twice as much as the profile**: twice the
+  late pings, a p90 of 7-8 ms instead of 4-5, a p99 a little higher. Its
+  episodes look alike (one to three seconds of late pings) but come every
+  ~5 s instead of 4, with 15-35 ms in each;
+- and the comparison favours the profile: it runs on the N95 itself, so its
+  ping waits in its own queue, while the iPhone is another station. The
+  real video takes more airtime than 11 Mbit/s of bursts at 280 Mbit/s
+  (the video's quality and the iPhone's link rate were not read: a 4K
+  YouTube stream is typically 20-25 Mbit/s, and a phone's link is slower
+  than the N95's);
+- **for D3**: run the video profile at `--mbps 22` (an 11 MB segment every
+  4 s), and check it once against these numbers in D3's first "none / video"
+  pair.
 
 ### 10/10/2026 — W2.6, SCTP's packet size: 1,500-byte MTU against 1,280 (UM790Pro, cable then Wi-Fi)
 
