@@ -1786,6 +1786,10 @@ SCTP take the bigger packets.
   bigger datagrams might also ease Chrome's socket buffer. The association's
   ceiling with heavy frames (`ultra=synthetic`) was not passed either: Ultra
   is closed.
+- **Decision (Bruno, 10/10 evening): `sctpmtu=` stays a bench key.** The
+  product keeps libdatachannel's 1,280: a third of a millisecond a frame in
+  Wi-Fi does not pay for a session that might never connect. Neither the Mac
+  measure nor a LAN-only product path with a 1,280 fallback is started.
 
 ## 4. The model so far (04/10/2026)
 
@@ -1848,9 +1852,10 @@ What the measurements support, in order of the path:
 - SCTP's MTU: libdatachannel's default 1,280 (1,172-byte SCTP packets)
   against 1,400 on the audio road, whose host pays ~12.4 µs a packet (POC
   Ultra §6.41). Tried on 10/10 (W2.6, §3): at 1,500, −0.33 ms on the way down
-  in a clean Wi-Fi, nothing on cable. Open: the Mac's lossy Wi-Fi, and how a
-  product would know a path holds 1,500 before the DTLS handshake (one MTU for
-  the connection; a failed handshake is a session that never connects).
+  in a clean Wi-Fi, nothing on cable; kept at the bench (Bruno). Open, not
+  planned: the Mac's lossy Wi-Fi, and how a product would know a path holds
+  1,500 before the DTLS handshake (one MTU for the connection; a failed
+  handshake is a session that never connects).
 - Whether the N95's SCTP losses are the same mechanism (pacing changed nothing
   there; no kernel counter).
 - Why "two windows in a row" or a minimum count was not needed for
