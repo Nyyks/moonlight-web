@@ -1696,6 +1696,46 @@ quiet; the station's own ping at 50 a second in the load's class:
 - the calibration against the real iPhone playing a video is still to do,
   with Bruno.
 
+### 10/10/2026 — The stream beside the load: a download hurts, the house's own noise as much (audio + DSCP plan, D1)
+
+Windows native host DualRTX (`--dev`, no mark: V0 of D3), the UM790Pro
+(Windows) as the stream's client in Wi-Fi with its cable off (Killer AX1675x,
+**associated to ec:68:b4**, channel 44), the load from the N95's Wi-Fi
+(`load.py`, server on DualRTX). `series.py um --contents clk`, two rounds
+alternated, 19:56-20:46:
+
+| Pass | click / p90 | host → drawn: median / p90 | message round trip: median / p90 | Mbit/s | NetEq buffer |
+|---|---|---|---|---|---|
+| none r1 | 24.5 / 38.1 | 8.0 / 11.9 | 2.8 / 5.1 | 29.8 | 46 |
+| video r1 | 30.7 / 36.1 | 8.5 / 14.5 | 2.9 / 5.4 | 28.1 | 58 |
+| bulk r1 | 37.4 / 65.6 | 12.2 / 22.3 | 9.0 / 149 | 28.4 | 78 |
+| call (EF) r1 | 39.3 / 88.8 | 11.5 / 41.7 | 5.4 / 555 | 22.8 | 131 |
+| none r2 | 47.4 / 114 | 18.1 / 62.8 | 7.5 / 56.7 | 15.3 | 160 |
+| video r2 | 44.5 / 103 | 13.6 / 101 | 5.5 / 101 | 11.9 | 201 |
+| bulk r2 | 35.2 / 55.6 | 11.3 / 43.3 | 8.1 / 81.5 | 28.1 | 113 |
+| call (EF) r2 | 26.0 / 33.5 | 8.0 / 11.9 | 3.0 / 5.9 | 30.4 | 49 |
+
+- **A download beside the stream costs it, both rounds**: click +11-13 ms,
+  host → drawn p90 ×2-4, the input channel's round trip p90 at 80-150 ms,
+  NetEq's buffer 78-113 ms. The load got 305-312 Mbit/s and its own ping 15
+  ms, as when alone;
+- **the "iPhone video" costs little when the house is quiet** (r1: +6 ms
+  click, the same p90, the messages unchanged);
+- **the house's own traffic weighs as much as our loads**: 20:21-20:31 the
+  stream went bad with no load or a light one (none r2, video r2: the
+  rate fell to 12-15 Mbit/s, NetEq to 160-200 ms), while the N95's station
+  stayed at 2.8 ms; the call EF was bad in r1 and clean in r2. Two rounds do
+  not separate a load's effect from the house's: D3 needs more rounds,
+  alternated finer, at a quieter hour;
+- **NetEq holds what a disturbance gives it**: its buffer rises with every
+  load (46 → 78-200 ms) and stays there for the pass, the 95th percentile
+  with a long memory (§2.1 of the plan): under contention the audio floor
+  question is moot, the sound waits on NetEq's own estimate;
+- **for D3, this client cannot show any class's effect**: it associated to
+  ec:68:b4, the access point the bench switch hangs off, which puts every
+  class in BE (06/10). A mark only counts for a client reached through the
+  Wi-Fi 7 link (the router 07:1d), and Windows cannot pin a BSSID.
+
 ### 10/10/2026 — W2.6, SCTP's packet size: 1,500-byte MTU against 1,280 (UM790Pro, cable then Wi-Fi)
 
 Bruno's go via session 59. New bench key `sctpmtu=<1280-1500>` (`a01b6b3b`):
