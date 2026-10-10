@@ -33,6 +33,7 @@
 #include "../backend/streambackend/HostOsProbe.h"
 
 #include <memory>
+#include <optional>
 
 class NvHTTP;
 class NvComputer;
@@ -437,6 +438,9 @@ private:
     /// the registry hint is stale) terminates instead of looping.
     bool m_LaunchAttempted = false;
     bool m_ResumeAttempted = false;
+    /// The /launch refusal that sent us to /resume. If the resume fails too,
+    /// this is the error the viewer is told about (see onLaunchResult).
+    std::optional<BackendError> m_LaunchRefusal;
     /// A /launch that TIMES OUT means Sunshine still holds a stale session; we
     /// /cancel and relaunch exactly once. This guards that single retry.
     bool m_LaunchTimeoutRetried = false;

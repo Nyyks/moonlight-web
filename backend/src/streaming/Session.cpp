@@ -490,6 +490,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
                 m_Backend->capabilities().resumableApps) {
                 qWarning() << "[Session] Launch rejected (" << err.message
                            << ") — asking the host which app runs";
+                m_LaunchRefusal = err;
                 QPointer<StreamSession> self(this);
                 chooseByRunningApp([self, message = err.message]() {
                     if (!self) return;
@@ -502,6 +503,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
             if (!m_ResumeAttempted) {
                 qWarning() << "[Session] Launch rejected (" << err.message
                            << ") — falling back to /resume for our uniqueid";
+                m_LaunchRefusal = err;
                 doResumeApp();
                 return;
             }
@@ -514,6 +516,17 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
             }
         }
 
+        // A /resume tried only because /launch was refused speaks of a session
+        // that never existed: "503 No running app to resume", which the mapping
+        // below would read as a video capture failure. The launch's refusal is
+        // what the viewer can act on — Apollo's "Permission denied" for a
+        // device it never allowed to launch apps (Discord report, 09/10/2026).
+        if (m_LaunchRefusal && m_ResumeAttempted) {
+            qWarning() << "[Session] Resume fallback failed too — reporting the launch's refusal ("
+                       << m_LaunchRefusal->message << ")";
+        }
+        const BackendError& refusal = m_LaunchRefusal && m_ResumeAttempted ? *m_LaunchRefusal : err;
+
         // Sunshine 503 = the host could not initialize video capture/encoding.
         // Almost always a display problem on the HOST: no display connected, or
         // the session is locked with the screen asleep — a blanked output stops
@@ -521,7 +534,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         // and Sunshine's encoder probe fails. On macOS it can also be a missing
         // Screen Recording permission. Surface a clear, actionable message
         // instead of the opaque "502 Launch error: HTTP 503".
-        if (err.httpStatus == 503 || err.message.contains(QStringLiteral("503"))) {
+        if (refusal.httpStatus == 503 || refusal.message.contains(QStringLiteral("503"))) {
             // Machine-readable `code` lets the frontend show an explicit dialog
             // instead of a plain toast. `local_host` + `local_os` tell it whose
             // machine failed: the repair buttons it offers (open the macOS
@@ -547,8 +560,8 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
             errObj["local_os"] = QStringLiteral("Linux");
 #endif
             m_Respond(HttpResponse::json(errObj, 503));
-        } else if (err.httpStatus == 403 ||
-                   err.message.contains(QStringLiteral("Permission denied"))) {
+        } else if (refusal.httpStatus == 403 ||
+                   refusal.message.contains(QStringLiteral("Permission denied"))) {
             // Apollo — and so every MultiSeat seat — grants full rights only to
             // the first device that pairs with it; everyone after gets "view the
             // list" and nothing else. The refusal is a 403 that says only
@@ -560,16 +573,16 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
                              "needs — a host that hands out limited permissions gives the first "
                              "device that pairs everything, and later ones almost nothing.")
                          .arg(m_Host->name)));
-        } else if (err.kind == BackendError::Protocol) {
-            m_Respond(HttpResponse::error(502, QString("Launch error: %1").arg(err.message)));
+        } else if (refusal.kind == BackendError::Protocol) {
+            m_Respond(HttpResponse::error(502, QString("Launch error: %1").arg(refusal.message)));
         } else {
             m_Respond(HttpResponse::error(502, QString("Launch failed: %1 (target: %2:%3)")
-                                                   .arg(err.message)
+                                                   .arg(refusal.message)
                                                    .arg(m_Host->activeAddress.address())
                                                    .arg(m_Host->activeHttpsPort)));
         }
 
-        emit sessionFailed(err.message);
+        emit sessionFailed(refusal.message);
         deleteLater();
         return;
     }
