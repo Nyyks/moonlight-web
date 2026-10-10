@@ -7,7 +7,10 @@ DSCP class buys, that competition has to be the same from pass to pass, and
 its own loss has to be measured too: the stream's gain may be the house's
 harm.
 
-    wired side:  python3 load.py serve [--port 47990] [--bind ADDR]
+    wired side:  python3 load.py serve [--port 45990] [--bind ADDR]
+                 (45990, away from Sunshine's 47984-48010, its web UI on 47990,
+                 the native host's media ports 48550-48573 and a --dev's
+                 tunnel ports 46064-46095)
     Wi-Fi side:  python3 load.py run --server ADDR --profile video|bulk|call|idle
                      [--dir down|up] [--mbps M] [--period S] [--secs S]
                      [--tos DF|AF41|EF|<0-63>] [--ping HZ] [--bind ADDR] [--out file.json]
@@ -461,11 +464,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sv = sub.add_parser("serve")
-    sv.add_argument("--port", type=int, default=47990)
+    sv.add_argument("--port", type=int, default=45990)
     sv.add_argument("--bind", default="")
     rn = sub.add_parser("run")
     rn.add_argument("--server", required=True)
-    rn.add_argument("--port", type=int, default=47990)
+    rn.add_argument("--port", type=int, default=45990)
     rn.add_argument("--bind", default="")
     rn.add_argument("--profile", choices=("video", "bulk", "call", "idle"), default="video")
     rn.add_argument("--dir", choices=("down", "up"), default="down")
