@@ -1666,6 +1666,36 @@ loopback gaps, the audio engine's discontinuities and skipped frames
 - still open: the flag is not found in the N95's window by cable (0 flags in
   all four passes), so no sound − picture offset yet.
 
+### 10/10/2026 — The load beside the stream, calibrated (audio + DSCP plan, D1)
+
+`scripts/bench/dscp/load.py` (`073d52f7`, port 45990 since `4eeb8b81`): the
+N95's Wi-Fi as the load's station (Realtek 8821CE, Wi-Fi 5, channel 44, 433
+Mbit/s, signal 100 %; the Windows profile, so no BSSID pinned), the server on
+DualRTX by cable. Eleven runs of 60 s, 19:34-19:46, the house otherwise
+quiet; the station's own ping at 50 a second in the load's class:
+
+| Run | Load got | Its ping: median / p99 / max (ms) |
+|---|---|---|
+| idle (twice) | — | 2.5-2.6 / 5.8-6.0 / 12-14 |
+| video down, DF / EF / AF41 | 279 / 283 / 272 Mbit/s a segment | 2.6-2.8 / 15-18 / 22-63 |
+| video up, DF | 244 Mbit/s a segment | 2.5 / 77 / 100 |
+| bulk down, DF / EF | 308 / 308 Mbit/s | 15.3-15.4 / 39-56 / 47-73 |
+| bulk up, DF | 187 Mbit/s | 4.7 / 9.9 / 24 |
+| call (3 Mbit/s each way), DF / EF | 0 lost of 18 000 each way | 2.7-2.8 / 6.6-6.9 / 13-33 |
+
+- **The "iPhone video" profile is a burst load**: 11 Mbit/s on average, but
+  each 5.5 MB segment goes at the link's speed (~280 Mbit/s), so ~0.16 s of
+  full airtime every 4 s. That is what the stream should feel (the house's
+  iPhone, `wifi-contention-devices`), not the average;
+- a bulk download fills the access point's queue toward the station: 15 ms
+  of the station's own latency in median. That is the house's harm a
+  higher-class stream would add to or take from;
+- the class changes nothing here, as expected: the ping shares the load's
+  class and station. What a class buys is measured between two stations (the
+  stream's client and this one), which is D3;
+- the calibration against the real iPhone playing a video is still to do,
+  with Bruno.
+
 ### 10/10/2026 — W2.6, SCTP's packet size: 1,500-byte MTU against 1,280 (UM790Pro, cable then Wi-Fi)
 
 Bruno's go via session 59. New bench key `sctpmtu=<1280-1500>` (`a01b6b3b`):
