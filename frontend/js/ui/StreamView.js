@@ -8131,11 +8131,6 @@ export class StreamView {
         // A mouse that reaches nothing: the viewer's own arrow is the only
         // pointer that is theirs.
         if (!this._mouseAllowed) return 'default';
-        // A guest in desktop mode on a picture that carries the pointer (the
-        // guests' shared feed, drawn once for all): theirs too, on top. Two
-        // arrows, the host's a round trip behind — Bruno's choice (S9.2,
-        // 11/10) over aiming with only the one in the picture.
-        if (this._playerMode && !this._gamingMode && this._hostDrawsCursor) return 'default';
         // The host is drawing it into the frame — showing ours too would be a
         // double cursor.
         if (!this._hostDrawsCursor) return this._hiddenCursor();
