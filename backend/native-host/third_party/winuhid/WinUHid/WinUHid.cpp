@@ -51,6 +51,13 @@ typedef struct _WINUHID_DEVICE {
 	LARGE_INTEGER ThrottlingPeriod;
 	HANDLE ReadReportReadyEvent;
 	PCWINUHID_EVENT PendingReadReportEvent;
+
+#ifdef MOONLIGHTWEB_VHID
+	//
+	// MoonlightWeb: the driver's MOONLIGHTWEB_VHID_FIX_* flags, asked once per handle
+	//
+	ULONG DriverFixes;
+#endif
 } WINUHID_DEVICE, *PWINUHID_DEVICE;
 
 size_t MultiSzWcsLen(PCWSTR MultiSzString)
@@ -95,6 +102,31 @@ BOOL DeviceIoControlInSync(HANDLE Handle, HANDLE OverlappedEvent, DWORD Ioctl, L
 
 	return ret;
 }
+
+#ifdef MOONLIGHTWEB_VHID
+//
+// MoonlightWeb: the MOONLIGHTWEB_VHID_FIX_* flags of the driver behind an
+// overlapped handle; 0 from a driver older than them, which fails the IOCTL.
+//
+ULONG QueryDriverFixes(HANDLE Handle)
+{
+	OVERLAPPED overlapped = {};
+	ULONG fixes = 0;
+	DWORD bytesReturned = 0;
+	BOOL ret;
+
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, TRUE, FALSE, NULL) };
+	if (!overlappedEvent.IsValid()) {
+		return 0;
+	}
+	overlapped.hEvent = overlappedEvent.Get();
+	ret = DeviceIoControl(Handle, IOCTL_MOONLIGHTWEB_VHID_GET_FIXES, NULL, 0, &fixes, sizeof(fixes), &bytesReturned, &overlapped);
+	if (!ret && GetLastError() == ERROR_IO_PENDING) {
+		ret = GetOverlappedResultEx(Handle, &overlapped, &bytesReturned, INFINITE, FALSE);
+	}
+	return ret && bytesReturned == sizeof(fixes) ? fixes : 0;
+}
+#endif
 
 WINUHID_API DWORD WinUHidGetDriverInterfaceVersion()
 {
@@ -221,6 +253,9 @@ WINUHID_API PWINUHID_DEVICE WinUHidCreateDevice(PCWINUHID_DEVICE_CONFIG Config)
 		goto Fail;
 	}
 
+#ifdef MOONLIGHTWEB_VHID
+	device->DriverFixes = QueryDriverFixes(device->Handle);
+#endif
 	return device;
 
 Fail:
@@ -349,16 +384,19 @@ DWORD WINAPI EventThreadProc(LPVOID lpParameter)
 
 #ifdef MOONLIGHTWEB_VHID
 	//
-	// MoonlightWeb: never wait more than a few milliseconds at a time. The
-	// driver's IOCTL_WINUHID_GET_NEXT_EVENT finds no waiting operation, drops
-	// its lock, then queues itself: an operation VHF hands it in between finds
-	// no queued IOCTL and waits for the next operation to wake it. A game whose
-	// write blocks on that operation sends no next one (pid.dll writes its
-	// output reports synchronously): ACC froze that way on the bench, 11/10.
-	// Asking again finds the operation that waits.
+	// MoonlightWeb: with a driver older than MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP,
+	// never wait more than a few milliseconds at a time. Its
+	// IOCTL_WINUHID_GET_NEXT_EVENT finds no waiting operation, drops its lock,
+	// then queues itself: an operation VHF hands it in between finds no queued
+	// IOCTL and waits for the next operation to wake it. A game whose write
+	// blocks on that operation sends no next one (pid.dll writes its output
+	// reports synchronously): ACC froze that way on the bench, 11/10. Asking
+	// again finds the operation that waits. Such a driver stays loaded until
+	// Windows restarts when an update finds a game holding a device.
 	//
+	const DWORD waitMillis = (device->DriverFixes & MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP) ? INFINITE : 10;
 	for (;;) {
-		event = WinUHidPollEvent(device, 10);
+		event = WinUHidPollEvent(device, waitMillis);
 		if (event == NULL) {
 			if (GetLastError() == ERROR_TIMEOUT) {
 				continue;
@@ -826,6 +864,7 @@ WINUHID_API PWINUHID_DEVICE WinUHidAdoptDevice(HANDLE Handle)
 	device->State = WINUHID_DEVICE_STATE::Stopped;
 	device->EventBufferSizeHint = 128;
 	device->Handle = Handle;
+	device->DriverFixes = QueryDriverFixes(Handle);
 	return device;
 }
 
@@ -875,6 +914,11 @@ WINUHID_API BOOL WinUHidIsServicingEvents(PWINUHID_DEVICE Device)
 		WaitForSingleObject(Device->EventThread, 0) == WAIT_TIMEOUT;
 	ReleaseSRWLockShared(&Device->Lock);
 	return running;
+}
+
+WINUHID_API ULONG WinUHidGetDriverFixes(PWINUHID_DEVICE Device)
+{
+	return Device ? Device->DriverFixes : 0;
 }
 #endif
 

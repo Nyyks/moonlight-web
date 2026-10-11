@@ -37,7 +37,10 @@
 param(
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
-    [string]$Version = '0.1.0.0',
+    # The INF's DriverVer, with the build's date. Raise it with every driver change: of two packages
+    # for the node, Windows installs the newer DriverVer, and two builds of one day tie on the date.
+    # 0.1.0.0 was the first (11/10/2026); 0.1.1.0 fixes the lost GET_NEXT_EVENT wakeup.
+    [string]$Version = '0.1.1.0',
     [ValidateSet('Test', 'Own', 'Product')]
     [string]$Sign = 'Test',
     [string]$CertThumbprint = '',

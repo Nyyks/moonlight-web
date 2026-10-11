@@ -103,3 +103,14 @@ typedef struct _WINUHID_READ_EVENT_COMPLETE {
 // See WINUHID_VERSION_*.
 //
 #define IOCTL_WINUHID_GET_INTERFACE_VERSION WINUHID_NA_CTL_CODE(9)
+
+#ifdef MOONLIGHTWEB_VHID
+//
+// MoonlightWeb: the fixes of ours this driver has. Output is a ULONG of
+// MOONLIGHTWEB_VHID_FIX_* flags (WinUHid.h). A driver older than the IOCTL fails
+// it as any IOCTL it does not know (ERROR_INVALID_FUNCTION): none.
+//
+#define IOCTL_MOONLIGHTWEB_VHID_GET_FIXES WINUHID_NA_CTL_CODE(0x40)
+
+#define MOONLIGHTWEB_VHID_FIXES MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP
+#endif

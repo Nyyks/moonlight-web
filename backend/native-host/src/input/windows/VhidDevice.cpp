@@ -144,6 +144,7 @@ public:
             m_device = nullptr;
             return false;
         }
+        logDriverFixes();
         return true;
     }
 
@@ -184,7 +185,10 @@ public:
     bool adopt(HANDLE handle, std::string& error)
     {
         m_device = WinUHidAdoptDevice(handle);
-        if (m_device) return true;
+        if (m_device) {
+            logDriverFixes();
+            return true;
+        }
         error = "not a MoonlightWeb Virtual HID device (error " + std::to_string(::GetLastError()) +
                 ")";
         ::CloseHandle(handle);
@@ -192,6 +196,16 @@ public:
     }
 
 private:
+    /// A driver from before 11/10 loses a request now and then: the client
+    /// library asks again every 10 ms with it. One stays loaded until Windows
+    /// restarts when an update found a game holding a device.
+    void logDriverFixes() const
+    {
+        if (!(WinUHidGetDriverFixes(m_device) & MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP))
+            log::info("[hid] the driver loaded predates its fix of 11/10: requests are asked for "
+                      "every 10 ms");
+    }
+
     // On WinUHid's event thread: every request is completed at once.
     static VOID onEvent(PVOID context, PWINUHID_DEVICE device, PCWINUHID_EVENT ev)
     {

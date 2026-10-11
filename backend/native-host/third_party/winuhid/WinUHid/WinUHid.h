@@ -284,4 +284,17 @@ WINUHID_API BOOL WinUHidResumeDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALL
 // when polling fails): for a diagnostic, not a synchronisation.
 //
 WINUHID_API BOOL WinUHidIsServicingEvents(PWINUHID_DEVICE Device);
+
+//
+// The driver's IOCTL_WINUHID_GET_NEXT_EVENT parks itself under the lock
+// operations are queued under, so an operation never waits for a next one to be
+// handed out: events may be waited for without end (11/10/2026).
+//
+#define MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP 0x00000001
+
+//
+// The MOONLIGHTWEB_VHID_FIX_* flags of the driver loaded when the device was
+// created or adopted; 0 for a driver older than them.
+//
+WINUHID_API ULONG WinUHidGetDriverFixes(PWINUHID_DEVICE Device);
 #endif

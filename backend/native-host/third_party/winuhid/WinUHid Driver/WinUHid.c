@@ -285,28 +285,31 @@ TakeOutstandingRequestById(
 }
 
 //
-// If this returns TRUE, the request is completed and the caller should not touch it.
-// If this returns FALSE, the request is not completed and needs to be queued by the caller.
+// Fills an IOCTL_WINUHID_GET_NEXT_EVENT request with the first waiting operation, which
+// moves to the outstanding requests. The caller holds RequestLock, and completes the
+// request with the status returned and *BytesTransferred once it has released it.
 //
-BOOLEAN
-TryCompleteGetNextEvent(
+// STATUS_PENDING: no operation is waiting, and the request is untouched. The caller parks
+// it in GetNextEventIoctlQueue before releasing the lock, so that an operation queued
+// after the lock is released finds it there (MoonlightWeb: parking it after the lock was
+// released lost the wakeup of an operation queued in between, until a next operation came;
+// a game whose synchronous write was that operation sent none, and froze).
+//
+NTSTATUS
+FillNextEventLocked(
     _In_ PFILE_CONTEXT FileContext,
-    _In_ WDFREQUEST Request)
+    _In_ WDFREQUEST Request,
+    _Out_ PULONG_PTR BytesTransferred)
 {
     NTSTATUS status;
     WDFOBJECT asyncOp;
     POPERATION_CONTEXT opContext;
     WDFMEMORY outputMem;
     WINUHID_EVENT eventHeader;
-    BOOLEAN completeRequest;
     ULONG_PTR bytesTransferred;
 
     bytesTransferred = 0;
-
-    //
-    // Lock the queue while dispatching
-    //
-    WdfWaitLockAcquire(FileContext->RequestLock, NULL);
+    *BytesTransferred = 0;
 
     //
     // Get the most recent waiting operation to return (if any)
@@ -317,9 +320,7 @@ TryCompleteGetNextEvent(
             TRACE_LEVEL_INFORMATION,
             TRACE_EVENT,
             "No requests ready for dispatching");
-        status = STATUS_PENDING;
-        completeRequest = FALSE;
-        goto Exit;
+        return STATUS_PENDING;
     }
     opContext = OpGetContext(asyncOp);
 
@@ -339,8 +340,7 @@ TryCompleteGetNextEvent(
             TRACE_EVENT,
             "Failed to get output buffer: %!STATUS!",
             status);
-        completeRequest = TRUE;
-        goto Exit;
+        return status;
     }
 
     //
@@ -366,8 +366,7 @@ TryCompleteGetNextEvent(
             TRACE_EVENT,
             "Failed to copy event header to output buffer: %!STATUS!",
             status);
-        completeRequest = TRUE;
-        goto Exit;
+        return status;
     }
     bytesTransferred += sizeof(eventHeader);
 
@@ -385,8 +384,7 @@ TryCompleteGetNextEvent(
                 TRACE_EVENT,
                 "Failed to copy event data to output buffer: %!STATUS!",
                 status);
-            completeRequest = TRUE;
-            goto Exit;
+            return status;
         }
 
         bytesTransferred += opContext->HidTransferPacket.reportBufferLen;
@@ -402,18 +400,12 @@ TryCompleteGetNextEvent(
             TRACE_EVENT,
             "Failed to move event: %!STATUS!",
             status);
-        completeRequest = TRUE;
-        goto Exit;
+        return status;
     }
     WdfCollectionRemove(FileContext->WaitingRequests, asyncOp);
-    completeRequest = TRUE;
 
-Exit:
-    WdfWaitLockRelease(FileContext->RequestLock);
-    if (completeRequest) {
-        WdfRequestCompleteWithInformation(Request, status, NT_SUCCESS(status) ? bytesTransferred : 0);
-    }
-    return completeRequest;
+    *BytesTransferred = bytesTransferred;
+    return status;
 }
 
 VOID
@@ -429,6 +421,7 @@ DispatchAsyncOperation(
     WDFOBJECT asyncOp;
     POPERATION_CONTEXT opContext;
     WDFREQUEST request;
+    ULONG_PTR bytesTransferred;
 
     //
     // Create a WDF object to wrap this operation
@@ -538,8 +531,8 @@ DispatchAsyncOperation(
     // Queue this operation to the file's waiting requests collection
     //
     status = WdfCollectionAdd(fileContext->WaitingRequests, asyncOp);
-    WdfWaitLockRelease(fileContext->RequestLock);
     if (!NT_SUCCESS(status)) {
+        WdfWaitLockRelease(fileContext->RequestLock);
         TraceEvents(
             TRACE_LEVEL_ERROR,
             TRACE_EVENT,
@@ -554,28 +547,32 @@ DispatchAsyncOperation(
     }
 
     //
-    // If there are any IOCTL_WINUHID_GET_NEXT_EVENT requests waiting, service them now
+    // If an IOCTL_WINUHID_GET_NEXT_EVENT request is parked, service it now, still under the
+    // lock: the IOCTL parks itself under it too, so either it found this operation waiting or
+    // this finds it parked. A parked request means no operation was waiting before this one.
     //
     status = WdfIoQueueRetrieveRequestByFileObject(
         fileContext->DeviceContext->GetNextEventIoctlQueue, fileContext->FileObject, &request);
-    if (status == STATUS_SUCCESS) {
-        if (!TryCompleteGetNextEvent(fileContext, request)) {
-            //
-            // We must have raced with another IOCTL_WINUHID_GET_NEXT_EVENT which took
-            // the operation we just queued out from under us. Requeue the request to
-            // wait for the next one.
-            //
-            status = WdfRequestRequeue(request);
-
-            //
-            // If requeuing failed, we have no option but to fail the request
-            //
-            if (!NT_SUCCESS(status)) {
-                WDFVERIFY(NT_SUCCESS(status));
-                WdfRequestComplete(request, status);
-            }
-        }
+    if (status != STATUS_SUCCESS) {
+        WdfWaitLockRelease(fileContext->RequestLock);
+        return;
     }
+    status = FillNextEventLocked(fileContext, request, &bytesTransferred);
+    if (status == STATUS_PENDING) {
+        //
+        // Cannot happen with the operation just queued under the lock; parked again
+        // rather than completed with a status a request may not complete with.
+        //
+        WDFVERIFY(status != STATUS_PENDING);
+        status = WdfRequestRequeue(request);
+        WdfWaitLockRelease(fileContext->RequestLock);
+        if (!NT_SUCCESS(status)) {
+            WdfRequestComplete(request, status);
+        }
+        return;
+    }
+    WdfWaitLockRelease(fileContext->RequestLock);
+    WdfRequestCompleteWithInformation(request, status, NT_SUCCESS(status) ? bytesTransferred : 0);
 }
 
 _Function_class_(EVT_VHF_ASYNC_OPERATION)
@@ -983,6 +980,8 @@ WinUHidEvtIoDeviceControl(
 
     case IOCTL_WINUHID_GET_NEXT_EVENT:
     {
+        ULONG_PTR bytesTransferred;
+
         //
         // The device must have been created first
         //
@@ -994,11 +993,15 @@ WinUHidEvtIoDeviceControl(
         //
         // Try to service a waiting request first
         //
-        if (!TryCompleteGetNextEvent(fileContext, Request)) {
+        WdfWaitLockAcquire(fileContext->RequestLock, NULL);
+        status = FillNextEventLocked(fileContext, Request, &bytesTransferred);
+        if (status == STATUS_PENDING) {
             //
-            // There wasn't a waiting request, so queue this for manual completion later
+            // There wasn't a waiting request, so queue this for manual completion later,
+            // before the lock goes: the next operation queued finds it (see FillNextEventLocked)
             //
             status = WdfRequestForwardToIoQueue(Request, fileContext->DeviceContext->GetNextEventIoctlQueue);
+            WdfWaitLockRelease(fileContext->RequestLock);
 
             //
             // If requeuing failed, we have no option but to fail the request
@@ -1007,13 +1010,31 @@ WinUHidEvtIoDeviceControl(
                 WDFVERIFY(NT_SUCCESS(status));
                 WdfRequestComplete(Request, status);
             }
+            break;
         }
-
-        //
-        // The request was already completed by TryCompleteGetNextEvent()
-        //
+        WdfWaitLockRelease(fileContext->RequestLock);
+        WdfRequestCompleteWithInformation(Request, status, NT_SUCCESS(status) ? bytesTransferred : 0);
         break;
     }
+
+#ifdef MOONLIGHTWEB_VHID
+    case IOCTL_MOONLIGHTWEB_VHID_GET_FIXES:
+    {
+        PULONG outputBuffer;
+
+        //
+        // MoonlightWeb: the fixes this driver has, so the client knows what it may rely on
+        //
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*outputBuffer), &outputBuffer, NULL);
+        if (!NT_SUCCESS(status)) {
+            WdfRequestComplete(Request, status);
+            break;
+        }
+        *outputBuffer = MOONLIGHTWEB_VHID_FIXES;
+        WdfRequestCompleteWithInformation(Request, STATUS_SUCCESS, sizeof(*outputBuffer));
+        break;
+    }
+#endif
 
     case IOCTL_WINUHID_COMPLETE_WRITE_EVENT:
     {

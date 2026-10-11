@@ -22,8 +22,17 @@ MoonlightWeb's changes to these files are listed below, each one in its own comm
 
 ## MoonlightWeb changes
 
-All behind `MOONLIGHTWEB_VHID`, which our build defines, so the files still build as upstream's
-without it:
+One fix applies to every build, since it fixes a bug:
+
+- `WinUHid.c`: IOCTL_WINUHID_GET_NEXT_EVENT parks itself in its manual queue under the lock that
+  operations are queued under, and `DispatchAsyncOperation` looks for a parked request under it
+  too (`FillNextEventLocked`). Upstream parked the request after dropping the lock: an
+  operation VHF handed over in between found no parked request and waited for the next
+  operation to wake it. A game whose synchronous write was that operation sent none, and froze
+  (ACC in `pid!PID_SendReportBl`, bench of 11/10/2026). Driver 0.1.1.0.
+
+Everything else is behind `MOONLIGHTWEB_VHID`, which our build defines, so the files still build
+as upstream's, with that fix, without it:
 
 - `Public.h`: the control device is `\\.\MoonlightWebVHid`, never `\\.\WinUHid`, so a WinUHid
   installed by someone else never collides with ours;
@@ -32,16 +41,17 @@ without it:
 - `WinUHid.c`, `WinUHid.h`: IOCTL_WINUHID_SET_REPORT_DESCRIPTOR refuses, with
   STATUS_ACCESS_DENIED, any descriptor the engine's `validate()` refuses
   (`drivers/vhid/DescriptorCheck.cpp`): game devices only, as the host checks already.
-- `WinUHid/WinUHid.cpp`, `WinUHid/WinUHid.h` (client library only, the driver is untouched):
+- `Public.h`, `WinUHid.c`: IOCTL_MOONLIGHTWEB_VHID_GET_FIXES answers the `MOONLIGHTWEB_VHID_FIX_*`
+  flags of the driver (`WinUHid.h`), today `MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP`, the fix above. A
+  driver older than it fails the IOCTL as unknown: no fixes.
+- `WinUHid/WinUHid.cpp`, `WinUHid/WinUHid.h` (client library):
   `WinUHidGetHandle`, `WinUHidAdoptDevice` and `WinUHidResumeDevice`, so a device outlives the
   stream's process: the driver keeps it while any handle to it is open, the handle is duplicated
   into the next process, which services its events from then on (`HidParking`).
-  `WinUHidIsServicingEvents`, for the log. The event thread polls 10 ms at a time instead of
-  waiting without end: the driver's IOCTL_WINUHID_GET_NEXT_EVENT drops its lock between finding
-  no waiting operation and queuing itself, and an operation that arrives in between waits for
-  the next one to wake it. A game whose synchronous write is that operation sends no next one
-  (ACC froze in `pid!PID_SendReportBl`, bench of 11/10). Polling again finds it. The driver
-  itself keeps the race until it is signed again.
+  `WinUHidIsServicingEvents`, for the log. `WinUHidGetDriverFixes`, asked once per device: with
+  a driver older than the fix above, the event thread asks again every 10 ms instead of waiting
+  without end, which finds an operation whose wakeup was lost. Such a driver can still be the
+  one loaded after an update, until Windows restarts, when a game held a device during it.
 
 The INF is ours (`drivers/vhid/MoonlightWebVHid.inf`): hardware id, DLL, UMDF service and strings
 renamed; upstream's ACL kept.
