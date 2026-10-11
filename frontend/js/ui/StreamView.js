@@ -953,6 +953,13 @@ export class StreamView {
         // page), and a header button to check or remap it — only when the
         // invitation lets them play with a gamepad at all.
         this._gamepadAllowed = opts.gamepadAllowed === true;
+        // Whether this viewer's mouse reaches the host at all. A guest without
+        // keyboard and mouse keeps their own pointer over the picture, in
+        // desktop and gaming mode alike: hiding it leaves them nothing to see
+        // where their mouse is, and taking the lock gains them nothing. From
+        // the invitation at first, then from the host as the owner changes it
+        // (`inputcaps`).
+        this._mouseAllowed = !this._playerMode || opts.keyboardMouseAllowed === true;
         this._padKey = opts.padKey || null;
         // Click-to-photon probe (debug builds, Windows host): the launch reply
         // says whether the host raises its flag on every click. Only then is
@@ -6874,6 +6881,10 @@ export class StreamView {
             if (msg.type === 'hidcaps') this._offerHid();
             return;
         }
+        if (msg.type === 'inputcaps') {
+            this._setMouseAllowed(msg.keyboardMouse === true);
+            return;
+        }
         if (msg.type === 'rumble') {
             if (this._gamepadManager) this._gamepadManager.rumble(msg.index, msg.low, msg.high);
             return;
@@ -8115,6 +8126,9 @@ export class StreamView {
      * double cursor from coming back.
      */
     _pictureCursor() {
+        // A mouse that reaches nothing: the viewer's own arrow is the only
+        // pointer that is theirs.
+        if (!this._mouseAllowed) return 'default';
         // The host is drawing it into the frame — showing ours too would be a
         // double cursor.
         if (!this._hostDrawsCursor) return this._hiddenCursor();
@@ -8923,6 +8937,21 @@ export class StreamView {
     }
 
     /**
+     * The owner gave this guest's mouse to the host, or took it back, while
+     * they watch. Taken back: the lock goes with it, and the viewer's arrow
+     * comes back over the picture. Given: the next move styles the pointer as
+     * for anyone, and gaming mode takes the mouse at the next click.
+     */
+    _setMouseAllowed(allowed) {
+        if (this._mouseAllowed === allowed) return;
+        this._mouseAllowed = allowed;
+        console.log(`[StreamView] Mouse ${allowed ? 'given to' : 'taken from'} this viewer`);
+        if (allowed) return;
+        if (document.pointerLockElement === this.inputEl) document.exitPointerLock();
+        if (this.inputEl) this.inputEl.style.cursor = 'default';
+    }
+
+    /**
      * Take the mouse without waiting for a click.
      *
      * Gaming mode is chosen before the stream exists, and it means "the mouse
@@ -8939,7 +8968,7 @@ export class StreamView {
      * for the retiring view to let go (see activate()).
      */
     _autoCapturePointer() {
-        if (!this._gamingMode || !this.inputEl || this.pointerLocked) return;
+        if (!this._gamingMode || !this.inputEl || this.pointerLocked || !this._mouseAllowed) return;
         if (document.pointerLockElement && document.pointerLockElement !== this.inputEl) return;
         try {
             const p = this._lockPointer();
@@ -9000,7 +9029,7 @@ export class StreamView {
      */
     _lockPointer() {
         const el = this.inputEl;
-        if (!el) return null;
+        if (!el || !this._mouseAllowed) return null;
         let p = null;
         try {
             p = el.requestPointerLock({ unadjustedMovement: true });

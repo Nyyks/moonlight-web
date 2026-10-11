@@ -39,6 +39,8 @@ const VIEW_MESSAGES = new Set([
     'hidattached',
     'hidrequest',
     'hidffb',
+    // A guest's mouse given or taken by the owner (StreamView._setMouseAllowed).
+    'inputcaps',
 ]);
 
 /** Whether a host message of this type goes to the stream view. */

@@ -117,8 +117,10 @@ public:
     void setInputPolicy(const InputMsg::Policy& policy)
     {
         const bool hidMoved = m_InputPolicy.hid != policy.hid;
+        const bool keyboardMouseMoved = m_InputPolicy.keyboardMouse != policy.keyboardMouse;
         m_InputPolicy = policy;
         if (hidMoved) onHidPolicyChanged();
+        if (keyboardMouseMoved) onKeyboardMousePolicyChanged();
     }
     const InputMsg::Policy& inputPolicy() const { return m_InputPolicy; }
 
@@ -170,6 +172,12 @@ protected:
     /// the start, where there is no page and nothing attached yet.
     virtual void onHidPolicyChanged() {}
 
+    /// The keyboard and mouse were given or taken under a running stream. The
+    /// relays tell the page (inputcaps), which shows its own pointer over the
+    /// picture while its mouse reaches nothing. Same thread as
+    /// onHidPolicyChanged().
+    virtual void onKeyboardMousePolicyChanged() {}
+
     /// The devices one page may have recreated at once (slots 0..7 of
     /// hidattach), mw::native::HidPassthrough::kMaxSlots on the host side.
     static constexpr int kHidSlots = 8;
@@ -178,6 +186,10 @@ protected:
     /// devices for this player (`available`, else `why`), with force feedback
     /// (`ffb`) and the Linux HID++ relay (`hidpp`).
     static QJsonObject hidCapsMessage(const InputMsg::Policy& policy, IMediaEngine& engine);
+
+    /// The inputcaps message both relays send: whether this player's keyboard
+    /// and mouse reach the host (`keyboardMouse`).
+    static QByteArray inputCapsMessage(const InputMsg::Policy& policy);
 
     /// Apply the UPnP host-candidate rewrite and the IPv6 suppression, then
     /// emit signalingIceCandidate. Both relays call this from their

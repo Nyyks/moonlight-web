@@ -522,6 +522,7 @@ const MoonlightApp = {
                         // One controller per invitation: the one picked on the
                         // join screen, when the invitation allows a gamepad.
                         gamepadAllowed: view.info.permissions?.gamepad === true,
+                        keyboardMouseAllowed: view.info.permissions?.keyboardMouse === true,
                         padKey: padKey || null,
                     },
                 );

@@ -483,6 +483,7 @@ void MediaTrackRelay::createTracksAndChannels()
                 }
 
                 sendHidCaps();
+                sendInputCaps(); // see DataChannelRelay
 
                 // Start periodic stats timer on the relay's own thread: this
                 // callback runs on a libdatachannel thread and QTimer::start()
@@ -1112,6 +1113,15 @@ void MediaTrackRelay::sendHidCaps()
     if (!m_InputDc || !m_InputDc->isOpen() || !m_Shim || m_Stopping.load()) return;
     const QJsonObject caps = hidCapsMessage(m_InputPolicy, *m_Shim);
     const QByteArray j = QJsonDocument(caps).toJson(QJsonDocument::Compact);
+    try {
+        m_InputDc->send(std::string(j.constData(), j.size()));
+    } catch (const std::exception&) {}
+}
+
+void MediaTrackRelay::sendInputCaps()
+{
+    if (!m_InputDc || !m_InputDc->isOpen() || m_Stopping.load()) return;
+    const QByteArray j = inputCapsMessage(m_InputPolicy);
     try {
         m_InputDc->send(std::string(j.constData(), j.size()));
     } catch (const std::exception&) {}

@@ -1284,6 +1284,9 @@ void DataChannelRelay::createDataChannels()
             // Whether this host recreates WebHID devices: the page sends the
             // devices it was asked to from this answer.
             sendHidCaps();
+            // Whether the mouse is this player's: a guest without one keeps
+            // their own pointer over the picture.
+            sendInputCaps();
 
             // Start periodic stats timer — marshal to the Qt main thread:
             // this callback runs on a libdatachannel thread and QTimer::start()
@@ -2771,6 +2774,15 @@ void DataChannelRelay::sendHidCaps()
     if (!m_InputDc || !m_InputDc->isOpen() || !m_Shim || m_Stopping.load()) return;
     const QJsonObject caps = hidCapsMessage(m_InputPolicy, *m_Shim);
     const QByteArray j = QJsonDocument(caps).toJson(QJsonDocument::Compact);
+    try {
+        m_InputDc->send(std::string(j.constData(), j.size()));
+    } catch (const std::exception&) {}
+}
+
+void DataChannelRelay::sendInputCaps()
+{
+    if (!m_InputDc || !m_InputDc->isOpen() || m_Stopping.load()) return;
+    const QByteArray j = inputCapsMessage(m_InputPolicy);
     try {
         m_InputDc->send(std::string(j.constData(), j.size()));
     } catch (const std::exception&) {}

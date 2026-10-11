@@ -25,6 +25,7 @@
 
 #include <QDebug>
 #include <QHostAddress>
+#include <QJsonDocument>
 #include <QString>
 
 namespace {
@@ -196,6 +197,13 @@ void RelayBase::emitLocalCandidate(const rtc::Candidate& candidate, const char* 
 
     emit signalingIceCandidate(std::string(modCandidate.candidate()),
                                std::string(modCandidate.mid()));
+}
+
+QByteArray RelayBase::inputCapsMessage(const InputMsg::Policy& policy)
+{
+    return QJsonDocument(QJsonObject{{QStringLiteral("type"), QStringLiteral("inputcaps")},
+                                     {QStringLiteral("keyboardMouse"), policy.keyboardMouse}})
+        .toJson(QJsonDocument::Compact);
 }
 
 QJsonObject RelayBase::hidCapsMessage(const InputMsg::Policy& policy, IMediaEngine& engine)
