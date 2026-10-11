@@ -19,9 +19,12 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <sddl.h>
+#include <wtsapi32.h>
 
 #include <cwchar>
 #include <string>
+#include <vector>
 
 #include "WinUHid.h"
 
@@ -54,11 +57,34 @@ void nameUnder(HKEY root, const wchar_t* path, const std::wstring& name)
 /// there, unless something else (the wheel's own software, on a host it was
 /// once plugged into) already wrote a name that is not VHF's.
 ///
-/// Twice: the machine's copy, and the user's. Windows keeps one per user
-/// (HKCU), made on the user's first sight of the device, and DirectInput
-/// reads that one first — a user who saw the device before the machine's copy
-/// was right kept VHF's name (seen 11/10 on the bench host). The worker runs
-/// as the console user, so its HKCU is that user's.
+/// The console user's SID as text, or "" — only a SYSTEM worker can ask
+/// (WTSQueryUserToken needs SeTcbPrivilege).
+std::wstring consoleUserSid()
+{
+    const DWORD session = ::WTSGetActiveConsoleSessionId();
+    HANDLE token = nullptr;
+    if (session == 0xFFFFFFFF || !::WTSQueryUserToken(session, &token)) return {};
+    std::wstring out;
+    DWORD size = 0;
+    ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::vector<unsigned char> user(size);
+    LPWSTR sid = nullptr;
+    if (size && ::GetTokenInformation(token, TokenUser, user.data(), size, &size) &&
+        ::ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(user.data())->User.Sid, &sid)) {
+        out = sid;
+        ::LocalFree(sid);
+    }
+    ::CloseHandle(token);
+    return out;
+}
+
+/// Twice: the machine's copy, and the user's. Windows keeps one per user,
+/// made on the user's first sight of the device, and DirectInput reads that
+/// one first — a user who saw the device before the machine's copy was right
+/// kept VHF's name (seen 11/10 on the bench host). The worker the service
+/// starts runs as SYSTEM, whose HKCU is nobody's: the console user's hive is
+/// then reached under HKEY_USERS. An elevated worker (the scheduled task) runs
+/// as the user, and HKCU is theirs.
 void nameForDirectInput(uint16_t vendorId, uint16_t productId, const std::string& name)
 {
     if (name.empty()) return;
@@ -73,7 +99,11 @@ void nameForDirectInput(uint16_t vendorId, uint16_t productId, const std::string
     MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, wide.data(), n);
     wide.resize(n - 1); // without the terminator the conversion counted
     nameUnder(HKEY_LOCAL_MACHINE, path, wide);
-    nameUnder(HKEY_CURRENT_USER, path, wide);
+    const std::wstring sid = consoleUserSid();
+    if (sid.empty())
+        nameUnder(HKEY_CURRENT_USER, path, wide);
+    else
+        nameUnder(HKEY_USERS, (sid + L"\\" + path).c_str(), wide);
 }
 
 /// A device made through the "MoonlightWeb Virtual HID" driver

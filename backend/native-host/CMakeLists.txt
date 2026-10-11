@@ -132,7 +132,7 @@ if(WIN32)
     # dwmapi: the compositor's timing, read by the bench's click trace only.
     target_link_libraries(mw-native-host PRIVATE dxgi d3d11 d3d12 d3dcompiler user32 gdi32 setupapi
                                                  avrt ole32 oleaut32 runtimeobject mfuuid
-                                                 strmiids dwmapi)
+                                                 strmiids dwmapi wtsapi32)
 elseif(APPLE)
     set(MW_NATIVE_PLATFORM "macos")
     # ScreenCaptureKit → VideoToolbox, with no conversion stage in between:
