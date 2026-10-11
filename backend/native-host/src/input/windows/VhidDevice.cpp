@@ -166,4 +166,13 @@ std::string virtualHidUnavailableReason()
     return {};
 }
 
+VirtualHidSupport virtualHidSupport()
+{
+    if (WinUHidGetDriverInterfaceVersion() != 0) return VirtualHidSupport::Ready;
+    // The control device admits administrators, SYSTEM and UMDF drivers only:
+    // refused, it is there. The stream's worker, elevated, opens it.
+    return ::GetLastError() == ERROR_ACCESS_DENIED ? VirtualHidSupport::Ready
+                                                   : VirtualHidSupport::DriverMissing;
+}
+
 } // namespace mw::native::input

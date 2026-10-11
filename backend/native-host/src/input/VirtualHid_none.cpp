@@ -36,4 +36,9 @@ std::string virtualHidUnavailableReason()
     return "no virtual HID on this OS";
 }
 
+VirtualHidSupport virtualHidSupport()
+{
+    return VirtualHidSupport::Unsupported;
+}
+
 } // namespace mw::native::input

@@ -137,6 +137,26 @@ export async function linkModel(hid, vendorId, productId, storage = globalThis.l
     return chosen;
 }
 
+/**
+ * Whether Settings' « As itself » may link a device, from this page's hosts
+ * (GET /api/hosts): null when a native host here takes it — Linux, or Windows
+ * with "MoonlightWeb Virtual HID" (signed, or activated by hand) — or when it
+ * cannot be told (no list, a server too old to say); otherwise why not, for
+ * the help popin: 'windows' (no driver), 'macos', 'none' (no native host).
+ * @param {Array<{backendType?: string, nativeDisplay?: {hid?: string}}>|null} hosts
+ * @returns {null|'windows'|'macos'|'none'}
+ */
+export function hidHelpFor(hosts) {
+    if (!Array.isArray(hosts) || !hosts.length) return null;
+    const native = hosts.map((h) => (h?.backendType === 'native' ? h.nativeDisplay?.hid : null));
+    // Linux without uhid access ('setup') still takes the switch: the package
+    // sets it up, and the stream says what is wrong if it is not.
+    if (native.some((s) => s === 'ok' || s === 'setup' || s === '' || s === undefined)) return null;
+    if (native.includes('driver_missing')) return 'windows';
+    if (native.includes('unsupported')) return 'macos';
+    return 'none';
+}
+
 function loadOffers(storage) {
     try {
         const v = JSON.parse(storage?.getItem(OFFERS_KEY) || '{}');

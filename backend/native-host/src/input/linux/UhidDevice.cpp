@@ -184,4 +184,10 @@ std::string virtualHidUnavailableReason()
     return {};
 }
 
+VirtualHidSupport virtualHidSupport()
+{
+    return virtualHidUnavailableReason().empty() ? VirtualHidSupport::Ready
+                                                 : VirtualHidSupport::NotSetUp;
+}
+
 } // namespace mw::native::input

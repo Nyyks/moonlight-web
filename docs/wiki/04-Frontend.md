@@ -142,7 +142,7 @@ To tell whether a failing pad is ours or the browser's: open a gamepad tester pa
 
 ### RC radios, flight sticks and wheels
 
-They reach the game as every pad does, as an **Xbox 360 controller**: two sticks of 16 bits, two triggers of 8 bits (256 steps), 15 buttons and the d-pad. What a device has beyond that is not sent, and no force feedback comes back. Recreating the device itself on the host is another track, the [HID passthrough study](../design/hid-passthrough-study.md).
+They reach the game as every pad does, as an **Xbox 360 controller**: two sticks of 16 bits, two triggers of 8 bits (256 steps), 15 buttons and the d-pad. What a device has beyond that is not sent, and no force feedback comes back. Sending the device itself, every axis and force feedback included, is [§4.9](#49-wheels-and-radios-as-themselves).
 
 | Device | Connection / mode | Laid out by | Read on |
 |---|---|---|---|
@@ -194,6 +194,40 @@ For a radio, **Test** says where its switches are read, and the wizard says whic
 **What the game receives** shows on a Windows host in `joy.cpl`: a "Controller (XBOX 360 For Windows)", whose axes move with the rim, the pedals or the radio's sticks.
 
 **Limits.** If the link goes silent for 3 s, or the wizard opens mid-game, sticks go back to the center and triggers to 0: a drone's throttle drops to mid-stick and the flight is lost, though arming on CH5 falls back too, which disarms; a wheel's pedals are released. A user's layout belongs to one browser (`localStorage`); built-in profiles need nothing.
+
+## 4.9 Wheels and radios as themselves
+
+**« As itself »** (Settings → Controllers, on a wheel's, radio's or stick's row) sends the real device instead of an Xbox pad: the page reads it through WebHID and **MoonlightWeb's own host** recreates it, under its own name and USB ids, every axis and button (the G923's clutch, the TX12's eight channels). Design and benches: [`hid-passthrough-study.md`](../design/hid-passthrough-study.md).
+
+**The client** needs Chrome or Edge on a computer, nothing installed. The first switch-on opens the browser's chooser, narrowed to that model; afterwards it is a plain switch. Logitech G HUB may stay open on the client: the page and G HUB share the wheel.
+
+**The host** decides:
+
+| Host | As itself | Force feedback |
+|---|---|---|
+| **Linux**, MoonlightWeb's package | out of the box (`uhid`; `uinput` for a wheel with force feedback) | yes: G920, G923 for Xbox (Logitech HID++); HID PID wheels written, not yet tried on one |
+| **Windows** | only with the **"MoonlightWeb Virtual HID"** driver, activated by hand (below) | yes, same wheels (`pid.dll`) |
+| **macOS** | no: macOS lets no app recreate a HID device without a DriverKit entitlement from Apple | — |
+| Sunshine, Wolf, Apollo | no: the mapping (an Xbox 360 pad) | rumble only |
+
+Where the host cannot, the switch opens a short explanation instead of the chooser, and the device keeps reaching the game as an Xbox pad. Logitech's G29, G27 and G923 for PlayStation are recreated, but their older force feedback commands (lg4ff) are not played yet. G HUB on the host never sees the wheel, recreated or not.
+
+### Windows: activating the driver by hand
+
+The installer sets the driver up by itself only from a package signed with a public code-signing certificate, which MoonlightWeb does not have. Until then, the driver is **test-signed**, and Windows takes it only in **test mode**:
+
+- **Secure Boot** must be off in the firmware, and Windows shows "Test Mode" in a corner of the desktop;
+- **some games' anti-cheat refuse to start in test mode**: check yours before;
+- the steps need an administrator, and two reboots to undo.
+
+1. **Build the package**, on any Windows PC with Visual Studio Build Tools (C++ workload) and Git for Windows (for `openssl`): in a clone of the repository, run `backend\native-host\drivers\vhid\build.ps1` from PowerShell. It downloads the Windows Driver Kit from NuGet (about 1.5 GB, once, inside the clone), builds, makes a self-signed certificate of its own and signs: the package lands in `drivers\vhid\build\package\`.
+2. **Test mode, on the host**: turn Secure Boot off in the firmware, then in an elevated prompt `bcdedit /set testsigning on`, and reboot.
+3. **Install, on the host**: copy the package folder and `install.ps1` there, then in an elevated PowerShell `.\install.ps1 -Package <package folder>`. It trusts the package's certificate (LocalMachine Root and TrustedPublisher), adds the device `ROOT\MoonlightWebVHid` and installs the driver.
+4. **Restart MoonlightWeb.** Settings → Controllers then takes the switch, and the stream's toast says the device "goes to the host as itself"; `joy.cpl` lists it.
+
+**To undo**: `.\install.ps1 -Uninstall`, remove the certificate from both stores (`certlm.msc`, "MoonlightWeb Virtual HID (test)"), then `bcdedit /set testsigning off`, reboot, and Secure Boot back on.
+
+A future signed release needs none of this: the installer then sets the driver up, and the same switch works without test mode.
 
 ---
 

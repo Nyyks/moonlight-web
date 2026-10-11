@@ -28,6 +28,7 @@
 #include "streambackend/NativeProbeService.h"
 #include "VirtualDisplay.h"
 #include "mw/native/Capabilities.h"
+#include "mw/native/HidPassthrough.h"
 #include "streambackend/StreamBackendSetup.h"
 #include "IdentityManager.h"
 #include "SunshineInstaller.h"
@@ -403,6 +404,10 @@ QJsonObject ComputerManager::nativeDisplayJson()
     // and when the stream starts, since macOS itself says nothing.
     obj["input_permission"] = caps.inputPermission;
     obj["virtual_display"] = VirtualDisplay::toJson(VirtualDisplay::probe());
+    // The HID passthrough's verdict for Settings' « As itself » switch, before
+    // any stream: "ok", or why not in a word the page explains (the stream's
+    // hidcaps stays the authority once it runs).
+    obj["hid"] = QString::fromLatin1(mw::native::HidPassthrough::supportToken());
     return obj;
 }
 

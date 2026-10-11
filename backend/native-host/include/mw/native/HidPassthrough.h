@@ -209,6 +209,10 @@ public:
 
     /// Empty when this host can recreate devices; why not otherwise.
     static std::string unavailableReason();
+    /// What the hosts page shows on the « As itself » switch, before any
+    /// stream: "ok"; "driver_missing" (Windows without MoonlightWeb Virtual
+    /// HID); "setup" (Linux without uhid access); "unsupported" (macOS).
+    static const char* supportToken();
     /// Whether a recreated wheel can carry force feedback on this host now
     /// (announced to the page in hidcaps.ffb).
     static bool forceFeedbackAvailable();

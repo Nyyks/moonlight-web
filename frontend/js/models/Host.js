@@ -68,7 +68,8 @@ export class Host {
         this.backendType = data.backendType || '';
         // The native host only: {state: 'ok'|'no_display'|
         // 'no_capture_permission'|'unavailable', input_permission,
-        // virtual_display: {supported, installed, enabled, active, name}}.
+        // virtual_display: {supported, installed, enabled, active, name},
+        // hid: 'ok'|'driver_missing'|'setup'|'unsupported' (hidHelpFor)}.
         // Computed by the server — the card never guesses whether the machine
         // behind it has a screen, or a "MoonlightWeb Virtual Display" to open.
         this.nativeDisplay = data.nativeDisplay || null;

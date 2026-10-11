@@ -106,4 +106,17 @@ bool virtualHidForceFeedback();
 /// English sentence (no /dev/uhid access, driver not installed).
 std::string virtualHidUnavailableReason();
 
+enum class VirtualHidSupport
+{
+    Ready,
+    DriverMissing, // Windows: MoonlightWeb Virtual HID is not installed (or not loaded)
+    NotSetUp,      // Linux: /dev/uhid missing or not writable
+    Unsupported,   // no backend on this OS (macOS)
+};
+
+/// The same verdict as virtualHidUnavailableReason(), as a kind the page can
+/// word for itself. Asked by the server for the hosts page, which on Windows
+/// may not be elevated: a driver it may not open is still installed.
+VirtualHidSupport virtualHidSupport();
+
 } // namespace mw::native::input

@@ -77,6 +77,17 @@ std::string HidPassthrough::unavailableReason()
     return input::virtualHidUnavailableReason();
 }
 
+const char* HidPassthrough::supportToken()
+{
+    switch (input::virtualHidSupport()) {
+    case input::VirtualHidSupport::Ready: return "ok";
+    case input::VirtualHidSupport::DriverMissing: return "driver_missing";
+    case input::VirtualHidSupport::NotSetUp: return "setup";
+    case input::VirtualHidSupport::Unsupported: break;
+    }
+    return "unsupported";
+}
+
 bool HidPassthrough::forceFeedbackAvailable()
 {
     return input::virtualHidForceFeedback();

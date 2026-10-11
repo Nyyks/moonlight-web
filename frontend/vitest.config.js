@@ -62,6 +62,7 @@ export default defineConfig({
                 'js/hid/hidppFfb.js',
                 'js/hid/pidFfb.js',
                 'js/hid/hidppRelay.js',
+                'js/ui/HidHelpDialog.js',
                 'js/ui/Toast.js',
                 'js/ui/RemoteNav.js',
             ],

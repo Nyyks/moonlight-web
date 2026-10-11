@@ -62,11 +62,13 @@ import * as RemoteNav from './RemoteNav.js';
 import {
     HID_KINDS,
     deviceKey,
+    hidHelpFor,
     linkModel,
     loadForwarded,
     saveForwarded,
 } from '../hid/HidPassthrough.js';
 import { isGameDevice } from '../hid/hidWire.js';
+import { openHidHelp } from './HidHelpDialog.js';
 import { confirmAction } from './ConfirmDialog.js';
 import { aspectToNumber, computeAutoBitrate } from '../util/AutoBitrate.js';
 import { autoFps, measuredFps } from '../util/RefreshRate.js';
@@ -705,10 +707,13 @@ export class SettingsView {
     // of an Xbox pad, when the host can (hid/HidPassthrough.js). The first
     // click opens Chrome's chooser narrowed to that model; Chrome then keeps
     // the permission of a device with a serial number, and the switch is a
-    // plain switch, kept in this browser.
+    // plain switch, kept in this browser. When no native host this page knows
+    // can take a device (a Mac, Windows without the driver, Sunshine only),
+    // switching it on explains why and what to do instead (HidHelpDialog).
 
     _startPadWatch() {
         if (this._padWatch || !navigator.getGamepads) return;
+        this._loadHidHelp();
         const tick = () => {
             this._renderPads();
             this._refreshHid();
@@ -856,9 +861,25 @@ export class SettingsView {
         this._renderPads();
     }
 
+    /** Whether this page's hosts can take a device as itself (hidHelpFor). */
+    async _loadHidHelp() {
+        if (!navigator.hid) return;
+        try {
+            const data = await BackendClient.getHosts();
+            this._hidHelp = hidHelpFor(data?.hosts);
+        } catch {
+            this._hidHelp = null; // unknown: the switch works, the stream decides
+        }
+    }
+
     /** « As itself » clicked: the chooser the first time, a plain switch after. */
     async _toggleHid(box) {
         const model = box.dataset.model;
+        if (box.checked && this._hidHelp) {
+            box.checked = false;
+            openHidHelp(this._hidHelp);
+            return;
+        }
         if (box.checked && !this._hidAllowed?.has(model)) {
             const [vid, pid] = model.split(':').map((h) => parseInt(h, 16));
             // Still inside the click: Chrome opens its chooser only then.

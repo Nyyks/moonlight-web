@@ -15,6 +15,7 @@ import {
     HidPassthrough,
     MAX_OFFERS,
     deviceKey,
+    hidHelpFor,
     hidModelOf,
     linkModel,
     loadForwarded,
@@ -348,5 +349,31 @@ describe('HidPassthrough (HID passthrough in the stream, P2)', () => {
         expect(await hp.link(0x046d, 0xc26e)).toBe(false);
         await hp.applyWanted();
         hp.stop();
+    });
+});
+
+describe('hidHelpFor (« As itself » on a host that cannot)', () => {
+    const native = (hid) => ({ backendType: 'native', nativeDisplay: { hid } });
+    const sunshine = { backendType: '' };
+
+    it('lets the switch link when a native host takes the device', () => {
+        expect(hidHelpFor([native('ok')])).toBeNull();
+        expect(hidHelpFor([sunshine, native('ok')])).toBeNull();
+        // Linux without uhid access: the stream says what is wrong.
+        expect(hidHelpFor([native('setup')])).toBeNull();
+    });
+
+    it('stays out of the way when it cannot tell', () => {
+        expect(hidHelpFor(null)).toBeNull();
+        expect(hidHelpFor([])).toBeNull();
+        // A server too old to say.
+        expect(hidHelpFor([{ backendType: 'native', nativeDisplay: {} }])).toBeNull();
+    });
+
+    it('says why not otherwise', () => {
+        expect(hidHelpFor([native('driver_missing')])).toBe('windows');
+        expect(hidHelpFor([native('unsupported')])).toBe('macos');
+        expect(hidHelpFor([sunshine])).toBe('none');
+        expect(hidHelpFor([sunshine, native('driver_missing')])).toBe('windows');
     });
 });
