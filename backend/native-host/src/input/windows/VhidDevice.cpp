@@ -29,6 +29,23 @@ namespace mw::native::input {
 
 namespace {
 
+/// One OEMName: written unless a name that is not VHF's is already there.
+void nameUnder(HKEY root, const wchar_t* path, const std::wstring& name)
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(root, path, 0, nullptr, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key,
+                        nullptr) != ERROR_SUCCESS)
+        return; // not elevated (HKLM): this copy stays as it is
+    wchar_t current[256] = {};
+    DWORD bytes = sizeof(current) - sizeof(wchar_t);
+    const bool has = RegQueryValueExW(key, L"OEMName", nullptr, nullptr,
+                                      reinterpret_cast<BYTE*>(current), &bytes) == ERROR_SUCCESS;
+    if (!has || current[0] == 0 || wcsstr(current, L"VHF"))
+        RegSetValueExW(key, L"OEMName", 0, REG_SZ, reinterpret_cast<const BYTE*>(name.c_str()),
+                       static_cast<DWORD>((name.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+}
+
 /// DirectInput (joy.cpl, and the games that list wheels through it) names a
 /// controller from its OEMName under MediaProperties, keyed by VID and PID.
 /// Windows writes one on first sight from the device description, and VHF's
@@ -36,30 +53,27 @@ namespace {
 /// string itself and has no way to take ours. So the real product name goes
 /// there, unless something else (the wheel's own software, on a host it was
 /// once plugged into) already wrote a name that is not VHF's.
+///
+/// Twice: the machine's copy, and the user's. Windows keeps one per user
+/// (HKCU), made on the user's first sight of the device, and DirectInput
+/// reads that one first — a user who saw the device before the machine's copy
+/// was right kept VHF's name (seen 11/10 on the bench host). The worker runs
+/// as the console user, so its HKCU is that user's.
 void nameForDirectInput(uint16_t vendorId, uint16_t productId, const std::string& name)
 {
     if (name.empty()) return;
     wchar_t path[160];
     swprintf_s(path,
-               L"SYSTEM\\CurrentControlSet\\Control\\MediaProperties\\PrivateProperties\\Joystick"
+               L"System\\CurrentControlSet\\Control\\MediaProperties\\PrivateProperties\\Joystick"
                L"\\OEM\\VID_%04X&PID_%04X",
                vendorId, productId);
-    HKEY key = nullptr;
-    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, path, 0, nullptr, 0, KEY_QUERY_VALUE | KEY_SET_VALUE,
-                        nullptr, &key, nullptr) != ERROR_SUCCESS)
-        return; // not elevated: the name stays VHF's, nothing else changes
-    wchar_t current[256] = {};
-    DWORD bytes = sizeof(current) - sizeof(wchar_t);
-    const bool has = RegQueryValueExW(key, L"OEMName", nullptr, nullptr,
-                                      reinterpret_cast<BYTE*>(current), &bytes) == ERROR_SUCCESS;
-    if (!has || current[0] == 0 || wcsstr(current, L"VHF")) {
-        const int n = MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, nullptr, 0);
-        std::wstring wide(n > 0 ? n : 1, L'\0');
-        if (n > 0) MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, wide.data(), n);
-        RegSetValueExW(key, L"OEMName", 0, REG_SZ, reinterpret_cast<const BYTE*>(wide.c_str()),
-                       static_cast<DWORD>((wcslen(wide.c_str()) + 1) * sizeof(wchar_t)));
-    }
-    RegCloseKey(key);
+    const int n = MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, nullptr, 0);
+    if (n <= 1) return;
+    std::wstring wide(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, wide.data(), n);
+    wide.resize(n - 1); // without the terminator the conversion counted
+    nameUnder(HKEY_LOCAL_MACHINE, path, wide);
+    nameUnder(HKEY_CURRENT_USER, path, wide);
 }
 
 /// A device made through the "MoonlightWeb Virtual HID" driver
