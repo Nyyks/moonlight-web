@@ -1952,13 +1952,15 @@ come from the run's log.)
     That is the signature of CS6 in the D3 entry's busy round;
   - the follow-up's AF41 pass had the worst frame age p90 (128 ms), messages
     p90 (236 ms) and NetEq (331 ms) of its series.
-- **CS3 did not break** in two passes. Both did a little better than no mark
+- **CS3 did not break** in two passes (but see the empty-house rerun below:
+  it did there). Both did a little better than no mark
   on the click and the frame age, though one dropped ~530 frames a minute
-  (the other 12). So the trouble is not the aggregation of a new TID: it is
-  the video queue (VI) itself on this path, against a best-effort neighbour
-  on the same repeater. Where exactly — the repeater's VI queue toward the
-  Wi-Fi 7 link, its scheduler, or the router — needs an air capture. Not
-  done.
+  (the other 12). Read in the morning as "the video queue (VI) itself is at
+  fault, not the aggregation of a new TID". The rerun breaks that reading:
+  any mark other than 0 can go wrong against this neighbour, so the culprit
+  may be the classes as such on this path (a separate queue per TID in the
+  repeater or the router, served behind the neighbour's) rather than VI.
+  Only an air capture would tell. Not done.
 - **The neighbour's download did not pay for the stream's class**: 264-326
   Mbit/s, and a ping median of 14-16 ms, in every bulk pass.
 
@@ -1990,6 +1992,49 @@ come from the run's log.)
   - audio and SCTP in different classes (a Linux host);
   - a pass through stream.dev;
   - the core D3 passes in a quiet night (59 holds 01:00-05:00).
+
+**Again in an empty house** (Bruno's go, 10:59-11:52, the family out for the
+hour). The box saw nothing move but our loads; both Macs made only short
+peaks, around 11:10. Same stream; loads now 260 s long and bulk only. Two
+rounds in reverse order:
+
+| Load | Stream class | click median / p90 | up | frame age median / mean / p90 | messages median / p90 | load Mbit/s |
+|---|---|---|---|---|---|---|
+| none | — | 30.4 / 44.7 · 25.0 / 37.7 | 2.2 · 1.3 | 9.2 / 9.7 / 12.8 · 9.6 / 10.1 / 13.7 | 5.5 / 10.9 · 3.1 / 7.7 | |
+| bulk onto the UM790Pro | — | 71.6 / 116.1 · 92.0 / 131.7 | 11.8 · 22.7 | 28.8 / 50.8 / 68.1 · 45.8 / 50.5 / 75.5 | 49.2 / 73.4 · 74.1 / 171 | 171 · 105 |
+| bulk onto the UM790Pro | **AF41** | **49.1 / 76.5 · 57.5 / 88.6** | 10.8 · 12.7 | **15.0 / 17.0 / 26.1 · 18.7 / 21.2 / 32.0** | **28.0 / 49.4 · 23.6 / 40.4** | 129 · 115 |
+| bulk onto the N95 | — | 54.1 / 75.1 · lost | 14.1 | 24.2 / 68.2 / 158 | 26.2 / 47.2 | 294 |
+| bulk onto the N95 | CS3 | 56.8 / 155.8 · 68.2 / 138.7 | 5.8 · 18.6 | 50.4 / 96.4 / 244 · 28.5 / 96.8 / 209 | 34.8 / 459 · 25.6 / 51.8 | 311 · 287 |
+| bulk onto the N95 | AF41 | 75.8 / 141.5 · 56.3 / 102.9 | 5.5 · 18.1 | 77.2 / 127 / 328 · 21.5 / 31.5 / 59.2 | – · 25.5 / 64.2 | 312 · 285 |
+
+- **A download onto the client's own station: AF41 wins again, in both
+  rounds.** Frame age p90 goes 68-76 → 26-32 ms, messages 49-74 → 24-28 ms
+  at the median, and the click 22-35 ms faster. With the D3 entry's clean
+  round, that is three rounds of three. One AF41 pass dropped ~2,170 frames
+  a minute (the other 1.8): frames came in bunches and the page showed the
+  newest, so fresher, maybe less smooth. The download showed no steady cost
+  (129 and 115 Mbit/s against 171 and 105).
+- **A neighbour's download through the stream's repeater hurts the stream in
+  every class, and no mark helped.**
+  - Unmarked: frame age p90 158 ms.
+  - CS3, twice worse (244 and 209 ms): the stream's bitrate fell to
+    2.3-5.6 Mbit/s and 2.7 % of its data was resent.
+  - AF41, once the worst (328 ms, 2.1 % resent, 9 retransmission timeouts),
+    once fine (59 ms).
+  - With the morning's passes, that makes five marked passes against this
+    neighbour that did worse than or no better than none, and two that did
+    better. **The morning's "CS3 held" does not hold up**: no class is safe
+    against this load on this mesh.
+- NetEq was erratic in this series (a no-load pass sat at 770 ms): not used.
+  One unmarked N95 pass was lost (the page's measure failed after 31 s of
+  stream).
+- For D4, the picture so far:
+  - **AF41 is a clear gain** against a download on the client's own station
+    (three rounds of three) and for the sound under a neighbour's video;
+  - **against a neighbour's bulk download through the same repeater**,
+    marking makes the stream less stable more often than not;
+  - **CS6 is out.** The way up (EF on the client's Chrome) is a small,
+    steady gain.
 
 ## 4. The model so far (04/10/2026)
 
