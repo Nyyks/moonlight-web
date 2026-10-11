@@ -209,6 +209,24 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
         r->deleteLater();
     }
 
+    // The wheels the engine left at rest (stopConnection parks them) go to the
+    // server, which keeps them for the next stream: a game left running keeps
+    // its wheel and the force feedback it set up (HidParkingTransfer). At once,
+    // before "ended": a stream started again within the grace below would
+    // otherwise find nothing kept and make a second wheel beside the game's
+    // (bench of 11/10: ACC running, the next stream's picture froze). The pid
+    // was checked when the pipes were, and is checked again: the server may
+    // be gone, and its pid someone else's.
+    const auto shipKept = []() {
+        const quint32 serverPid = ConsoleSession::workerServerPid();
+        if (!serverPid ||
+            !ConsoleSession::isThisExecutable(ConsoleSession::processImage(serverPid)))
+            return;
+        const QJsonObject parked = HidParkingTransfer::shipToServer(serverPid);
+        if (!parked.isEmpty()) emitEvent(parked);
+    };
+    shipKept();
+
     if (!g_State->endedEmitted) {
         g_State->endedEmitted = true;
         emitEvent({{QStringLiteral("event"), QStringLiteral("ended")}});
@@ -216,18 +234,9 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
 
     // The relay graph tears down asynchronously on its own thread; give it a
     // moment before the process exits (LiStopConnection can take a while).
-    // Last, the wheels its engine left at rest go to the server, which keeps
-    // them for the next stream: a game left running keeps its wheel and the
-    // force feedback it set up (HidParkingTransfer). The pid was checked when
-    // the pipes were, and is checked again: the server may be gone, and its
-    // pid someone else's.
-    QTimer::singleShot(3000, qApp, []() {
-        const quint32 serverPid = ConsoleSession::workerServerPid();
-        if (serverPid &&
-            ConsoleSession::isThisExecutable(ConsoleSession::processImage(serverPid))) {
-            const QJsonObject parked = HidParkingTransfer::shipToServer(serverPid);
-            if (!parked.isEmpty()) emitEvent(parked);
-        }
+    // Whatever an engine parked on its way down meanwhile goes too.
+    QTimer::singleShot(3000, qApp, [shipKept]() {
+        shipKept();
         QCoreApplication::quit();
     });
 }
