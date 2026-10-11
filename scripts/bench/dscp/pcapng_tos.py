@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """DSCP per UDP payload size in a pcapng capture (pktmon etl2pcap, Wireshark).
 
-usage: pcapng_tos.py capture.pcapng [--src IP]
+usage: pcapng_tos.py capture.pcapng [--src IP] [--src-mac MAC]
 
 The Windows probe (win_dscp_probe.py) gives each method its own payload size;
-this counts, per size, which DSCP arrived. Ethernet frames, or the 802.11 ones
+this counts, per size, which DSCP arrived. --src keeps the IPv4 packets from
+that address; --src-mac keeps the Ethernet frames from that station, IPv6
+included (a stream's one direction, whatever addresses its pair took). Ethernet frames, or the 802.11 ones
 pktmon hands for a Wi-Fi adapter (under the Ethernet link type); IPv4
 and IPv6 (whose Traffic Class carries the DSCP the same way). A packet seen by
 several pktmon components is counted once per component: compare the shares,
@@ -43,9 +45,14 @@ def packets(path):
 def main():
     path = sys.argv[1]
     src = sys.argv[sys.argv.index('--src') + 1] if '--src' in sys.argv else None
+    mac = None
+    if '--src-mac' in sys.argv:
+        mac = bytes.fromhex(sys.argv[sys.argv.index('--src-mac') + 1].replace('-', '').replace(':', ''))
     count = Counter()
     for p in packets(path):
         if len(p) < 14:
+            continue
+        if mac and p[6:12] != mac:
             continue
         eth = struct.unpack_from('!H', p, 12)[0]
         off = 14

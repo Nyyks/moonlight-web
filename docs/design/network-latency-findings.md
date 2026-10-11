@@ -1826,7 +1826,7 @@ reverse order, 23:00-00:33:
   the N95 moved next to the router), the way up (a policy on the client's
   `chrome.exe`), audio and SCTP in different classes (a Linux host, or the
   libjuice patch of D5), more rounds at a quiet hour, and a pass through
-  stream.dev.
+  stream.dev. (Another station and the way up: 11/10, below.)
 
 ### 10/10/2026 — W2.6, SCTP's packet size: 1,500-byte MTU against 1,280 (UM790Pro, cable then Wi-Fi)
 
@@ -1882,6 +1882,114 @@ SCTP take the bigger packets.
   product keeps libdatachannel's 1,280: a third of a millisecond a frame in
   Wi-Fi does not pay for a session that might never connect. Neither the Mac
   measure nor a LAN-only product path with a 1,280 fallback is started.
+
+### 11/10/2026 — A neighbour's download through the same repeater, and the way up (audio + DSCP plan, D3 part 2)
+
+The stream of the D3 entry above, unchanged: DualRTX's `--dev`, the whole
+UDP of its exe in one class by an ActiveStore policy; the UM790Pro on the
+router's `07:1d:00` (channel 44, 802.11ax, 1,201 Mbit/s), cable off, over
+IPv6. Sunday 07:27-10:12, slot from session 59. New this time:
+
+- **The Freebox OS API** (Bruno's go; `lan/browser/pub/`, polled every 2 s)
+  gives every device's access point and rates. It settles the topology. The
+  router (ground floor, `07:1d`) has the UM790Pro and the Player POP (by
+  Ethernet) next to it. DualRTX's switch hangs off the 2nd-floor repeater
+  (`38:07:16:BD:16:37`, BSSIDs `ec:68:bx`), where the N95 also sits. So the
+  stream runs switch → that repeater → Wi-Fi 7 link → router → UM790Pro.
+  From 08:12 to 09:42 the house stayed quiet: Léo's Mac averaged 2-3 Mbit/s
+  (peaks of 11), and nothing else passed 0.2. (The box files the UM790Pro's
+  Wi-Fi under the wrong access point, with rates that make no sense: its
+  entry is ignored.)
+- **E, a load from another station.** The N95's Wi-Fi on that repeater
+  (`ec:68:b4`, channel 44 like the router's, 802.11ac 433 Mbit/s, 100 %)
+  takes a download from DualRTX: video bursts at 22 Mbit/s (segments at
+  270-290 Mbit/s), or bulk (264-326 Mbit/s). The repeater carries both that
+  download and the stream's way to the router.
+- **U, the way up.** An upload from the UM790Pro itself (bulk TCP,
+  95-104 Mbit/s), with the host at AF41 throughout. An ActiveStore policy
+  marks the bench Chrome: its user's `chrome.exe`, UDP toward the LAN's
+  v4 /24 and v6 /64 only. Three settings: none, EF, or EF with 802.1p 6.
+- **pktmon on DualRTX**, filtered by the UM790Pro's MAC, now split by
+  direction (`pcapng_tos.py --src-mac`). Every marked pass showed its mark,
+  both ways.
+
+**E** (round 1 · round 2; NetEq = the page's audio buffer, ms):
+
+| Load on the N95 | Stream class | click median / p90 | frame age median / mean / p90 | messages median / p90 | NetEq |
+|---|---|---|---|---|---|
+| none | — | 31.1 / 53.0 · 25.4 / 36.7 | 10.5 / 11.3 / 16.7 · 8.7 / 8.7 / 10.6 | 4.8 / 9.4 · 4.5 / 7.1 | 102 · 57 |
+| none | AF41 | 28.8 / 41.0 · 29.6 / 50.0 | 8.7 / 8.8 / 10.7 · 9.2 / 9.3 / 11.3 | 4.8 / 7.5 · 4.7 / 7.3 | 51 · 53 |
+| video 22 | — | 26.1 / 50.9 · 27.2 / 38.8 | 9.8 / 12.3 / 18.9 · 12.3 / 33.2 / 93.0 | 5.2 / 13.1 · 4.9 / 21.2 | 91 · 85 |
+| video 22 | AF41 | 24.5 / 39.0 · 28.8 / 54.3 | 9.9 / 14.9 / 32.8 · 10.6 / 25.6 / 57.4 | 4.9 / 15.1 · 4.7 / 13.8 | **51 · 51** |
+| bulk | — | 57.7 / 85.5 · 66.6 / 110.3 | 22.6 / 34.0 / 59.7 · 26.2 / 35.5 / 70.3 | 61.2 / 267 · 27.3 / 55.8 | 90 · 97 |
+| bulk | AF41 | 63.1 / 120.2 · 57.5 / 122.2 | **877 / 895 / 1,189** · 16.0 / 19.0 / 30.0 | 27.3 / 67.3 · 40.7 / 111 | **634** · 67 |
+
+**A follow-up on the bulk alone** (09:36-10:08, one pass each in the order
+none, CS3, AF41, CS3, none). CS3 (24) rides the same best-effort queue as no
+mark, but under its own TID (3), as AF41 does under TID 4:
+
+| Stream class | click median / p90 | frame age median / mean / p90 | messages median / p90 | NetEq |
+|---|---|---|---|---|
+| — | 52.9 / 70.1 · 49.1 / 68.0 | 21.8 / 31.1 / 62.7 · 17.8 / 20.2 / 30.1 | 29.3 / 108 · 49.6 / 3,246 | – · 74 |
+| CS3 | 47.2 / 66.2 · 47.7 / 76.0 | 19.7 / 25.1 / 45.6 · 19.3 / 23.3 / 39.5 | 38.4 / 84.4 · 25.7 / 135 | – · 72 |
+| AF41 | 57.1 / 122.7 | 22.8 / 47.9 / 128.5 | 12.4 / 236 | 331 |
+
+(Both CS3 passes, and both unmarked ones, carried the same tag. The second
+overwrote the first's files, so only its NetEq is left; the other figures
+come from the run's log.)
+
+- **A neighbour's video bursts barely touch the stream.** The frame age p90
+  spread from 19 to 93 ms whatever the class, and the click did not move.
+  The one steady gain of AF41 there is the sound: NetEq stayed at its floor
+  (51 ms in both rounds, against 85-91), as in the D3 entry.
+- **A neighbour's bulk download through the same repeater costs ~25-35 ms
+  of click and stalls the messages**, with or without a mark: p90 from 56 to
+  267 ms, and one 3 s stall.
+- **AF41 is a gamble there.** Once it halved the frame age (p90 70 → 30 ms)
+  and trimmed NetEq (97 → 67 ms). Twice it made things worse:
+  - **the stream broke once**: 0.9-1.3 s late from the window's first frame
+    to its last, 4.4 Mbit/s, ~570 frames dropped a minute, NetEq 634 ms.
+    That is the signature of CS6 in the D3 entry's busy round;
+  - the follow-up's AF41 pass had the worst frame age p90 (128 ms), messages
+    p90 (236 ms) and NetEq (331 ms) of its series.
+- **CS3 did not break** in two passes. Both did a little better than no mark
+  on the click and the frame age, though one dropped ~530 frames a minute
+  (the other 12). So the trouble is not the aggregation of a new TID: it is
+  the video queue (VI) itself on this path, against a best-effort neighbour
+  on the same repeater. Where exactly — the repeater's VI queue toward the
+  Wi-Fi 7 link, its scheduler, or the router — needs an air capture. Not
+  done.
+- **The neighbour's download did not pay for the stream's class**: 264-326
+  Mbit/s, and a ping median of 14-16 ms, in every bulk pass.
+
+**U** (round 1 · round 2; "up" = the click's way up, median):
+
+| Upload from the UM790Pro | Chrome's class | click median / p90 | up | messages median / p90 |
+|---|---|---|---|---|
+| none | — | 28.5 / 37.9 · 26.6 / 40.2 | 2.39 · 2.26 | 4.5 / 8.0 · 4.6 / 7.1 |
+| none | EF + 802.1p 6 | 26.6 / 38.6 · 26.8 / 36.2 | 2.21 · 2.24 | 4.4 / 6.4 · 4.5 / 6.9 |
+| bulk up | — | 37.1 / 62.7 · 31.7 / 42.7 | **7.29 · 7.13** | 11.9 / 20.6 · 10.6 / 16.7 |
+| bulk up | EF | 36.4 / 46.8 · 30.6 / 42.0 | 4.88 · 3.89 | 12.0 / 78.2 · 7.5 / 11.6 |
+| bulk up | EF + 802.1p 6 | 33.3 / 45.9 · 30.2 / 38.6 | **3.94 · 3.44** | 8.0 / 14.0 · 8.3 / 17.4 |
+
+- **An upload from the client itself costs the click's way up ~5 ms** (2.3 →
+  7.2 ms) and 5-9 ms of click. The frames do not mind: the frame age is
+  unchanged, and NetEq sits at 46-70 ms in every pass.
+- **A policy on the client's Chrome gives about half of it back**: the way
+  up goes from 7.2 to 3.4-4.9 ms, the click median drops 1-4 ms and its p90
+  4-17 ms. EF alone does most of it; 802.1p 6 on top adds a little, in both
+  rounds. It costs nothing at rest.
+- **The client's mark arrives intact**: EF on every one of Chrome's IPv6
+  datagrams, across the router, the Wi-Fi 7 link and the repeater. A
+  non-domain Windows client marks too, without the NLA key (ActiveStore,
+  from an elevated SSH session).
+- **Not measured yet**:
+  - the queue on the client's own radio (Windows hides the QoS field);
+  - whether a mark on the way up helps against another station's upload;
+  - Mac and iPhone (no policy to set);
+  - audio and SCTP in different classes (a Linux host);
+  - a pass through stream.dev;
+  - the core D3 passes in a quiet night (59 holds 01:00-05:00).
 
 ## 4. The model so far (04/10/2026)
 
