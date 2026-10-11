@@ -80,6 +80,8 @@ From the in‑app overlay: **bitrate** (1–150 Mbps or auto), **resolution** (7
 **FPS** (15–240), **codec** (auto / H.264 / HEVC / AV1, unsupported options greyed out),\
 **HDR**, **4:4:4 chroma**, **Mouse Gaming Mode** (pointer‑lock), perf stats and aspect ratio.
 
+**Settings → Start streams in fullscreen** (off by default) opens every stream in fullscreen. On an iPhone, Safari keeps its bars and the stream fills the page; added to the Home Screen, MoonlightWeb is fullscreen anyway.
+
 <div align="center">
 
 | Video settings | Advanced options |
