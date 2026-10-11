@@ -1161,7 +1161,10 @@ end;
 // package is signed by MoonlightWeb's own certificate, which the helper trusts
 // for the install alone (Root and Trusted Publishers, out of both again
 // before it returns). A build that bundles no package (Windows on ARM: the
-// driver is x64 only) skips it entirely.
+// driver is x64 only) skips it entirely. Exit 3010 asks for no restart: a game
+// still held a device made through the old driver, which stays loaded until
+// Windows next restarts, and the app works with either. An update that brings
+// the same driver installs nothing, so it never gets there.
 procedure RunVirtualHidHelper(verb: String);
 var
   rc: Integer;

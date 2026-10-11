@@ -32,6 +32,7 @@
 #include <setupapi.h>
 #include <newdev.h>
 #include <devguid.h>
+#include <cfgmgr32.h>
 #endif
 
 namespace VirtualHidApply {
@@ -248,6 +249,39 @@ bool installOnNode(HDEVINFO set, SP_DEVINFO_DATA& data, const QString& infPath, 
     return true;
 }
 
+/// The node's driver is this very package: the pinned files, found again in
+/// the driver store folder its INF was installed from. Reinstalling it would
+/// restart the node for nothing, and a game still holding a wheel made through
+/// it turns that restart into a reboot (exit 3010 on every update of the bench
+/// of 11/10, with ACC open).
+bool nodeHasPackage(HDEVINFO set, SP_DEVINFO_DATA& data,
+                    const std::vector<DriverPackage::File>& files)
+{
+    HKEY key = SetupDiOpenDevRegKey(set, &data, DICS_FLAG_GLOBAL, 0, DIREG_DRV, KEY_QUERY_VALUE);
+    if (key == INVALID_HANDLE_VALUE) return false; // no driver yet
+    wchar_t inf[MAX_PATH] = {};
+    DWORD bytes = sizeof(inf) - sizeof(wchar_t);
+    const bool hasInf = RegQueryValueExW(key, L"InfPath", nullptr, nullptr,
+                                         reinterpret_cast<BYTE*>(inf), &bytes) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    if (!hasInf || inf[0] == 0) return false;
+    wchar_t stored[MAX_PATH] = {};
+    if (!SetupGetInfDriverStoreLocationW(inf, nullptr, nullptr, stored, MAX_PATH, nullptr))
+        return false;
+    const QString dir = QFileInfo(QString::fromWCharArray(stored)).absolutePath();
+    QString infPath, catPath;
+    return DriverPackage::checkFiles(dir, files.data(), files.size(), &infPath, &catPath).isEmpty();
+}
+
+/// Windows still has to restart for the node's driver: an update earlier
+/// found a device made through the old one held open.
+bool restartPending(const SP_DEVINFO_DATA& data)
+{
+    ULONG status = 0, problem = 0;
+    if (CM_Get_DevNode_Status(&status, &problem, data.DevInst, 0) != CR_SUCCESS) return false;
+    return (status & DN_NEED_RESTART) || problem == CM_PROB_NEED_RESTART;
+}
+
 /// Every package in the store that installs on our hardware id, deleted. Best
 /// effort: a package left behind is harmless once the node is gone. A test
 /// package from install.ps1 goes too, which is what an uninstall should do.
@@ -307,6 +341,23 @@ int install(const QString& action, const QString& dir)
         return answer(action, false,
                       QStringLiteral("SetupDiGetClassDevs: %1").arg(lastErrorText()));
 
+    std::vector<SP_DEVINFO_DATA> ours = nodes.ours();
+    const bool created = ours.empty();
+    SP_DEVINFO_DATA data{};
+    if (!created) {
+        // One node is the design; a second one (an older bench install) is
+        // left alone rather than guessed about.
+        data = ours.front();
+        if (nodeHasPackage(nodes.set, data, files)) {
+            addOwner();
+            const bool pending = restartPending(data);
+            return answer(action, true,
+                          pending ? QStringLiteral("up to date, loaded when Windows restarts")
+                                  : QStringLiteral("up to date"),
+                          pending);
+        }
+    }
+
     // Our own certificate: in Root and Trusted Publishers for the install, out
     // of both before this returns. The driver, once installed, loads without.
     DriverPackage::PublisherTrust trust;
@@ -314,16 +365,7 @@ int install(const QString& action, const QString& dir)
                                            trust, &error))
         return answer(action, false, error);
 
-    std::vector<SP_DEVINFO_DATA> ours = nodes.ours();
-    const bool created = ours.empty();
-    SP_DEVINFO_DATA data{};
-    if (created) {
-        if (!createNode(nodes.set, data, &error)) return answer(action, false, error);
-    } else {
-        // One node is the design; a second one (an older bench install) is
-        // left alone rather than guessed about.
-        data = ours.front();
-    }
+    if (created && !createNode(nodes.set, data, &error)) return answer(action, false, error);
     bool reboot = false;
     if (!installOnNode(nodes.set, data, infPath, &reboot, &error)) {
         // Leave no orphan node behind a failed first install.
@@ -339,7 +381,12 @@ int install(const QString& action, const QString& dir)
     if (!setFriendlyName(nodes.set, data, &error))
         Logger::warning(QStringLiteral("[vhid-apply] %1").arg(error));
     addOwner();
-    return answer(action, true, created ? QStringLiteral("installed") : QStringLiteral("updated"),
+    // Reboot: a game still holds a device made through the old driver, which
+    // stays loaded until Windows restarts. The engine copes with either.
+    return answer(action, true,
+                  created  ? QStringLiteral("installed")
+                  : reboot ? QStringLiteral("updated, loaded when Windows restarts")
+                           : QStringLiteral("updated"),
                   reboot);
 }
 

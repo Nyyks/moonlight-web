@@ -34,10 +34,11 @@
  *              (our own certificate: Root and Trusted Publishers, out of both
  *              again before it returns), create the root-enumerated System
  *              node Root\MoonlightWebVHid if there is none, and install the
- *              package on it — on every run, so an update brings a newer
- *              driver. The node stays enabled: it only offers
- *              \\.\MoonlightWebVHid, and nothing appears to a game until a
- *              stream attaches a device.
+ *              package on it, so an update brings a newer driver — unless
+ *              the node's driver is already these very files: an update
+ *              that brings none restarts nothing. The node stays enabled: it
+ *              only offers \\.\MoonlightWebVHid, and nothing appears to a
+ *              game until a stream attaches a device.
  *   uninstall  forget this edition; when it had installed the driver and no
  *              other MoonlightWeb edition is left using it, remove the node
  *              and the package. A driver put there by hand (install.ps1, on
@@ -49,7 +50,9 @@
  * unavailable, as on any machine without the driver.
  *
  * Prints one JSON line on stdout. Exit 0 done or skipped, 1 failed, 3010 done
- * but Windows wants a reboot.
+ * but Windows wants a reboot: a game still held a device made through the old
+ * driver, which stays loaded until then. The engine works with either (the
+ * client library asks the driver which fixes it has).
  */
 namespace VirtualHidApply {
 
@@ -66,18 +69,19 @@ inline QString deviceName()
 }
 
 /// The package under backend/installer/drivers/vhid, as build.ps1 -Sign Own
-/// made it on 11/10/2026, pinned file by file: any other bytes, and the
-/// install refuses. A new driver means a new package there and new pins here,
-/// both printed by build.ps1. A test-signed package is never bundled.
+/// made it on 11/10/2026 (driver 0.1.1.0, the event wakeup fixed), pinned file
+/// by file: any other bytes, and the install refuses. A new driver means a new
+/// package there, a higher -Version, and new pins here, all printed by
+/// build.ps1. A test-signed package is never bundled.
 inline const std::vector<DriverPackage::File>& driverFiles()
 {
     static const std::vector<DriverPackage::File> files = {
         {"MoonlightWebVHid.inf",
-         "661adf513a7e4addda9b1959a9168015261b8f420f53ac6d88391971a1317ee2"},
+         "05bbf4afce86520fd50b907d3848690084f241d1894a7aec9e96d519edeae410"},
         {"MoonlightWebVHid.cat",
-         "3f71b2998180cfa00db894d0d8afc95e0e40ac245c12d692660af5e4a263bf25"},
+         "918ab148e7a2505f2ef41428353985531fa3ab4fcbec75b085b078121b318e96"},
         {"MoonlightWebVHid.dll",
-         "7cb4e8b6221648315685163898e26e95d2a6d8e048e96b2c26093bde201fde85"},
+         "08d48aa909219270b9aa477e8648a71857b3142ddf995c3bbb5b21d2e118b5ff"},
     };
     return files;
 }
