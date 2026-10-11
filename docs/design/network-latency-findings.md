@@ -1767,6 +1767,67 @@ passes, 22:36-22:50:
   4 s), and check it once against these numbers in D3's first "none / video"
   pair.
 
+### 10/10/2026 — Windows QoS policies mark the host, and the video queue rescues the stream from a download (audio + DSCP plan, D2 and D3)
+
+**D2, the Windows host marks without code** (DualRTX, elevated once to set
+the policy, the sender a plain user process): an ActiveStore QoS policy
+(`New-NetQosPolicy -PolicyStore ActiveStore -AppPathNameMatchCondition <exe>
+-IPProtocolMatchCondition UDP -DSCPAction n`, not persistent) marks every UDP
+packet of that exe, on a machine outside any domain, **without the "Do not
+use NLA" key and without a reboot**. pktmon on DualRTX's NICs: AF41 34, EF
+46 and CS6 48 all left as asked (800 of 800 each); the port left unmatched
+stayed at 0. The limit: one class for the whole 5-tuple, so audio, video and
+SCTP share it.
+
+**D3, Windows native host DualRTX (`--dev`)**, the whole UDP of
+`build\MoonlightWeb.exe` in one class by such a policy: none, AF41 (VI on the
+Freebox's precedence table) or CS6 (VO). Client: the UM790Pro (Windows),
+moved next to the router, **its Wi-Fi associated to 07:1d** (802.11ax,
+channel 44, 1201 Mbit/s), its cable off. The load: `load.py` on the UM790Pro
+itself, a download onto the stream's own station (the client PC downloading
+a game, say): bulk TCP or the video profile at 22 Mbit/s (calibrated above),
+DF. The stream ran over IPv6; pktmon proved the mark on every marked pass of
+round 2 and on three of round 1's four (its AF41 bulk pass was captured
+before the stream started). `series.py um --contents clk`, two rounds in
+reverse order, 23:00-00:33:
+
+| Load | Class | click: median / p90 (ms) | frame age: median / mean / p90 (ms) | message round trip: median / p90 (ms) | NetEq buffer (ms) |
+|---|---|---|---|---|---|
+| none | — | 27.4 / 38.6 · 26.0 / 37.8 | 9.4 / 9.4 / 11.4 · 8.4 / 8.6 / 10.7 | 4.7 / 10.1 · 4.4 / 7.0 | 54 · 51 |
+| video 22 | — | 40.1 / 90.5 · 32.1 / 70.0 | 12.1 / 26.1 / 60.9 · 9.9 / 18.3 / 41.8 | 6.5 / 72.9 · 4.9 / 46.8 | 131 · 93 |
+| video 22 | **AF41** | 35.4 / 65.2 · **26.6 / 48.1** | 9.5 / 10.3 / **14.4** · 9.8 / 11.8 / **18.2** | 4.8 / **26.4** · 4.8 / **28.4** | **52 · 55** |
+| video 22 | CS6 | 34.7 / 76.9 · 35.1 / 73.0 | 10.3 / 12.5 / 19.0 · 10.2 / 12.4 / 19.3 | 4.7 / 25.6 · 4.7 / 22.5 | 54 · 46 |
+| bulk | — | 83.3 / 106.9 · 84.5 / 111.8 | 32.4 / 46.7 / 63.4 · 39.6 / 45.4 / 68.0 | 48.3 / 85.6 · 44.7 / 66.7 | 139 · 78 |
+| bulk | **AF41** | 99.3 / 137.2 · **54.7 / 71.6** | 54.1 / 69.2 / 124 · **17.4 / 18.5 / 26.7** | 71 / 112 · **26.5 / 42.0** | 119 · **59** |
+| bulk | CS6 | 43.1 / 62.2 · 50.8 / 68.4 | **1,496 / 1,538 / 2,282** · 15.6 / 17.3 / 26.5 | 16.4 / 36.5 · 27.0 / 43.2 | **426** · 54 |
+
+(round 1 · round 2; "frame age" is host → drawn.)
+
+- **Under the video load, AF41 takes the stream back to its quiet numbers**,
+  both rounds: the frame age p90 from 42-61 ms to 14-18, the messages' p90
+  from 47-73 ms to 26-28, the click p90 −20 ms, and NetEq's buffer stays at
+  the floor (52-55 ms against 93-131): every sound ~40-80 ms earlier;
+- **under a download, round 2 (the clean one) halves what the download
+  costs**: click 84.5 → 54.7 ms, frame age 40 → 17 ms, messages 45 → 27 ms,
+  NetEq 78 → 59 ms. A download still costs ~25 ms of click: the stream waits
+  less in the access point's queue, not at all in the air;
+- **round 1's bulk passes ran in a busier air** (the download itself got
+  82-199 Mbit/s against 219-221 in round 2, its own ping p90 128-623 ms
+  against 63-76): there AF41 gained nothing, and **CS6 broke the video**
+  (1.5 s late, ~1,080 frames dropped a minute, 4.4 Mbit/s): the voice queue
+  does not aggregate, and a video stream does not fit in it once the air is
+  contended. The messages loved it (16 ms) — the plan's §3 in one pass;
+- **CS6 never did better than AF41 where both held**: the video queue is
+  the class for the stream; the voice queue is a risk with no gain;
+- **the download did not pay for it**: 219-221 Mbit/s and the same ping
+  (43-47 ms median) with the stream in any class in round 2; the video
+  load's segments 203-211 Mbit/s either way;
+- **not measured yet**: a load from another station (the house's iPhone,
+  the N95 moved next to the router), the way up (a policy on the client's
+  `chrome.exe`), audio and SCTP in different classes (a Linux host, or the
+  libjuice patch of D5), more rounds at a quiet hour, and a pass through
+  stream.dev.
+
 ### 10/10/2026 — W2.6, SCTP's packet size: 1,500-byte MTU against 1,280 (UM790Pro, cable then Wi-Fi)
 
 Bruno's go via session 59. New bench key `sctpmtu=<1280-1500>` (`a01b6b3b`):
