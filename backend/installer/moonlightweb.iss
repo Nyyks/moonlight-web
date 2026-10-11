@@ -1157,9 +1157,11 @@ end;
 // against the constants compiled into the exe, then creates or updates the
 // driver's node; `uninstall` removes it once no MoonlightWeb edition that
 // installed it is left. Best-effort like ViGEmBus: without the driver the
-// passthrough is simply unavailable, so nothing here may fail the setup. A
-// build that bundles no signed package (until the product signature exists)
-// skips it entirely.
+// passthrough is simply unavailable, so nothing here may fail the setup. The
+// package is signed by MoonlightWeb's own certificate, which the helper trusts
+// for the install alone (Root and Trusted Publishers, out of both again
+// before it returns). A build that bundles no package (Windows on ARM: the
+// driver is x64 only) skips it entirely.
 procedure RunVirtualHidHelper(verb: String);
 var
   rc: Integer;

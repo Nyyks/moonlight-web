@@ -53,12 +53,19 @@ QString checkFiles(const QString& dir, const File* files, std::size_t count, QSt
 
 #ifdef Q_OS_WIN
 
-/// The catalog's signer in the machine's Trusted Publishers, for as long as
-/// this lives: removed again on destruction, unless it was there before us.
+/// The catalog's signer in the machine's stores, for as long as this lives:
+/// Trusted Publishers always, Root too for a self-signed signer. Removed again
+/// on destruction — unless a public CA's signer was there before us.
 struct PublisherTrust
 {
-    HCERTSTORE store = nullptr;
-    PCCERT_CONTEXT added = nullptr; // the copy in the store, when WE added it
+    struct Entry
+    {
+        const wchar_t* storeName = nullptr;
+        HCERTSTORE store = nullptr;
+        PCCERT_CONTEXT added = nullptr; // the copy to remove when this ends
+    };
+    Entry publisher{L"TrustedPublisher"};
+    Entry root{L"Root"};
     bool preexisting = false;
     const char* logTag = "[driver]";
 
@@ -73,9 +80,15 @@ struct PublisherTrust
 /// @p thumbprintHex; the certificate itself is taken from inside the catalog
 /// (already hashed by the caller), never from anywhere else. Nothing signed by
 /// anyone else is ever trusted, and the trust does not outlive @p trust.
+///
+/// @p selfSigned: the signer is MoonlightWeb's own certificate, which chains
+/// to nothing Windows trusts, so it goes in Root as well for the install — and
+/// leaves both stores afterwards even when an install that was cut short left
+/// it there: no machine keeps it. Once installed, the driver loads without it
+/// (bench of 11/10/2026, Secure Boot on).
 /// @param logTag prefix of the log lines, e.g. "[vdisplay-apply]".
-bool trustCatalogSigner(const QString& catPath, const QString& thumbprintHex, const char* logTag,
-                        PublisherTrust& trust, QString* error);
+bool trustCatalogSigner(const QString& catPath, const QString& thumbprintHex, bool selfSigned,
+                        const char* logTag, PublisherTrust& trust, QString* error);
 
 #endif
 

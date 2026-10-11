@@ -69,20 +69,70 @@ QString lastErrorText(DWORD err = GetLastError())
 PublisherTrust::~PublisherTrust()
 {
     const QString tag = QLatin1String(logTag);
-    if (added) {
-        // CertDeleteCertificateFromStore frees the context either way.
-        if (!CertDeleteCertificateFromStore(added))
-            Logger::warning(
-                QStringLiteral("%1 could not untrust the publisher: %2").arg(tag, lastErrorText()));
-        else
-            Logger::info(QStringLiteral("%1 publisher untrusted again").arg(tag));
-        added = nullptr;
+    for (Entry* e : {&publisher, &root}) {
+        const QString name = QString::fromWCharArray(e->storeName);
+        if (e->added) {
+            // CertDeleteCertificateFromStore frees the context either way.
+            if (!CertDeleteCertificateFromStore(e->added))
+                Logger::warning(QStringLiteral("%1 could not take the publisher out of %2: %3")
+                                    .arg(tag, name, lastErrorText()));
+            else
+                Logger::info(QStringLiteral("%1 publisher out of %2 again").arg(tag, name));
+            e->added = nullptr;
+        }
+        if (e->store) CertCloseStore(e->store, 0);
+        e->store = nullptr;
     }
-    if (store) CertCloseStore(store, 0);
 }
 
-bool trustCatalogSigner(const QString& catPath, const QString& thumbprintHex, const char* logTag,
-                        PublisherTrust& trust, QString* error)
+namespace {
+
+/// @p cert in the LocalMachine store @p e names, and what to remove after:
+/// the copy we add, or — when @p alwaysRemove — one found there already.
+bool trustIn(PublisherTrust::Entry& e, PCCERT_CONTEXT cert, const QByteArray& thumbprint,
+             bool alwaysRemove, const QString& tag, bool* found, QString* error)
+{
+    const QString name = QString::fromWCharArray(e.storeName);
+    e.store =
+        CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
+                      CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_OPEN_EXISTING_FLAG, e.storeName);
+    if (!e.store)
+        e.store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, CERT_SYSTEM_STORE_LOCAL_MACHINE,
+                                e.storeName);
+    if (!e.store) {
+        *error = QStringLiteral("cannot open the %1 store: %2").arg(name, lastErrorText());
+        return false;
+    }
+    CRYPT_HASH_BLOB blob{DWORD(thumbprint.size()),
+                         reinterpret_cast<BYTE*>(const_cast<char*>(thumbprint.constData()))};
+    if (PCCERT_CONTEXT existing =
+            CertFindCertificateInStore(e.store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
+                                       CERT_FIND_SHA1_HASH, &blob, nullptr)) {
+        *found = true;
+        if (alwaysRemove) {
+            e.added = existing; // left by an install cut short: out with this one
+            Logger::info(QStringLiteral("%1 publisher already in %2, removed after this install")
+                             .arg(tag, name));
+        } else {
+            // A public CA's signer the driver's own installer trusted for
+            // good: not ours to remove.
+            CertFreeCertificateContext(existing);
+            Logger::info(QStringLiteral("%1 publisher already in %2").arg(tag, name));
+        }
+        return true;
+    }
+    if (!CertAddCertificateContextToStore(e.store, cert, CERT_STORE_ADD_NEW, &e.added)) {
+        *error = QStringLiteral("cannot put the publisher in %1: %2").arg(name, lastErrorText());
+        return false;
+    }
+    Logger::info(QStringLiteral("%1 publisher in %2 for this install").arg(tag, name));
+    return true;
+}
+
+} // namespace
+
+bool trustCatalogSigner(const QString& catPath, const QString& thumbprintHex, bool selfSigned,
+                        const char* logTag, PublisherTrust& trust, QString* error)
 {
     trust.logTag = logTag;
     const QString tag = QLatin1String(logTag);
@@ -122,41 +172,16 @@ bool trustCatalogSigner(const QString& catPath, const QString& thumbprintHex, co
         return false;
     }
 
-    trust.store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
-                                CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_OPEN_EXISTING_FLAG,
-                                L"TrustedPublisher");
-    if (!trust.store)
-        trust.store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, CERT_SYSTEM_STORE_LOCAL_MACHINE,
-                                    L"TrustedPublisher");
-    if (!trust.store) {
-        CertFreeCertificateContext(match);
-        *error =
-            QStringLiteral("cannot open the Trusted Publishers store: %1").arg(lastErrorText());
-        return false;
+    // Root first: a publisher whose chain Windows cannot build is no publisher.
+    bool found = false;
+    bool ok = !selfSigned || trustIn(trust.root, match, wanted, true, tag, &found, error);
+    if (ok) {
+        found = false;
+        ok = trustIn(trust.publisher, match, wanted, selfSigned, tag, &found, error);
+        trust.preexisting = found && !selfSigned;
     }
-
-    CRYPT_HASH_BLOB blob{DWORD(wanted.size()),
-                         reinterpret_cast<BYTE*>(const_cast<char*>(wanted.constData()))};
-    if (PCCERT_CONTEXT existing =
-            CertFindCertificateInStore(trust.store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
-                                       CERT_FIND_SHA1_HASH, &blob, nullptr)) {
-        // Already trusted on this machine (the driver's own installer does the
-        // same thing, permanently): not ours to remove afterwards.
-        CertFreeCertificateContext(existing);
-        CertFreeCertificateContext(match);
-        trust.preexisting = true;
-        Logger::info(QStringLiteral("%1 publisher already trusted").arg(tag));
-        return true;
-    }
-    const BOOL ok =
-        CertAddCertificateContextToStore(trust.store, match, CERT_STORE_ADD_NEW, &trust.added);
     CertFreeCertificateContext(match);
-    if (!ok) {
-        *error = QStringLiteral("cannot trust the publisher: %1").arg(lastErrorText());
-        return false;
-    }
-    Logger::info(QStringLiteral("%1 publisher trusted for this install").arg(tag));
-    return true;
+    return ok;
 }
 
 #endif

@@ -307,8 +307,10 @@ int install(const QString& action, const QString& dir)
         return answer(action, false,
                       QStringLiteral("SetupDiGetClassDevs: %1").arg(lastErrorText()));
 
+    // Our own certificate: in Root and Trusted Publishers for the install, out
+    // of both before this returns. The driver, once installed, loads without.
     DriverPackage::PublisherTrust trust;
-    if (!DriverPackage::trustCatalogSigner(catPath, catalogSignerThumbprint(), "[vhid-apply]",
+    if (!DriverPackage::trustCatalogSigner(catPath, catalogSignerThumbprint(), true, "[vhid-apply]",
                                            trust, &error))
         return answer(action, false, error);
 

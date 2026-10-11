@@ -605,6 +605,9 @@ if(MW_BUILD_TESTS)
     )
     set_target_properties(mw-security-tests PROPERTIES AUTOMOC ON)
     target_include_directories(mw-security-tests PRIVATE src tests)
+    # The driver packages the installer bundles, re-hashed against their pins.
+    target_compile_definitions(mw-security-tests PRIVATE
+        MW_INSTALLER_DRIVERS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers")
     target_link_libraries(mw-security-tests PRIVATE Qt6::Core Qt6::Network OpenSSL::Crypto)
     if(WIN32)
         # DriverPackage.cpp's catalog signer check (CryptQueryObject).
@@ -652,11 +655,12 @@ if(WIN32)
     endforeach()
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vdd" DESTINATION drivers)
     # "MoonlightWeb Virtual HID": the HID passthrough's driver, built and signed
-    # apart (native-host/drivers/vhid/build.ps1 -Sign Product) and dropped here
-    # only once signed for the product. Absent — today — the installer has
-    # nothing to set up and the passthrough reports itself unavailable, as on a
-    # machine without the driver. Its files are pinned in VirtualHidApply.cpp.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid/MoonlightWebVHid.inf")
+    # apart (native-host/drivers/vhid/build.ps1 -Sign Own, our own certificate)
+    # and pinned file by file in VirtualHidApply.h. x64 only: on Windows on ARM
+    # the installer has nothing to set up and the passthrough reports itself
+    # unavailable, as on a machine without the driver.
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid/MoonlightWebVHid.inf")
         install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid" DESTINATION drivers)
     endif()
 endif()

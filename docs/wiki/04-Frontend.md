@@ -206,28 +206,24 @@ For a radio, **Test** says where its switches are read, and the wizard says whic
 | Host | As itself | Force feedback |
 |---|---|---|
 | **Linux**, MoonlightWeb's package | out of the box (`uhid`; `uinput` for a wheel with force feedback) | yes: G920, G923 for Xbox (Logitech HID++); HID PID wheels written, not yet tried on one |
-| **Windows** | only with the **"MoonlightWeb Virtual HID"** driver, activated by hand (below) | yes, same wheels (`pid.dll`) |
+| **Windows** (x64) | with the **"MoonlightWeb Virtual HID"** driver, which the installer sets up (below) | yes, same wheels (`pid.dll`) |
 | **macOS** | no: macOS lets no app recreate a HID device without a DriverKit entitlement from Apple | — |
 | Sunshine, Wolf, Apollo | no: the mapping (an Xbox 360 pad) | rumble only |
 
 Where the host cannot, the switch opens a short explanation instead of the chooser, and the device keeps reaching the game as an Xbox pad. Logitech's G29, G27 and G923 for PlayStation are recreated, but their older force feedback commands (lg4ff) are not played yet. G HUB on the host never sees the wheel, recreated or not.
 
-### Windows: activating the driver by hand
+### Windows: the driver
 
-The installer sets the driver up by itself only from a package signed with a public code-signing certificate, which MoonlightWeb does not have. Until then, the driver is **test-signed**, and Windows takes it only in **test mode**:
+The installer sets **"MoonlightWeb Virtual HID"** up on x64 PCs, on install and on every update; uninstalling MoonlightWeb removes it, unless the other edition (DEV or release) still uses it. Nothing to do by hand: no test mode, Secure Boot stays on, anti-cheats see an ordinary driver.
 
-- **Secure Boot** must be off in the firmware, and Windows shows "Test Mode" in a corner of the desktop;
-- **some games' anti-cheat refuse to start in test mode**: check yours before;
-- the steps need an administrator, and two reboots to undo.
+It is a user-mode driver (UMDF 2, over Windows' own Virtual HID Framework) signed with **MoonlightWeb's own certificate** ("MoonlightWeb Virtual HID", code signing only, not a certificate authority) rather than a paid one. Windows takes such a package only from a publisher it trusts, so the installer's elevated step:
 
-1. **Build the package**, on any Windows PC with Visual Studio Build Tools (C++ workload) and Git for Windows (for `openssl`): in a clone of the repository, run `backend\native-host\drivers\vhid\build.ps1` from PowerShell. It downloads the Windows Driver Kit from NuGet (about 1.5 GB, once, inside the clone), builds, makes a self-signed certificate of its own and signs: the package lands in `drivers\vhid\build\package\`.
-2. **Test mode, on the host**: turn Secure Boot off in the firmware, then in an elevated prompt `bcdedit /set testsigning on`, and reboot.
-3. **Install, on the host**: copy the package folder and `install.ps1` there, then in an elevated PowerShell `.\install.ps1 -Package <package folder>`. It trusts the package's certificate (LocalMachine Root and TrustedPublisher), adds the device `ROOT\MoonlightWebVHid` and installs the driver.
-4. **Restart MoonlightWeb.** Settings → Controllers then takes the switch, and the stream's toast says the device "goes to the host as itself"; `joy.cpl` lists it.
+1. checks the three files of the package against SHA-256 hashes compiled into `MoonlightWeb.exe`, and the catalog's signer against the certificate's pinned thumbprint;
+2. puts that certificate in the machine's **Root** and **Trusted Publishers** stores, installs the driver, then **takes the certificate out of both**: once installed, Windows loads the driver without it.
 
-**To undo**: `.\install.ps1 -Uninstall`, remove the certificate from both stores (`certlm.msc`, "MoonlightWeb Virtual HID (test)"), then `bcdedit /set testsigning off`, reboot, and Secure Boot back on.
+So no machine keeps our certificate, and it never vouches for anything but this install. On Windows on ARM the switch explains that the host cannot take the device: the driver is x64 only.
 
-A future signed release needs none of this: the installer then sets the driver up, and the same switch works without test mode.
+**Developers**: `backend\native-host\drivers\vhid\build.ps1` builds the package (Visual Studio Build Tools, the Windows Driver Kit from NuGet) and test-signs it by default; `install.ps1` puts a test-signed package on a machine in test mode (`bcdedit /set testsigning on`).
 
 ---
 

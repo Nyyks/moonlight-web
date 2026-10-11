@@ -79,9 +79,8 @@ void run_driver_package_tests()
         using namespace VirtualHidApply;
         const auto& files = driverFiles();
         const QString signer = catalogSignerThumbprint();
-        // Until the product signature exists: nothing pinned, nothing trusted,
-        // and the installer's helper skips. A half-filled pin set would let
-        // it trust a publisher for a package it cannot check, or the reverse.
+        // Both or neither: a half-filled pin set would let the helper trust a
+        // publisher for a package it cannot check, or the reverse.
         CHECK_EQ(files.empty(), signer.isEmpty());
         if (!files.empty()) {
             CHECK_EQ(int(files.size()), 3);
@@ -96,6 +95,13 @@ void run_driver_package_tests()
             }
             CHECK(inf && cat && dll);
             CHECK(isHex(signer, 40));
+            // The package the installer bundles is the one pinned: a driver
+            // rebuilt without new pins would be refused on every machine.
+            QString infPath, catPath;
+            CHECK(DriverPackage::checkFiles(QStringLiteral(MW_INSTALLER_DRIVERS_DIR "/vhid"),
+                                            files.data(), files.size(), &infPath, &catPath)
+                      .isEmpty());
+            CHECK(!infPath.isEmpty() && !catPath.isEmpty());
         }
         // The id the INF binds to (native-host/drivers/vhid) and install.ps1
         // uses: ours alone, never WinUHid's.

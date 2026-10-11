@@ -20,16 +20,16 @@
  *
  * The HID passthrough recreates the device on MoonlightWeb's own host: Linux
  * does it out of the box (uhid, uinput); Windows needs the "MoonlightWeb
- * Virtual HID" driver, which the installer sets up only once a signed package
- * exists — until then the owner activates it by hand (the wiki's steps);
- * macOS cannot. Settings opens this instead of Chrome's chooser when no
- * native host this page knows can take the device (hidHelpFor()).
+ * Virtual HID" driver, which the installer sets up on x64 — a host without it
+ * runs an older MoonlightWeb, or Windows on ARM; macOS cannot. Settings opens
+ * this instead of Chrome's chooser when no native host this page knows can
+ * take the device (hidHelpFor()).
  */
 
 import { t } from '../i18n/i18n.js';
 import { escapeHtml } from '../util/escapeHtml.js';
 
-/** The wiki's steps: a Linux host, or the driver activated by hand on Windows. */
+/** The wiki's section: which hosts take a device as itself, and how. */
 export const HID_HELP_URL =
     'https://github.com/linckosz/moonlight-web/blob/main/docs/wiki/04-Frontend.md#49-wheels-and-radios-as-themselves';
 
@@ -56,7 +56,7 @@ export function openHidHelp(kind) {
                 </div>
                 <div class="hid-help-way" data-way="windows">
                     <div class="hid-help-way-title">${escapeHtml(t('settings.hidHelpWindowsTitle'))}</div>
-                    <div class="hid-help-way-text">${escapeHtml(t('settings.hidHelpWindowsManual'))}</div>
+                    <div class="hid-help-way-text">${escapeHtml(t('settings.hidHelpWindowsInstall'))}</div>
                     <a class="hid-help-link" href="${HID_HELP_URL}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('settings.hidHelpLink'))}</a>
                 </div>
                 <p class="hid-help-meanwhile">${escapeHtml(t('settings.hidHelpMeanwhile'))}</p>

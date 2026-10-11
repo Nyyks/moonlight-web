@@ -554,7 +554,7 @@ int stageDriver(Context& ctx)
 
         DriverPackage::PublisherTrust trust;
         if (!DriverPackage::trustCatalogSigner(catPath, VirtualDisplay::catalogSignerThumbprint(),
-                                               "[vdisplay-apply]", trust, &error))
+                                               false, "[vdisplay-apply]", trust, &error))
             return failAt(ctx, stage, error);
         SP_DEVINFO_DATA data{};
         if (!createOurNode(nodes.set, data, &error)) return failAt(ctx, stage, error);
