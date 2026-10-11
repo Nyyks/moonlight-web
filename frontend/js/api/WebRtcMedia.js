@@ -107,6 +107,8 @@ export class WebRtcMedia {
         this.pc = null;
         this.dataChannels = { input: null };
         this.connected = false;
+        // A share-link guest, never paired: no MW-BIND hello (StreamView sets it).
+        this._unpairedGuest = false;
 
         // ICE config — populated dynamically by the host's ice-config message,
         // which is authoritative and may legitimately be an empty list (LAN).
@@ -220,6 +222,8 @@ export class WebRtcMedia {
             this._createPeerConnection();
             // MW-BIND-v1: announce our key and nonce. The host holds its SDP
             // offer until this arrives, since its signature covers the nonce.
+            // Not for a share-link guest: see WebRtcDataChannel.
+            if (this._unpairedGuest) return;
             beginHandshake().then((identity) => {
                 this._mwBind = identity;
                 if (identity) this._sendSignaling(helloMessage(identity));

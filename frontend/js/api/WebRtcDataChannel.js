@@ -215,6 +215,8 @@ export class WebRtcDataChannel {
         // caller (StreamView → MoonlightApp) can relaunch with the next
         // transport in the priority chain (… → wss is a distinct attempt).
         this._chainFallback = false;
+        // A share-link guest, never paired: no MW-BIND hello (StreamView sets it).
+        this._unpairedGuest = false;
 
         // ICE connection timeout: if ICE doesn't reach "connected" in time,
         // trigger WebSocket fallback (UDP blocked, corporate firewall).
@@ -413,6 +415,10 @@ export class WebRtcDataChannel {
                 console.log('[WebRTC] Signaling WS connected, waiting for ICE config...');
                 // MW-BIND-v1: announce our key and nonce. The host holds its SDP
                 // offer until this arrives, since its signature covers the nonce.
+                // Not for a share-link guest: never paired, it is sent an
+                // unsigned offer, which a key this browser holds from pairing
+                // with the same host as its owner would refuse (S9.2, 11/10).
+                if (this._unpairedGuest) return;
                 beginHandshake().then((identity) => {
                     this._mwBind = identity;
                     if (identity) this._sendSignaling(helloMessage(identity));

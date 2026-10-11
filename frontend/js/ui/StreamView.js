@@ -928,6 +928,8 @@ export class StreamView {
         // MoonlightApp can relaunch with the next transport (no in-session WS
         // reroute). WebRtcMedia ignores this flag (no in-session WS fallback).
         this.webrtc._chainFallback = true;
+        // A share-link guest was never paired with this host: no MW-BIND.
+        this.webrtc._unpairedGuest = this._playerMode;
 
         // Ride out a gap rather than demand a keyframe — only when the HOST
         // confirmed its encoder is really intra-refreshing (opts.intraRefresh
