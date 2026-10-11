@@ -214,6 +214,8 @@ Where the host cannot, the switch opens a short explanation instead of the choos
 
 **Between two streams**, a Windows host keeps the recreated device for 10 minutes, at rest, still answering the game: a game left running keeps its wheel, and its force feedback, when the next stream sends the same device (same model, same browser-side description). The next page first receives the effects the game had set up, then the game's updates. A stream that does not send the device within 30 s lets it go; unplugging it, or switching **As itself** off, removes it at once. A game started before the wheel was ever there still needs one restart to get force feedback. Each stream has a worker process of its own: the device goes from the worker to the server and on to the next worker by its driver handle (`HidParking`, `HidParkingTransfer`). A Linux host removes the device with the stream, as before.
 
+**Medal on a Windows host**: Medal (the clip recorder) opens the wheel when it notices a game starting, and resets its force feedback as it does. When Medal starts after the game has set its force feedback up, the game keeps its wheel and pedals but never sends force feedback again (ACC, bench of 11/10, `pid.dll`). Start Medal before the game, as it does when it starts with Windows; if the force is gone, restart the game. The loss is in `pid.dll`, inside the game: a USB PID wheel plugged into the PC likely meets it too (not tried).
+
 ### Windows: the driver
 
 The installer sets **"MoonlightWeb Virtual HID"** up on x64 PCs, on install and on every update; uninstalling MoonlightWeb removes it, unless the other edition (DEV or release) still uses it. Nothing to do by hand: no test mode, Secure Boot stays on, anti-cheats see an ordinary driver.
