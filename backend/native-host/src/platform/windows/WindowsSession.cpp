@@ -671,14 +671,6 @@ public:
         if (composite) m_ForceKeyframe.store(true);
     }
 
-    void setRecentrePointer(bool allowed) override
-    {
-        // Read by the capture thread, see recentrePointerIfAway().
-        if (m_RecentrePointer.exchange(allowed) == allowed) return;
-        log::info(allowed ? "[native] cursor: brought back onto this display when it leaves it"
-                          : "[native] cursor: free to leave this display");
-    }
-
     void setFrameFloorFps(int fps) override
     {
         // Bounded here rather than trusted: the number crosses the network from
@@ -3187,9 +3179,9 @@ private:
     /// one place they can be sure to find it again.
     ///
     /// The guests' shared feed draws the pointer for every guest, whatever
-    /// mode each is in; it lets this run only while one of them sees the
-    /// pointer nowhere else (setRecentrePointer). Without that, a guest in
-    /// desktop mode pulled the owner's pointer back off their other screen.
+    /// mode each is in, and so brings it over at its start whatever they
+    /// are in. Until 11/10 it did only for a guest with pointer lock, which a
+    /// guest in desktop mode found missing (S9.2).
     ///
     /// Windows' own word rather than the capture's: Desktop Duplication says
     /// "not visible" for a pointer on another display and for one an
@@ -3215,7 +3207,7 @@ private:
             m_RecentreDone = true;
             return;
         }
-        if (!m_CompositeCursor.load() || !m_RecentrePointer.load()) return;
+        if (!m_CompositeCursor.load()) return;
 
         // An application can be holding the pointer on the other display and
         // pulling it back every frame — Counter-Strike left running on the
@@ -3756,9 +3748,6 @@ private:
     /// True — the default — draws the pointer into the picture. False reports
     /// its shape to the client, which draws it itself at its own refresh rate.
     std::atomic<bool> m_CompositeCursor{true};
-    /// Whether a drawn pointer elsewhere at the start is brought onto the
-    /// display. See Session::setRecentrePointer.
-    std::atomic<bool> m_RecentrePointer{true};
     /// How wide the client wants the composited pointer, in frame pixels; 0 for
     /// the size it has on the desktop. See Session::setCompositeCursor.
     std::atomic<int> m_CursorFramePx{0};

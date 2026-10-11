@@ -7388,18 +7388,15 @@ worker owner (slots 0/1) : inchangé, son propre encodeur
 - L'invalidation de référence ne s'applique pas à un flux commun
   (`ref_invalidation = false` dans l'`info`).
 - **Pointeur** : le flux dessine le pointeur de l'hôte dans l'image commune,
-  quel que soit le mode de chaque invité. Une session qui dessine le pointeur
-  le ramène au milieu de l'écran streamé s'il est ailleurs au démarrage
-  (règle du 18/09, réduite au démarrage le 05/10, §29.5), pour un spectateur
-  qui ne le voit que dans l'image. Le flux ne le ramène que tant qu'un invité ne voit le pointeur nulle part ailleurs
-  (pointeur verrouillé, trackpad d'un téléphone).
-  - La page le dit à son worker (`cursormode`), qui le redit au flux, et encore
-    à chaque relance du flux.
-  - Un invité en mode bureau a son propre pointeur : celui de l'hôte reste
-    libre pour le owner ou pour la personne devant l'hôte.
-  - Avant le correctif (test manuel de S9, 01/10), le flux le ramenait
-    toujours. Un invité en mode bureau tirait donc la souris de l'hôte hors de
-    ses autres écrans.
+  quel que soit le mode de chaque invité. Il le ramène au milieu de l'écran
+  streamé s'il est ailleurs à son démarrage, puis le laisse libre (§29.5,
+  « seulement au démarrage partout », Bruno, 05/10).
+  - 01/10 : le flux le ramenait toute la session, et un invité en mode bureau
+    tirait la souris de l'hôte hors de ses autres écrans. Corrigé alors en ne
+    le ramenant que pour un invité en pointeur verrouillé (`5e39ea3a`).
+  - 11/10 (S9.2) : un invité en mode bureau ne la voyait donc jamais arriver.
+    Réduit au démarrage, le retour n'a plus à trier les invités : ce tri
+    (`cursormode` remonté au flux, `FeedArbiter`) est retiré.
 
 ### 34.5 La vie du flux (`SharedFeed`, côté serveur)
 

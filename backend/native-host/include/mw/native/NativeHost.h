@@ -296,18 +296,6 @@ public:
     /// the client draws its own pointer: it can size that one itself.
     virtual void setCompositeCursor(bool composite, int cursorFramePx) = 0;
 
-    /// Whether a session that draws the pointer into the picture may bring the
-    /// host's pointer onto the streamed display when it is on another monitor
-    /// at the start: a viewer who sees it nowhere else would steer it blind.
-    /// At the start only — once seen on the display, the pointer stays free.
-    /// True by default, the session's one viewer being that viewer. The
-    /// guests' shared feed draws it for every guest, and asks this only while
-    /// one of them sees the pointer nowhere else (FeedArbiter) — the pointer is
-    /// also the owner's, and the person's at the host. Safe from any thread,
-    /// before start() included; only Windows brings it back, elsewhere this is
-    /// accepted and ignored.
-    virtual void setRecentrePointer(bool allowed) { (void)allowed; }
-
     /// The lowest rate at which frames must keep arriving while nothing on the
     /// screen moves at all, in frames per second. 0 asks for the engine's own.
     ///
