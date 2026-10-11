@@ -4779,15 +4779,18 @@ int main(int argc, char* argv[])
 
     // The owner's live context (host + app), taken from whichever owner slot is
     // up. Empty uuid means nothing is running and no player can join.
-    auto ownerContext = [&g_Pool, &g_ActiveHostUuid]() {
+    auto ownerContext = [&g_Pool, &g_LiveSunshineUids]() {
         for (int i = 0; i < kOwnerSlots; ++i)
             if (g_Pool.at(i).worker && !g_Pool.at(i).hostUuid.isEmpty())
                 return std::pair<QString, int>{g_Pool.at(i).hostUuid, g_Pool.at(i).appId};
-        // No owner leg left — they pressed Leave, or their stream dropped. The
-        // app is still on Sunshine, so fall back to what it was.
-        if (!g_LastOwnerHostUuid.isEmpty())
+        // No owner leg left — they pressed Leave, or their stream dropped. While
+        // the session is still held on Sunshine, the app is still up: fall back
+        // to what it was. Otherwise nothing runs, and the board's own choice of
+        // host and app decides (S9.2, 11/10: the last stream's display won over
+        // the one the owner had just picked, for every invitation after it).
+        if (!g_LastOwnerHostUuid.isEmpty() && !g_LiveSunshineUids.isEmpty())
             return std::pair<QString, int>{g_LastOwnerHostUuid, g_LastOwnerAppId};
-        return std::pair<QString, int>{g_ActiveHostUuid, 0};
+        return std::pair<QString, int>{};
     };
 
     // What a guest would get by pressing Join, resolved on the host their
