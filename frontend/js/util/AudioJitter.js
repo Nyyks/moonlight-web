@@ -26,17 +26,17 @@
  * in bursts rather than in a steady stream, and NetEq reads a burst exactly as
  * it reads a congested link.
  *
- * A target puts a stake in the ground. 60 ms is twelve Opus frames — room for
- * a burst of a dozen packets, and still far above the 5 ms frame it plays out.
- * Video's target is set the same way, adaptively, from StreamView's stats loop
- * (WebRtcMedia.setVideoJitterBufferTarget).
+ * From September a target of 60 ms was set on every stream. But libwebrtc
+ * applies `jitterBufferTarget` as a MINIMUM delay (NetEq's base minimum): it
+ * can raise the buffer, never take it below what NetEq wants, so on a clean
+ * link every sound waited for the floor. Measured (plan « le son et la priorité
+ * des paquets », A2-A3 L1): Chrome on a Mac −37 ms without it; Bruno's blind
+ * listening on Wi-Fi, 11/10, heard the same with and without, and without it
+ * NetEq concealed nothing that was not a lost packet. Since then the default is
+ * no floor at all: NetEq sizes itself.
  *
- * ⚠️ libwebrtc applies `jitterBufferTarget` as a MINIMUM delay (NetEq's base
- * minimum): it can raise the buffer, never take it below what NetEq wants. So
- * the 60 ms is a floor, and on a clean link where NetEq would settle lower,
- * every sound waits for it. Whether it costs anything is measured before it is
- * changed (plan « le son et la priorité des paquets », A0-A2): the bench key
- * `mw_audio_target` in localStorage sets another floor, or `off` none at all.
+ * The bench key `mw_audio_target` in localStorage still sets one (a whole
+ * number of ms, 60 for the old default), or `off` none.
  *
  * Chrome 124 and later, Firefox 115 and later and Safari 27 have the property
  * (MDN); a browser without it is a no-op here rather than a fallback.
@@ -46,8 +46,8 @@
  * kept at 0 by RtpVideo.
  */
 
-/** What the audio buffer aims for, in milliseconds. */
-export const AUDIO_JITTER_TARGET_MS = 60;
+/** What the audio buffer aims for by default: nothing, NetEq sizes itself. */
+export const AUDIO_JITTER_TARGET_MS = null;
 
 /** The bench key: a floor in ms (0-4000), or `off` to leave NetEq alone. */
 export const AUDIO_TARGET_KEY = 'mw_audio_target';
@@ -56,8 +56,8 @@ export const AUDIO_TARGET_KEY = 'mw_audio_target';
 const AUDIO_ROAD_MID = /^[vu]audio$/;
 
 /**
- * The floor the bench asks for, read once per stream: the default without the
- * key, `null` for `off` (no target at all), or a whole number of ms.
+ * The floor the bench asks for, read once per stream: the default (none) without
+ * the key, `null` for `off` (no target at all), or a whole number of ms.
  *
  * @param {{getItem: (k: string) => string|null}} [storage]
  * @returns {number|null}
@@ -113,19 +113,17 @@ export function streamAudioReceivers(pc) {
  *
  * @param {RTCPeerConnection} pc
  * @param {number|null} [ms] target in milliseconds; the default is the bench
- *        key's, or the one above; `null` touches nothing
+ *        key's, or none; `null` touches nothing
  * @returns {number} how many receivers took it (0 on a browser without the
- *          property, or with the target off, which is not a failure)
+ *          property, or with no target, which is not a failure)
  */
 export function setAudioJitterBufferTarget(pc, ms = audioJitterTargetMs()) {
     if (!pc || typeof pc.getReceivers !== 'function') return 0;
-    if (ms === null) {
-        console.info('[Audio] jitter buffer target off (bench key ' + AUDIO_TARGET_KEY + ')');
-        return 0;
-    }
+    if (ms === null) return 0;
     const targetMs = Math.max(0, ms | 0);
-    if (targetMs !== AUDIO_JITTER_TARGET_MS)
-        console.info('[Audio] jitter buffer target ' + targetMs + ' ms (bench)');
+    console.info(
+        '[Audio] jitter buffer target ' + targetMs + ' ms (bench key ' + AUDIO_TARGET_KEY + ')',
+    );
     let applied = 0;
     try {
         for (const receiver of streamAudioReceivers(pc)) {

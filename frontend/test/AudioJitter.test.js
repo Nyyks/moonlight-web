@@ -22,45 +22,63 @@ const receiver = (kind, supported = true) => {
 };
 
 describe('setAudioJitterBufferTarget', () => {
+    it('sets no floor by default: NetEq sizes itself (L1, 11/10)', () => {
+        expect(AUDIO_JITTER_TARGET_MS).toBe(null);
+        const audio = receiver('audio');
+        const pc = { getReceivers: () => [audio] };
+        expect(setAudioJitterBufferTarget(pc, audioJitterTargetMs({ getItem: () => null }))).toBe(
+            0,
+        );
+        expect(audio.jitterBufferTarget).toBe(null);
+    });
+
     it('aims the audio receiver and leaves the video one alone', () => {
         const audio = receiver('audio');
         const video = receiver('video');
         video.jitterBufferTarget = 180;
         const pc = { getReceivers: () => [video, audio] };
-        expect(setAudioJitterBufferTarget(pc)).toBe(1);
-        expect(audio.jitterBufferTarget).toBe(AUDIO_JITTER_TARGET_MS);
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        expect(setAudioJitterBufferTarget(pc, 60)).toBe(1);
+        expect(audio.jitterBufferTarget).toBe(60);
         expect(video.jitterBufferTarget).toBe(180);
+        info.mockRestore();
     });
 
     it('takes a target of its own, whole and never negative', () => {
         const audio = receiver('audio');
         const pc = { getReceivers: () => [audio] };
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
         setAudioJitterBufferTarget(pc, 42.7);
         expect(audio.jitterBufferTarget).toBe(42);
         setAudioJitterBufferTarget(pc, -10);
         expect(audio.jitterBufferTarget).toBe(0);
+        info.mockRestore();
     });
 
-    it('is a no-op where the property does not exist — Firefox, Safari', () => {
+    it('is a no-op where the property does not exist — older browsers', () => {
         const audio = receiver('audio', false);
         const pc = { getReceivers: () => [audio] };
-        expect(setAudioJitterBufferTarget(pc)).toBe(0);
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        expect(setAudioJitterBufferTarget(pc, 60)).toBe(0);
         expect(audio.jitterBufferTarget).toBeUndefined();
+        info.mockRestore();
     });
 
     it('survives no connection, no receivers and a throwing one', () => {
-        expect(setAudioJitterBufferTarget(null)).toBe(0);
-        expect(setAudioJitterBufferTarget({})).toBe(0);
-        expect(setAudioJitterBufferTarget({ getReceivers: () => [] })).toBe(0);
+        expect(setAudioJitterBufferTarget(null, 60)).toBe(0);
+        expect(setAudioJitterBufferTarget({}, 60)).toBe(0);
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        expect(setAudioJitterBufferTarget({ getReceivers: () => [] }, 60)).toBe(0);
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const pc = {
             getReceivers: () => {
                 throw new Error('closed');
             },
         };
-        expect(setAudioJitterBufferTarget(pc)).toBe(0);
+        expect(setAudioJitterBufferTarget(pc, 60)).toBe(0);
         expect(warn).toHaveBeenCalled();
         warn.mockRestore();
+        info.mockRestore();
     });
 });
 
@@ -82,7 +100,9 @@ describe('the stream sound only, never the audio road', () => {
             ],
         };
         expect(streamAudioReceivers(pc)).toEqual([sound]);
+        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
         expect(setAudioJitterBufferTarget(pc, 60)).toBe(1);
+        info.mockRestore();
         expect(sound.jitterBufferTarget).toBe(60);
         expect(vaudio.jitterBufferTarget).toBe(0);
         expect(uaudio.jitterBufferTarget).toBe(0);
@@ -90,17 +110,15 @@ describe('the stream sound only, never the audio road', () => {
 
     it('touches nothing when the target is off (null)', () => {
         const sound = receiver('audio');
-        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
         expect(setAudioJitterBufferTarget({ getReceivers: () => [sound] }, null)).toBe(0);
         expect(sound.jitterBufferTarget).toBe(null);
-        info.mockRestore();
     });
 });
 
 describe('audioJitterTargetMs, the bench key mw_audio_target', () => {
     const store = (v) => ({ getItem: () => v });
 
-    it('is the default without the key, or with a value it cannot read', () => {
+    it('is the default (none) without the key, or with a value it cannot read', () => {
         expect(audioJitterTargetMs(store(null))).toBe(AUDIO_JITTER_TARGET_MS);
         expect(audioJitterTargetMs(store(''))).toBe(AUDIO_JITTER_TARGET_MS);
         expect(audioJitterTargetMs(store('soon'))).toBe(AUDIO_JITTER_TARGET_MS);

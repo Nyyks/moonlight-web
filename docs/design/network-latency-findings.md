@@ -2036,6 +2036,45 @@ rounds in reverse order:
   - **CS6 is out.** The way up (EF on the client's Chrome) is a small,
     steady gain.
 
+### 11/10/2026 — Bruno's blind listening: the 60 ms audio floor goes (audio + DSCP plan, A3 L1)
+
+DualRTX's `--dev` (native host, 5 ms Opus) → Chrome 126 on Bruno's work Mac,
+Wi-Fi, through stream.dev's link (video direct on the LAN). No access to that
+Mac: a console snippet wrapped `RTCPeerConnection` and switched the stream
+receiver's `jitterBufferTarget` live, block by block, in a shuffled order
+Bruno did not know (60 twice and none twice per content), then summed
+`mwAudio`'s rows per block. Blocks of 1 min at Bruno's request (the plan asked
+for 10 min per content). 21:03-21:12.
+
+| Block | Content | Floor | Bruno heard | Concealed (non-silent) | Lost | NetEq buffer |
+|---|---|---|---|---|---|---|
+| 1 | music (YouTube) | none | nothing | 46 ms | 3 | 45 ms |
+| 2 | music | 60 | crackles | 0 | 0 | 45 ms |
+| 3 | music | 60 | crackles | 36 ms | 2 | 46 ms |
+| 4 | music | none | crackles | 53 ms | 5 | 56 ms |
+| 5 | game | 60 | nothing | 65 ms | 0 | 77 ms |
+| 6 | game | 60 | crackles | 0 | 0 | 68 ms |
+| 7 | game | none | unsure | 30 ms | 3 | 53 ms |
+| 8 | game | none | nothing | 9 ms | 2 | 54 ms |
+
+- **The ear did not follow the floor**: crackles in three 60 ms blocks out of
+  four, in one block without (plus one unsure).
+- **Some crackles never reached NetEq**: blocks 2 and 6 were heard crackling
+  with no concealment and no loss. They come from elsewhere: the host's
+  capture (loopback of a muted output), the Mac's output, or the source.
+  Open, to locate before any long listening.
+- **Without the floor, NetEq concealed only around lost packets**; with it,
+  twice with none lost (10 ms in block 3, 65 ms in block 5). NetEq's own
+  minimum here was 40 ms.
+- Buffer: the game 53-54 ms without against 68-77 with (−15 to −20 ms); the
+  music the same in 1-min blocks. With `7d31a24e` (Chrome Mac −37 ms), the
+  floor costs 15-35 ms on each sound on this client.
+- Wi-Fi loses 2-5 packets a minute whatever the floor: each one is a small
+  gap, only redundancy (L3) would fill them.
+- **Bruno's decision (11/10): no floor by default.** `AudioJitter.js` sets no
+  `jitterBufferTarget`; `mw_audio_target=<ms>` still sets one for a bench
+  (60 for the old default).
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
