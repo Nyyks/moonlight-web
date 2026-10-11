@@ -33,7 +33,12 @@ import { HidppRelay, hidppInputIds, isHidppReport } from './hidppRelay.js';
  * the switches, on each wheel's, radio's or stick's own row: the first click
  * opens Chrome's chooser narrowed to that model (linkModel). The stream applies
  * them, and offers the link for such a device plugged in but never linked
- * (offers(), at most MAX_OFFERS streams per model).
+ * (offers(), once a stream per model).
+ *
+ * A device switched on is held back from the mapped pads (excludedKeys) from
+ * the stream's start until the host has said whether it takes it: the game
+ * never sees an Xbox pad come and go before the real wheel. Without an answer
+ * within HOLD_MS (a server too old to send `hidcaps`) the hold lets go.
  *
  * What the host asks back (`hidrequest`: output reports, features) is counted
  * and never written to the real device: a host writing to a wheel's vendor
@@ -58,6 +63,7 @@ import { HidppRelay, hidppInputIds, isHidppReport } from './hidppRelay.js';
 
 export const FORWARD_KEY = 'mw_hid_forward';
 const TICK_MS = 100;
+export const HOLD_MS = 3000;
 
 /** `vid:pid` in lowercase hex: how a device is remembered. */
 export function deviceKey(device) {
@@ -98,9 +104,6 @@ export function saveForwarded(keys, storage = globalThis.localStorage) {
 
 /** The pads a mapping shortchanges most: their rows offer « as itself ». */
 export const HID_KINDS = ['wheel', 'rc', 'flightstick'];
-
-const OFFERS_KEY = 'mw_hid_offers';
-export const MAX_OFFERS = 3;
 
 /**
  * The model a pad the Gamepad API sees could be sent as, or null: a wheel,
@@ -157,15 +160,6 @@ export function hidHelpFor(hosts) {
     return 'none';
 }
 
-function loadOffers(storage) {
-    try {
-        const v = JSON.parse(storage?.getItem(OFFERS_KEY) || '{}');
-        return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-    } catch {
-        return {};
-    }
-}
-
 export class HidPassthrough {
     /**
      * @param {object} o
@@ -184,6 +178,8 @@ export class HidPassthrough {
         now = () => performance.now(),
         setTimer = (fn, ms) => setInterval(fn, ms),
         clearTimer = (t) => clearInterval(t),
+        later = (fn, ms) => setTimeout(fn, ms),
+        cancelLater = (t) => clearTimeout(t),
         onChange = null,
         onResult = null,
     }) {
@@ -194,6 +190,7 @@ export class HidPassthrough {
         this._now = now;
         this._setTimer = setTimer;
         this._clearTimer = clearTimer;
+        this._cancelLater = cancelLater;
         this._onChange = onChange;
         this._onResult = onResult;
         this._caps = null; // { available, why } once the host said
@@ -202,6 +199,9 @@ export class HidPassthrough {
         this._timer = null;
         this._requests = 0;
         this._offered = new Set(); // models offered in this stream
+        // Devices switched on wait for the host's word (see the file comment).
+        this._holding = !!this._hid;
+        this._holdTimer = this._holding ? later(() => this._letGo(), HOLD_MS) : null;
         this._onDisconnect = (e) => this._drop(e.device, 'unplugged');
         if (this._hid) this._hid.addEventListener('disconnect', this._onDisconnect);
     }
@@ -241,12 +241,16 @@ export class HidPassthrough {
             });
     }
 
-    /** Keys GamepadManager must not forward: devices sent, or being sent, as HID. */
+    /**
+     * Keys GamepadManager must not forward: devices sent, or being sent, as
+     * HID — and, until the host has said, every device switched on.
+     */
     excludedKeys() {
-        const out = [];
+        const out = new Set();
+        if (this._holding) for (const k of loadForwarded(this._storage)) out.add(`usb:${k}`);
         for (const [d, e] of this._entries)
-            if (e.state === 'on' || e.state === 'pending') out.push(padKeyOf(d));
-        return out;
+            if (e.state === 'on' || e.state === 'pending') out.add(padKeyOf(d));
+        return Array.from(out);
     }
 
     /** A message from the host; true when it was one of ours. */
@@ -259,8 +263,16 @@ export class HidPassthrough {
                 hidpp: !!msg.hidpp,
                 why: String(msg.why || ''),
             };
-            if (this._caps.available) this.applyWanted();
-            else this._dropAll(this._caps.why);
+            if (this._caps.available) {
+                // The hold lasts until the devices are asked for: from then on
+                // the attaches themselves keep them off the mapped pads.
+                this.applyWanted()
+                    .catch(() => {})
+                    .finally(() => this._letGo());
+            } else {
+                this._dropAll(this._caps.why);
+                this._letGo();
+            }
             this._changed();
             return true;
         }
@@ -350,7 +362,7 @@ export class HidPassthrough {
      * The pads worth offering to send as themselves, when the host can: a
      * wheel, radio or stick model this browser may not open yet. A model the
      * viewer allowed then switched off is never offered: that was a choice.
-     * Each model once a stream, MAX_OFFERS streams in all; Settings stays.
+     * Each model once a stream, every stream until it is linked.
      * @param {Array<Gamepad|{id: string}>} pads
      * @returns {Promise<Array<{key: string, vendorId: number, productId: number, name: string}>>}
      */
@@ -366,27 +378,18 @@ export class HidPassthrough {
         } catch {
             return [];
         }
-        const counts = loadOffers(this._storage);
         const out = [];
         for (const gp of pads) {
             const m = gp && hidModelOf(gp);
             if (!m || permitted.has(m.key) || this._offered.has(m.key)) continue;
-            if ((counts[m.key] | 0) >= MAX_OFFERS) continue;
             this._offered.add(m.key);
-            counts[m.key] = (counts[m.key] | 0) + 1;
             out.push({ ...m, name: padName(gp) });
-        }
-        if (out.length) {
-            try {
-                this._storage?.setItem(OFFERS_KEY, JSON.stringify(counts));
-            } catch {
-                /* private window: offered again next stream */
-            }
         }
         return out;
     }
 
     stop() {
+        this._letGo(false);
         this._dropAll('');
         if (this._hid) this._hid.removeEventListener('disconnect', this._onDisconnect);
         this._changed();
@@ -420,6 +423,16 @@ export class HidPassthrough {
         this._entries.set(device, { slot, state: 'pending', why: '', listener, ffb });
         this._send(attachMessage(slot, device, { forceFeedback: !!ffb }));
         this._armTimer();
+    }
+
+    // The host said, or never will: the devices switched on but not sent go
+    // back to the mapped pads.
+    _letGo(notify = true) {
+        if (this._holdTimer !== null) this._cancelLater(this._holdTimer);
+        this._holdTimer = null;
+        if (!this._holding) return;
+        this._holding = false;
+        if (notify) this._changed();
     }
 
     _drop(device, why) {

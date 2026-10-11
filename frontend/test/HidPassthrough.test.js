@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     FORWARD_KEY,
     HID_KINDS,
+    HOLD_MS,
     HidPassthrough,
-    MAX_OFFERS,
     deviceKey,
     hidHelpFor,
     hidModelOf,
@@ -83,6 +83,7 @@ function setup(devices, wanted = []) {
     const sent = [];
     const frames = [];
     let tick = null;
+    let hold = null;
     let now = 0;
     const storage = memoryStorage({ [FORWARD_KEY]: JSON.stringify(wanted) });
     const onChange = vi.fn();
@@ -95,6 +96,8 @@ function setup(devices, wanted = []) {
         now: () => now,
         setTimer: (fn) => (tick = fn),
         clearTimer: () => (tick = null),
+        later: (fn, ms) => (hold = { fn, ms }),
+        cancelLater: () => (hold = null),
         onChange,
         onResult,
     });
@@ -111,6 +114,7 @@ function setup(devices, wanted = []) {
             if (tick) tick();
         },
         ticking: () => !!tick,
+        hold: () => hold,
     };
 }
 
@@ -304,7 +308,37 @@ describe('HidPassthrough (HID passthrough in the stream, P2)', () => {
         expect(await t.hp.link(0x046d, 0xc26e)).toBe(false);
     });
 
-    it('offers a wheel never linked, once a stream and three streams at most', async () => {
+    it('holds the devices switched on off the mapped pads until the host has said', async () => {
+        const wheel = fakeDevice();
+        // Switched on, but no longer allowed by Chrome: held all the same.
+        const t = setup([wheel], ['046d:c26e', '1209:4f54']);
+        expect(t.hold().ms).toBe(HOLD_MS);
+        expect(t.hp.excludedKeys().sort()).toEqual(['usb:046d:c26e', 'usb:1209:4f54']);
+        t.hp.handleMessage({ type: 'hidcaps', available: true });
+        // Asked for: the wheel stays off as a device being sent, the radio
+        // the browser cannot open goes back to the mapped pads.
+        await vi.waitFor(() => expect(t.hold()).toBeNull());
+        expect(t.hp.excludedKeys()).toEqual(['usb:046d:c26e']);
+        expect(t.onChange).toHaveBeenCalled();
+        // Refused by the host: back to the mapped pads too.
+        t.hp.handleMessage({ type: 'hidattached', slot: 0, ok: false, why: 'no driver' });
+        expect(t.hp.excludedKeys()).toEqual([]);
+    });
+
+    it('lets the held devices go when the host cannot, or never says', () => {
+        const cannot = setup([fakeDevice()], ['046d:c26e']);
+        cannot.hp.handleMessage({ type: 'hidcaps', available: false, why: 'Sunshine' });
+        expect(cannot.hp.excludedKeys()).toEqual([]);
+        expect(cannot.hold()).toBeNull();
+
+        const silent = setup([fakeDevice()], ['046d:c26e']);
+        silent.onChange.mockClear();
+        silent.hold().fn(); // a server too old to send hidcaps
+        expect(silent.hp.excludedKeys()).toEqual([]);
+        expect(silent.onChange).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers a wheel never linked, once a stream, every stream', async () => {
         const wheelPad = { id: 'G923 (STANDARD GAMEPAD Vendor: 046d Product: c26e)' };
         const pad = { id: 'Xbox (STANDARD GAMEPAD Vendor: 045e Product: 0b13)' };
         const radioPad = { id: 'TX12 (STANDARD GAMEPAD Vendor: 1209 Product: 4f54)' };
@@ -325,14 +359,13 @@ describe('HidPassthrough (HID passthrough in the stream, P2)', () => {
                 send: () => {},
                 sendFrame: () => true,
                 storage: t.storage,
+                later: () => null,
             });
             hp.handleMessage({ type: 'hidcaps', available: true });
             return hp.offers([wheelPad]);
         };
-        expect(await streamAgain()).toHaveLength(1);
-        expect(await streamAgain()).toHaveLength(1);
-        expect(MAX_OFFERS).toBe(3);
-        expect(await streamAgain()).toEqual([]);
+        // No cap: an offer missed is made again, stream after stream.
+        for (let i = 0; i < 5; i++) expect(await streamAgain()).toHaveLength(1);
     });
 
     it('says WebHID is missing rather than failing', async () => {

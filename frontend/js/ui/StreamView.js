@@ -4842,6 +4842,12 @@ export class StreamView {
                     },
                 );
             }
+            // A wheel switched on to go as itself waits for the host's word
+            // instead of showing up first as a mapped Xbox pad; a device
+            // already sent (the host answered first) stays off it too.
+            const hidPassthrough = this._ensureHidPassthrough();
+            if (this._gamepadManager && hidPassthrough)
+                this._gamepadManager.setExcluded(hidPassthrough.excludedKeys());
             // A hold asked before the pads were up (the remote's menu opened
             // while connecting) still holds.
             if (this._gamepadManager && this._padHolds.size > 0) {
@@ -6837,20 +6843,23 @@ export class StreamView {
     /**
      * A wheel, radio or stick plugged in but never linked: offer, once a
      * stream, to send it as itself. The toast's button is the click Chrome's
-     * chooser needs (narrowed to that model).
+     * chooser needs (narrowed to that model). It stays until clicked — the
+     * stream's first seconds bring many toasts — and goes with the stream.
      */
     async _offerHid() {
         const hp = this._hidPassthrough;
         if (!hp || this._quitting || !navigator.getGamepads) return;
         const pads = Array.from(navigator.getGamepads()).filter(Boolean);
         for (const m of await hp.offers(pads)) {
-            Toast.info(t('stream.hidOffer', { name: m.name }), {
-                durationMs: 15000,
+            if (hp !== this._hidPassthrough) return; // the stream ended meanwhile
+            const toast = Toast.info(t('stream.hidOffer', { name: m.name }), {
+                sticky: true,
                 action: {
                     label: t('stream.hidOfferAction'),
                     onClick: () => hp.link(m.vendorId, m.productId),
                 },
             });
+            (this._hidOfferToasts ||= []).push(toast);
         }
     }
 
@@ -8832,6 +8841,8 @@ export class StreamView {
             this._hidPassthrough = null;
             window.removeEventListener('gamepadconnected', this._onHidPadConnected);
         }
+        for (const toast of this._hidOfferToasts || []) toast.dismiss();
+        this._hidOfferToasts = [];
         document.removeEventListener('keydown', this._onKeyDown);
         document.removeEventListener('keyup', this._onKeyUp);
         document.removeEventListener('paste', this._onPaste);
