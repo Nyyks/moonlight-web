@@ -278,6 +278,7 @@ private:
     std::unique_ptr<Entry> claim(const std::string& name, uint16_t vendorId, uint16_t productId,
                                  uint16_t version, const std::vector<uint8_t>& descriptor);
     void run();
+    void logRequests();
 
     Clock m_clock;
     mutable std::mutex m_mutex;
@@ -365,6 +366,17 @@ private:
     struct Slot;
     static void wire(input::IVirtualHid& device, const std::shared_ptr<Route>& route);
     void watchdog();
+    /// Every 5 s, for each device: logged when the game starts or stops asking,
+    /// when a get feature went unanswered, and whenever its requests are no
+    /// longer serviced (a game waiting on an unanswered one stalls).
+    void logRequests();
+    /// The line for what the route counted since the last look, empty when
+    /// nothing changed; resets the counts.
+    static std::string requestSummary(Route& route, bool servicing);
+    /// Requests logged one by one after a device is made or taken back, the
+    /// game's force feedback setting up; an output repeating the last one's
+    /// report id is not.
+    static constexpr int kTraceRequests = 64;
 
     RequestSink m_onRequest;
     FfbSink m_onFfb;

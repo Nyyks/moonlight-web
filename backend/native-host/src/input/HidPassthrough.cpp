@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <utility>
 
 namespace mw::native {
 
@@ -60,7 +61,32 @@ struct HidPassthrough::Route
     HidPassthrough* owner = nullptr;
     int slot = 0;
     Clock clock = steadyMs;
+    // What the game asked since the watchdog last looked, for the log: output
+    // reports, set and get feature, and the gets answered with nothing.
+    uint32_t outputs = 0, sets = 0, gets = 0, emptyGets = 0;
+    // Whether the game asked anything in the last 5 s the log saw.
+    bool asking = false;
+    // The next requests logged one by one (a stream's first, the game's
+    // force feedback setting up), and the last output's report id.
+    int traceLeft = 0;
+    int lastOutputId = -1;
 };
+
+namespace {
+
+std::string hexHead(const std::vector<uint8_t>& data)
+{
+    std::string out;
+    char b[4];
+    for (size_t i = 0; i < data.size() && i < 12; ++i) {
+        std::snprintf(b, sizeof b, "%02x", data[i]);
+        out += b;
+    }
+    if (data.size() > 12) out += "…";
+    return out;
+}
+
+} // namespace
 
 struct HidPassthrough::Slot
 {
@@ -153,10 +179,24 @@ size_t HidParking::size() const
 
 void HidParking::run()
 {
+    int rounds = 0;
     while (!m_stop) {
         for (int i = 0; i < 10 && !m_stop; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         expire(m_clock());
+        if (++rounds % 5 == 0) logRequests();
+    }
+}
+
+void HidParking::logRequests()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (const std::unique_ptr<Entry>& e : m_entries) {
+        HidPassthrough::Slot& s = *e->slot;
+        // A handed out device is paused on purpose.
+        const bool servicing = e->batch || s.device->servicing();
+        const std::string line = HidPassthrough::requestSummary(*s.route, servicing);
+        if (!line.empty()) log::info("[hid] " + s.identity.name + " (kept): " + line);
     }
 }
 
@@ -314,6 +354,7 @@ std::string HidParking::takeIn(std::unique_ptr<input::IVirtualHid> device,
     const int64_t now = m_clock();
     s->route = std::make_shared<HidPassthrough::Route>();
     s->route->clock = m_clock;
+    s->route->traceLeft = HidPassthrough::kTraceRequests;
     if (state.pidFirstId) {
         s->route->engine = std::make_unique<input::hid::PidEngine>(s->parsed, state.pidFirstId);
         if (!s->route->engine->restore(state.pidState))
@@ -400,7 +441,18 @@ void HidPassthrough::wire(input::IVirtualHid& device, const std::shared_ptr<Rout
     // pid.dll's synchronous questions: answered here, at once.
     device.setFeatureHandler([route](uint8_t reportId) {
         std::lock_guard<std::mutex> lock(route->mutex);
-        return route->engine ? route->engine->getFeature(reportId) : std::vector<uint8_t>{};
+        std::vector<uint8_t> answer =
+            route->engine ? route->engine->getFeature(reportId) : std::vector<uint8_t>{};
+        ++route->gets;
+        if (answer.empty()) ++route->emptyGets;
+        if (route->traceLeft > 0) {
+            --route->traceLeft;
+            log::info("[hid] slot " + std::to_string(route->slot) +
+                      (route->owner ? "" : " (kept)") + ": get feature " +
+                      std::to_string(reportId) + " -> " +
+                      (answer.empty() ? std::string("nothing") : hexHead(answer)));
+        }
+        return answer;
     });
     // Effects the backend services itself (uinput).
     device.setFfbHandler([route](const HidFfb& op) {
@@ -415,6 +467,18 @@ void HidPassthrough::wire(input::IVirtualHid& device, const std::shared_ptr<Rout
     device.setRequestHandler([route](input::IVirtualHid::Request kind, uint8_t reportId,
                                      const std::vector<uint8_t>& data) {
         std::lock_guard<std::mutex> lock(route->mutex);
+        const bool output = kind == input::IVirtualHid::Request::Output;
+        if (output) ++route->outputs;
+        if (kind == input::IVirtualHid::Request::SetFeature) ++route->sets;
+        const bool repeat = output && route->lastOutputId == reportId;
+        if (output) route->lastOutputId = reportId;
+        if (route->traceLeft > 0 && !repeat && kind != input::IVirtualHid::Request::GetFeature) {
+            --route->traceLeft;
+            log::info(
+                "[hid] slot " + std::to_string(route->slot) + (route->owner ? "" : " (kept)") +
+                (kind == input::IVirtualHid::Request::Output ? ": output " : ": set feature ") +
+                std::to_string(reportId) + " " + hexHead(data));
+        }
         // The PID block's reports stay here: decoded into operations, or
         // already answered by the feature handler.
         std::vector<HidFfb> ops;
@@ -496,6 +560,7 @@ std::string HidPassthrough::attach(int slot, const HidDeviceInfo& device)
         if (pidId) s->route->engine = std::make_unique<input::hid::PidEngine>(s->parsed, pidId);
         s->route->owner = this;
         s->route->slot = slot;
+        s->route->traceLeft = kTraceRequests;
         wire(*dev, s->route);
         std::string error;
         if (!dev->create(s->identity, error)) return error;
@@ -535,6 +600,7 @@ void HidPassthrough::attached(int slot)
     route->owner = this;
     route->slot = slot;
     route->clock = m_clock;
+    route->traceLeft = kTraceRequests;
     const std::vector<HidFfb> ops = route->journal.replay(m_clock());
     if (m_onFfb)
         for (HidFfb op : ops) {
@@ -620,10 +686,45 @@ void HidPassthrough::checkSilence(int64_t nowMs)
 
 void HidPassthrough::watchdog()
 {
+    int ticks = 0;
     while (!m_stop) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         checkSilence(m_clock());
+        if (++ticks % 20 == 0) logRequests();
     }
+}
+
+void HidPassthrough::logRequests()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [slot, sp] : m_slots) {
+        Slot& s = *sp;
+        const std::string line = requestSummary(*s.route, s.device->servicing());
+        if (!line.empty()) log::info("[hid] slot " + std::to_string(slot) + ": " + line);
+    }
+}
+
+std::string HidPassthrough::requestSummary(Route& route, bool servicing)
+{
+    uint32_t outputs, sets, gets, emptyGets;
+    bool was;
+    {
+        std::lock_guard<std::mutex> lock(route.mutex);
+        outputs = std::exchange(route.outputs, 0);
+        sets = std::exchange(route.sets, 0);
+        gets = std::exchange(route.gets, 0);
+        emptyGets = std::exchange(route.emptyGets, 0);
+        was = std::exchange(route.asking, outputs || sets || gets);
+    }
+    const bool asking = outputs || sets || gets;
+    if (servicing && !emptyGets && asking == was) return {};
+    if (!asking)
+        return servicing ? "the game asks nothing any more"
+                         : "requests NOT SERVICED: the event thread has stopped";
+    return "in 5 s the game sent " + std::to_string(outputs) + " output, " + std::to_string(sets) +
+           " set feature, asked " + std::to_string(gets) + " get feature (" +
+           std::to_string(emptyGets) + " unanswered); requests " +
+           (servicing ? "serviced" : "NOT SERVICED: the event thread has stopped");
 }
 
 } // namespace mw::native
