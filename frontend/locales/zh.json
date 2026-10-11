@@ -499,7 +499,9 @@
         "controllersReset": "重置",
         "controllersDelete": "删除",
         "quitAppOnStop": "停止串流时退出应用",
-        "quitAppOnStopDesc": "关闭：停止串流后游戏仍在主机上运行，其卡片提供继续或退出——与 Moonlight 相同。开启：停止串流同时关闭游戏。"
+        "quitAppOnStopDesc": "关闭：停止串流后游戏仍在主机上运行，其卡片提供继续或退出——与 Moonlight 相同。开启：停止串流同时关闭游戏。",
+        "fullscreenOnStart": "以全屏启动串流",
+        "fullscreenOnStartDesc": "启动串流时立即进入全屏。在 iPhone 上，Safari 会保留其工具栏，串流将铺满页面（将 MoonlightWeb 添加到主屏幕即可获得真正的全屏）。"
     },
     "admin": {
         "title": "服务器设置",

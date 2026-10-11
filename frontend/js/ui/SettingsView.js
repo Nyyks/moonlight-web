@@ -124,6 +124,9 @@ export class SettingsView {
         this._chroma444 = false;
         this._muteHostAudio = true;
         this._quitAppOnStop = false;
+        // Enter fullscreen at launch (off by default): asked on the launch
+        // click, the only moment a browser lets a page go fullscreen.
+        this._fullscreenOnStart = false;
         this._touchSensitivity = 2.2;
         this._mouseSensitivity = 1;
         // Mobile only: direct touch-screen input (absolute) instead of the
@@ -392,6 +395,7 @@ export class SettingsView {
         this._chroma444 = data.chroma_444_enabled === true;
         this._muteHostAudio = data.mute_host_audio !== false;
         this._quitAppOnStop = data.quit_app_on_stop === true;
+        this._fullscreenOnStart = data.fullscreen_on_start === true;
         this._touchSensitivity =
             typeof data.touch_sensitivity === 'number' && data.touch_sensitivity > 0
                 ? data.touch_sensitivity
@@ -561,6 +565,7 @@ export class SettingsView {
             video_enhancement_algo: this._videoEnhancementAlgo,
             // Per-device only (server ignores these unknown fields).
             quit_app_on_stop: this._quitAppOnStop,
+            fullscreen_on_start: this._fullscreenOnStart,
             power_save: this._powerSave,
             power_save_backup: this._powerSaveBackup,
             gamepad_profile: this._gamepadProfile,
@@ -1008,6 +1013,7 @@ export class SettingsView {
         this._chroma444 = false;
         this._muteHostAudio = true;
         this._quitAppOnStop = false;
+        this._fullscreenOnStart = false;
         this._touchSensitivity = 2.2;
         this._mouseSensitivity = 1;
         this._touchScreen = false;
@@ -1531,6 +1537,17 @@ export class SettingsView {
                         <span class="setting-desc">${t('settings.quitAppOnStopDesc')}</span>
                     </div>
 
+                    <div class="settings-field">
+                        <label class="settings-checkbox-label">
+                            <input type="checkbox" id="settings-fullscreen-on-start"
+                                ${this._fullscreenOnStart ? 'checked' : ''} />
+                            <span class="settings-checkbox-text">
+                                <strong>${t('settings.fullscreenOnStart')}</strong>
+                            </span>
+                        </label>
+                        <span class="setting-desc">${t('settings.fullscreenOnStartDesc')}</span>
+                    </div>
+
                     <!-- Allow tearing: disables VSync pacing + desynchronized
                          canvas. Dimmed + locked "(unavailable)" outside Chromium
                          desktop — Safari/Firefox ignore the flag and mobile
@@ -1885,6 +1902,13 @@ export class SettingsView {
         if (quitAppCheck)
             quitAppCheck.addEventListener('change', () => {
                 this._quitAppOnStop = quitAppCheck.checked;
+                this._autoSave();
+            });
+
+        const fullscreenCheck = this.container.querySelector('#settings-fullscreen-on-start');
+        if (fullscreenCheck)
+            fullscreenCheck.addEventListener('change', () => {
+                this._fullscreenOnStart = fullscreenCheck.checked;
                 this._autoSave();
             });
 

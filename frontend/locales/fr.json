@@ -499,7 +499,9 @@
         "controllersReset": "Réinitialiser",
         "controllersDelete": "Supprimer",
         "quitAppOnStop": "Quitter l'appli en arrêtant le stream",
-        "quitAppOnStopDesc": "Désactivé : arrêter le stream laisse le jeu tourner sur l'hôte, et sa tuile propose de le reprendre ou de le quitter, comme Moonlight. Activé : arrêter le stream ferme aussi le jeu."
+        "quitAppOnStopDesc": "Désactivé : arrêter le stream laisse le jeu tourner sur l'hôte, et sa tuile propose de le reprendre ou de le quitter, comme Moonlight. Activé : arrêter le stream ferme aussi le jeu.",
+        "fullscreenOnStart": "Démarrer les streams en plein écran",
+        "fullscreenOnStartDesc": "Le stream s'ouvre en plein écran dès son lancement. Sur iPhone, Safari garde ses barres : le stream remplit alors la page (ajoute MoonlightWeb à l'écran d'accueil pour un vrai plein écran)."
     },
     "admin": {
         "title": "Paramètres serveur",

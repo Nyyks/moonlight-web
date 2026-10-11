@@ -499,7 +499,9 @@
         "controllersReset": "Reset",
         "controllersDelete": "Delete",
         "quitAppOnStop": "Quit the app when the stream stops",
-        "quitAppOnStopDesc": "Off: stopping the stream leaves the game running on the host, and its card offers to resume or quit it — like Moonlight. On: stopping the stream also closes the game."
+        "quitAppOnStopDesc": "Off: stopping the stream leaves the game running on the host, and its card offers to resume or quit it — like Moonlight. On: stopping the stream also closes the game.",
+        "fullscreenOnStart": "Start streams in fullscreen",
+        "fullscreenOnStartDesc": "The stream opens in fullscreen as soon as you launch it. On an iPhone, Safari keeps its bars: the stream fills the page instead (add MoonlightWeb to the Home Screen for a true fullscreen)."
     },
     "admin": {
         "title": "Server Settings",

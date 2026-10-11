@@ -518,6 +518,8 @@ export class StreamView {
         // host whose app outlives the stream, Stop only disconnects, as in
         // Moonlight, and the app's card offers to resume or quit it.
         this._quitAppOnStop = opts.quitAppOnStop === true;
+        // "Start streams in fullscreen" (settings) — see _applyFullscreenOnStart.
+        this._fullscreenOnStart = opts.fullscreenOnStart === true;
         // Backend stream slot this view runs on (0 = /ws ports, 1 = /ws1) and
         // the uniqueid it launched with — quit() scopes its /quit with them so
         // retiring one leg of a dual stream never cancels the other.
@@ -4958,6 +4960,7 @@ export class StreamView {
 
             // Mobile fullscreen/button init (all transport modes)
             this._initMobileFullscreen();
+            this._applyFullscreenOnStart();
         };
         this.webrtc.onClose = () => {
             // _manualQuitting: Stop pressed, exit animation running — quit() is

@@ -177,6 +177,33 @@ export class StreamViewFullscreen {
     }
 
     /**
+     * "Start streams in fullscreen" (settings), once the stream is up.
+     *
+     * The real fullscreen was asked on the launch click (app.js
+     * _enterLaunchFullscreen) — here it is too late for one, no gesture is
+     * left. What remains:
+     *   - already fullscreen: take Escape into the host, as when entered here;
+     *   - no Fullscreen API (iPhone): fill the page, the CSS fallback the
+     *     button gives there too;
+     *   - refused elsewhere (a fallback relaunch, a click too long ago): the
+     *     header button stays, nothing forced.
+     * The standby view of a dual stream leaves it to the live one.
+     * @this {StreamViewInstance}
+     */
+    _applyFullscreenOnStart() {
+        if (!this._fullscreenOnStart || this._standby || this._fullscreenOnStartDone) return;
+        this._fullscreenOnStartDone = true;
+        if (document.fullscreenElement) {
+            this._syncKeyboardLock();
+            this._updateMobileFsButtonVisibility();
+            return;
+        }
+        if (typeof document.documentElement.requestFullscreen !== 'function') {
+            this._enterCssFallbackFullscreen();
+        }
+    }
+
+    /**
      * Mobile auto-fullscreen (orientation change / landscape launch).
      * Delegates to _requestFullscreen(): same chain, same CSS fallback.
      * @this {StreamViewInstance}

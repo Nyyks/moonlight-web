@@ -1844,6 +1844,12 @@ const MoonlightApp = {
         // No-op off iOS.
         iosAudioUnlock.prepareForLaunch(48000);
 
+        // "Start streams in fullscreen" (Settings): asked here, on the launch
+        // click, for the same reason — once the stream is up no gesture is
+        // left and the browser refuses. A codec/HDR fallback relaunch has no
+        // click behind it; the stream view falls back on its own there.
+        if (!codecOverride) this._enterLaunchFullscreen();
+
         console.log(
             `[MW] Launching: ${app.name} (id=${app.id}) on ${host.displayName}` +
                 (codecOverride ? ` (forced codec: ${codecOverride})` : '') +
@@ -3243,6 +3249,9 @@ const MoonlightApp = {
             // "Quit the app when the stream stops": Stop then closes the app on
             // a host where it would otherwise keep running for a resume.
             quitAppOnStop: streamingSettings.quit_app_on_stop === true,
+            // "Start streams in fullscreen": the launch click already asked
+            // for it; the view completes it where that was not possible.
+            fullscreenOnStart: streamingSettings.fullscreen_on_start === true,
             // Its encoder heals a lost frame with a delta (reference
             // invalidation): the view then decodes through a gap.
             refInvalidation: result.ref_invalidation === true,
@@ -4450,6 +4459,43 @@ const MoonlightApp = {
     transition(newState) {
         console.log(`[MW] State: ${this.state} -> ${newState}`);
         this.state = newState;
+        // Fullscreen entered by the launch click: the stream takes it over
+        // (and leaves it on Stop); a launch that ends anywhere else gives it
+        // back, so a failed launch never strands the user in a fullscreen
+        // host list.
+        if (this._launchFullscreen && newState !== 'launching') {
+            this._launchFullscreen = false;
+            if (newState !== 'streaming' && document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            }
+        }
+    },
+
+    /**
+     * Enter fullscreen from the launch click when Settings ask for it.
+     * The Fullscreen API needs a user gesture, and the launch click is the
+     * last one before the stream: by the time the stream is up, the browser
+     * refuses (Chrome, Firefox and Safari keep a click "active" ~5 s). An
+     * iPhone has no Fullscreen API for the page at all — StreamView fills
+     * the page instead (_applyFullscreenOnStart).
+     */
+    _enterLaunchFullscreen() {
+        this._launchFullscreen = false;
+        let wanted = false;
+        try {
+            const stored = JSON.parse(localStorage.getItem('mw-streaming-settings') || '{}');
+            wanted = stored.fullscreen_on_start === true;
+        } catch (e) {
+            /* unreadable settings: the default, off */
+        }
+        const root = document.documentElement;
+        if (!wanted || document.fullscreenElement || typeof root.requestFullscreen !== 'function')
+            return;
+        this._launchFullscreen = true;
+        root.requestFullscreen().catch((err) => {
+            this._launchFullscreen = false;
+            console.warn('[MW] Fullscreen at launch refused:', err.message);
+        });
     },
 };
 
