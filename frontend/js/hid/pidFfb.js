@@ -337,13 +337,22 @@ export class PidFfbPlayer {
         this._busy = false;
         this._closed = false;
         this._frees = 0;
+        this._ready = null; // init() while it runs
     }
 
-    /** No effect left, actuators on, full gain. */
-    async init() {
-        await this._control('reset');
-        await this._control('enable');
-        await this._gain(255);
+    /**
+     * No effect left, actuators on, full gain. The host's operations wait for
+     * it, as on HidppFfbPlayer: a kept wheel's replay must not come first.
+     */
+    init() {
+        this._ready = (async () => {
+            await this._control('reset');
+            await this._control('enable');
+            await this._gain(255);
+        })().finally(() => {
+            this._ready = null; // done: nothing waits on it any more
+        });
+        return this._ready;
     }
 
     /** One `hidffb` message from the host. */
@@ -593,6 +602,7 @@ export class PidFfbPlayer {
     async _pump() {
         if (this._busy) return;
         this._busy = true;
+        if (this._ready) await this._ready.catch(() => {});
         while (this._queue.length && !this._closed) {
             const { run } = this._queue.shift();
             try {

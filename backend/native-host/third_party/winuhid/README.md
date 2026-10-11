@@ -32,6 +32,10 @@ without it:
 - `WinUHid.c`, `WinUHid.h`: IOCTL_WINUHID_SET_REPORT_DESCRIPTOR refuses, with
   STATUS_ACCESS_DENIED, any descriptor the engine's `validate()` refuses
   (`drivers/vhid/DescriptorCheck.cpp`): game devices only, as the host checks already.
+- `WinUHid/WinUHid.cpp`, `WinUHid/WinUHid.h` (client library only, the driver is untouched):
+  `WinUHidGetHandle`, `WinUHidAdoptDevice` and `WinUHidResumeDevice`, so a device outlives the
+  stream's process: the driver keeps it while any handle to it is open, the handle is duplicated
+  into the next process, which services its events from then on (`HidParking`).
 
 The INF is ours (`drivers/vhid/MoonlightWebVHid.inf`): hardware id, DLL, UMDF service and strings
 renamed; upstream's ACL kept.

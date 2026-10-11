@@ -150,12 +150,41 @@ public:
         return m_device && WinUHidSubmitInputReport(m_device, report, static_cast<DWORD>(size));
     }
 
+    /// Closes this process's handle: the device goes when no process holds
+    /// one any more (HidParking hands a copy to the next stream's).
     void destroy() override
     {
         if (!m_device) return;
         WinUHidStopDevice(m_device);
         WinUHidDestroyDevice(m_device);
         m_device = nullptr;
+    }
+
+    uint64_t nativeHandle() const override
+    {
+        return m_device ? reinterpret_cast<uint64_t>(WinUHidGetHandle(m_device)) : 0;
+    }
+
+    void pause() override
+    {
+        if (m_device) WinUHidStopDevice(m_device);
+    }
+
+    void resume() override
+    {
+        if (m_device) WinUHidResumeDevice(m_device, &VhidDevice::onEvent, this);
+    }
+
+    /// A device another process made: `handle` is this process's copy, and
+    /// closed when it is not one of the driver's devices.
+    bool adopt(HANDLE handle, std::string& error)
+    {
+        m_device = WinUHidAdoptDevice(handle);
+        if (m_device) return true;
+        error = "not a MoonlightWeb Virtual HID device (error " + std::to_string(::GetLastError()) +
+                ")";
+        ::CloseHandle(handle);
+        return false;
     }
 
 private:
@@ -195,6 +224,13 @@ private:
 std::unique_ptr<IVirtualHid> makeVirtualHid(bool)
 {
     return std::make_unique<VhidDevice>();
+}
+
+std::unique_ptr<IVirtualHid> adoptVirtualHid(uint64_t handle, std::string& error)
+{
+    auto device = std::make_unique<VhidDevice>();
+    if (!device->adopt(reinterpret_cast<HANDLE>(handle), error)) return nullptr;
+    return device;
 }
 
 bool virtualHidForceFeedback()

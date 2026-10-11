@@ -171,6 +171,14 @@ std::unique_ptr<IVirtualHid> makeVirtualHid(bool forceFeedback)
     return std::make_unique<UhidDevice>();
 }
 
+std::unique_ptr<IVirtualHid> adoptVirtualHid(uint64_t, std::string& error)
+{
+    // A uhid or uinput device lives as long as its descriptor, in the process
+    // that opened it: nothing is handed over between processes here yet.
+    error = "devices do not cross processes on Linux";
+    return nullptr;
+}
+
 bool virtualHidForceFeedback()
 {
     return ::access("/dev/uinput", R_OK | W_OK) == 0;

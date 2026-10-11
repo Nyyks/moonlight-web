@@ -172,6 +172,121 @@ struct HidFfb
     std::vector<std::pair<std::string, int32_t>> fields;
 };
 
+/// A recreated device no stream holds, as it crosses to another process
+/// (HidParking::handOut, takeIn): what it is, where it rests, and its force
+/// feedback as the game left it.
+struct HidParkedState
+{
+    std::string name;
+    uint16_t vendorId = 0;
+    uint16_t productId = 0;
+    uint16_t version = 0;
+    std::vector<uint8_t> descriptor;
+    /// Per input report id, without the id byte: the device's first report
+    /// (where its pedals rest) and its last.
+    std::vector<std::pair<uint8_t, std::vector<uint8_t>>> first;
+    std::vector<std::pair<uint8_t, std::vector<uint8_t>>> last;
+    /// The PID block (0: none) and its effect block table (PidEngine::save).
+    uint8_t pidFirstId = 0;
+    std::vector<uint8_t> pidState;
+    /// What rebuilds its force feedback on a fresh player (FfbJournal::replay).
+    std::vector<HidFfb> effects;
+    /// How much longer it may wait for a stream to take it.
+    int64_t keepMs = 0;
+};
+
+/// One device handed out: `handle` is its OS handle in the process that hands
+/// it out (see IVirtualHid::nativeHandle).
+struct HidHandedDevice
+{
+    uint64_t handle = 0;
+    HidParkedState state;
+};
+
+class HidPassthrough;
+
+/// The recreated devices no stream holds (plan « garder le volant », Bruno's
+/// choice of 11/10/2026): a game left running between two streams keeps its
+/// wheel, and the force feedback it set up on it. Recreating the device would
+/// give the game a new one: DirectInput keeps its effects on the old, and the
+/// wheel would steer without a motor until the game restarts.
+///
+/// A stream that ends parks its devices here, at rest, still answering the
+/// game (the PID block's questions, the effects it keeps writing, which the
+/// journal remembers). The next stream's page attaching the same device —
+/// same descriptor, ids and name — takes it back: no new device, the slot's
+/// sequence numbers start over, and the journal's operations go to the page
+/// first so its player knows every effect the game still drives.
+///
+/// Each stream runs in a process of its own, so the parking crosses
+/// processes: the stream's worker hands its devices out (handOut, their OS
+/// handles duplicated into the server), the server keeps them (takeIn), and
+/// hands them to the next worker the same way. The server, not elevated, then
+/// holds a handle to a game device already made: it can feed it reports and
+/// answer it, never make another device nor change this one's descriptor (the
+/// driver refuses both once a device exists). Windows only for now: a uhid or
+/// uinput device stays in its process, and goes with it.
+///
+/// Policy, in one place: a parked device waits kKeepMs for a stream; in a
+/// stream's process, one the page has not taken within kUnclaimedMs goes (the
+/// stream has no use for it, and a game might pick it over the user's pad);
+/// an explicit detach (device unplugged, « As itself » switched off) removes
+/// a device at once and never parks it.
+class HidParking
+{
+public:
+    static constexpr int64_t kKeepMs = 10 * 60 * 1000;
+    static constexpr int64_t kUnclaimedMs = 30 * 1000;
+
+    using Clock = std::function<int64_t()>; // milliseconds, monotonic
+
+    /// `clock` for tests (the steady clock otherwise); `ownThread` lets
+    /// expired devices go every second, else the caller calls expire().
+    explicit HidParking(Clock clock = nullptr, bool ownThread = false);
+    ~HidParking();
+    HidParking(const HidParking&) = delete;
+    HidParking& operator=(const HidParking&) = delete;
+
+    /// This process's parking, with its own thread.
+    static HidParking& process();
+
+    /// Devices here, handed out ones included.
+    size_t size() const;
+    void expire(int64_t nowMs);
+
+    /// Every device that can cross processes, paused (no longer answering the
+    /// game) and listed with its state; they stay here, handed out, until
+    /// settle(). Returns the batch, 0 when nothing was handed out.
+    uint64_t handOut(std::vector<HidHandedDevice>& out);
+    /// `taken`: the other process holds the batch now, this one lets go of its
+    /// copies. Otherwise they answer the game here again.
+    void settle(uint64_t batch, bool taken);
+
+    /// A device another process handed out: `handle` is this process's copy,
+    /// owned from here on, closed on failure. `unclaimedMs`: in a stream's
+    /// process, how long the page has to take it (0: the server, no limit).
+    /// Empty on success, otherwise why not.
+    std::string takeIn(uint64_t handle, const HidParkedState& state, int64_t unclaimedMs);
+    /// The same with the backend already made (tests).
+    std::string takeIn(std::unique_ptr<input::IVirtualHid> device, const HidParkedState& state,
+                       int64_t unclaimedMs);
+
+private:
+    friend class HidPassthrough;
+    struct Entry;
+    void park(std::unique_ptr<Entry> entry);
+    std::unique_ptr<Entry> claim(const std::string& name, uint16_t vendorId, uint16_t productId,
+                                 uint16_t version, const std::vector<uint8_t>& descriptor);
+    void run();
+
+    Clock m_clock;
+    mutable std::mutex m_mutex;
+    std::vector<std::unique_ptr<Entry>> m_entries;
+    uint64_t m_nextBatch = 1;
+    std::atomic<bool> m_stop{false};
+    std::thread m_thread;
+};
+
 /// The devices one stream session recreates. Thread-safe: attach and detach
 /// come from the relay's input handler, input() from the `hid` channel's
 /// callback, requests leave from the backends' threads.
@@ -183,7 +298,9 @@ struct HidFfb
 ///  - after kSilenceMs without a report, each input report goes back to rest
 ///    once: buttons up, hats centred, sticks and wheels centred, pedals and
 ///    throttles at their rest end, read from the device's first report when
-///    its usages do not say (hid::restReport, Bruno's rule of 04/10).
+///    its usages do not say (hid::restReport, Bruno's rule of 04/10);
+///  - with a parking (setParking), the devices still here when this ends go
+///    there at rest, and attach() takes a parked one back before making one.
 class HidPassthrough
 {
 public:
@@ -204,8 +321,11 @@ public:
     HidPassthrough& operator=(const HidPassthrough&) = delete;
 
     /// Where force-feedback operations go; set before the first attach. Called
-    /// on a backend thread, outside this object's lock.
+    /// on a backend thread, never under this object's lock.
     void setFfbSink(FfbSink sink) { m_onFfb = std::move(sink); }
+    /// Where devices go when this ends, and come back from; set before the
+    /// first attach. None: they are removed with this, as before.
+    void setParking(HidParking* parking) { m_parking = parking; }
 
     /// Empty when this host can recreate devices; why not otherwise.
     static std::string unavailableReason();
@@ -218,8 +338,13 @@ public:
     static bool forceFeedbackAvailable();
 
     /// Empty on success; otherwise why the device was refused (for the log and
-    /// the page). A slot already in use is replaced.
+    /// the page). A slot already in use is replaced. A parked device of the
+    /// same identity is taken back rather than a new one made.
     std::string attach(int slot, const HidDeviceInfo& device);
+    /// Once the page knows the device is there (it answered hidattached): a
+    /// device taken back from the parking sends what rebuilds its force
+    /// feedback, through the FfbSink. Nothing for a new one.
+    void attached(int slot);
     /// One frame of the `hid` channel's payload: report id, sequence number and
     /// the report as WebHID gives it (without its id byte).
     void input(int slot, uint8_t reportId, uint16_t seq, const uint8_t* bytes, size_t size);
@@ -235,13 +360,17 @@ public:
     void checkSilence(int64_t nowMs);
 
 private:
+    friend class HidParking;
+    struct Route;
     struct Slot;
+    static void wire(input::IVirtualHid& device, const std::shared_ptr<Route>& route);
     void watchdog();
 
     RequestSink m_onRequest;
     FfbSink m_onFfb;
     Factory m_factory;
     Clock m_clock;
+    HidParking* m_parking = nullptr;
     std::mutex m_mutex;
     std::map<int, std::unique_ptr<Slot>> m_slots;
     std::atomic<bool> m_stop{false};

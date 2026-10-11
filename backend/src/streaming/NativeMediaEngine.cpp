@@ -21,6 +21,7 @@
 #include "FeedPublisher.h"
 #include "FeedSubscriber.h"
 #include "HidCollectionsJson.h"
+#include "HidParkedJson.h"
 #include "InputWatchdog.h"
 #include "NativeBench.h"
 #include "backend/VirtualDisplay.h"
@@ -826,13 +827,15 @@ void NativeMediaEngine::stopConnection()
         m_Subscriber->stop();
         m_Subscriber.reset();
     }
-    if (!m_Session) return;
-    m_Connected.store(false, std::memory_order_release);
     {
-        // The recreated devices leave with the session that made them.
+        // The recreated devices leave the session that made them, at rest,
+        // for the next stream to take back (HidParking): a game left running
+        // keeps its wheel and the force feedback it set up on it.
         std::lock_guard<std::mutex> lock(m_HidMutex);
         m_Hid.reset();
     }
+    if (!m_Session) return;
+    m_Connected.store(false, std::memory_order_release);
     m_Session->stop();
     writeClickTrace();
     m_Session.reset();
@@ -1415,15 +1418,12 @@ QString NativeMediaEngine::hidAttach(int slot, const QJsonObject& message)
                     Qt::QueuedConnection);
             });
         m_Hid->setFfbSink([this](const mw::native::HidFfb& op) {
-            QJsonObject m{{QStringLiteral("type"), QStringLiteral("hidffb")},
-                          {QStringLiteral("slot"), op.slot},
-                          {QStringLiteral("op"), QString::fromStdString(op.op)},
-                          {QStringLiteral("effect"), op.effect}};
-            if (!op.kind.empty()) m[QStringLiteral("kind")] = QString::fromStdString(op.kind);
-            for (const auto& [name, value] : op.fields)
-                m[QString::fromStdString(name)] = value;
+            QJsonObject m = hidFfbToJson(op);
+            m[QStringLiteral("type")] = QStringLiteral("hidffb");
+            m[QStringLiteral("slot")] = op.slot;
             QMetaObject::invokeMethod(this, [this, m]() { emit hidFfb(m); }, Qt::QueuedConnection);
         });
+        m_Hid->setParking(&mw::native::HidParking::process());
     }
     const std::string why = m_Hid->attach(slot, device);
     if (!why.empty()) {
@@ -1432,6 +1432,12 @@ QString NativeMediaEngine::hidAttach(int slot, const QJsonObject& message)
         return QString::fromStdString(why);
     }
     return {};
+}
+
+void NativeMediaEngine::hidAttached(int slot)
+{
+    std::lock_guard<std::mutex> lock(m_HidMutex);
+    if (m_Hid) m_Hid->attached(slot);
 }
 
 void NativeMediaEngine::hidInput(const uint8_t* frame, size_t size)

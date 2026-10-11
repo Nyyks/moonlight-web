@@ -190,6 +190,22 @@ describe('hidppFfb — the player', () => {
         expect(w.calls[1].params.slice(0, 2)).toEqual([0, 0x86]); // new zero spring, autostart
     });
 
+    it('operations sent before init is over wait for it: a kept wheel’s replay is not reset', async () => {
+        const w = fakeWheel();
+        const p = new HidppFfbPlayer(new HidppTransport(w), FFB_INDEX);
+        const ready = p.init();
+        // The host's replay arrives at once, right behind hidattached.
+        p.apply({ op: 'gain', effect: 0, gain: 128 });
+        p.apply({ op: 'effect', effect: 1, kind: 'constant', duration: -1, gain: 255 });
+        p.apply({ op: 'constant', effect: 1, magnitude: -2500 });
+        p.apply({ op: 'start', effect: 1 });
+        await ready;
+        for (let i = 0; i < 10; i++) await settle();
+        // reset, zero spring, full gains (init), then the replay's gain and effect
+        expect(w.calls.map((c) => c.func)).toEqual([1, 2, 8, 8, 2]);
+        expect(ffbCalls(w, 8)[1].params.slice(0, 2)).toEqual([0x80, 0x80]);
+    });
+
     it('a started effect is downloaded with autostart, then updated in its slot', async () => {
         const { w, p } = await player();
         p.apply({ op: 'effect', effect: 3, kind: 'constant', duration: -1, gain: 255, axes: 1 });

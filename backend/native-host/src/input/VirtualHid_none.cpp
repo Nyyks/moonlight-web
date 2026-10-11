@@ -26,6 +26,12 @@ std::unique_ptr<IVirtualHid> makeVirtualHid(bool)
     return nullptr;
 }
 
+std::unique_ptr<IVirtualHid> adoptVirtualHid(uint64_t, std::string& error)
+{
+    error = "no virtual HID on this OS";
+    return nullptr;
+}
+
 bool virtualHidForceFeedback()
 {
     return false;

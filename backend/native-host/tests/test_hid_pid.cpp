@@ -18,6 +18,7 @@
 #include "native_test_framework.h"
 
 #include "input/HidDescriptor.h"
+#include "input/HidFfbJournal.h"
 #include "input/HidPid.h"
 #include "input/VirtualHid.h"
 #include "mw/native/HidPassthrough.h"
@@ -537,5 +538,392 @@ void run_hid_pid_tests()
         CHECK(hp.attach(0, info).empty());
         CHECK(dev != nullptr);
         if (dev) CHECK(dev->descriptor == encode(wheel()));
+    }
+}
+
+// ── Between two streams: the journal, the table, the parking ───────────────
+
+namespace {
+
+HidFfb ffbOp(const char* op, int effect, std::vector<std::pair<std::string, int32_t>> fields = {},
+             const char* kind = "")
+{
+    HidFfb o;
+    o.op = op;
+    o.effect = effect;
+    o.kind = kind;
+    o.fields = std::move(fields);
+    return o;
+}
+
+std::vector<std::string> namesOf(const std::vector<HidFfb>& ops)
+{
+    std::vector<std::string> out;
+    for (const HidFfb& o : ops)
+        out.push_back(o.op + (o.effect ? ":" + std::to_string(o.effect) : std::string()));
+    return out;
+}
+
+/// What the parking's backends were asked, for the test to read.
+struct ParkLog
+{
+    int created = 0;
+    int destroyed = 0;
+    int released = 0;
+    int paused = 0;
+    int resumed = 0;
+    std::vector<std::vector<uint8_t>> inputs;
+    std::vector<uint8_t> descriptor;
+};
+
+/// A backend that can cross processes, like the Windows one: a handle, a pump
+/// that pauses and resumes, and release() apart from destroy() to tell them
+/// apart here.
+class ParkFake : public input::IVirtualHid
+{
+public:
+    ParkFake(ParkLog& log, uint64_t handle = 0)
+        : m_log(log)
+        , m_handle(handle)
+    {}
+    ~ParkFake() override { destroy(); }
+    bool create(const input::VirtualHidIdentity& id, std::string&) override
+    {
+        ++m_log.created;
+        m_log.descriptor = id.descriptor;
+        m_alive = true;
+        return true;
+    }
+    bool input(const uint8_t* r, size_t n) override
+    {
+        m_log.inputs.emplace_back(r, r + n);
+        return true;
+    }
+    void destroy() override
+    {
+        if (m_alive) ++m_log.destroyed;
+        m_alive = false;
+    }
+    uint64_t nativeHandle() const override { return m_alive ? m_handle : 0; }
+    void pause() override { ++m_log.paused; }
+    void resume() override { ++m_log.resumed; }
+    void release() override
+    {
+        if (m_alive) ++m_log.released;
+        m_alive = false;
+    }
+    void adopted() { m_alive = true; }
+    std::vector<uint8_t> getFeature(uint8_t id)
+    {
+        return m_onGetFeature ? m_onGetFeature(id) : std::vector<uint8_t>{};
+    }
+    void write(Request kind, const std::vector<uint8_t>& data)
+    {
+        if (m_onRequest) m_onRequest(kind, data[0], data);
+    }
+
+private:
+    ParkLog& m_log;
+    uint64_t m_handle = 0;
+    bool m_alive = false;
+};
+
+HidDeviceInfo ffbWheel(const char* name = "Wheel")
+{
+    HidDeviceInfo info;
+    info.name = name;
+    info.vendorId = 0x046d;
+    info.productId = 0xc26e;
+    info.collections = wheel();
+    info.forceFeedback = true;
+    return info;
+}
+
+/// The game, through pid.dll: a constant force in its own block, started.
+void playConstant(ParkFake& dev, const Writer& w, int magnitude, bool create)
+{
+    if (create) {
+        std::vector<uint8_t> c = w.report(Kind::Feature, 19 + 10);
+        w.select(c, Kind::Feature, P(0x26));
+        dev.write(input::IVirtualHid::Request::SetFeature, c);
+        std::vector<uint8_t> se = w.report(Kind::Output, 19);
+        w.set(se, Kind::Output, P(0x22), 1);
+        w.select(se, Kind::Output, P(0x26));
+        w.set(se, Kind::Output, P(0x50), 0xFFFF);
+        w.set(se, Kind::Output, P(0x52), 255);
+        dev.write(input::IVirtualHid::Request::Output, se);
+    }
+    std::vector<uint8_t> cf = w.report(Kind::Output, 19 + 4);
+    w.set(cf, Kind::Output, P(0x22), 1);
+    w.set(cf, Kind::Output, P(0x70), static_cast<uint16_t>(magnitude));
+    dev.write(input::IVirtualHid::Request::Output, cf);
+    if (create) {
+        std::vector<uint8_t> op = w.report(Kind::Output, 19 + 6);
+        w.set(op, Kind::Output, P(0x22), 1);
+        w.select(op, Kind::Output, P(0x79));
+        w.set(op, Kind::Output, P(0x7C), 1);
+        dev.write(input::IVirtualHid::Request::Output, op);
+    }
+}
+
+} // namespace
+
+void run_hid_parking_tests()
+{
+    SECTION("HID parking — the journal rebuilds the force feedback a game left behind");
+    {
+        FfbJournal j;
+        j.record(ffbOp("gain", 0, {{"gain", 200}}), 0);
+        j.record(ffbOp("effect", 1, {{"duration", -1}}, "constant"), 0);
+        j.record(ffbOp("constant", 1, {{"magnitude", -2500}}), 0);
+        j.record(ffbOp("constant", 1, {{"magnitude", -3000}}), 0); // the latest wins
+        j.record(ffbOp("start", 1, {{"loops", 1}}), 0);
+        j.record(ffbOp("effect", 2, {{"duration", -1}}, "spring"), 0);
+        j.record(ffbOp("condition", 2, {{"axis", 1}, {"offset", 5}}), 0);
+        j.record(ffbOp("condition", 2, {{"axis", 0}, {"offset", 7}}), 0);
+        j.record(ffbOp("effect", 3, {{"duration", 100}, {"delay", 0}}, "sine"), 0);
+        j.record(ffbOp("periodic", 3, {{"magnitude", 4000}}), 0);
+        j.record(ffbOp("start", 3, {{"loops", 1}}), 0);
+        j.record(ffbOp("effect", 4, {{"duration", -1}}, "ramp"), 0);
+        j.record(ffbOp("free", 4), 0);
+        CHECK_EQ(j.effects(), static_cast<size_t>(3));
+
+        // At 50 ms the sine still plays; at 1 s it is over and stays stopped.
+        CHECK(namesOf(j.replay(50)) ==
+              (std::vector<std::string>{"gain", "effect:1", "constant:1", "start:1", "effect:2",
+                                        "condition:2", "condition:2", "effect:3", "periodic:3",
+                                        "start:3"}));
+        const std::vector<HidFfb> later = j.replay(1000);
+        CHECK(namesOf(later) ==
+              (std::vector<std::string>{"gain", "effect:1", "constant:1", "start:1", "effect:2",
+                                        "condition:2", "condition:2", "effect:3", "periodic:3"}));
+        CHECK_EQ(field(later[2], "magnitude"), -3000);
+        CHECK_EQ(field(later[5], "axis"), 0); // conditions by axis
+        CHECK_EQ(field(later[6], "axis"), 1);
+
+        // Solo stops the others; stopAll every one; pause comes last.
+        j.record(ffbOp("solo", 2, {{"loops", 255}}), 2000);
+        std::vector<std::string> n = namesOf(j.replay(1'000'000));
+        CHECK(std::count(n.begin(), n.end(), "start:1") == 0);
+        CHECK(std::count(n.begin(), n.end(), "start:2") == 1);
+        j.record(ffbOp("control", 0, {}, "pause"), 2000);
+        CHECK_EQ(j.replay(2000).back().kind, std::string("pause"));
+        j.record(ffbOp("control", 0, {}, "stopAll"), 2000);
+        n = namesOf(j.replay(2000));
+        CHECK(std::none_of(n.begin(), n.end(),
+                           [](const std::string& s) { return s.rfind("start", 0) == 0; }));
+        // Reset forgets every effect, not the device's gain.
+        j.record(ffbOp("control", 0, {}, "reset"), 2000);
+        CHECK(namesOf(j.replay(2000)) == (std::vector<std::string>{"gain"}));
+    }
+
+    SECTION("HID parking — the PID table goes along: blocks the game holds stay given");
+    {
+        const Parsed p = parse(encodeWithPid(wheel(), 19));
+        Writer w{p};
+        PidEngine a(p, 19);
+        std::vector<HidFfb> ops;
+        for (int i = 0; i < 2; ++i) {
+            std::vector<uint8_t> c = w.report(Kind::Feature, 19 + 10);
+            w.select(c, Kind::Feature, P(0x26));
+            a.write(c, ops);
+        }
+        PidEngine b(p, 19);
+        CHECK(!b.restore({1, 2, 3}));
+        CHECK(b.restore(a.save()));
+        CHECK_EQ(w.get(b.getFeature(19 + 11), Kind::Feature, P(0x22)), 2);
+        std::vector<uint8_t> c = w.report(Kind::Feature, 19 + 10);
+        w.select(c, Kind::Feature, P(0x40));
+        b.write(c, ops);
+        CHECK_EQ(w.get(b.getFeature(19 + 11), Kind::Feature, P(0x22)), 3);
+    }
+
+    SECTION("HID parking — a stream that ends leaves its wheel at rest, the next takes it back");
+    {
+        ParkLog log;
+        int64_t now = 0;
+        HidParking parking([&] { return now; });
+        ParkFake* live = nullptr;
+        auto factory = [&] {
+            auto d = std::make_unique<ParkFake>(log);
+            live = d.get();
+            return d;
+        };
+        std::vector<HidFfb> first;
+        {
+            HidPassthrough a(nullptr, factory, [&] { return now; });
+            a.setParking(&parking);
+            a.setFfbSink([&](const HidFfb& o) { first.push_back(o); });
+            CHECK(a.attach(0, ffbWheel()).empty());
+            const uint8_t steer[2] = {0x00, 0x10}; // well left of the middle
+            a.input(0, 1, 10, steer, 2);
+            playConstant(*live, Writer{parse(log.descriptor)}, -2500, true);
+            CHECK(!first.empty());
+        }
+        // The stream is gone, the device is not: at rest, still answering.
+        CHECK_EQ(log.created, 1);
+        CHECK_EQ(log.destroyed, 0);
+        CHECK_EQ(parking.size(), static_cast<size_t>(1));
+        CHECK(!log.inputs.empty() &&
+              log.inputs.back() == (std::vector<uint8_t>{1, 0x00, 0x80})); // wheel centred
+        const Writer w{parse(log.descriptor)};
+        ParkFake* parked = live;
+        const size_t heard = first.size();
+        playConstant(*parked, w, 1234, false); // the game goes on alone
+        CHECK_EQ(first.size(), heard);
+        CHECK_EQ(w.get(parked->getFeature(19 + 11), Kind::Feature, P(0x22)), 1);
+
+        std::vector<HidFfb> second;
+        {
+            HidPassthrough b(nullptr, factory, [&] { return now; });
+            b.setParking(&parking);
+            b.setFfbSink([&](const HidFfb& o) { second.push_back(o); });
+            CHECK(b.attach(3, ffbWheel()).empty());
+            CHECK_EQ(log.created, 1); // taken back, not made again
+            CHECK_EQ(parking.size(), static_cast<size_t>(0));
+            playConstant(*parked, w, 4321, false); // before the page knows: journal only
+            CHECK(second.empty());
+            b.attached(3);
+            CHECK(namesOf(second) ==
+                  (std::vector<std::string>{"effect:1", "constant:1", "start:1"}));
+            if (second.size() == 3) {
+                CHECK_EQ(second[1].slot, 3);
+                CHECK_EQ(field(second[1], "magnitude"), 4321);
+            }
+            b.attached(3); // once only
+            CHECK_EQ(second.size(), static_cast<size_t>(3));
+            playConstant(*parked, w, 99, false);
+            CHECK_EQ(second.size(), static_cast<size_t>(4));
+            // The new page counts from 0: not late after the old page's 10.
+            const size_t inputs = log.inputs.size();
+            const uint8_t steer[2] = {0x00, 0x20};
+            b.input(3, 1, 0, steer, 2);
+            CHECK_EQ(log.inputs.size(), inputs + 1);
+        }
+        CHECK_EQ(parking.size(), static_cast<size_t>(1));
+        CHECK_EQ(log.destroyed, 0);
+    }
+
+    SECTION("HID parking — another device, an explicit detach and time let a wheel go");
+    {
+        ParkLog log;
+        int64_t now = 0;
+        HidParking parking([&] { return now; });
+        auto factory = [&] { return std::make_unique<ParkFake>(log); };
+        {
+            HidPassthrough a(nullptr, factory, [&] { return now; });
+            a.setParking(&parking);
+            CHECK(a.attach(0, ffbWheel()).empty());
+        }
+        {
+            HidPassthrough b(nullptr, factory, [&] { return now; });
+            b.setParking(&parking);
+            CHECK(b.attach(0, ffbWheel("Another wheel")).empty());
+            CHECK_EQ(log.created, 2); // not the parked one
+            b.detach(0);              // unplugged: gone at once, never parked
+            CHECK_EQ(log.destroyed, 1);
+        }
+        CHECK_EQ(parking.size(), static_cast<size_t>(1));
+        parking.expire(HidParking::kKeepMs - 1);
+        CHECK_EQ(parking.size(), static_cast<size_t>(1));
+        parking.expire(HidParking::kKeepMs);
+        CHECK_EQ(parking.size(), static_cast<size_t>(0));
+        CHECK_EQ(log.released, 1);
+        // Without a parking, the old rule: removed with the stream.
+        {
+            HidPassthrough c(nullptr, factory, [&] { return now; });
+            CHECK(c.attach(0, ffbWheel()).empty());
+        }
+        CHECK_EQ(log.destroyed, 2);
+    }
+
+    SECTION("HID parking — handed to another process: paused, then let go or answering again");
+    {
+        ParkLog log;
+        int64_t now = 0;
+        HidParking server([&] { return now; });
+        ParkFake* live = nullptr;
+        {
+            HidPassthrough a(
+                nullptr,
+                [&] {
+                    auto d = std::make_unique<ParkFake>(log, 42);
+                    live = d.get();
+                    return d;
+                },
+                [&] { return now; });
+            a.setParking(&server);
+            CHECK(a.attach(0, ffbWheel()).empty());
+            playConstant(*live, Writer{parse(log.descriptor)}, -2500, true);
+        }
+        now = 60'000;
+        std::vector<HidHandedDevice> out;
+        const uint64_t batch = server.handOut(out);
+        CHECK(batch != 0);
+        CHECK_EQ(out.size(), static_cast<size_t>(1));
+        CHECK_EQ(log.paused, 1);
+        if (out.size() != 1) return;
+        const HidParkedState& st = out[0].state;
+        CHECK_EQ(out[0].handle, uint64_t{42});
+        CHECK(st.descriptor == log.descriptor);
+        CHECK_EQ(static_cast<int>(st.pidFirstId), 19);
+        CHECK_EQ(st.pidState.size(), static_cast<size_t>(2 + kPidMaxEffects));
+        CHECK(namesOf(st.effects) ==
+              (std::vector<std::string>{"effect:1", "constant:1", "start:1"}));
+        CHECK_EQ(st.keepMs, HidParking::kKeepMs - 60'000);
+        CHECK_EQ(st.name, std::string("Wheel"));
+
+        std::vector<HidHandedDevice> again;
+        CHECK_EQ(server.handOut(again), uint64_t{0}); // already out
+        server.settle(batch, false);                  // the worker never came
+        CHECK_EQ(log.resumed, 1);
+        const uint64_t batch2 = server.handOut(again);
+        CHECK(batch2 != 0 && batch2 != batch);
+        server.settle(batch2, true); // the worker holds its copy now
+        CHECK_EQ(server.size(), static_cast<size_t>(0));
+        CHECK_EQ(log.released, 1);
+
+        // The worker's side: the copy, the state, a page that takes it back.
+        HidParking worker([&] { return now; });
+        auto copy = std::make_unique<ParkFake>(log, 42);
+        copy->adopted();
+        ParkFake* adopted = copy.get();
+        CHECK(worker.takeIn(std::move(copy), st, HidParking::kUnclaimedMs).empty());
+        CHECK_EQ(log.resumed, 2);
+        std::vector<HidFfb> ops;
+        HidPassthrough b(
+            nullptr, [&] { return std::make_unique<ParkFake>(log); }, [&] { return now; });
+        b.setParking(&worker);
+        b.setFfbSink([&](const HidFfb& o) { ops.push_back(o); });
+        CHECK(b.attach(1, ffbWheel()).empty());
+        CHECK_EQ(log.created, 1);
+        b.attached(1);
+        CHECK(namesOf(ops) == (std::vector<std::string>{"effect:1", "constant:1", "start:1"}));
+        // The table came along: the game's next effect gets block 2.
+        const Writer w{parse(st.descriptor)};
+        std::vector<uint8_t> c = w.report(Kind::Feature, 19 + 10);
+        w.select(c, Kind::Feature, P(0x40));
+        adopted->write(input::IVirtualHid::Request::SetFeature, c);
+        CHECK_EQ(w.get(adopted->getFeature(19 + 11), Kind::Feature, P(0x22)), 2);
+
+        // A device no page takes in a stream's process goes after kUnclaimedMs.
+        auto other = std::make_unique<ParkFake>(log, 43);
+        other->adopted();
+        HidParkedState st2 = st;
+        st2.name = "Spare wheel";
+        CHECK(worker.takeIn(std::move(other), st2, HidParking::kUnclaimedMs).empty());
+        worker.expire(now + HidParking::kUnclaimedMs - 1);
+        CHECK_EQ(worker.size(), static_cast<size_t>(1));
+        worker.expire(now + HidParking::kUnclaimedMs);
+        CHECK_EQ(worker.size(), static_cast<size_t>(0));
+        CHECK_EQ(log.released, 2);
+
+        // Not a game device: refused, and let go.
+        auto bad = std::make_unique<ParkFake>(log, 44);
+        bad->adopted();
+        HidParkedState st3 = st;
+        st3.descriptor = {0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0xC0}; // a keyboard
+        CHECK(!worker.takeIn(std::move(bad), st3, 0).empty());
+        CHECK_EQ(log.released, 3);
     }
 }

@@ -212,6 +212,8 @@ For a radio, **Test** says where its switches are read, and the wizard says whic
 
 Where the host cannot, the switch opens a short explanation instead of the chooser, and the device keeps reaching the game as an Xbox pad. Logitech's G29, G27 and G923 for PlayStation are recreated, but their older force feedback commands (lg4ff) are not played yet. G HUB on the host never sees the wheel, recreated or not.
 
+**Between two streams**, a Windows host keeps the recreated device for 10 minutes, at rest, still answering the game: a game left running keeps its wheel, and its force feedback, when the next stream sends the same device (same model, same browser-side description). The next page first receives the effects the game had set up, then the game's updates. A stream that does not send the device within 30 s lets it go; unplugging it, or switching **As itself** off, removes it at once. A game started before the wheel was ever there still needs one restart to get force feedback. Each stream has a worker process of its own: the device goes from the worker to the server and on to the next worker by its driver handle (`HidParking`, `HidParkingTransfer`). A Linux host removes the device with the stream, as before.
+
 ### Windows: the driver
 
 The installer sets **"MoonlightWeb Virtual HID"** up on x64 PCs, on install and on every update; uninstalling MoonlightWeb removes it, unless the other edition (DEV or release) still uses it. Nothing to do by hand: no test mode, Secure Boot stays on, anti-cheats see an ordinary driver.

@@ -53,6 +53,7 @@ add_executable(run_tests
     main.cpp
     test_input_encoder.cpp
     test_hid_collections_json.cpp
+    test_hid_parked_json.cpp
     test_stream_config.cpp
     test_input_crypto.cpp
     test_rest_router.cpp
@@ -116,6 +117,8 @@ add_executable(run_tests
     ${_src}/src/streaming/InputWatchdog.cpp
     # The HID passthrough's hidattach, read and rebuilt into a descriptor.
     ${_src}/src/streaming/HidCollectionsJson.cpp
+    # Its wheels kept between two streams, as they travel between processes.
+    ${_src}/src/streaming/HidParkedJson.cpp
     ${_src}/native-host/src/input/HidDescriptor.cpp
     ${_src}/src/streaming/StreamConfig.cpp
     ${_src}/src/streaming/InputCrypto.cpp

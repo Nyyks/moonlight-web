@@ -390,7 +390,10 @@ export class HidPassthrough {
 
     stop() {
         this._letGo(false);
-        this._dropAll('');
+        // The stream ends, not the devices: the host keeps each one at rest for
+        // the next stream, so a game left running keeps its wheel and the force
+        // feedback it set up. Only an unplug or a switch turned off detaches.
+        this._dropAll('', false);
         if (this._hid) this._hid.removeEventListener('disconnect', this._onDisconnect);
         this._changed();
     }
@@ -435,18 +438,18 @@ export class HidPassthrough {
         if (notify) this._changed();
     }
 
-    _drop(device, why) {
+    _drop(device, why, tell = true) {
         const e = this._entries.get(device);
         if (!e) return;
-        if (e.state === 'on' || e.state === 'pending') this._send(detachMessage(e.slot));
+        if (tell && (e.state === 'on' || e.state === 'pending')) this._send(detachMessage(e.slot));
         this._release(device, e);
         this._entries.delete(device);
         if (why) this._entries.set(device, { slot: -1, state: 'off', why, listener: null });
         this._changed();
     }
 
-    _dropAll(why) {
-        for (const d of Array.from(this._entries.keys())) this._drop(d, why);
+    _dropAll(why, tell = true) {
+        for (const d of Array.from(this._entries.keys())) this._drop(d, why, tell);
         this._disarmTimer();
     }
 

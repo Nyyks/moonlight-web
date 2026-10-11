@@ -136,6 +136,11 @@ bool isThisExecutable(const QString& image);
 /// pipes of a QProcess parent. Must run before anything touches std::cin.
 bool attachWorkerPipes(const QString& base, QString* error);
 
+/// The server process attachWorkerPipes() checked: this executable, the one
+/// the worker's recreated devices go back to between two streams
+/// (HidParkingTransfer). 0 in any other process, or before the pipes.
+quint32 workerServerPid();
+
 } // namespace ConsoleSession
 
 /**

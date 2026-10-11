@@ -2238,6 +2238,9 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
         try {
             if (m_InputDc) m_InputDc->send(std::string(j.constData(), j.size()));
         } catch (const std::exception&) {}
+        // After the answer: a wheel kept from the last stream replays its
+        // force feedback, which the page plays only on a device it knows.
+        if (why.isEmpty()) m_Shim->hidAttached(slot);
     } else if (type == "hiddetach") {
         m_Shim->hidDetach(msg["slot"].toInt(-1));
     } else if (type == "hidreply") {

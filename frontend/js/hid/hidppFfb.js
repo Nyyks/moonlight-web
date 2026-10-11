@@ -219,13 +219,23 @@ export class HidppFfbPlayer {
         this._busy = false;
         this._closed = false;
         this._frees = 0;
+        this._ready = null; // init() while it runs
     }
 
-    /** Clears the wheel: no effect, and its own centring spring cancelled. */
-    async init() {
-        await this._t.call(this._index, fn.resetAll);
-        await this._freeWheel();
-        await this._t.call(this._index, fn.setGains, [0xff, 0xff, 0, 0]);
+    /**
+     * Clears the wheel: no effect, and its own centring spring cancelled. The
+     * host's operations wait for it: a wheel kept from the last stream sends
+     * its effects and gain at once, which a reset landing after would undo.
+     */
+    init() {
+        this._ready = (async () => {
+            await this._t.call(this._index, fn.resetAll);
+            await this._freeWheel();
+            await this._t.call(this._index, fn.setGains, [0xff, 0xff, 0, 0]);
+        })().finally(() => {
+            this._ready = null; // done: nothing waits on it any more
+        });
+        return this._ready;
     }
 
     /** One `hidffb` message from the host. */
@@ -398,6 +408,7 @@ export class HidppFfbPlayer {
     async _pump() {
         if (this._busy) return;
         this._busy = true;
+        if (this._ready) await this._ready.catch(() => {});
         while (this._queue.length && !this._closed) {
             const { run } = this._queue.shift();
             try {

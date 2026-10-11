@@ -103,6 +103,13 @@ public:
     /// operations it means to `ops` (slot left at 0 for the caller).
     void write(const std::vector<uint8_t>& data, std::vector<HidFfb>& ops);
 
+    /// The block table, for a wheel that moves to another process between
+    /// two streams: the game still holds the blocks it was given, and the
+    /// next Create New Effect must not hand one of them out again.
+    std::vector<uint8_t> save() const;
+    /// The table save() gave; false (and the table untouched) when it is not one.
+    bool restore(const std::vector<uint8_t>& state);
+
 private:
     struct Place
     {

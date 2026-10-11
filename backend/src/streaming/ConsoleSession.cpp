@@ -483,6 +483,15 @@ bool isThisExecutable(const QString& image)
 #endif
 }
 
+namespace {
+std::atomic<quint32> g_WorkerServerPid{0};
+}
+
+quint32 workerServerPid()
+{
+    return g_WorkerServerPid.load();
+}
+
 bool attachWorkerPipes(const QString& base, QString* error)
 {
 #ifndef Q_OS_WIN
@@ -528,6 +537,7 @@ bool attachWorkerPipes(const QString& base, QString* error)
         return fail(QStringLiteral("pipe server is \"%1\" (pid %2), not this executable")
                         .arg(serverImage)
                         .arg(serverPid));
+    g_WorkerServerPid = serverPid;
 
     // A task runs a console-subsystem build (a dev tree) with a console of its
     // own; nothing is ever shown in it.

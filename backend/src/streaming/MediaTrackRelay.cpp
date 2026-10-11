@@ -996,6 +996,7 @@ void MediaTrackRelay::onInputMessage(const std::string& message)
         try {
             if (m_InputDc) m_InputDc->send(std::string(j.constData(), j.size()));
         } catch (const std::exception&) {}
+        if (why.isEmpty()) m_Shim->hidAttached(slot);
     } else if (type == "hiddetach") {
         m_Shim->hidDetach(msg["slot"].toInt(-1));
     } else if (type == "hidreply") {

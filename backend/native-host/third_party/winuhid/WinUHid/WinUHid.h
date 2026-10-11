@@ -251,3 +251,31 @@ WINUHID_API VOID WinUHidStopDevice(PWINUHID_DEVICE Device);
 // This function never fails as long as the provided argument is valid.
 //
 WINUHID_API VOID WinUHidDestroyDevice(PWINUHID_DEVICE Device);
+
+#ifdef MOONLIGHTWEB_VHID
+//
+// MoonlightWeb: a device that outlives the process that created it. The driver
+// keeps a device for as long as any handle to its file object is open, so a
+// process can hand a duplicate of the handle to another one, which carries on.
+//
+
+//
+// The file handle behind a device, to duplicate into another process.
+//
+WINUHID_API HANDLE WinUHidGetHandle(PWINUHID_DEVICE Device);
+
+//
+// Wraps a handle another process created and started a device on (this
+// process's own duplicate). Nothing is sent to the driver but a version query,
+// which a handle to anything else fails. The device starts stopped: call
+// WinUHidResumeDevice() to service its events. On success the device owns the
+// handle; on failure (NULL) the caller still does.
+//
+WINUHID_API PWINUHID_DEVICE WinUHidAdoptDevice(HANDLE Handle);
+
+//
+// Services the events of a stopped device again (WinUHidStopDevice(), or
+// WinUHidAdoptDevice()), without starting it in the driver a second time.
+//
+WINUHID_API BOOL WinUHidResumeDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLBACK EventCallback, PVOID CallbackContext);
+#endif

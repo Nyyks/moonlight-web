@@ -72,6 +72,7 @@ void run_ds4_mapping_tests();
 void run_hid_descriptor_tests();
 void run_hid_passthrough_tests();
 void run_hid_pid_tests();
+void run_hid_parking_tests();
 void run_hid_evdev_tests();
 void run_stage_stats_tests();
 void run_frame_cadence_tests();
@@ -161,6 +162,7 @@ int main(int argc, char** argv)
     RUN(hid_descriptor);
     RUN(hid_passthrough);
     RUN(hid_pid);
+    RUN(hid_parking);
     RUN(hid_evdev);
     RUN(stage_stats);
     RUN(frame_cadence);

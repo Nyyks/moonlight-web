@@ -150,4 +150,7 @@ private:
     QByteArray m_Buf;
     bool m_ResponseEmitted = false;
     bool m_EndedEmitted = false;
+    /// The kept wheels handed to this worker (HidParkingTransfer), until it
+    /// says it took them; 0 when none are out.
+    uint64_t m_HidBatch = 0;
 };

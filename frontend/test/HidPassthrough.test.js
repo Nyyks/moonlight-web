@@ -252,7 +252,9 @@ describe('HidPassthrough (HID passthrough in the stream, P2)', () => {
         t.hp.handleMessage({ type: 'hidcaps', available: true });
         await vi.waitFor(() => expect(t.sent).toHaveLength(1));
         t.hp.stop();
-        expect(t.sent[1]).toEqual({ type: 'hiddetach', slot: 0 });
+        // The stream ends, the device stays on the host for the next one (a
+        // game left running keeps its wheel): nothing is detached.
+        expect(t.sent).toHaveLength(1);
     });
 
     it('knows which pads a row offers « as itself », by kind and USB ids', () => {

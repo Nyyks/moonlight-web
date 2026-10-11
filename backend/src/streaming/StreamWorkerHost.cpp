@@ -17,6 +17,7 @@
 
 #include "StreamWorkerHost.h"
 #include "ConsoleSession.h"
+#include "HidParkingTransfer.h"
 #include "WorkerService.h"
 #include "common/Edition.h"
 #include "common/LinuxCapabilities.h"
@@ -42,6 +43,7 @@ StreamWorkerHost::~StreamWorkerHost()
     }
     // A console child is killed and joined by its own destructor (it is our
     // QObject child), so nothing more is needed here.
+    if (m_HidBatch) HidParkingTransfer::settle(m_HidBatch, false);
 }
 
 void StreamWorkerHost::prepare(const QJsonObject& config, QStringList& args,
@@ -193,7 +195,32 @@ bool StreamWorkerHost::startInConsoleSession(const QStringList& args, const QByt
         return false;
     }
 
-    m_Console->write(configLine);
+    // The wheels kept from the last stream go with the config, to a worker
+    // that can both make such devices and reach into this process for them
+    // (HidParkingTransfer). Never to the guests' feed: it has no page to give
+    // them to, and would hold them unanswered for the whole shared session.
+    QByteArray line = configLine;
+    if (how == Launch::ServiceAsSystem || how == Launch::TaskElevated) {
+        QJsonObject config = QJsonDocument::fromJson(configLine).object();
+        if (config[QStringLiteral("backendType")].toString() == QLatin1String("native") &&
+            config[QStringLiteral("role")].toString() != QLatin1String("feed")) {
+            uint64_t batch = 0;
+            const QJsonObject parked = HidParkingTransfer::handOut(&batch);
+            if (batch) {
+                config[QStringLiteral("hidParked")] = parked;
+                line = QJsonDocument(config).toJson(QJsonDocument::Compact) + "\n";
+                m_HidBatch = batch;
+                // A worker that never reads its config never answers: the
+                // devices cannot wait unanswered for the game that long.
+                QTimer::singleShot(30000, this, [this, batch]() {
+                    if (m_HidBatch != batch) return;
+                    m_HidBatch = 0;
+                    HidParkingTransfer::settle(batch, false);
+                });
+            }
+        }
+    }
+    m_Console->write(line);
     m_Launch = how;
     qInfo() << "[StreamWorkerHost] Worker spawned"
             << (how == Launch::ConsoleAsUser ? "in the console session as"
@@ -341,6 +368,13 @@ void StreamWorkerHost::onStdoutData(const QByteArray& data)
         } else if (type == QLatin1String("portalGrant")) {
             const QString token = event["token"].toString();
             if (!token.isEmpty()) emit portalGrantReceived(token);
+        } else if (type == QLatin1String("hidAdopted")) {
+            // The worker holds its copies of the kept devices: ours go.
+            if (m_HidBatch) HidParkingTransfer::settle(m_HidBatch, true);
+            m_HidBatch = 0;
+        } else if (type == QLatin1String("hidParked")) {
+            // The stream is over, its wheels stay: their handles are ours now.
+            HidParkingTransfer::takeIn(event);
         } else if (!line.trimmed().isEmpty()) {
             qWarning() << "[StreamWorkerHost] Unknown worker event:" << line.constData();
         }
@@ -350,6 +384,9 @@ void StreamWorkerHost::onStdoutData(const QByteArray& data)
 void StreamWorkerHost::onFinished(int exitCode, QProcess::ExitStatus status)
 {
     qInfo() << "[StreamWorkerHost] Worker finished, exitCode=" << exitCode << "status=" << status;
+    // Gone without taking the kept devices: they answer the game here again.
+    if (m_HidBatch) HidParkingTransfer::settle(m_HidBatch, false);
+    m_HidBatch = 0;
     // A worker that dies without answering still owes the browser a reply, and
     // its session is over either way.
     if (!m_ResponseEmitted) {

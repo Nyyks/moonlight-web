@@ -19,9 +19,11 @@
 
 #include "core/Log.h"
 #include "input/HidDescriptor.h"
+#include "input/HidFfbJournal.h"
 #include "input/HidPid.h"
 #include "input/VirtualHid.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 
@@ -35,19 +37,37 @@ int64_t steadyMs()
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-/// A device's PID block, shared with its backend's threads: pid.dll's requests
-/// arrive there, possibly before the slot is in the table.
-struct PidState
+std::string idsOf(uint16_t vendorId, uint16_t productId)
+{
+    char ids[16];
+    std::snprintf(ids, sizeof ids, "%04x:%04x", vendorId, productId);
+    return ids;
+}
+
+} // namespace
+
+/// Where a device's requests and force feedback go, and what of them it must
+/// remember. Shared by the device's backend threads and whoever holds the
+/// device: a stream's HidPassthrough (owner), or nobody while it is parked,
+/// when the journal alone hears what the game does. Everything here is read
+/// and written under `mutex`, the sinks called under it too: an owner that
+/// lets go waits for a call in flight, and never hears one after.
+struct HidPassthrough::Route
 {
     std::mutex mutex;
     std::unique_ptr<input::hid::PidEngine> engine;
+    input::hid::FfbJournal journal;
+    HidPassthrough* owner = nullptr;
+    int slot = 0;
+    Clock clock = steadyMs;
 };
-
-} // namespace
 
 struct HidPassthrough::Slot
 {
     std::unique_ptr<input::IVirtualHid> device;
+    std::shared_ptr<Route> route;
+    input::VirtualHidIdentity identity;
+    uint8_t pidFirstId = 0;
     input::hid::Parsed parsed;
     bool numbered = false;
     std::map<uint8_t, size_t> inputBytes; // per report id, without the id byte
@@ -57,7 +77,267 @@ struct HidPassthrough::Slot
     std::map<uint8_t, uint16_t> lastSeq;
     int64_t lastAtMs = 0;
     bool resting = true;
+    // Taken back from the parking: attached() replays its force feedback.
+    bool fromParking = false;
+
+    void describe(const std::vector<uint8_t>& descriptor)
+    {
+        parsed = input::hid::parse(descriptor);
+        numbered = !(parsed.reportIds.size() == 1 && parsed.reportIds.front() == 0);
+        for (uint8_t id : parsed.reportIds) {
+            const size_t n = input::hid::reportBytes(parsed, input::hid::Kind::Input, id);
+            if (n) inputBytes[id] = n - (numbered ? 1 : 0);
+        }
+    }
+
+    /// Every input report back to rest, once (Bruno's rule of 04/10).
+    void rest()
+    {
+        resting = true;
+        for (auto& [id, report] : last) {
+            std::vector<uint8_t> r = input::hid::restReport(parsed, id, report, first[id]);
+            if (r == report) continue;
+            report = r;
+            if (numbered) r.insert(r.begin(), id);
+            device->input(r.data(), r.size());
+        }
+    }
+
+    bool sameAs(const std::string& name, uint16_t vendorId, uint16_t productId, uint16_t version,
+                const std::vector<uint8_t>& descriptor) const
+    {
+        return identity.vendorId == vendorId && identity.productId == productId &&
+               identity.version == version && identity.name == name &&
+               identity.descriptor == descriptor;
+    }
 };
+
+// ── HidParking ──────────────────────────────────────────────────────────────
+
+struct HidParking::Entry
+{
+    std::unique_ptr<HidPassthrough::Slot> slot;
+    int64_t keepUntilMs = 0;
+    int64_t unclaimedUntilMs = 0; // 0: no stream waits on it
+    uint64_t batch = 0;           // handed out in this batch; 0: here
+};
+
+HidParking::HidParking(Clock clock, bool ownThread)
+    : m_clock(clock ? std::move(clock) : Clock(steadyMs))
+{
+    if (ownThread) m_thread = std::thread([this] { run(); });
+}
+
+HidParking::~HidParking()
+{
+    m_stop = true;
+    if (m_thread.joinable()) m_thread.join();
+    std::vector<std::unique_ptr<Entry>> gone;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        gone.swap(m_entries);
+    }
+}
+
+HidParking& HidParking::process()
+{
+    static HidParking parking(nullptr, true);
+    return parking;
+}
+
+size_t HidParking::size() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_entries.size();
+}
+
+void HidParking::run()
+{
+    while (!m_stop) {
+        for (int i = 0; i < 10 && !m_stop; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        expire(m_clock());
+    }
+}
+
+void HidParking::park(std::unique_ptr<Entry> entry)
+{
+    entry->keepUntilMs = m_clock() + kKeepMs;
+    entry->unclaimedUntilMs = 0;
+    entry->batch = 0;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_entries.push_back(std::move(entry));
+}
+
+std::unique_ptr<HidParking::Entry> HidParking::claim(const std::string& name, uint16_t vendorId,
+                                                     uint16_t productId, uint16_t version,
+                                                     const std::vector<uint8_t>& descriptor)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto it = m_entries.begin(); it != m_entries.end(); ++it) {
+        if ((*it)->batch || !(*it)->slot->sameAs(name, vendorId, productId, version, descriptor))
+            continue;
+        std::unique_ptr<Entry> e = std::move(*it);
+        m_entries.erase(it);
+        return e;
+    }
+    return nullptr;
+}
+
+void HidParking::expire(int64_t nowMs)
+{
+    std::vector<std::unique_ptr<Entry>> gone;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto it = m_entries.begin(); it != m_entries.end();) {
+            Entry& e = **it;
+            const bool expired = !e.batch && (nowMs >= e.keepUntilMs ||
+                                              (e.unclaimedUntilMs && nowMs >= e.unclaimedUntilMs));
+            if (!expired) {
+                ++it;
+                continue;
+            }
+            gone.push_back(std::move(*it));
+            it = m_entries.erase(it);
+        }
+    }
+    // Outside the lock: removing a device waits for its backend's thread.
+    for (std::unique_ptr<Entry>& e : gone) {
+        const input::VirtualHidIdentity& id = e->slot->identity;
+        log::info("[hid] " + id.name + " " + idsOf(id.vendorId, id.productId) +
+                  (e->unclaimedUntilMs && nowMs >= e->unclaimedUntilMs
+                       ? " not taken by this stream: removed"
+                       : " kept with no stream for too long: removed"));
+        e->slot->device->release();
+    }
+}
+
+uint64_t HidParking::handOut(std::vector<HidHandedDevice>& out)
+{
+    std::vector<Entry*> handed;
+    uint64_t batch = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (std::unique_ptr<Entry>& e : m_entries) {
+            if (e->batch || !e->slot->device->nativeHandle()) continue;
+            if (!batch) batch = m_nextBatch++;
+            e->batch = batch;
+            handed.push_back(e.get());
+        }
+    }
+    // Entries of a batch move only through settle(), so the pointers hold.
+    const int64_t now = m_clock();
+    for (Entry* e : handed) {
+        HidPassthrough::Slot& s = *e->slot;
+        // From here the game's requests wait in the driver for the next
+        // process; pausing waits for the one being answered.
+        s.device->pause();
+        HidHandedDevice d;
+        d.handle = s.device->nativeHandle();
+        HidParkedState& st = d.state;
+        st.name = s.identity.name;
+        st.vendorId = s.identity.vendorId;
+        st.productId = s.identity.productId;
+        st.version = s.identity.version;
+        st.descriptor = s.identity.descriptor;
+        st.first.assign(s.first.begin(), s.first.end());
+        st.last.assign(s.last.begin(), s.last.end());
+        st.pidFirstId = s.pidFirstId;
+        {
+            std::lock_guard<std::mutex> lock(s.route->mutex);
+            if (s.route->engine) st.pidState = s.route->engine->save();
+            st.effects = s.route->journal.replay(now);
+        }
+        st.keepMs = std::max<int64_t>(0, e->keepUntilMs - now);
+        out.push_back(std::move(d));
+    }
+    return batch;
+}
+
+void HidParking::settle(uint64_t batch, bool taken)
+{
+    if (!batch) return;
+    std::vector<std::unique_ptr<Entry>> gone;
+    std::vector<Entry*> back;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto it = m_entries.begin(); it != m_entries.end();) {
+            if ((*it)->batch != batch) {
+                ++it;
+                continue;
+            }
+            if (taken) {
+                gone.push_back(std::move(*it));
+                it = m_entries.erase(it);
+            } else {
+                back.push_back(it->get());
+                ++it;
+            }
+        }
+    }
+    // The other process holds its own copy: closing ours leaves the device.
+    for (std::unique_ptr<Entry>& e : gone)
+        e->slot->device->release();
+    for (Entry* e : back) {
+        e->slot->device->resume();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        e->batch = 0;
+    }
+}
+
+std::string HidParking::takeIn(uint64_t handle, const HidParkedState& state, int64_t unclaimedMs)
+{
+    std::string error;
+    std::unique_ptr<input::IVirtualHid> device = input::adoptVirtualHid(handle, error);
+    if (!device) return error;
+    return takeIn(std::move(device), state, unclaimedMs);
+}
+
+std::string HidParking::takeIn(std::unique_ptr<input::IVirtualHid> device,
+                               const HidParkedState& state, int64_t unclaimedMs)
+{
+    if (std::string why = input::hid::validate(state.descriptor); !why.empty()) {
+        device->release();
+        return why;
+    }
+    auto s = std::make_unique<HidPassthrough::Slot>();
+    s->identity.name = state.name;
+    s->identity.vendorId = state.vendorId;
+    s->identity.productId = state.productId;
+    s->identity.version = state.version;
+    s->identity.descriptor = state.descriptor;
+    s->pidFirstId = state.pidFirstId;
+    s->describe(state.descriptor);
+    s->first.insert(state.first.begin(), state.first.end());
+    s->last.insert(state.last.begin(), state.last.end());
+
+    const int64_t now = m_clock();
+    s->route = std::make_shared<HidPassthrough::Route>();
+    s->route->clock = m_clock;
+    if (state.pidFirstId) {
+        s->route->engine = std::make_unique<input::hid::PidEngine>(s->parsed, state.pidFirstId);
+        if (!s->route->engine->restore(state.pidState))
+            log::warning("[hid] " + state.name + ": its effect table did not come along");
+    }
+    for (const HidFfb& op : state.effects)
+        s->route->journal.record(op, now);
+    HidPassthrough::wire(*device, s->route);
+    device->resume();
+    s->device = std::move(device);
+
+    auto e = std::make_unique<Entry>();
+    log::info("[hid] " + state.name + " " + idsOf(state.vendorId, state.productId) +
+              " kept for the next stream (" + std::to_string(s->route->journal.effects()) +
+              " effects)");
+    e->slot = std::move(s);
+    e->keepUntilMs = now + std::max<int64_t>(0, state.keepMs);
+    e->unclaimedUntilMs = unclaimedMs > 0 ? now + unclaimedMs : 0;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_entries.push_back(std::move(e));
+    return {};
+}
+
+// ── HidPassthrough ──────────────────────────────────────────────────────────
 
 HidPassthrough::HidPassthrough(RequestSink onRequest, Factory factory, Clock clock)
     : m_onRequest(std::move(onRequest))
@@ -69,7 +349,29 @@ HidPassthrough::~HidPassthrough()
 {
     m_stop = true;
     if (m_watchdog.joinable()) m_watchdog.join();
-    detachAll();
+    if (!m_parking) {
+        detachAll();
+        return;
+    }
+    // The stream ends, the game may not: each device waits at rest for the
+    // next stream, still answering the game.
+    std::map<int, std::unique_ptr<Slot>> leaving;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        leaving.swap(m_slots);
+    }
+    for (auto& [slot, s] : leaving) {
+        s->rest();
+        {
+            std::lock_guard<std::mutex> lock(s->route->mutex);
+            s->route->owner = nullptr;
+        }
+        log::info("[hid] slot " + std::to_string(slot) + ": " + s->identity.name +
+                  " kept at rest for the next stream");
+        auto e = std::make_unique<HidParking::Entry>();
+        e->slot = std::move(s);
+        m_parking->park(std::move(e));
+    }
 }
 
 std::string HidPassthrough::unavailableReason()
@@ -91,6 +393,55 @@ const char* HidPassthrough::supportToken()
 bool HidPassthrough::forceFeedbackAvailable()
 {
     return input::virtualHidForceFeedback();
+}
+
+void HidPassthrough::wire(input::IVirtualHid& device, const std::shared_ptr<Route>& route)
+{
+    // pid.dll's synchronous questions: answered here, at once.
+    device.setFeatureHandler([route](uint8_t reportId) {
+        std::lock_guard<std::mutex> lock(route->mutex);
+        return route->engine ? route->engine->getFeature(reportId) : std::vector<uint8_t>{};
+    });
+    // Effects the backend services itself (uinput).
+    device.setFfbHandler([route](const HidFfb& op) {
+        std::lock_guard<std::mutex> lock(route->mutex);
+        route->journal.record(op, route->clock());
+        HidPassthrough* owner = route->owner;
+        if (!owner || !owner->m_onFfb) return;
+        HidFfb o = op;
+        o.slot = route->slot;
+        owner->m_onFfb(o);
+    });
+    device.setRequestHandler([route](input::IVirtualHid::Request kind, uint8_t reportId,
+                                     const std::vector<uint8_t>& data) {
+        std::lock_guard<std::mutex> lock(route->mutex);
+        // The PID block's reports stay here: decoded into operations, or
+        // already answered by the feature handler.
+        std::vector<HidFfb> ops;
+        bool handled = false;
+        if (route->engine && route->engine->owns(reportId)) {
+            if (kind != input::IVirtualHid::Request::GetFeature) route->engine->write(data, ops);
+            handled = true;
+        }
+        const int64_t now = route->clock();
+        for (const HidFfb& op : ops)
+            route->journal.record(op, now);
+        HidPassthrough* owner = route->owner;
+        if (!owner) return; // parked: the journal is all that hears it
+        for (HidFfb& op : ops) {
+            op.slot = route->slot;
+            if (owner->m_onFfb) owner->m_onFfb(op);
+        }
+        if (handled || !owner->m_onRequest) return;
+        HidRequest r;
+        r.slot = route->slot;
+        r.kind = kind == input::IVirtualHid::Request::Output       ? HidRequest::Kind::Output
+                 : kind == input::IVirtualHid::Request::GetFeature ? HidRequest::Kind::GetFeature
+                                                                   : HidRequest::Kind::SetFeature;
+        r.reportId = reportId;
+        r.data = data;
+        owner->m_onRequest(r);
+    });
 }
 
 std::string HidPassthrough::attach(int slot, const HidDeviceInfo& device)
@@ -118,61 +469,38 @@ std::string HidPassthrough::attach(int slot, const HidDeviceInfo& device)
         pidId ? input::hid::encodeWithPid(collections, pidId) : input::hid::encode(collections);
     if (std::string why = input::hid::validate(descriptor); !why.empty()) return why;
 
-    auto s = std::make_unique<Slot>();
-    s->parsed = input::hid::parse(descriptor);
-    s->numbered = !(s->parsed.reportIds.size() == 1 && s->parsed.reportIds.front() == 0);
-    for (uint8_t id : s->parsed.reportIds) {
-        const size_t n = input::hid::reportBytes(s->parsed, input::hid::Kind::Input, id);
-        if (n) s->inputBytes[id] = n - (s->numbered ? 1 : 0);
+    // The same device, kept from the last stream: the game still has it.
+    std::unique_ptr<Slot> s;
+    if (m_parking) {
+        std::unique_ptr<HidParking::Entry> e = m_parking->claim(
+            device.name, device.vendorId, device.productId, device.version, descriptor);
+        if (e) s = std::move(e->slot);
     }
-    auto pid = std::make_shared<PidState>();
-    if (pidId) pid->engine = std::make_unique<input::hid::PidEngine>(s->parsed, pidId);
-    if (device.forceFeedback && !dev->forceFeedbackByPid())
-        dev->setFfbHandler([this, slot](const HidFfb& op) {
-            HidFfb o = op;
-            o.slot = slot;
-            if (m_onFfb) m_onFfb(o);
-        });
-    dev->setFeatureHandler([pid](uint8_t reportId) {
-        std::lock_guard<std::mutex> lock(pid->mutex);
-        return pid->engine ? pid->engine->getFeature(reportId) : std::vector<uint8_t>{};
-    });
-    dev->setRequestHandler([this, slot, pid](input::IVirtualHid::Request kind, uint8_t reportId,
-                                             const std::vector<uint8_t>& data) {
-        // The PID block's reports stay here: decoded into operations, or
-        // already answered by the feature handler.
-        std::vector<HidFfb> ops;
-        bool handled = false;
-        {
-            std::lock_guard<std::mutex> lock(pid->mutex);
-            if (pid->engine && pid->engine->owns(reportId)) {
-                if (kind != input::IVirtualHid::Request::GetFeature) pid->engine->write(data, ops);
-                handled = true;
-            }
-        }
-        for (HidFfb& op : ops) {
-            op.slot = slot;
-            if (m_onFfb) m_onFfb(op);
-        }
-        if (handled || !m_onRequest) return;
-        HidRequest r;
-        r.slot = slot;
-        r.kind = kind == input::IVirtualHid::Request::Output       ? HidRequest::Kind::Output
-                 : kind == input::IVirtualHid::Request::GetFeature ? HidRequest::Kind::GetFeature
-                                                                   : HidRequest::Kind::SetFeature;
-        r.reportId = reportId;
-        r.data = data;
-        m_onRequest(r);
-    });
-    input::VirtualHidIdentity id;
-    id.name = device.name;
-    id.vendorId = device.vendorId;
-    id.productId = device.productId;
-    id.version = device.version;
-    id.descriptor = descriptor;
-    std::string error;
-    if (!dev->create(id, error)) return error;
-    s->device = std::move(dev);
+    const bool kept = s != nullptr;
+    if (kept) {
+        // Its route stays ownerless until attached(): what the game does in
+        // between goes to the journal, and reaches the page in the replay.
+        s->lastSeq.clear(); // the page counts from 0 again
+        s->fromParking = true;
+    } else {
+        s = std::make_unique<Slot>();
+        s->identity.name = device.name;
+        s->identity.vendorId = device.vendorId;
+        s->identity.productId = device.productId;
+        s->identity.version = device.version;
+        s->identity.descriptor = descriptor;
+        s->pidFirstId = pidId;
+        s->describe(descriptor);
+        s->route = std::make_shared<Route>();
+        s->route->clock = m_clock;
+        if (pidId) s->route->engine = std::make_unique<input::hid::PidEngine>(s->parsed, pidId);
+        s->route->owner = this;
+        s->route->slot = slot;
+        wire(*dev, s->route);
+        std::string error;
+        if (!dev->create(s->identity, error)) return error;
+        s->device = std::move(dev);
+    }
 
     std::unique_ptr<Slot> previous;
     {
@@ -182,13 +510,39 @@ std::string HidPassthrough::attach(int slot, const HidDeviceInfo& device)
         if (!m_watchdog.joinable()) m_watchdog = std::thread([this] { watchdog(); });
     }
     previous.reset(); // its device goes away outside the lock
-    char ids[16];
-    std::snprintf(ids, sizeof ids, "%04x:%04x", device.vendorId, device.productId);
-    log::info("[hid] slot " + std::to_string(slot) + ": " + device.name + " " + ids +
-              " created, descriptor " + std::to_string(descriptor.size()) + " bytes" +
+    log::info("[hid] slot " + std::to_string(slot) + ": " + device.name + " " +
+              idsOf(device.vendorId, device.productId) +
+              (kept ? " taken back from the last stream"
+                    : " created, descriptor " + std::to_string(descriptor.size()) + " bytes") +
               (pidId ? ", force feedback (PID reports from " + std::to_string(pidId) + ")"
                      : std::string()));
     return {};
+}
+
+void HidPassthrough::attached(int slot)
+{
+    std::shared_ptr<Route> route;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_slots.find(slot);
+        if (it == m_slots.end() || !it->second->fromParking) return;
+        it->second->fromParking = false;
+        route = it->second->route;
+    }
+    // Under the route's lock: the game's next operation waits for the replay,
+    // and the page's player meets every effect before its updates.
+    std::lock_guard<std::mutex> lock(route->mutex);
+    route->owner = this;
+    route->slot = slot;
+    route->clock = m_clock;
+    const std::vector<HidFfb> ops = route->journal.replay(m_clock());
+    if (m_onFfb)
+        for (HidFfb op : ops) {
+            op.slot = slot;
+            m_onFfb(op);
+        }
+    log::info("[hid] slot " + std::to_string(slot) + ": force feedback of the last stream sent " +
+              "again (" + std::to_string(route->journal.effects()) + " effects)");
 }
 
 void HidPassthrough::input(int slot, uint8_t reportId, uint16_t seq, const uint8_t* bytes,
@@ -258,14 +612,7 @@ void HidPassthrough::checkSilence(int64_t nowMs)
     for (auto& [slot, sp] : m_slots) {
         Slot& s = *sp;
         if (s.resting || nowMs - s.lastAtMs < kSilenceMs) continue;
-        s.resting = true;
-        for (auto& [id, last] : s.last) {
-            std::vector<uint8_t> rest = input::hid::restReport(s.parsed, id, last, s.first[id]);
-            if (rest == last) continue;
-            last = rest;
-            if (s.numbered) rest.insert(rest.begin(), id);
-            s.device->input(rest.data(), rest.size());
-        }
+        s.rest();
         log::info("[hid] slot " + std::to_string(slot) + " silent for " +
                   std::to_string(kSilenceMs) + " ms: put to rest");
     }

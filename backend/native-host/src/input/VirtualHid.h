@@ -87,6 +87,24 @@ public:
     /// the backend takes effects itself and calls the FfbHandler (uinput).
     virtual bool forceFeedbackByPid() const { return true; }
 
+    // ── Between two streams (HidParking) ─────────────────────────────────────
+    // Each stream has a process of its own; a device that must outlive one is
+    // carried to the next by its OS handle, which keeps it in place as long as
+    // any process holds a copy (Windows: the driver removes the device when
+    // the last handle to it closes).
+
+    /// The handle another process can be given, or 0 where the device cannot
+    /// cross processes (uhid, uinput: it stays in the process that made it).
+    virtual uint64_t nativeHandle() const { return 0; }
+    /// Stops answering the device's requests, the device left as it is: the
+    /// process the handle goes to answers them from now on.
+    virtual void pause() {}
+    /// Answers them again: after pause(), or once handlers are set on a
+    /// device made by adoptVirtualHid().
+    virtual void resume() {}
+    /// Lets go of the device: removed, unless another process holds it.
+    virtual void release() { destroy(); }
+
 protected:
     RequestHandler m_onRequest;
     FeatureHandler m_onGetFeature;
@@ -97,6 +115,12 @@ protected:
 /// feedback asked, Linux gives a uinput device (UinputWheel) instead of uhid:
 /// the kernel gives a uhid device none (HidEvdev.h).
 std::unique_ptr<IVirtualHid> makeVirtualHid(bool forceFeedback = false);
+
+/// A device another process made and handed over: `handle` is this process's
+/// copy of its nativeHandle(), owned from here on. Null with the reason (the
+/// handle closed) when it is not one of the driver's devices, or where devices
+/// cannot cross processes. Answers nothing until resume().
+std::unique_ptr<IVirtualHid> adoptVirtualHid(uint64_t handle, std::string& error);
 
 /// Whether this host can carry a recreated wheel's force feedback now:
 /// Windows always (pid.dll), Linux when /dev/uinput is writable.

@@ -756,6 +756,93 @@ WINUHID_API VOID WinUHidDestroyDevice(PWINUHID_DEVICE Device)
 	HeapFree(GetProcessHeap(), 0, Device);
 }
 
+#ifdef MOONLIGHTWEB_VHID
+WINUHID_API HANDLE WinUHidGetHandle(PWINUHID_DEVICE Device)
+{
+	return Device ? Device->Handle : NULL;
+}
+
+WINUHID_API PWINUHID_DEVICE WinUHidAdoptDevice(HANDLE Handle)
+{
+	PWINUHID_DEVICE device;
+	DWORD version = 0;
+	DWORD bytesReturned = 0;
+	OVERLAPPED overlapped = {};
+	BOOL ret;
+
+	if (Handle == NULL || Handle == INVALID_HANDLE_VALUE) {
+		SetLastError(ERROR_INVALID_PARAMETER);
+		return NULL;
+	}
+
+	//
+	// The handle was opened overlapped by the process that created the device,
+	// and its duplicates share that mode.
+	//
+	Wrappers::Event overlappedEvent{ CreateEventW(NULL, TRUE, FALSE, NULL) };
+	if (!overlappedEvent.IsValid()) {
+		return NULL;
+	}
+	overlapped.hEvent = overlappedEvent.Get();
+	ret = DeviceIoControl(Handle, IOCTL_WINUHID_GET_INTERFACE_VERSION, NULL, 0, &version, sizeof(version), &bytesReturned, &overlapped);
+	if (!ret && GetLastError() == ERROR_IO_PENDING) {
+		ret = GetOverlappedResultEx(Handle, &overlapped, &bytesReturned, 5000, FALSE);
+		if (!ret) {
+			CancelIoEx(Handle, &overlapped);
+			GetOverlappedResult(Handle, &overlapped, &bytesReturned, TRUE);
+		}
+	}
+	if (!ret || bytesReturned != sizeof(version) || version != WINUHID_VERSION_LATEST) {
+		SetLastError(ERROR_INVALID_HANDLE);
+		return NULL;
+	}
+
+	device = (PWINUHID_DEVICE)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*device));
+	if (!device) {
+		SetLastError(ERROR_OUTOFMEMORY);
+		return NULL;
+	}
+	InitializeSRWLock(&device->Lock);
+	device->State = WINUHID_DEVICE_STATE::Stopped;
+	device->EventBufferSizeHint = 128;
+	device->Handle = Handle;
+	return device;
+}
+
+WINUHID_API BOOL WinUHidResumeDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLBACK EventCallback, PVOID CallbackContext)
+{
+	if (Device == NULL || EventCallback == NULL) {
+		SetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	AcquireSRWLockExclusive(&Device->Lock);
+	if (Device->State != WINUHID_DEVICE_STATE::Stopped) {
+		ReleaseSRWLockExclusive(&Device->Lock);
+		SetLastError(ERROR_BAD_COMMAND);
+		return FALSE;
+	}
+
+	//
+	// As WinUHidStartDevice(): the thread waits on the lock until the state
+	// below is set. No throttled read thread: MoonlightWeb submits its input.
+	//
+	Device->EventCallback = EventCallback;
+	Device->CallbackContext = CallbackContext;
+	Device->EventThread = CreateThread(NULL, 0, EventThreadProc, Device, 0, NULL);
+	if (Device->EventThread == NULL) {
+		ReleaseSRWLockExclusive(&Device->Lock);
+		return FALSE;
+	}
+	SetThreadPriority(Device->EventThread, THREAD_PRIORITY_TIME_CRITICAL);
+	SetThreadDescription(Device->EventThread, L"WinUHid Event Callback Thread");
+
+	Device->State = WINUHID_DEVICE_STATE::Started;
+	ReleaseSRWLockExclusive(&Device->Lock);
+	return TRUE;
+}
+#endif
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 {
 	switch (fdwReason)

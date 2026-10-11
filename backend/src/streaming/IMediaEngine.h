@@ -320,6 +320,10 @@ public:
         Q_UNUSED(message);
         return hidUnavailableReason();
     }
+    /// The relay sent the page its hidattached {ok: true}. A wheel kept from
+    /// the last stream answers with what rebuilds its force feedback, which
+    /// the page can only play once it knows the device is there.
+    virtual void hidAttached(int slot) { Q_UNUSED(slot); }
     /// One message of the 'hid' channel: [slot][report id][seq u16 LE][report].
     /// Called on the channel's own thread; never blocks.
     virtual void hidInput(const uint8_t* frame, size_t size)

@@ -813,4 +813,25 @@ void PidEngine::write(const std::vector<uint8_t>& data, std::vector<HidFfb>& ops
     }
 }
 
+std::vector<uint8_t> PidEngine::save() const
+{
+    // Block Load's last answer, then one byte per block, 1..kPidMaxEffects.
+    std::vector<uint8_t> out{m_loadIndex, m_loadStatus};
+    for (int i = 1; i <= kPidMaxEffects; ++i)
+        out.push_back(m_used[i] ? 1 : 0);
+    return out;
+}
+
+bool PidEngine::restore(const std::vector<uint8_t>& state)
+{
+    if (state.size() != static_cast<size_t>(2 + kPidMaxEffects) || state[0] > kPidMaxEffects ||
+        state[1] > 3)
+        return false;
+    m_loadIndex = state[0];
+    m_loadStatus = state[1];
+    for (int i = 1; i <= kPidMaxEffects; ++i)
+        m_used[i] = state[static_cast<size_t>(1 + i)] != 0;
+    return true;
+}
+
 } // namespace mw::native::input::hid

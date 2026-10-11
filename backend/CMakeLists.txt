@@ -298,6 +298,9 @@ add_executable(mw-server
     src/streaming/NativeMediaEngine.cpp
     # The HID passthrough's hidattach: the page's WebHID collections, read.
     src/streaming/HidCollectionsJson.cpp
+    # Its wheels kept between two streams, from one worker to the next.
+    src/streaming/HidParkedJson.cpp
+    src/streaming/HidParkingTransfer.cpp
     src/streaming/FeedInfo.cpp
     src/streaming/FeedPublisher.cpp
     src/streaming/FeedSubscriber.cpp

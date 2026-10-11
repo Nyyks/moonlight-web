@@ -267,6 +267,7 @@ public:
     /// here by mw::native::HidPassthrough (made at the first attach).
     QString hidUnavailableReason() const override;
     QString hidAttach(int slot, const QJsonObject& message) override;
+    void hidAttached(int slot) override;
     void hidInput(const uint8_t* frame, size_t size) override;
     void hidDetach(int slot) override;
     bool hidForceFeedback() const override;

@@ -33,6 +33,8 @@
 #include "../StreamRelay.h"
 #include "../SignalingServer.h"
 #include "../IMediaEngine.h"
+#include "../ConsoleSession.h"
+#include "../HidParkingTransfer.h"
 #include "../WorkerService.h"
 #include "../../backend/NvComputer.h"
 #include "../../backend/NvHTTP.h"
@@ -214,7 +216,20 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
 
     // The relay graph tears down asynchronously on its own thread; give it a
     // moment before the process exits (LiStopConnection can take a while).
-    QTimer::singleShot(3000, qApp, &QCoreApplication::quit);
+    // Last, the wheels its engine left at rest go to the server, which keeps
+    // them for the next stream: a game left running keeps its wheel and the
+    // force feedback it set up (HidParkingTransfer). The pid was checked when
+    // the pipes were, and is checked again: the server may be gone, and its
+    // pid someone else's.
+    QTimer::singleShot(3000, qApp, []() {
+        const quint32 serverPid = ConsoleSession::workerServerPid();
+        if (serverPid &&
+            ConsoleSession::isThisExecutable(ConsoleSession::processImage(serverPid))) {
+            const QJsonObject parked = HidParkingTransfer::shipToServer(serverPid);
+            if (!parked.isEmpty()) emitEvent(parked);
+        }
+        QCoreApplication::quit();
+    });
 }
 
 /// The guests' shared feed (plan « flux commun des invités »): a worker with no
@@ -463,6 +478,16 @@ int runStreamWorker(QCoreApplication& app)
 
     // The guests' shared feed: an engine and a pipe, nothing a browser meets.
     if (cfg[QStringLiteral("role")].toString() == QLatin1String("feed")) return runFeedWorker(cfg);
+
+    // The wheels the server kept from the last stream, first of all: until
+    // this process answers for them, the game's force feedback requests wait.
+    // The server learns at once, and lets go of its copies.
+    if (cfg.contains(QStringLiteral("hidParked"))) {
+        const int taken = HidParkingTransfer::adoptFromServer(
+            cfg[QStringLiteral("hidParked")].toObject(), ConsoleSession::workerServerPid());
+        emitEvent({{QStringLiteral("event"), QStringLiteral("hidAdopted")},
+                   {QStringLiteral("count"), taken}});
+    }
 
     // Automatic storage is required: the relay callbacks below capture `state`
     // by reference, and a lambda can only capture a variable with automatic

@@ -32,10 +32,13 @@ add_library(mw-native-host STATIC
     # checked before the host creates anything. Pure as well, so tested anywhere.
     src/input/HidDescriptor.cpp
     src/input/HidPid.cpp
+    # A wheel's force feedback as the game left it, replayed to the next page.
+    src/input/HidFfbJournal.cpp
     # A wheel's evdev layout and Linux force feedback effects (uinput, P4).
     src/input/HidEvdev.cpp
-    # The devices a session recreates from them, with their watchdog; the OS
-    # backend behind it is chosen below (uhid, the driver, or none).
+    # The devices a session recreates from them, with their watchdog, and the
+    # parking that keeps them between two streams; the OS backend behind them
+    # is chosen below (uhid, the driver, or none).
     src/input/HidPassthrough.cpp
 )
 
