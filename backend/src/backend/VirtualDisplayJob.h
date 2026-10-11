@@ -163,4 +163,7 @@ private:
     // macOS: the request was applied in this process and the poll is waiting
     // for the OS to list the display; this is the result to deliver then.
     std::optional<VirtualDisplay::Result> m_InProcessResult;
+    /// The mode the caller asked for, while fail() walks the request towards
+    /// the default one (VirtualDisplay::fallbackTowardsDefault).
+    std::optional<VirtualDisplay::Request> m_AskedBeforeFallback;
 };

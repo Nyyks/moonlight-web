@@ -225,9 +225,12 @@ void VirtualDisplayJob::enqueue(Action action, int width, int height, int refres
     // The same verb AND the same mode as the running or last queued
     // operation: join it. A different mode is a different operation, and it
     // waits its turn rather than riding on one that will not deliver it.
-    if (running() && m_Request.action == action && m_Request.width == width &&
-        m_Request.height == height && m_Request.refresh == refresh && m_Request.hdr == hdr &&
-        m_Queue.isEmpty()) {
+    // While a mode falls back, the caller's own one is what it is running.
+    const VirtualDisplay::Request& runningAsked =
+        m_AskedBeforeFallback ? *m_AskedBeforeFallback : m_Request;
+    if (running() && runningAsked.action == action && runningAsked.width == width &&
+        runningAsked.height == height && runningAsked.refresh == refresh &&
+        runningAsked.hdr == hdr && m_Queue.isEmpty()) {
         if (cb) m_Callbacks.append(std::move(cb));
         return;
     }
@@ -266,6 +269,7 @@ void VirtualDisplayJob::startNext()
     m_HelperOut.clear();
     m_NextStages.clear();
     m_InProcessResult.reset();
+    m_AskedBeforeFallback.reset();
 
     const VirtualDisplay::Status st = VirtualDisplay::probe();
     if (!st.supported) {
@@ -302,6 +306,29 @@ void VirtualDisplayJob::settle(bool ok, const QString& error)
 
 void VirtualDisplayJob::fail(const QString& error)
 {
+    // A display that did not come up at the client's mode is asked again
+    // closer to the default one, which always comes up: the stream then runs
+    // at that mode instead of failing to launch. The helper has already
+    // switched the node back off and taken the client's mode out of the list.
+    if (const auto next = VirtualDisplay::fallbackTowardsDefault(m_Request, error)) {
+        if (!m_AskedBeforeFallback) m_AskedBeforeFallback = m_Request;
+        Logger::warning(QStringLiteral("[vdisplay] %1x%2@%3 did not come up — trying %4x%5@%6")
+                            .arg(m_Request.width)
+                            .arg(m_Request.height)
+                            .arg(m_Request.refresh)
+                            .arg(next->width)
+                            .arg(next->height)
+                            .arg(next->refresh));
+        m_Poll.stop();
+        m_Deadline.stop();
+        m_Request = *next;
+        m_HelperOut.clear();
+        m_NextStages.clear();
+        QFile::remove(VirtualDisplay::resultPath());
+        QFile::remove(VirtualDisplay::requestPath());
+        dispatch();
+        return;
+    }
     m_Error = error;
     m_FinishedAt = QDateTime::currentDateTimeUtc();
     m_Poll.stop();
@@ -330,10 +357,15 @@ void VirtualDisplayJob::succeed(const VirtualDisplay::Result& res)
         }
         if (m_Request.refresh > 0) rec["refresh"] = m_Request.refresh;
         settings.setVirtualDisplay(rec);
-        m_ActiveWidth = m_Request.width;
-        m_ActiveHeight = m_Request.height;
-        m_ActiveRefresh = m_Request.refresh;
-        m_ActiveHdr = m_Request.hdr;
+        // After a fallback, the mode the caller asked for is remembered as
+        // answered: the next launch asking it again joins the display as it
+        // is, instead of waiting on the same refusal before the same fallback.
+        const VirtualDisplay::Request& asked =
+            m_AskedBeforeFallback ? *m_AskedBeforeFallback : m_Request;
+        m_ActiveWidth = asked.width;
+        m_ActiveHeight = asked.height;
+        m_ActiveRefresh = asked.refresh;
+        m_ActiveHdr = asked.hdr;
     } else if (m_Request.action == Action::Deactivate) {
         settings.clearVirtualDisplay();
         m_ActiveWidth = m_ActiveHeight = m_ActiveRefresh = 0;

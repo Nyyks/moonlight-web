@@ -1206,7 +1206,9 @@ int stageMode(Context& ctx)
         }
         // Nor does the mode it was asked for stay in an owner's list.
         forgetAddedModes();
-        return failAt(ctx, stage, QStringLiteral("the virtual display did not appear"));
+        // The server tries again closer to the default mode
+        // (VirtualDisplay::fallbackTowardsDefault).
+        return failAt(ctx, stage, VirtualDisplay::notAppearedError());
     }
     ctx.result.display = target->gdiName;
 

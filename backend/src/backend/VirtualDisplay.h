@@ -309,6 +309,19 @@ std::optional<Request> parseRequest(const QByteArray& json, QString* error);
 QByteArray toJson(const Request& req);
 QString toString(Request::Action action);
 
+/// The helper's error when the display never came up after the node was
+/// switched on — the driver read a mode list it could not bring up (a
+/// client's 1784×1160 at 240 Hz beside an owner's own modes, 11/10/2026).
+QString notAppearedError();
+
+/// What to try next when activating @p tried failed with @p error: the same
+/// request one step closer to the default mode — the client's size dropped
+/// first (a rate the client's screen runs at is worth more than its shape),
+/// then its rate. nullopt when there is nothing left to drop, or when the
+/// failure is not one a mode explains: a launch at the default mode is
+/// better than no launch, which is what normaliseMode() already promises.
+std::optional<Request> fallbackTowardsDefault(const Request& tried, const QString& error);
+
 struct Result
 {
     bool ok = false;

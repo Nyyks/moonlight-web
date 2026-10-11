@@ -327,6 +327,46 @@ void run_virtual_display_tests()
                  QFileInfo(settingsXmlPath()).absolutePath());
     }
 
+    SECTION("VirtualDisplay — a display that does not come up falls back to the default mode");
+    {
+        // DSCP bench, 11/10/2026: a client's 1784x1160 at 240 Hz in the owner's
+        // list and the display never appeared, so the launch failed. The size
+        // goes first, then the rate, then nothing is left to drop.
+        Request asked;
+        asked.action = Request::Action::Activate;
+        asked.width = 1784;
+        asked.height = 1160;
+        asked.refresh = 240;
+        asked.restorePrimary = QStringLiteral("kept");
+        const auto first = fallbackTowardsDefault(asked, notAppearedError());
+        CHECK(first.has_value());
+        if (first) {
+            CHECK_EQ(first->width, 0);
+            CHECK_EQ(first->height, 0);
+            CHECK_EQ(first->refresh, 240);
+            CHECK(first->action == Request::Action::Activate);
+            CHECK_EQ(first->restorePrimary, QStringLiteral("kept"));
+            const auto second = fallbackTowardsDefault(*first, notAppearedError());
+            CHECK(second.has_value());
+            if (second) {
+                CHECK_EQ(second->width, 0);
+                CHECK_EQ(second->refresh, 0);
+                CHECK(!fallbackTowardsDefault(*second, notAppearedError()).has_value());
+            }
+        }
+        // The default rate asked explicitly: dropping it changes nothing.
+        Request atDefaultRate;
+        atDefaultRate.action = Request::Action::Activate;
+        atDefaultRate.refresh = kRefreshHz;
+        CHECK(!fallbackTowardsDefault(atDefaultRate, notAppearedError()).has_value());
+        // A failure no mode explains is not retried, nor anything but Activate.
+        CHECK(!fallbackTowardsDefault(asked, QStringLiteral("this process is not elevated"))
+                   .has_value());
+        Request off = asked;
+        off.action = Request::Action::Deactivate;
+        CHECK(!fallbackTowardsDefault(off, notAppearedError()).has_value());
+    }
+
     SECTION("VirtualDisplay — the client's refresh rate travels and fills the mode list");
     {
         // Pinned into bounds, never refused — a launch must not fail over a

@@ -119,6 +119,27 @@ std::optional<Request> parseRequest(const QByteArray& json, QString* error)
     return req;
 }
 
+QString notAppearedError()
+{
+    return QStringLiteral("the virtual display did not appear");
+}
+
+std::optional<Request> fallbackTowardsDefault(const Request& tried, const QString& error)
+{
+    if (tried.action != Request::Action::Activate || error != notAppearedError())
+        return std::nullopt;
+    Request next = tried;
+    if (next.width > 0 || next.height > 0) {
+        next.width = next.height = 0;
+        return next;
+    }
+    if (next.refresh > 0 && next.refresh != kRefreshHz) {
+        next.refresh = 0;
+        return next;
+    }
+    return std::nullopt;
+}
+
 QByteArray toJson(const Request& req)
 {
     QJsonObject obj;
