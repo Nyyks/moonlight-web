@@ -278,4 +278,10 @@ WINUHID_API PWINUHID_DEVICE WinUHidAdoptDevice(HANDLE Handle);
 // WinUHidAdoptDevice()), without starting it in the driver a second time.
 //
 WINUHID_API BOOL WinUHidResumeDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALLBACK EventCallback, PVOID CallbackContext);
+
+//
+// TRUE while the device is started and its event thread still runs (it ends
+// when polling fails): for a diagnostic, not a synchronisation.
+//
+WINUHID_API BOOL WinUHidIsServicingEvents(PWINUHID_DEVICE Device);
 #endif

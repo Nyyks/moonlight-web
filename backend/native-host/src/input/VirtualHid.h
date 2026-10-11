@@ -104,6 +104,9 @@ public:
     virtual void resume() {}
     /// Lets go of the device: removed, unless another process holds it.
     virtual void release() { destroy(); }
+    /// False once the thread that answers the device's requests has stopped
+    /// while it should run: the game's next request would wait for nobody.
+    virtual bool servicing() const { return true; }
 
 protected:
     RequestHandler m_onRequest;

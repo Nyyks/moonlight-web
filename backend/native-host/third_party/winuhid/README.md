@@ -36,6 +36,12 @@ without it:
   `WinUHidGetHandle`, `WinUHidAdoptDevice` and `WinUHidResumeDevice`, so a device outlives the
   stream's process: the driver keeps it while any handle to it is open, the handle is duplicated
   into the next process, which services its events from then on (`HidParking`).
+  `WinUHidIsServicingEvents`, for the log. The event thread polls 10 ms at a time instead of
+  waiting without end: the driver's IOCTL_WINUHID_GET_NEXT_EVENT drops its lock between finding
+  no waiting operation and queuing itself, and an operation that arrives in between waits for
+  the next one to wake it. A game whose synchronous write is that operation sends no next one
+  (ACC froze in `pid!PID_SendReportBl`, bench of 11/10). Polling again finds it. The driver
+  itself keeps the race until it is signed again.
 
 The INF is ours (`drivers/vhid/MoonlightWebVHid.inf`): hardware id, DLL, UMDF service and strings
 renamed; upstream's ACL kept.

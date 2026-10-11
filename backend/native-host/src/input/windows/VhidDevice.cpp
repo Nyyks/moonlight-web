@@ -17,6 +17,8 @@
 
 #include "input/VirtualHid.h"
 
+#include "core/Log.h"
+
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <sddl.h>
@@ -175,6 +177,8 @@ public:
         if (m_device) WinUHidResumeDevice(m_device, &VhidDevice::onEvent, this);
     }
 
+    bool servicing() const override { return m_device && WinUHidIsServicingEvents(m_device); }
+
     /// A device another process made: `handle` is this process's copy, and
     /// closed when it is not one of the driver's devices.
     bool adopt(HANDLE handle, std::string& error)
@@ -192,27 +196,39 @@ private:
     static VOID onEvent(PVOID context, PWINUHID_DEVICE device, PCWINUHID_EVENT ev)
     {
         auto* self = static_cast<VhidDevice*>(context);
-        switch (ev->Type) {
+        // Completing an event frees it: what is needed after is copied first
+        // (reading it after crashed a worker on the bench, 11/10).
+        const WINUHID_EVENT_TYPE type = ev->Type;
+        const uint8_t reportId = ev->ReportId;
+        switch (type) {
         case WINUHID_EVENT_WRITE_REPORT:
         case WINUHID_EVENT_SET_FEATURE: {
             std::vector<uint8_t> data(ev->Write.Data, ev->Write.Data + ev->Write.DataLength);
             WinUHidCompleteWriteEvent(device, ev, TRUE);
             if (self->m_onRequest)
-                self->m_onRequest(ev->Type == WINUHID_EVENT_WRITE_REPORT ? Request::Output
-                                                                         : Request::SetFeature,
-                                  ev->ReportId, data);
+                self->m_onRequest(type == WINUHID_EVENT_WRITE_REPORT ? Request::Output
+                                                                     : Request::SetFeature,
+                                  reportId, data);
             break;
         }
         case WINUHID_EVENT_GET_FEATURE: {
             // VHF hands the report buffer id byte first, as HidD_GetFeature does.
             std::vector<uint8_t> answer;
-            if (self->m_onGetFeature) answer = self->m_onGetFeature(ev->ReportId);
+            if (self->m_onGetFeature) answer = self->m_onGetFeature(reportId);
             WinUHidCompleteReadEvent(device, ev, answer.empty() ? nullptr : answer.data(),
                                      static_cast<DWORD>(answer.size()));
-            if (self->m_onRequest) self->m_onRequest(Request::GetFeature, ev->ReportId, {});
+            if (self->m_onRequest) self->m_onRequest(Request::GetFeature, reportId, {});
             break;
         }
-        default: break;
+        default:
+            // Never asked for (SupportedEvents): failed, or the game would wait.
+            log::warning("[hid] unexpected request type " + std::to_string(type) +
+                         " from the driver, report " + std::to_string(reportId));
+            if (WINUHID_EVENT_TYPE_IS_READ(type))
+                WinUHidCompleteReadEvent(device, ev, nullptr, 0);
+            else
+                WinUHidCompleteWriteEvent(device, ev, FALSE);
+            break;
         }
     }
 

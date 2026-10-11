@@ -347,7 +347,27 @@ DWORD WINAPI EventThreadProc(LPVOID lpParameter)
 	PWINUHID_DEVICE device = (PWINUHID_DEVICE)lpParameter;
 	PCWINUHID_EVENT event;
 
+#ifdef MOONLIGHTWEB_VHID
+	//
+	// MoonlightWeb: never wait more than a few milliseconds at a time. The
+	// driver's IOCTL_WINUHID_GET_NEXT_EVENT finds no waiting operation, drops
+	// its lock, then queues itself: an operation VHF hands it in between finds
+	// no queued IOCTL and waits for the next operation to wake it. A game whose
+	// write blocks on that operation sends no next one (pid.dll writes its
+	// output reports synchronously): ACC froze that way on the bench, 11/10.
+	// Asking again finds the operation that waits.
+	//
+	for (;;) {
+		event = WinUHidPollEvent(device, 10);
+		if (event == NULL) {
+			if (GetLastError() == ERROR_TIMEOUT) {
+				continue;
+			}
+			break;
+		}
+#else
 	while ((event = WinUHidPollEvent(device, INFINITE))) {
+#endif
 		//
 		// If this is a ready-for-read event and throttling is enabled, pass it to the read thread
 		//
@@ -840,6 +860,21 @@ WINUHID_API BOOL WinUHidResumeDevice(PWINUHID_DEVICE Device, PWINUHID_EVENT_CALL
 	Device->State = WINUHID_DEVICE_STATE::Started;
 	ReleaseSRWLockExclusive(&Device->Lock);
 	return TRUE;
+}
+
+WINUHID_API BOOL WinUHidIsServicingEvents(PWINUHID_DEVICE Device)
+{
+	BOOL running;
+
+	if (Device == NULL) {
+		return FALSE;
+	}
+
+	AcquireSRWLockShared(&Device->Lock);
+	running = Device->State == WINUHID_DEVICE_STATE::Started && Device->EventThread != NULL &&
+		WaitForSingleObject(Device->EventThread, 0) == WAIT_TIMEOUT;
+	ReleaseSRWLockShared(&Device->Lock);
+	return running;
 }
 #endif
 

@@ -97,6 +97,8 @@ private:
         auto* self = static_cast<WinUHidDevice*>(context);
         Request kind = Request::Output;
         QByteArray data;
+        // Completing an event frees it: its id is read first.
+        const int reportId = ev->ReportId;
         switch (ev->Type) {
         case WINUHID_EVENT_WRITE_REPORT:
             data = QByteArray(reinterpret_cast<const char*>(ev->Write.Data),
@@ -115,7 +117,6 @@ private:
             break;
         default: return;
         }
-        const int reportId = ev->ReportId;
         QMetaObject::invokeMethod(
             self, [self, kind, reportId, data] { emit self->request(kind, 0, reportId, data); },
             Qt::QueuedConnection);
