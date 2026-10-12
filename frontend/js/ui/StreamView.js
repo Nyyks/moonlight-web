@@ -2344,11 +2344,13 @@ export class StreamView {
         // covers the streamed image, leaving the header/letterbox untouched.
         this.canvasArea.appendChild(this._revealEl);
 
-        // Start overlay update timer (every 500ms). The silent-decoder check
-        // rides on it: it reads the same counters, whether the stats show or not.
+        // Start overlay update timer (every 500ms). The silent-decoder check,
+        // the renderer fallback and the pipeline governors ride on it: they
+        // read the same counters, whether the stats show or not.
         this._overlayInterval = setInterval(() => {
             this._checkSilentDecoder();
             this._checkRendererCost();
+            this._runPipelineGovernors(performance.now());
             this._updateOverlay();
         }, 500);
 
@@ -6158,10 +6160,7 @@ export class StreamView {
             fps = this._mediaFps;
             bitrateMbps = this._mediaBitrateMbps;
         } else {
-            // FPS: decoded frames in the last 2 seconds
-            const cutoff = now - 2000;
-            this._fpsTimestamps = this._fpsTimestamps.filter((t) => t > cutoff);
-            fps = Math.round(this._fpsTimestamps.length / 2);
+            fps = this._decodedFps(now);
 
             // Bitrate: the last 2 s, not the session's average — after a
             // step down the ladder, the card follows within the window.
@@ -6671,11 +6670,6 @@ export class StreamView {
         // be reported without watching the overlay.
         // Not applicable to webrtc-media: no WebCodecs pipeline to observe.
         if (!isMedia) {
-            // Main-thread path only: the worker applies its own ladder before
-            // posting, so re-deciding here would fight it with stale numbers.
-            // Runs whether or not the diagnostics are displayed.
-            if (!this._useWorker) this._applyEnhancerGovernor(diagSnap, now);
-            this._applyDecodeRateGovernor(diagSnap, fps, now);
             if (this._perfDiag) {
                 let diagLine = formatDiag(diagSnap, {
                     decodedFps: fps,
@@ -6903,6 +6897,31 @@ export class StreamView {
      * queue covers the case the draw wait cannot see: a GPU pass that only
      * queues its work reports no cost at all while it starves the decoder.
      */
+    /** Decoded frames per second, over the last 2 s. */
+    _decodedFps(now) {
+        const cutoff = now - 2000;
+        this._fpsTimestamps = this._fpsTimestamps.filter((t) => t > cutoff);
+        return Math.round(this._fpsTimestamps.length / 2);
+    }
+
+    /**
+     * Feed the enhancer and decode-rate governors on the 500 ms tick, whether
+     * the stats card shows or not: they used to run inside _updateOverlay,
+     * whose early returns stopped both ladders once the card was hidden or
+     * closed, and whose repaints (a hover on the card) fed them extra windows.
+     * The decoded-frame window is pruned here too, so a hidden card does not
+     * let it grow for the whole session.
+     */
+    _runPipelineGovernors(now) {
+        const fps = this._decodedFps(now);
+        if (this._transport === 'webrtc-media' || !this._firstFrameRendered) return;
+        const diag = this._workerDiag || this._diag.snapshot();
+        // Main-thread path only: the worker applies its own ladder before
+        // posting, so re-deciding here would fight it with stale numbers.
+        if (!this._useWorker) this._applyEnhancerGovernor(diag, now);
+        this._applyDecodeRateGovernor(diag, fps, now);
+    }
+
     /**
      * Feed the decode-rate governor and tell the host what it decides.
      *
