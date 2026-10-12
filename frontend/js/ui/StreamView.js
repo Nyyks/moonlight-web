@@ -9570,6 +9570,31 @@ export class StreamView {
         }
     }
 
+    /**
+     * An AltGr keystroke the layout has no character for: a dead key, or
+     * nothing at all. Chrome on Windows names neither 'Dead' — e.key reads the
+     * key's plain character, as if AltGr were not held: 'é' for AltGr+2 on
+     * AZERTY, whose tilde then comes composed with the next key ("~" with the
+     * Space). Sent as that 'é', it typed "é~" on the native host for one tilde
+     * (12/10/2026). The layout map holds each key's plain character, which a
+     * real AltGr character ('#' for AltGr+3) is not. A left Ctrl+Alt chord
+     * reports Control and Alt, not AltGraph, and stays a chord.
+     *
+     * @param {KeyboardEvent} e
+     * @param {Map<string, string>|null} map navigator.keyboard's layout map
+     * @returns {boolean}
+     */
+    static isAltGrWithoutChar(e, map) {
+        if (!map || typeof e.key !== 'string' || [...e.key].length !== 1) return false;
+        let altGraph = false;
+        try {
+            altGraph = typeof e.getModifierState === 'function' && e.getModifierState('AltGraph');
+        } catch {
+            altGraph = false;
+        }
+        return altGraph && map.get(e.code) === e.key;
+    }
+
     // Align the host's toggle-lock state with the client's. The Moonlight
     // protocol has no lock-state field, so we send the client's lock states
     // to the backend, which reads the host's REAL state (when the streamed
@@ -9863,15 +9888,16 @@ export class StreamView {
         // AZERTY instead of VK_Q), which breaks Sunshine's layout correction.
         // Fall back to e.keyCode only for unmapped codes.
         const vkCode = StreamView.codeToWindowsVk(e.code) || e.keyCode;
-        // …and, for a printable key, which character the client's layout put
-        // there — plus whether the US layout disagrees. What each host does with
-        // that is InputMsg::resolveKey's business, not ours.
-        const cc = StreamView.clientChar(e);
-        const char = cc ? cc.char : null;
-        const nonUs = cc ? cc.nonUs : false;
         // A dead key (AltGr+2's tilde on AZERTY): its character comes composed
         // with the next key. Said so, for the native host to leave it out.
-        const dead = e.key === 'Dead';
+        const dead = e.key === 'Dead' || StreamView.isAltGrWithoutChar(e, this._layoutMap);
+        // …and, for a printable key, which character the client's layout put
+        // there — plus whether the US layout disagrees. What each host does with
+        // that is InputMsg::resolveKey's business, not ours. A dead key has none
+        // yet, whatever e.key reads.
+        const cc = dead ? null : StreamView.clientChar(e);
+        const char = cc ? cc.char : null;
+        const nonUs = cc ? cc.nonUs : false;
 
         // The printable key after a dead key: what it types is the browser's
         // composition, and Chrome on Windows does not put that in this event —

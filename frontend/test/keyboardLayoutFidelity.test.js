@@ -342,3 +342,53 @@ describe('a dead key and what it composes', () => {
         expect(n.char).toBe('Ñ');
     });
 });
+
+describe('an AltGr dead key that Chrome does not name', () => {
+    // Recorded on Windows Chrome, AZERTY (12/10/2026): AltGr+2 reads 'é', the
+    // key's plain character, with AltGraph set and neither Ctrl nor Alt; the
+    // tilde comes with the Space, which reads '~'. 'Dead' only ever came for
+    // the ^ key, which needs no AltGr. One tilde typed "é~" on the native host.
+    const azerty = new Map([
+        ['Digit2', 'é'],
+        ['Digit3', '"'],
+        ['Digit7', 'è'],
+        ['KeyT', 't'],
+    ]);
+    const altGr = { getModifierState: (n) => n === 'AltGraph' };
+
+    it('flags AltGr+2 as dead, without its plain é, and sends the ~ on the Space', () => {
+        const v = keySink({ _layoutMap: azerty });
+        v.handleKeyDown(ev('ControlLeft', 'Control', { ctrlKey: true }));
+        v.handleKeyDown(ev('AltRight', 'AltGraph', altGr));
+        v.handleKeyDown(ev('Digit2', 'é', altGr));
+        v.handleKeyUp(ev('Digit2', 'é', altGr));
+        v.handleKeyUp(ev('ControlLeft', 'Control', altGr));
+        v.handleKeyUp(ev('AltRight', 'AltGraph'));
+        v.handleKeyDown(ev('Space', '~'));
+        v.handleKeyPress(ev('Space', '~'));
+        v.handleKeyUp(ev('Space', ' '));
+
+        const digit2 = v.sent.find((m) => m.type === 'keydown' && m.code === 'Digit2');
+        expect(digit2).toMatchObject({ dead: true, char: null, nonUs: false });
+        const space = v.sent.find((m) => m.type === 'keydown' && m.code === 'Space');
+        expect(space).toMatchObject({ char: '~', dead: false });
+    });
+
+    it('keeps a real AltGr character: # on AltGr+3', () => {
+        const v = keySink({ _layoutMap: azerty });
+        v.handleKeyDown(ev('Digit3', '#', altGr));
+        expect(v.sent[0]).toMatchObject({ code: 'Digit3', char: '#', dead: false });
+    });
+
+    it('keeps a left Ctrl+Alt shortcut a shortcut', () => {
+        const v = keySink({ _layoutMap: azerty });
+        v.handleKeyDown(ev('KeyT', 't', { ctrlKey: true, altKey: true }));
+        expect(v.sent[0]).toMatchObject({ code: 'KeyT', char: 't', dead: false });
+    });
+
+    it('changes nothing without a layout map to tell', () => {
+        const v = keySink();
+        v.handleKeyDown(ev('Digit2', 'é', altGr));
+        expect(v.sent[0]).toMatchObject({ code: 'Digit2', char: 'é', dead: false });
+    });
+});
