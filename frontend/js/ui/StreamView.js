@@ -9668,6 +9668,7 @@ export class StreamView {
                 // through a different path than the original press.
                 char: held.char,
                 nonUs: held.nonUs,
+                dead: held.dead,
                 hold: held.hold,
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
@@ -9857,6 +9858,9 @@ export class StreamView {
         const cc = StreamView.clientChar(e);
         const char = cc ? cc.char : null;
         const nonUs = cc ? cc.nonUs : false;
+        // A dead key (AltGr+2's tilde on AZERTY): its character comes composed
+        // with the next key. Said so, for the native host to leave it out.
+        const dead = e.key === 'Dead';
 
         // ── Cmd+key on an Apple keyboard: send a tap, not a hold ──────────
         // macOS never delivers the keyup of a key pressed while Cmd is down.
@@ -9875,6 +9879,7 @@ export class StreamView {
                 key: e.key,
                 char,
                 nonUs,
+                dead,
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
@@ -9897,6 +9902,7 @@ export class StreamView {
             key: e.key,
             char,
             nonUs,
+            dead,
             hold: this._holdsThroughStall(e.code),
             ctrlKey: e.ctrlKey,
             shiftKey: e.shiftKey,
@@ -10004,6 +10010,7 @@ export class StreamView {
             // the first one never comes back up.
             char: this._heldPhysKeys.get(e.code)?.char ?? null,
             nonUs: this._heldPhysKeys.get(e.code)?.nonUs ?? false,
+            dead: this._heldPhysKeys.get(e.code)?.dead ?? false,
             ctrlKey: e.ctrlKey,
             shiftKey: e.shiftKey,
             altKey: e.altKey,
@@ -10137,6 +10144,7 @@ export class StreamView {
                 key: payload.key,
                 char: payload.char ?? null,
                 nonUs: !!payload.nonUs,
+                dead: !!payload.dead,
                 ctrlKey: false,
                 shiftKey: false,
                 altKey: false,
@@ -10187,6 +10195,7 @@ export class StreamView {
                 key: payload.key,
                 char: payload.char ?? null,
                 nonUs: !!payload.nonUs,
+                dead: !!payload.dead,
                 ctrlKey: false,
                 shiftKey: false,
                 altKey: false,
@@ -10359,6 +10368,7 @@ export class StreamView {
                 key: msg.key,
                 char: msg.char ?? null,
                 nonUs: !!msg.nonUs,
+                dead: !!msg.dead,
                 hold: !!msg.hold,
             });
         } else {
@@ -10533,6 +10543,7 @@ export class StreamView {
                 // differently from the original press would strand a key.
                 char: payload.char ?? null,
                 nonUs: !!payload.nonUs,
+                dead: !!payload.dead,
                 hold: !!payload.hold,
                 ...mods,
             });

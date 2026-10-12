@@ -112,6 +112,8 @@ struct KeyPlan
     /// Non-empty: type this instead of pressing keyCode. The host resolves it
     /// in its own layout (native) or injects it as Unicode (Sunshine).
     QString text;
+    /// Send nothing at all: a dead key on the native host (see resolveKey).
+    bool skip = false;
 
     bool isText() const { return !text.isEmpty(); }
 };
@@ -155,6 +157,18 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode)
 
     plan.keyCode = static_cast<short>(msg["keyCode"].toInt(0));
     plan.flags = 0;
+
+    // A dead key (the client's layout waits for the next key to compose: the
+    // tilde of AltGr+2 on a French keyboard). Its composed character arrives
+    // with that next key, and the native host types it in its own layout — so
+    // the dead key itself must not reach it. Pressed as a position, it typed
+    // what the host's layout has there without the client's AltGr: "é" on a
+    // French host, then "~" with the space, "é~" for one tilde (12/10/2026).
+    // A Sunshine host composes nothing from text and keeps the position.
+    if (mode == KeyboardMode::Native && msg["dead"].toBool(false)) {
+        plan.skip = true;
+        return plan;
+    }
 
     const QString ch = msg["char"].toString();
     if (ch.isEmpty() || mode == KeyboardMode::Positional) return plan;
@@ -234,7 +248,7 @@ inline QVector<IMediaEngine::HeldKey> parseHeldKeys(const QJsonObject& msg, Keyb
     for (const QJsonValue& v : arr) {
         const QJsonObject k = v.toObject();
         const KeyPlan plan = resolveKey(k, mode);
-        if (plan.isText()) continue;
+        if (plan.isText() || plan.skip) continue;
         IMediaEngine::HeldKey held;
         held.keyCode = plan.keyCode;
         held.flags = plan.flags;

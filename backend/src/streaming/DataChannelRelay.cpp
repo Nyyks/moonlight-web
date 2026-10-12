@@ -2052,7 +2052,9 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
         bool down = (type == "keydown");
         const InputMsg::KeyPlan plan = InputMsg::resolveKey(msg, m_Shim->keyboardMode());
         InputMsg::logKey(msg, m_Shim->keyboardMode(), plan, down);
-        if (plan.isText()) {
+        if (plan.skip) {
+            // A dead key on the native host: its character comes with the next key.
+        } else if (plan.isText()) {
             // The client's layout puts a character here that this key's US
             // position would not produce. The engine decides what it can do
             // with that: a real press/release on the native host, a one-shot

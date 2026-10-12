@@ -181,6 +181,32 @@ void run_keyboard_layout_tests()
         CHECK_EQ(plan.text.toStdString(), std::string("q"));
     }
 
+    // ── A dead key ───────────────────────────────────────────────────────────
+    //
+    // AltGr+2 on AZERTY is the tilde, held back until the next key. The native
+    // host gets the composed "~" with that key, so the dead key itself sends
+    // nothing: pressed as its position, it typed "é" first (12/10/2026, "é~"
+    // for one tilde on a French Ubuntu host). Neither does the watchdog re-press
+    // it. A Sunshine host keeps the position: it composes on its own side.
+    {
+        QJsonObject msg = key(kVk1 + 1, "Digit2");
+        msg["dead"] = true;
+        const KeyPlan native = resolveKey(msg, KeyboardMode::Native);
+        CHECK(native.skip);
+        CHECK(!native.isText());
+
+        for (KeyboardMode mode : {KeyboardMode::Positional, KeyboardMode::SunshineWindows}) {
+            const KeyPlan plan = resolveKey(msg, mode);
+            CHECK(!plan.skip);
+            CHECK_EQ(plan.keyCode, static_cast<short>(kVk1 + 1));
+        }
+
+        QJsonObject beat;
+        beat["keys"] = QJsonArray{msg};
+        CHECK(InputMsg::parseHeldKeys(beat, KeyboardMode::Native).isEmpty());
+        CHECK_EQ(InputMsg::parseHeldKeys(beat, KeyboardMode::SunshineWindows).size(), 1);
+    }
+
     // ── International keys keep their own rule, in every mode ────────────────
     //
     // They have no US virtual key at all, so they are sent as raw VKs whatever

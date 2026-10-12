@@ -821,7 +821,9 @@ void MediaTrackRelay::onInputMessage(const std::string& message)
         bool down = (type == "keydown");
         const InputMsg::KeyPlan plan = InputMsg::resolveKey(msg, m_Shim->keyboardMode());
         InputMsg::logKey(msg, m_Shim->keyboardMode(), plan, down);
-        if (plan.isText()) {
+        if (plan.skip) {
+            // A dead key on the native host: its character comes with the next key.
+        } else if (plan.isText()) {
             m_Shim->sendKeyChar(plan.text, down, InputMsg::modifierMask(msg));
         } else {
             // `hold`: a movement key the client wants kept down through a brief

@@ -890,7 +890,9 @@ void SignalingServer::handleWsFallbackInput(const QString& message)
         // the client's keyboard layout entirely.
         const InputMsg::KeyPlan plan = InputMsg::resolveKey(msg, m_Shim->keyboardMode());
         InputMsg::logKey(msg, m_Shim->keyboardMode(), plan, down);
-        if (plan.isText()) {
+        if (plan.skip) {
+            // A dead key on the native host: its character comes with the next key.
+        } else if (plan.isText()) {
             m_Shim->sendKeyChar(plan.text, down, InputMsg::modifierMask(msg));
         } else {
             m_Shim->sendKeyEvent(plan.keyCode, down, InputMsg::modifierMask(msg), plan.flags);
