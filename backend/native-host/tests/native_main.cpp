@@ -48,6 +48,7 @@ void run_vulkan_hevc_tests();
 void run_vulkan_av1_tests();
 void run_cpu_cursor_tests();
 void run_gl_readback_tests();
+void run_linux_cpu_fallback_tests();
 void run_portal_tests();
 void run_encode_load_cap_tests();
 void run_h264_vui_tests();
@@ -221,6 +222,7 @@ int main(int argc, char** argv)
     RUN(gl_readback);
     RUN(portal);
     RUN(linux_session);
+    RUN(linux_cpu_fallback);
     RUN(linux_virtual_display);
     RUN(mac_session);
 

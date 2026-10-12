@@ -869,6 +869,102 @@ void run_linux_session_tests()
 #endif
 }
 
+// Issue #34: a GPU with no encoder on it — Fedora's own Mesa, or a libva that
+// cannot load the driver. The probe offers OpenH264, and the session must
+// stream off the GPU's TILED scanout rather than end on its first frame. Runs
+// only on such a machine; on the bench it is made one by hiding both GPU
+// encoders, as root so the loaders read the environment (a binary with a file
+// capability is secure-exec, and libva and the Vulkan loader then ignore it):
+//   sudo env LIBVA_DRIVER_NAME=none VK_ICD_FILENAMES=/nonexistent \
+//       ./mw-native-tests linux_cpu_fallback
+void run_linux_cpu_fallback_tests()
+{
+    SECTION("Linux — a GPU with no encoder streams on the CPU (issue #34)");
+
+#if !defined(MW_NATIVE_LINUX_GFX)
+    std::fprintf(stderr, "  skipped: Linux graphics backend not built\n");
+#else
+    const Capabilities caps = NativeHost::probe();
+    if (!caps.available) {
+        std::fprintf(stderr, "  skipped: %s (%s)\n", toString(caps.reason),
+                     caps.diagnostic.c_str());
+        return;
+    }
+    const DisplayInfo* display = nullptr;
+    for (const DisplayInfo& d : caps.displays)
+        if (d.primary) display = &d;
+    if (!display && !caps.displays.empty()) display = &caps.displays.front();
+    const GpuInfo* gpu = display ? caps.gpuFor(*display) : nullptr;
+    if (!gpu || !gpu->encoders.empty()) {
+        std::fprintf(stderr, "  skipped: the display's GPU encodes — hide its encoders to run "
+                             "this (see the comment above the test)\n");
+        return;
+    }
+    if (caps.capture != CaptureApi::Kms) {
+        std::fprintf(stderr, "  skipped: no KMS capture here — the tiled scanout is the case\n");
+        return;
+    }
+    CHECK(!caps.fallbacks.empty());
+
+    SessionConfig config;
+    config.displayId = display->id;
+    config.fps = 60;
+    config.bitrateKbps = 10000;
+    config.clientCodecs = {Codec::H264};
+
+    std::atomic<int> frames{0};
+    std::atomic<int> keyframes{0};
+    std::atomic<bool> firstWasKeyframe{false};
+    std::ofstream out("/tmp/mw-linux-cpu-fallback.h264", std::ios::binary | std::ios::trunc);
+    std::mutex endedMutex;
+    std::string ended;
+    std::string error;
+    std::unique_ptr<Session> session = NativeHost::createSession(
+        config,
+        [&](const EncodedFrame& f) {
+            const int n = frames.fetch_add(1);
+            if (f.keyframe) keyframes.fetch_add(1);
+            if (n == 0) firstWasKeyframe.store(f.keyframe);
+            out.write(reinterpret_cast<const char*>(f.data), static_cast<std::streamsize>(f.size));
+        },
+        nullptr, nullptr, nullptr,
+        [&](const std::string& reason) {
+            std::lock_guard<std::mutex> lock(endedMutex);
+            ended = reason;
+        },
+        error);
+    if (!session) {
+        std::fprintf(stderr, "  createSession failed: %s\n", error.c_str());
+        CHECK(false);
+        return;
+    }
+    CHECK(session->start(error));
+    if (!error.empty()) std::fprintf(stderr, "  %s\n", error.c_str());
+    const SessionInfo& info = session->info();
+    std::fprintf(stderr, "  session: %dx%d %s via %s, route \"%s\"\n", info.width, info.height,
+                 toString(info.codec), toString(info.encoder), info.videoRoute.c_str());
+    CHECK_EQ(static_cast<int>(info.encoder), static_cast<int>(EncoderApi::Software));
+    CHECK_EQ(static_cast<int>(info.codec), static_cast<int>(Codec::H264));
+
+    // Long enough for the floor's repeats on a still desktop, and for the
+    // first frame — the one the session died on before — to be long gone.
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    session->stop();
+    out.close();
+
+    std::string why;
+    {
+        std::lock_guard<std::mutex> lock(endedMutex);
+        why = ended;
+    }
+    std::fprintf(stderr, "  %d frame(s), %d keyframe(s)%s%s\n", frames.load(), keyframes.load(),
+                 why.empty() ? "" : ", ended: ", why.c_str());
+    CHECK(why.empty());
+    CHECK(frames.load() > 10);
+    CHECK(firstWasKeyframe.load());
+#endif
+}
+
 #if defined(MW_NATIVE_LINUX_GFX) && defined(MW_NATIVE_LINUX_PORTAL)
 namespace {
 
