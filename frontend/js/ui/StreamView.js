@@ -94,6 +94,7 @@ import { shouldFlushAtKeyframe } from '../stream/DecodeQueuePolicy.js';
 import { DecodeDelay, DecodeQueueSignal } from '../stream/DecodeQueueSignal.js';
 import { DecodeRateGovernor } from '../stream/DecodeRateGovernor.js';
 import { SilentDecoderWatch } from '../stream/SilentDecoderWatch.js';
+import { ByteRate } from '../stream/ByteRate.js';
 import {
     EnhancerGovernor,
     ladderRung,
@@ -1240,7 +1241,9 @@ export class StreamView {
         this._codec = this.videoCodec; // Same as videoCodec
         this._transport = transport; // "webrtc" or "wss"
         this._totalBytes = 0; // Cumulative video bytes for bitrate
-        this._startTime = performance.now(); // Stream start time for bitrate calc
+        this._startTime = performance.now(); // Stream start time
+        // The card's bitrate: the last 2 s, like the framerate next to it.
+        this._byteRate = new ByteRate(2000);
         this._fpsTimestamps = []; // performance.now() per decoded frame
         // A decoder that takes chunks and gives no picture back, read off the
         // two counters on the overlay's tick — see _checkSilentDecoder.
@@ -5942,6 +5945,10 @@ export class StreamView {
         // appears once streaming starts, independent of the perf-stats setting.
         this._updateGamingOverlay();
 
+        // Sampled even while the card is hidden: reopened, it shows the last
+        // 2 s at once instead of a rate across the time it was closed.
+        this._byteRate.sample(performance.now(), this._totalBytes);
+
         if (!this._overlayEl) return;
 
         // Dismissed by the user via its × button — stays hidden for the session.
@@ -5964,7 +5971,6 @@ export class StreamView {
         }
 
         const now = performance.now();
-        const elapsed = (now - this._startTime) / 1000;
         let fps = 0;
         let bitrateMbps = 0;
         const isMedia = this._transport === 'webrtc-media';
@@ -5979,10 +5985,9 @@ export class StreamView {
             this._fpsTimestamps = this._fpsTimestamps.filter((t) => t > cutoff);
             fps = Math.round(this._fpsTimestamps.length / 2);
 
-            // Bitrate: total bytes / elapsed seconds
-            if (elapsed > 0.5) {
-                bitrateMbps = (this._totalBytes * 8) / elapsed / 1e6;
-            }
+            // Bitrate: the last 2 s, not the session's average — after a
+            // step down the ladder, the card follows within the window.
+            bitrateMbps = this._byteRate.mbps();
 
             // Presented-frame and drop rates for the diagnostics line below.
             this._sampleDiagRates(now);
@@ -6332,6 +6337,16 @@ export class StreamView {
                 }
             }
             if (reserveRow && !reserveShown) rows.push(reserveRow);
+            // Where the sum stops: at the draw. The compositor and the screen's
+            // scan-out still come after it, and no page can time them (the
+            // click bench reads them at ~½ to 1 refresh). A row says so rather
+            // than leaving the total to read as glass to glass.
+            rows.push(
+                legRow(
+                    escapeHtml(t('stream.statLegScreen')),
+                    escapeHtml(t('stream.statLegScreenValue')),
+                ),
+            );
             // The same way measured whole, frame by frame (stream/FrameLog.js):
             // shown, not added — it is what the sum above should read, and the
             // gap between the two is a leg nobody times. Main-thread path only.

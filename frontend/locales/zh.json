@@ -793,6 +793,8 @@
         "multiSeatInputWhere": "打开 {{url}}，登录后在已配对客户端列表中找到本设备，并开启它的输入权限。",
         "multiSeatInputWhereUnknown": "该界面的地址与主机相同，端口为席位串流端口加一，使用 https。登录后在已配对客户端列表中找到本设备，并开启它的输入权限。",
         "statLegRender": "渲染",
+        "statLegScreen": "屏幕（合成 + 扫描输出）",
+        "statLegScreenValue": "未测量，约 ½–1 个刷新周期",
         "enhancerOff": "关闭",
         "iosFullscreenHint": "要获得真正的全屏：分享 → 添加到主屏幕，然后从图标启动 Moonlight。",
         "exitFullscreenHint": "按 {{combo}} 退出全屏",

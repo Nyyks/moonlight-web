@@ -793,6 +793,8 @@
         "multiSeatInputWhere": "Ouvrez {{url}}, connectez-vous, retrouvez cet appareil dans la liste des clients appairés et activez ses permissions d'entrée.",
         "multiSeatInputWhereUnknown": "Cette interface est à la même adresse que l'hôte, sur le port de stream du siège plus un, en https. Connectez-vous, retrouvez cet appareil dans la liste des clients appairés et activez ses permissions d'entrée.",
         "statLegRender": "Rendu",
+        "statLegScreen": "Écran (composition + balayage)",
+        "statLegScreenValue": "non mesuré, ~½ à 1 rafraîchissement",
         "enhancerOff": "Désactivé",
         "iosFullscreenHint": "Pour un vrai plein écran : Partager → Sur l'écran d'accueil, puis lancez Moonlight depuis l'icône.",
         "exitFullscreenHint": "Appuyez sur {{combo}} pour quitter le plein écran",
