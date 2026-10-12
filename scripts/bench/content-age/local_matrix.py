@@ -147,6 +147,8 @@ def main():
                     help="a client on another machine (pass.py --client-port)")
     ap.add_argument("--client-url", default="")
     ap.add_argument("--local-storage", action="append", default=[], metavar="KEY=VALUE")
+    ap.add_argument("--setting", action="append", default=[], metavar="KEY=VALUE",
+                    help="a stream setting over the matrix's base (pass.py --setting)")
     ap.add_argument("--game-fps", default="", help="the page at a game's rate (pass.py --game-fps)")
     ap.add_argument("--clicks", type=int, default=0, help="click → flag samples (pass.py --clicks)")
     ap.add_argument("--uplink", default="",
@@ -175,6 +177,8 @@ def main():
               if a.client_port else [])
     for kv in a.local_storage:
         client += ["--local-storage", kv]
+    for kv in a.setting:
+        client += ["--setting", kv]
     if a.game_fps:
         client += ["--game-fps", a.game_fps]
     if a.clicks:
