@@ -333,6 +333,19 @@ export const IS_WEBKIT = (() => {
 })();
 
 /**
+ * True on the Gecko engine: Firefox on a desktop or on Android. Firefox on iOS
+ * ("FxiOS") wraps WebKit and is not Gecko.
+ *
+ * Read by the renderer choice: Gecko draws a decoded VideoFrame onto a 2D
+ * canvas through a synchronous copy, and WebGL takes the same frame for a
+ * fraction of it (see geckoPresentsOnPlainWebGl).
+ */
+export const IS_GECKO = (() => {
+    const ua = navigator.userAgent || '';
+    return !IS_IOS && /\bfirefox\//i.test(ua);
+})();
+
+/**
  * Physical screen resolution in device pixels, orientation-independent.
  * screen.{width,height} are CSS pixels; multiplying by devicePixelRatio yields
  * physical pixels. We return both edges so callers can reason about the panel

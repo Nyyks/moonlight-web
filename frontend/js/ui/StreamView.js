@@ -69,6 +69,7 @@ import {
     IS_LOW_MEMORY,
     IS_TV,
     IS_APPLE,
+    IS_GECKO,
     IS_WEBKIT,
     SUPPORTS_CANVAS_TEARING,
     decoderRidesOutGaps,
@@ -82,7 +83,11 @@ import {
 import * as RemoteNav from './RemoteNav.js';
 import { StreamRemoteMenu } from './StreamRemoteMenu.js';
 import { RemotePointer } from '../stream/RemotePointer.js';
-import { createVideoRenderer, NO_WEBGPU_ALGOS } from '../stream/renderers/createRenderer.js';
+import {
+    createVideoRenderer,
+    geckoPresentsOnPlainWebGl,
+    NO_WEBGPU_ALGOS,
+} from '../stream/renderers/createRenderer.js';
 import { tvPresentsThroughSink, videoSinkCtor } from '../stream/renderers/videoSink.js';
 import {
     PipelineDiag,
@@ -858,6 +863,17 @@ export class StreamView {
             );
         }
         this._videoEnhancementAlgo = algo;
+        // Firefox: the plain picture on WebGL2, its 2D canvas copies each
+        // frame on the main thread (geckoPresentsOnPlainWebGl).
+        this._plainWebGl = geckoPresentsOnPlainWebGl({
+            gecko: IS_GECKO,
+            hdr: this._hdrMode !== 'none',
+            algo,
+            webgpu: this._wantWebGpu,
+            sink: this._useVideoSink || this._forceVideoSink,
+            forceCanvas2d,
+            devCanvas2d,
+        });
         this._workerLastDecoded = 0;
 
         // Backend timestamp tracking for stale frame detection.
@@ -2516,6 +2532,7 @@ export class StreamView {
                 webgpu: this._wantWebGpu,
                 algo: this._videoEnhancementAlgo,
                 ceiling: this._enhancerCeiling,
+                plainWebGl: this._plainWebGl,
                 hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                 hdrTonemap: this._hdrTonemap,
                 hdrLinear: this._hdrLinear,
@@ -4926,6 +4943,7 @@ export class StreamView {
                         webgpu: this._wantWebGpu,
                         algo: this._videoEnhancementAlgo,
                         ceiling: this._enhancerCeiling,
+                        plainWebGl: this._plainWebGl,
                         hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                         hdrTonemap: this._hdrTonemap,
                         hdrLinear: this._hdrLinear,

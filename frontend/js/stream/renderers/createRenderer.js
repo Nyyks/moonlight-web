@@ -40,6 +40,35 @@ import { videoSinkCtor } from './videoSink.js';
  */
 export const NO_WEBGPU_ALGOS = ['smooth2d', ...WEBGL_ALGOS];
 
+/**
+ * Firefox presents the plain SDR stream on WebGL2, not on Canvas2D.
+ *
+ * Gecko's drawImage(VideoFrame) on a 2D canvas is a synchronous copy on the
+ * main thread. Measured on the N95 (Firefox 157, UHD Graphics, hardware H.264,
+ * 12/10/2026): 38 ms a 720p frame and 55 ms a 1080p one, where texImage2D on
+ * WebGL2 took 2 and 4 ms with a readback to wait on it. At 60 fps the decoder's
+ * outputs then queue behind the draws, the decode queue overflows, and every
+ * keyframe asked for to clear it overflows again: an IDR every 300 ms, for
+ * good. Chrome draws the same frame in 0.5 ms and keeps Canvas2D (the
+ * 03/09/2026 defaults, measured on Mac and Windows).
+ *
+ * Only the plain path moves: an enhancer already runs on WebGL or WebGPU, HDR
+ * has its own routing, and the debug menu's Canvas2D stays Canvas2D.
+ * @param {{gecko: boolean, hdr: boolean, algo: string, webgpu: boolean,
+ *          sink: boolean, forceCanvas2d?: boolean, devCanvas2d?: boolean}} s
+ */
+export function geckoPresentsOnPlainWebGl(s) {
+    return (
+        s.gecko === true &&
+        !s.hdr &&
+        s.algo === 'off' &&
+        !s.webgpu &&
+        !s.sink &&
+        !s.forceCanvas2d &&
+        !s.devCanvas2d
+    );
+}
+
 export async function createVideoRenderer(canvas, opts) {
     // HDR: route decoded frames to a <video> element via the track generator.
     // The canvas paths (WebGPU/Canvas2D) tone-map HDR away (importExternalTexture /
@@ -74,6 +103,15 @@ export async function createVideoRenderer(canvas, opts) {
     if (WEBGL_ALGOS.includes(opts.ceiling || opts.algo)) {
         try {
             return await WebGlRenderer.create(canvas, opts);
+        } catch (e) {
+            console.warn('[Renderer] WebGL init failed, falling back to Canvas2D: ' + e.message);
+        }
+    }
+    // Firefox's plain copy (geckoPresentsOnPlainWebGl): the same WebGL
+    // renderer with no pass, and the same safe fallback.
+    if (opts.plainWebGl) {
+        try {
+            return await WebGlRenderer.create(canvas, { ...opts, algo: 'off' });
         } catch (e) {
             console.warn('[Renderer] WebGL init failed, falling back to Canvas2D: ' + e.message);
         }
