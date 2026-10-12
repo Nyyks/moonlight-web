@@ -20,6 +20,7 @@
 #include "../../core/ClickTrace.h"
 #include "../IInputSink.h"
 #include "../RecentreDetector.h"
+#include "../WheelCarry.h"
 #include "X11Pointer.h"
 #include "XkbTextMap.h"
 
@@ -117,6 +118,10 @@ private:
     /// nobody left to release it — the same reason Win32Input keeps its own.
     std::set<uint16_t> m_HeldKeys;
     std::set<uint16_t> m_HeldButtons;
+
+    /// What is left of a notch the browser sent in pieces. See WheelCarry.
+    WheelCarry m_WheelCarry;
+    WheelCarry m_HWheelCarry;
 
     /// Guards the descriptors and the held sets. inject() is documented as
     /// callable from any thread, and on the native path it really is called

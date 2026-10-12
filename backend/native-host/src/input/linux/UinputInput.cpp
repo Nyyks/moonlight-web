@@ -706,19 +706,25 @@ void UinputInput::inject(const InputEvent& event)
 
     // The wire carries 120-unit notches, as Windows does. evdev's REL_WHEEL is
     // in whole notches, so the amount is divided rather than forwarded — sent
-    // raw, one notch of the wheel would scroll a hundred and twenty lines.
-    case Type::MouseScrollVertical:
-        if (event.scrollAmount != 0) {
-            emit(m_Keyboard, EV_REL, REL_WHEEL, event.scrollAmount / 120);
+    // raw, one notch of the wheel would scroll a hundred and twenty lines. A
+    // notch that arrives in pieces is added up first (WheelCarry): divided one
+    // piece at a time, each was 0 and the wheel only moved now and then.
+    case Type::MouseScrollVertical: {
+        const int32_t notches = m_WheelCarry.add(event.scrollAmount);
+        if (notches != 0) {
+            emit(m_Keyboard, EV_REL, REL_WHEEL, notches);
             emitSyn(m_Keyboard);
         }
         break;
-    case Type::MouseScrollHorizontal:
-        if (event.scrollAmount != 0) {
-            emit(m_Keyboard, EV_REL, REL_HWHEEL, event.scrollAmount / 120);
+    }
+    case Type::MouseScrollHorizontal: {
+        const int32_t notches = m_HWheelCarry.add(event.scrollAmount);
+        if (notches != 0) {
+            emit(m_Keyboard, EV_REL, REL_HWHEEL, notches);
             emitSyn(m_Keyboard);
         }
         break;
+    }
 
     // Not this sink's business: the gamepad has its own device (UinputGamepad),
     // and aligning the host's lock keys would mean toggling CapsLock and NumLock
