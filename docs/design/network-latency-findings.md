@@ -2075,6 +2075,104 @@ for 10 min per content). 21:03-21:12.
   `jitterBufferTarget`; `mw_audio_target=<ms>` still sets one for a bench
   (60 for the old default).
 
+### 11-12/10/2026 — The crackles were the Windows host's: its capture never waited (audio + DSCP plan)
+
+Bruno heard crackles in blocks where NetEq neither lost a packet nor
+concealed anything (L1, entry above). The `--dev`'s log of that session
+said why. While music played, the Windows pacer sent 170 to 270 silent
+frames a minute, and dropped as many: a loopback packet a little late got
+silence in its place at once (`pop()`). The late packet then joined a queue
+the clock no longer drained, which cost a dropped frame later. Each pair is
+a 5 ms hole plus a 5 ms skip, inside the stream itself: no receiver can see
+it. macOS had the same fault and a grace since `563fd71f` (the pacer's
+`take()`). Windows never got it. The A1 beep runs show the same signature
+(36 to 240 pairs a minute).
+
+Bench: DualRTX's `--dev` → Chrome on Léo's Mac (Wi-Fi), a looping tone in
+DualRTX's muted output (the loopback still hears it), the Mac muted, held
+streams of 200 s at 1668x1080. New key `audiograce=<ms>`. The pacer's
+minute report now also says how long the sound waits in it ("held"). Each
+window ran in alternated rounds.
+
+| Grace | Silent frames / min | Held in the pacer | Click → flag median |
+|---|---|---|---|
+| none (the product until now) | 66-260 (a calmer evening: ~2) | 4.4-5.8 ms | 27.8-36.3 ms |
+| 2.5 ms | 1.1, 10.4 | 3.5-3.7 ms | 27.9-30.0 ms |
+| **5 ms** | **0, 0.3** | **3.4-3.5 ms** | **27.4-29.0 ms** |
+| 10 ms | 0 in 7 passes | 3.4 ms | 27.1-40.2 ms |
+
+- The rate without grace follows the machine's load: 66 to 260 a minute in
+  the evening, about 2 in two later passes.
+- **A grace costs no latency; it saves some.** A frame that waits is sent
+  the moment its samples arrive. Without the grace, every silent frame left
+  one extra frame queued until the cap dropped one, so the sound waited 1 to
+  2 ms longer.
+- The click → flag gap seen in the first five 10 ms pairs (+3.9 ms median)
+  did not hold. In the sweep the graces sit at or below no grace. It was
+  noise.
+- **The product now waits 5 ms** (`WasapiLoopback::kDefaultGraceUs`, one
+  frame), the smallest window with no silent frame. `audiograce=0` puts the
+  old behaviour back for a bench.
+- Bench trap: a client whose window asks for 1784x1160 at 240 Hz (Léo's
+  Mac's Chrome) gets no virtual display. The driver never brings that mode
+  up, and the launch fails instead of falling back to the default mode (§9).
+
+### 12/10/2026 — AF41 as the default, tested overnight (audio + DSCP plan, D3)
+
+Bruno chose AF41 as the default on 11/10 (through session 59). This night
+series had to confirm it, against a rule written beforehand
+(`verdict-rule.txt`). The setup was the D3 one: DualRTX's `--dev`, with the
+UDP of its exe marked by an ActiveStore policy (none or AF41), and pktmon
+proving the mark on every pass. Each round alternated the two in adjacent
+pairs and reversed the order the next round. The UM790Pro was the client:
+2 rounds on its cable (the path still crosses the repeater's Wi-Fi 7 link),
+then 3 rounds of Wi-Fi on the router's `07:1d` (the 4th and 5th were cut by
+the 04:40 stop). 01:00-04:46, house asleep. The "age" is how old a frame
+is when it is shown; differences are AF41 minus none, per pair.
+
+| Case | Click median | Frame age p90 | Breaks (none / AF41) |
+|---|---|---|---|
+| At rest, cable (2 pairs) | −0.6, +1.0 ms | +1.3, −3.0 ms | 0 / 0 |
+| At rest, Wi-Fi (3 pairs) | +0.9, −0.2, −0.5 ms | +4.1, +0.6, −52.8 ms | 0 / 0 |
+| Download onto the client's station (3) | −32, −40, −36 ms | −36, −8, −18 ms | **3** (3.6, 7.7, 6.9 Mbit/s) / 0 |
+| A neighbour's video (2) | −5.0, −8.2 ms | −6.5, −0.5 ms | 0 / 2 by bitrate (8.9, 9.9 Mbit/s) |
+| A neighbour's download, cable (2) | +4.7, −2.7 ms | −19.0, −6.8 ms | 0 / 0 |
+| A neighbour's download, Wi-Fi (5, one none pass lost) | −19.5, +5.3, +1.6, −4.5, −6.1 ms | −130.5, +17.6, +191.4, −14.6, −21.2 ms | 1 (5.9 Mbit/s) / 2 by bitrate (9.7, 9.9) |
+
+- A break, by the rule: frame age p90 above 300 ms, or the stream under
+  10 Mbit/s. No pass of either mark went past 300 ms. The 10 Mbit/s line
+  turned out to sit inside the normal spread: at rest, both marks streamed
+  9.7-12 Mbit/s. The real collapses (3.6-7.7 Mbit/s) were all unmarked.
+- **By the rule: criteria 1 to 3 hold, criterion 4 fails by the letter**
+  (AF41 "breaks" twice against once, though both of its breaks are bitrate
+  dips at 9.7 and 9.9 Mbit/s, while the unmarked one is a collapse to 5.9
+  Mbit/s). The median neighbour-download pair still favours AF41 (−14.6 ms
+  on the age p90). The rule's outcome: AF41 helps the common cases and adds
+  a risk on a mesh; Bruno weighs. The risk shows in one pass: an age p90 of
+  236 ms under the neighbour's download (`n95-bulk-34-r2b`).
+- **Bruno's decision (12/10, through session 59): AF41 stays the default.**
+  Carried by `.patch` files applied at configure time: libdatachannel's DSCP
+  settable (everything AF41), and libjuice marking on Windows.
+- **Windows, how to mark (bench of 12/10 morning, DualRTX host, pktmon):**
+  - a persistent QoS policy as the installer would set it marks everything
+    (54,264 packets in 34 from a `--dev`, 49,500 under the service's SYSTEM
+    worker, without the "Do not use NLA" key) **until the next reboot**:
+    after it the policy is still in the registry but not in force (ActiveStore
+    empty, 64,066 packets at 0). `gpupdate /force` brings it back (63,136 in
+    34); the "Do not use NLA" key does not (second reboot: ActiveStore empty,
+    66,220 packets at 0). Set aside;
+  - the libjuice patch marks without elevation (43,424 packets in 34; only
+    the 24 STUN packets at 0), and does not depend on a reboot: chosen,
+    on by default (`MW_LIBJUICE_WINDOWS_DSCP`);
+  - asking EF for the sound alone (`MW_DSCP=46,34,34`) did not reach the
+    wire on Windows: the worker logged "audio 46", its packets left in 34.
+    Not looked into; the product marks everything AF41 anyway.
+- A download onto the client's own station is where AF41 earns its place: it
+  cuts 32-40 ms off every click, and the unmarked stream collapsed in all
+  three pairs.
+- The virtual display stayed on after every pass ("the screens did not come
+  back"). It was switched off by the product's own tool at the end.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
