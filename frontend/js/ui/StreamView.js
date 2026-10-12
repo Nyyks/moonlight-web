@@ -11041,8 +11041,11 @@ export class StreamView {
         // keystroke to ask for it has nothing left to do.
         if (this.pointerLocked) this._disarmPointerCapture();
         this._mouseFocused = this.pointerLocked;
+        // The hint asks for a click only gaming mode answers. Leaving gaming
+        // mode lets the lock go afterwards, asynchronously: shown again there,
+        // the hint stayed over the desktop-mode picture for good (12/10/2026).
         if (this.hintEl) {
-            this.hintEl.style.display = this.pointerLocked ? 'none' : 'flex';
+            this.hintEl.style.display = this._gamingMode && !this.pointerLocked ? 'flex' : 'none';
         }
         // Capturing/releasing the mouse drives both the full keyboard lock and
         // the gaming-mode exit-reminder overlay.
