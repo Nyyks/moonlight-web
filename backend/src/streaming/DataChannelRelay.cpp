@@ -2150,8 +2150,9 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
         }
     } else if (type == "requestidr") {
         const QString reason = msg["reason"].toString();
-        qInfo() << "[DataChannelRelay] Requesting IDR frame from Sunshine (browser request"
-                << (reason.isEmpty() ? QStringLiteral(")") : QStringLiteral(": ") + reason + ")");
+        qInfo().noquote()
+            << "[DataChannelRelay] Requesting IDR frame from Sunshine (browser request" +
+                   (reason.isEmpty() ? QStringLiteral(")") : QStringLiteral(": ") + reason + ")");
         std::lock_guard<std::mutex> lk(m_VideoMutex);
         m_AwaitingIdr = true;
         sendIdrRequestThrottled();

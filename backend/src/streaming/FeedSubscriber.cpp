@@ -71,6 +71,11 @@ public:
     bool m_Ok = false;
     QJsonObject m_Info;
     QString m_Error;
+    // What became of the tries before `info`, for a join that times out (§9:
+    // a cold guest that never reached the feed, without a word of why).
+    int m_Tries = 0;
+    int m_Connects = 0;
+    QString m_LastFailure;
 
     /// Connect, and keep trying until @p deadline: the feed may be starting
     /// at this very moment — the first guest's arrival is what launches it.
@@ -79,6 +84,10 @@ public:
         m_Deadline = deadline;
         m_Socket = new QLocalSocket(this);
         QObject::connect(m_Socket, &QLocalSocket::connected, this, [this]() {
+            {
+                std::lock_guard<std::mutex> lock(m_WaitMutex);
+                ++m_Connects;
+            }
             QJsonObject hello{{QStringLiteral("type"), QStringLiteral("hello")},
                               {QStringLiteral("token"), QString::fromLatin1(m_Owner->m_Token)},
                               {QStringLiteral("slot"), m_Owner->m_Slot}};
@@ -89,7 +98,27 @@ public:
                          [this]() { lost(QStringLiteral("the feed closed the pipe")); });
         QObject::connect(m_Socket, &QLocalSocket::errorOccurred, this,
                          [this](QLocalSocket::LocalSocketError) { lost(m_Socket->errorString()); });
+        tryConnect();
+    }
+
+    void tryConnect()
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_WaitMutex);
+            ++m_Tries;
+        }
         m_Socket->connectToServer(m_Owner->m_Name);
+    }
+
+    /// Why start() is still waiting: how many tries, how many reached the
+    /// pipe (then the feed never answered the hello), and the last failure.
+    QString waitStory()
+    {
+        std::lock_guard<std::mutex> lock(m_WaitMutex);
+        return QStringLiteral("%1 tries, %2 connected, last failure: %3")
+            .arg(m_Tries)
+            .arg(m_Connects)
+            .arg(m_LastFailure.isEmpty() ? QStringLiteral("none") : m_LastFailure);
     }
 
     void write(const QByteArray& bytes)
@@ -200,6 +229,10 @@ private:
     void lost(const QString& why)
     {
         if (m_Ended || m_RetryPending) return;
+        if (!m_EverIn) {
+            std::lock_guard<std::mutex> lock(m_WaitMutex);
+            m_LastFailure = why;
+        }
         m_GotInfo = false;
         m_Inbox.clear();
         m_Owner->m_Connected.store(false, std::memory_order_release);
@@ -218,7 +251,7 @@ private:
             m_RetryPending = false;
             if (m_Ended || !m_Socket) return;
             m_Socket->abort();
-            m_Socket->connectToServer(m_Owner->m_Name);
+            tryConnect();
         });
     }
 
@@ -313,6 +346,8 @@ bool FeedSubscriber::start(int timeoutMs, QJsonObject* info, QString* error)
     }
     if (!ok) {
         qWarning() << "[FeedSubscriber] cannot join the feed" << m_Name << ":" << why;
+        // Outside the wait's lock: the story takes it.
+        qWarning().noquote() << "[FeedSubscriber] before giving up:" << m_Client->waitStory();
         if (error) *error = why;
         stop();
         return false;
