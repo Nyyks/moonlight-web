@@ -276,6 +276,9 @@ private:
     // Deltas a GameStream engine may leave waiting on the sender thread before
     // the oldest is evicted (the native engine keeps one). See the constructor.
     static constexpr size_t kGameStreamQueuedDeltas = 2;
+    // A guest of the shared feed: the pipe's bursts, not the link (handleVideoFrame).
+    static constexpr size_t kFeedGuestQueuedDeltas = 3;
+    bool m_SenderDepthKnown = false; // under m_VideoMutex
 
     // presentationTimeUs: the frame's own capture time (from the decode unit),
     // carried through the queued signal. -1 = unknown → fall back to the shim's

@@ -74,8 +74,15 @@ void leaveGamesTask(void* h)
 
 FrameSender::FrameSender(Options options)
     : m_Options(options)
+    , m_MaxQueuedDeltas(options.maxQueuedDeltas)
 {
     m_Thread = std::thread([this]() { run(); });
+}
+
+void FrameSender::setMaxQueuedDeltas(size_t deltas)
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    m_MaxQueuedDeltas = deltas;
 }
 
 FrameSender::~FrameSender()
@@ -180,10 +187,9 @@ bool FrameSender::push(Job&& job, std::vector<uint32_t>* evicted)
         // takes its place. Counted like the eviction above: the caller starts
         // recovery for the hole it leaves. Keyframes never wait behind a delta
         // either — they are what the recovery is waiting for.
-        if (m_Options.maxQueuedDeltas < kMaxQueued) {
-            const size_t keep = job.isKeyframe || m_Options.maxQueuedDeltas == 0
-                                    ? 0
-                                    : m_Options.maxQueuedDeltas - 1;
+        if (m_MaxQueuedDeltas < kMaxQueued) {
+            const size_t keep =
+                job.isKeyframe || m_MaxQueuedDeltas == 0 ? 0 : m_MaxQueuedDeltas - 1;
             size_t deltas = 0;
             for (const Job& j : m_Queue)
                 if (!j.isKeyframe) deltas++;

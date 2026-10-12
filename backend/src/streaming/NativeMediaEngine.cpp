@@ -1098,10 +1098,16 @@ bool NativeMediaEngine::nameLinkDrops() const
 void NativeMediaEngine::reportLink(const mw::native::LinkFeedback& feedback)
 {
     mw::native::LinkFeedback fb = feedback;
-    fb.evictions += m_Evictions.exchange(0, std::memory_order_relaxed);
+    const int evicted = m_Evictions.exchange(0, std::memory_order_relaxed);
     // A guest's link goes to the feed, which follows the slowest guest's
     // (down to its floor) — this one's governor has no encoder to move.
     if (m_Subscriber) {
+        // Its own sender's evictions are the pipe's bursts more than its
+        // link (DataChannelRelay::handleVideoFrame): the link speaks through
+        // SCTP drops and the delay, so neither those frames nor the holes they
+        // leave on the page lower the feed for everyone (12/10 bench: 10 → 6
+        // Mbps on evictions alone, nothing lost on the wire).
+        fb.gaps = std::max(0, fb.gaps - evicted);
         m_Subscriber->sendControl(QJsonObject{{QStringLiteral("type"), QStringLiteral("link")},
                                               {QStringLiteral("owdRiseMs"), fb.owdRiseMs},
                                               {QStringLiteral("gaps"), fb.gaps},
@@ -1110,6 +1116,7 @@ void NativeMediaEngine::reportLink(const mw::native::LinkFeedback& feedback)
                                               {QStringLiteral("resumed"), fb.resumed}});
         return;
     }
+    fb.evictions += evicted;
     if (m_Session) m_Session->reportLink(fb);
 }
 

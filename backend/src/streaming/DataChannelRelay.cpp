@@ -1487,6 +1487,19 @@ void DataChannelRelay::handleVideoFrame(const QByteArray& data, bool isKeyframe,
     // Re-check after acquiring the lock: stop() may have run while we waited.
     if (m_Stopping.load()) return;
 
+    // A guest of the shared feed takes its pictures from the feed's pipe,
+    // which can hand over two or three at once after a hiccup on either side
+    // of it: with one delta held, all but the last would be evicted, each a
+    // hole and a keyframe the whole feed pays for (12/10 bench: 8 evictions in
+    // a minute, bufferedAmount 0 throughout). Known on the first frame — the
+    // engine joins the feed before any picture comes.
+    if (!m_SenderDepthKnown) {
+        m_SenderDepthKnown = true;
+        auto* native = qobject_cast<NativeMediaEngine*>(m_Shim);
+        if (native && native->isFeedSubscriber() && m_Sender)
+            m_Sender->setMaxQueuedDeltas(kFeedGuestQueuedDeltas);
+    }
+
     if (m_FrameLog) {
         // The capture on the host's clock, as sendFragmented stamps backendTs:
         // what the client's per-frame log carries, and how a pass joins the two.

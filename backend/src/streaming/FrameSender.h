@@ -144,6 +144,11 @@ public:
     /// 0 switches it off. Taken up by the worker at its next frame.
     void setPacing(int64_t bytesPerSecond, size_t burstBytes);
 
+    /// Options::maxQueuedDeltas, changed once the producer is known: a guest
+    /// of the shared feed takes its pictures from a pipe that can hand over
+    /// two or three at once, and those are not a link falling behind.
+    void setMaxQueuedDeltas(size_t deltas);
+
     /// What pacing cost: frames sent, frames that waited at least once, the
     /// time spent waiting in all, and the longest wait inside one frame.
     struct PacingStats
@@ -201,6 +206,7 @@ private:
     std::mutex m_Mutex;
     std::condition_variable m_Cv;
     std::deque<Job> m_Queue;
+    size_t m_MaxQueuedDeltas; // under m_Mutex
     std::atomic<bool> m_Stop{false};
     std::atomic<uint64_t> m_QueueDrops{0};
 
