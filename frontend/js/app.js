@@ -3171,8 +3171,10 @@ const MoonlightApp = {
         const upnpEnabled = true;
         const internalTransport = result.transport || (result.signalingUrl ? 'webrtc' : 'wss');
         const transportMode = result.transport_mode || internalTransport;
-        // Respect the "show performance stats" setting (default: true)
-        const showPerfStats = streamingSettings.show_performance_stats !== false;
+        // Respect the "show performance stats" setting, off unless ticked — as
+        // the settings page and the backend read it. A first stream to a new
+        // host has no value yet, and showed the card under an unticked box.
+        const showPerfStats = streamingSettings.show_performance_stats === true;
         // Touch/trackpad sensitivity (default 2.2)
         const touchSensitivity =
             typeof streamingSettings.touch_sensitivity === 'number'

@@ -508,7 +508,7 @@ export class StreamView {
         transport = 'webrtc',
         transportMode = undefined,
         isRemote = false,
-        showPerformanceStats = true,
+        showPerformanceStats = false,
         touchSensitivity = 2.0,
         tearing = false,
         videoWorker = 'auto',
