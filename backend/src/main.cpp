@@ -5966,6 +5966,9 @@ int main(int argc, char* argv[])
     trayManager.setActivityProvider(streamActivity);
     trayManager.setAdminLocked(adminLocked);
     if (hasGuiSession()) trayManager.init();
+    // A login item an earlier version wrote may name the bare binary, which
+    // comes back after a reboot unable to capture (Linux; see Autostart.h).
+    if (Autostart::isSupported()) Autostart::refreshLoginItem();
 
     // Click-to-photon latency flag: the overlay and its click source live on
     // their own thread, only while the setting is on, and only where there is a

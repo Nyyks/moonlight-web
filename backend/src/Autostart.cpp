@@ -181,6 +181,8 @@ bool isLoginItemInstalled()
     return QFile::exists(plistPath());
 }
 
+void refreshLoginItem() {}
+
 #elif defined(Q_OS_LINUX)
 
 namespace {
@@ -221,32 +223,48 @@ QString execArgument(QString arg)
     return QLatin1Char('"') + quoted + QLatin1Char('"');
 }
 
-} // namespace
-
-bool installLoginItem()
+// What the next login starts. Inside an AppImage, applicationFilePath() points
+// at the transient mount; relaunch the .AppImage itself instead ($APPIMAGE is
+// set by the runtime). A package starts us through moonlightweb-launch, which
+// carries the capabilities the screen capture needs: the binary alone came back
+// after every reboot with the native host unavailable (12/10/2026).
+QString loginExecutable()
 {
-    // Inside an AppImage, applicationFilePath() points at the transient mount;
-    // relaunch the .AppImage itself instead ($APPIMAGE is set by the runtime).
-    QString exe = qEnvironmentVariable("APPIMAGE");
-    if (exe.isEmpty()) exe = QCoreApplication::applicationFilePath();
+    const QString appImage = qEnvironmentVariable("APPIMAGE");
+    if (!appImage.isEmpty()) return appImage;
+    const QString launcher =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/moonlightweb-launch");
+    if (QFileInfo(launcher).isExecutable()) return launcher;
+    return QCoreApplication::applicationFilePath();
+}
+
+// The whole entry, the way installLoginItem() writes it.
+QString entryText()
+{
     QStringList args;
     for (const QString& arg : launchArguments())
         args << execArgument(arg);
 
     // The icon name is the one the package installed in the hicolor theme.
-    const QString entry = QStringLiteral("[Desktop Entry]\n"
-                                         "Type=Application\n"
-                                         "Name=%2\n"
-                                         "Comment=Sunshine streaming client for the browser\n"
-                                         "Exec=\"%1\" %4\n"
-                                         "Icon=%3\n"
-                                         "Terminal=false\n"
-                                         "X-GNOME-Autostart-enabled=true\n")
-                              .arg(exe, mw::edition::displayName(),
-                                   mw::edition::isDevBuild() ? QStringLiteral("moonlightweb-dev")
-                                                             : QStringLiteral("moonlightweb"),
-                                   args.join(QLatin1Char(' ')));
+    return QStringLiteral("[Desktop Entry]\n"
+                          "Type=Application\n"
+                          "Name=%2\n"
+                          "Comment=Sunshine streaming client for the browser\n"
+                          "Exec=\"%1\" %4\n"
+                          "Icon=%3\n"
+                          "Terminal=false\n"
+                          "X-GNOME-Autostart-enabled=true\n")
+        .arg(loginExecutable(), mw::edition::displayName(),
+             mw::edition::isDevBuild() ? QStringLiteral("moonlightweb-dev")
+                                       : QStringLiteral("moonlightweb"),
+             args.join(QLatin1Char(' ')));
+}
 
+} // namespace
+
+bool installLoginItem()
+{
+    const QString entry = entryText();
     const QString path = entryPath();
     QDir().mkpath(QFileInfo(path).absolutePath());
     QFile f(path);
@@ -258,6 +276,20 @@ bool installLoginItem()
     f.close();
     Logger::info(QStringLiteral("Autostart: login item installed at %1").arg(path));
     return true;
+}
+
+// An entry written by an earlier version started the bare binary; a package
+// update replaces the program, never the user's file. Rewritten only when it
+// says something else than this version would write, so a launch that finds it
+// right logs nothing.
+void refreshLoginItem()
+{
+    const QString path = entryPath();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const bool same = f.readAll() == entryText().toUtf8();
+    f.close();
+    if (!same) installLoginItem();
 }
 
 bool removeLoginItem()
@@ -489,6 +521,8 @@ bool isLoginItemInstalled()
     ComPtr<IRegisteredTask> task;
     return SUCCEEDED(root->GetTask(name.b, task.out()));
 }
+
+void refreshLoginItem() {}
 
 #endif
 
