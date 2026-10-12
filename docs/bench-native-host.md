@@ -4822,6 +4822,68 @@ l'écran 1 (HDMI-A-2, 2560×1440, où GNOME ouvre le kiosk), 20 Mbit/s tenus
 H.264 sur un bureau calme prend 0,5 Mbit/s au lieu de 17. Le HEVC l'avait déjà
 grâce à Vulkan Video.
 
+### 8o.20 G5 : Counter-Strike 2, le test de Bruno (12/10/2026)
+
+G5 sous un jeu limité par le CPU, joué par Bruno avec sa connexion Steam.
+
+**Montage.**
+- UM790Pro, Ubuntu 24.04, Wayland, Mesa 26.2.3, noyau 7.0.0-38, Secure Boot
+  actif, profil d'énergie « balanced ».
+- La DEV `0.3.1.gcfc.dev` (`.deb` de la CI de `cfc52428`), puis
+  `0.3.1.g80d-dev`. Elle tourne en LAN seul, à côté de la prod 0.3.1.
+- Le client est Chrome sur DualRTX, en Ethernet : HEVC 1080p, 40 Mbit/s,
+  capture KMS de HDMI-A-1 (60 Hz).
+- La route est « Vulkan compute → Vulkan Video (auto) », preuve au pixel à
+  46,6 dB (révision 3, `c88aae1f`). Le run 5 passe par le réglage « VA-API ».
+- Le jeu tourne sur la carte de l'atelier « CS2 FPS BENCHMARK », 1920×1080,
+  `fps_max 0`. Le menu est bridé par `fps_max_ui 60` à partir des runs « bis ».
+- Un relevé en lecture seule prend une ligne par seconde : fréquence CPU,
+  puissance de l'APU, Tctl, charge et fréquence du 780M, CPU du worker et de
+  cs2 (`/tmp/g5r2/samples.csv` sur l'UM790Pro). Chaque moyenne court de 10 s
+  après le début du run jusqu'à son rapport.
+
+**Le premier essai** compare 106,1 i/s sans stream et 90,7 pendant un stream
+1080p120, soit −14,5 %. Les étapes CPU du jeu y montent toutes d'environ 45 %,
+alors que le worker ne prend que 8 à 10 % d'un cœur. La référence avait été
+prise sur une machine plus fraîche : c'est l'ordre des runs qui fausse
+l'écart. Les runs suivants alternent donc avec et sans stream, à 60 i/s.
+
+**Les runs.**
+
+| run | stream | i/s moy. | P1 | FrameTotal ms | CPU MHz | APU W | Tctl °C | GPU % | worker (% d'un cœur) |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 bis (20:04) | sans | 106,1 | 54,4 | 9,42 | 3297 | 55,8 | 83,2 | 85 | — |
+| 2 bis (20:07) | Vulkan Video | 98,5 | 54,4 | 10,16 | 2469 | 56,4 | 85,7 | 83 | 28,2 |
+| 3 bis (20:10) | sans | 97,7 | 55,1 | 10,24 | 2787 | 53,1 | 84,4 | 87 | — |
+| 4 (19:59) | Vulkan Video | 100,0 | 54,8 | 10,00 | 2761 | 59,4 | 84,4 | 87 | 27,6 |
+| 5 (20:16) | VA-API | 103,2 | 58,5 | 9,69 | 3371 | 55,1 | 81,5 | 87 | 22,8 |
+
+- Les runs 1 à 3 de 19:48 à 19:56 n'ont pas de chiffres du jeu : son journal a
+  été réécrit au relancement de 19:58. Le relevé y montre la même dispersion,
+  de 3240 à 2438 MHz.
+- Au run 1 bis, un stream a encore tourné pendant ses 45 premières secondes ;
+  c'est pourtant le run le plus haut.
+
+**Ce qu'on en retient.**
+- L'APU reste plaquée à 53-59 W et 81-86 °C pendant tous les runs. La
+  fréquence du CPU s'y décide à ±0,4 GHz d'un run à l'autre, stream ou pas, et
+  les images du jeu la suivent : les deux runs les plus hauts sont les plus
+  rapides (3,3 et 3,37 GHz).
+- Sans stream, 101,9 i/s en moyenne ; avec Vulkan Video, 99,25 : −2,6 %. Les
+  deux runs sans stream s'écartent de 8,6 % entre eux, soit trois fois plus.
+- Le stream coûte environ 28 % d'un cœur en Vulkan Video et 23 % en VA-API
+  (sur 16 fils), sans copie CPU ni repli. VA-API et Vulkan Video donnent le
+  même résultat pour le jeu.
+- **G5 tenu** (décision de Bruno, 12/10) : sous CS2, limité par le CPU, l'écart
+  (−2,6 %) reste dans le bruit de l'enveloppe de puissance de l'APU (8,6 %
+  entre deux runs sans stream). Rise of the Tomb Raider (§8o.16), limité par le
+  GPU, avait tenu les 2 %.
+
+**Concrètement, pour l'utilisateur** : sur un mini-PC AMD, streamer un jeu
+gourmand en CPU comme Counter-Strike 2 ne lui coûte que quelques images par
+seconde, moins que ce que la chaleur et la puissance de la machine font
+varier d'une partie à l'autre.
+
 ## 8p. Framerate « Hôte » : l'âge du contenu (29-30/09/2026, provisoire)
 
 Plan `framerate-hote`, design §33. Tout passe par des clés de banc :
