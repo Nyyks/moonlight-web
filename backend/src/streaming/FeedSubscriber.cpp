@@ -17,6 +17,7 @@
 
 #include "FeedSubscriber.h"
 
+#include <QDateTime>
 #include <QDeadlineTimer>
 #include <QDebug>
 #include <QJsonDocument>
@@ -24,6 +25,7 @@
 #include <QThread>
 #include <QTimer>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -110,6 +112,7 @@ private:
     {
         m_Inbox.append(m_Socket->readAll());
         qsizetype at = 0;
+        int framesThisRead = 0;
         while (!m_Ended) {
             feed::Header h;
             std::string why;
@@ -131,6 +134,7 @@ private:
                 // would be one the worker cannot yet describe to its browser.
                 if (!m_GotInfo) continue;
                 m_Owner->m_Frames.fetch_add(1, std::memory_order_relaxed);
+                ++framesThisRead;
                 if (m_Owner->m_OnFrame) m_Owner->m_OnFrame(h, payload, h.payloadSize);
                 continue;
             }
@@ -160,6 +164,33 @@ private:
         // The frames handed out above pointed into the buffer: it is trimmed
         // only once they are all delivered.
         if (at > 0) m_Inbox.remove(0, at);
+        if (framesThisRead > 0) notePictures(framesThisRead);
+    }
+
+    /// How the pictures come out of the pipe: one read handing over several is
+    /// a burst the guest's sender has to hold (DataChannelRelay keeps three
+    /// deltas for it), and a long pause before it is where the burst came
+    /// from. Told once a minute, when there was any.
+    void notePictures(int frames)
+    {
+        const int64_t nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (m_LastPictureMs > 0)
+            m_LongestPauseMs = std::max(m_LongestPauseMs, nowMs - m_LastPictureMs);
+        m_LastPictureMs = nowMs;
+        if (frames > 1) {
+            ++m_Bursts;
+            m_BiggestBurst = std::max(m_BiggestBurst, frames);
+        }
+        if (m_WindowStartMs == 0) m_WindowStartMs = nowMs;
+        if (nowMs - m_WindowStartMs < 60000) return;
+        if (m_Bursts > 0)
+            qInfo() << "[FeedSubscriber] pipe: in the last minute," << m_Bursts
+                    << "reads handed over several pictures (at most" << m_BiggestBurst
+                    << "), longest pause between two" << m_LongestPauseMs << "ms";
+        m_WindowStartMs = nowMs;
+        m_Bursts = 0;
+        m_BiggestBurst = 0;
+        m_LongestPauseMs = 0;
     }
 
     /// The pipe closed, or never opened. Before the first `info`: tried again
@@ -226,6 +257,12 @@ private:
     bool m_RetryPending = false;
     bool m_Ended = false;
     QDeadlineTimer m_Deadline;
+    // notePictures(), on the client's thread.
+    int64_t m_LastPictureMs = 0;
+    int64_t m_WindowStartMs = 0;
+    int64_t m_LongestPauseMs = 0;
+    int m_Bursts = 0;
+    int m_BiggestBurst = 0;
 };
 
 // ── FeedSubscriber ──────────────────────────────────────────────────────────

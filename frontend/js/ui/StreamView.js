@@ -2897,7 +2897,10 @@ export class StreamView {
         this._lastIdrRequestMs = now;
         console.log('[StreamView] Requesting IDR (' + reason + ')');
         this._diag.noteRecovery('idr');
-        this.webrtc.send({ type: 'requestidr' });
+        // The reason goes along for the host's log: a guest that keeps asking
+        // is otherwise a list of requests with no why (12/10, an H.264 guest
+        // of the shared feed asking every second).
+        this.webrtc.send({ type: 'requestidr', reason });
         this._recordCongestionEvent('sv:' + reason);
     }
 
