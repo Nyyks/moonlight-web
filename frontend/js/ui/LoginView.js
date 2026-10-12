@@ -29,6 +29,7 @@ import { BackendClient } from '../api/BackendClient.js';
 import { Toast } from './Toast.js';
 import { t } from '../i18n/i18n.js';
 import { escapeHtml } from '../util/escapeHtml.js';
+import { Icons } from './icons.js';
 import { currentInstanceRef, listInstances } from '../util/instances.js';
 import { tunnelHostId } from '../net/tunnelBridge.js';
 
@@ -171,7 +172,10 @@ export class LoginView {
                     <div class="login-logo">
                         <span class="login-logo-img" role="img" aria-label="Moonlight"></span>
                     </div>
-                    <h1 class="login-title">MoonlightWeb</h1>
+                    <div class="login-title-row">
+                        <h1 class="login-title">MoonlightWeb</h1>
+                        ${this._loading ? '' : this._renderServerField()}
+                    </div>
 
                     <div id="login-form-area">
                         ${
@@ -231,8 +235,6 @@ export class LoginView {
         return `
             <div class="login-form login-form--pin">
                 <p class="login-subtitle">${t('login.pinSubtitle')}</p>
-
-                ${this._renderServerField()}
 
                 <!-- Machine name -->
                 <div class="login-field">
@@ -333,23 +335,31 @@ export class LoginView {
      *
      * Absent entirely when there is nowhere to go, rather than shown empty: a
      * chooser with one unusable entry is a question with no answer.
+     *
+     * It sits beside the title, as the machine menu does in the header once
+     * inside, and not in the form: among the fields to fill in, it read as one
+     * more question to answer before the PIN, when it is a way out of this
+     * screen. A native select under the quiet look of that header menu, so a
+     * phone still opens its own picker.
      */
     _renderServerField() {
         if (this._otherInstances.length === 0) return '';
 
+        const label = this.esc(t('login.serverSelection'));
         return `
-                <div class="login-field">
-                    <label class="login-label" for="login-server-select">${t('login.serverSelection')}</label>
-                    <select id="login-server-select" class="settings-select login-select">
-                        <option value="" selected>${this.esc(t('login.serverCurrent'))}</option>
-                        ${this._otherInstances
-                            .map(
-                                (e) =>
-                                    `<option value="${this.esc(e.url)}">${this.esc(e.name)}</option>`,
-                            )
-                            .join('')}
-                    </select>
-                </div>
+                        <span class="login-server">
+                            <select id="login-server-select" class="login-server-select"
+                                    aria-label="${label}" title="${label}">
+                                <option value="" selected>${this.esc(t('login.serverCurrent'))}</option>
+                                ${this._otherInstances
+                                    .map(
+                                        (e) =>
+                                            `<option value="${this.esc(e.url)}">${this.esc(e.name)}</option>`,
+                                    )
+                                    .join('')}
+                            </select>
+                            <span class="login-server-caret" aria-hidden="true">${Icons.chevronDown}</span>
+                        </span>
         `;
     }
 
@@ -374,8 +384,6 @@ export class LoginView {
         return `
             <div class="login-form">
                 <p class="login-subtitle">${t('login.certSubtitle')}</p>
-
-                ${this._renderServerField()}
 
                 <!-- Machine name -->
                 <div class="login-field">

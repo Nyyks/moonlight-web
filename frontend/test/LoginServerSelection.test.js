@@ -87,6 +87,19 @@ describe('LoginView server selection', () => {
         expect(container.querySelector('#login-server-select')).not.toBeNull();
     });
 
+    it('sits beside the title, out of both forms', async () => {
+        register([entry(HERE, 'DualRTX'), entry(THERE, 'UM790Pro')]);
+        await open();
+        const select = container.querySelector('#login-server-select');
+        expect(select.closest('.login-title-row')).not.toBeNull();
+        expect(select.closest('.login-form')).toBeNull();
+
+        container.querySelector('#btn-toggle-auth-method').click();
+        const again = container.querySelector('#login-server-select');
+        expect(again.closest('.login-title-row')).not.toBeNull();
+        expect(again.closest('.login-form')).toBeNull();
+    });
+
     it('never names the machine being unlocked', async () => {
         register([entry(HERE, 'DualRTX'), entry(THERE, 'UM790Pro')]);
         await open();
