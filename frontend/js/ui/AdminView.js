@@ -1125,7 +1125,6 @@ export class AdminView {
                         </div>
                     </div>
                 </div>
-                ${this._gamescopeAppsSupported ? this._renderGamescopeApps() : ''}
                 ${this._renderAdvanced()}
             </div>
         `;
@@ -2262,6 +2261,7 @@ export class AdminView {
                     <h3 class="settings-section-title">${t('admin.advanced')}</h3>
                     ${this._videoPipelineSupported ? this._renderVideoPipeline() : ''}
                     ${this._videoCodecSupported ? this._renderVideoCodec() : ''}
+                    ${this._gamescopeAppsSupported ? this._renderGamescopeApps() : ''}
                     ${this._renderDiagMode('chk-debug-mode', this._debugMode, this._debugModeCli, 'debugMode', '--debug')}
                     ${this._renderDiagMode('chk-verbose-logs', this._verboseLogs, this._verboseLogsCli, 'verboseLogs', '--verbose')}
                     <div class="settings-field">
@@ -2461,8 +2461,11 @@ export class AdminView {
     // --- The owner's apps in gamescope (Linux native host) ---
 
     // A card each on this host, beside the displays and Steam's: the name the
-    // card shows, the command the host runs in the app's own gamescope.
-    _renderGamescopeApps() {
+    // card shows, the command the host runs in the app's own gamescope. Under
+    // Advanced, folded: few owners need it, and its first look explained
+    // nothing (Bruno, 12/10/2026). Open once there is an app to show, or when
+    // it was open before a save drew it again.
+    _renderGamescopeApps(open = this._gamescopeApps.length > 0) {
         const full = this._gamescopeApps.length >= this._gamescopeAppsMax;
         const rows = this._gamescopeApps
             .map(
@@ -2477,8 +2480,8 @@ export class AdminView {
             )
             .join('');
         return `
-                <div class="settings-section" id="admin-section-gamescope">
-                    <h3 class="settings-section-title">${t('admin.gamescopeApps')}</h3>
+                <details class="settings-field gamescope-apps" id="admin-section-gamescope" ${open ? 'open' : ''}>
+                    <summary class="settings-label">${t('admin.gamescopeApps')}</summary>
                     <p class="setting-desc">${t('admin.gamescopeAppsDesc')}</p>
                     ${
                         rows
@@ -2487,17 +2490,17 @@ export class AdminView {
                     }
                     <div class="settings-field gamescope-app-add">
                         <input type="text" id="gamescope-app-name" class="settings-input"
-                               maxlength="40" placeholder="${this.esc(t('admin.gamescopeAppName'))}"
+                               maxlength="40" placeholder="${this.esc(t('admin.gamescopeAppNameExample'))}"
                                aria-label="${this.esc(t('admin.gamescopeAppName'))}" ${full ? 'disabled' : ''} />
                         <input type="text" id="gamescope-app-command" class="settings-input u-grow"
-                               maxlength="1000" placeholder="${this.esc(t('admin.gamescopeAppCommand'))}"
+                               maxlength="1000" placeholder="${this.esc(t('admin.gamescopeAppCommandExample'))}"
                                aria-label="${this.esc(t('admin.gamescopeAppCommand'))}" ${full ? 'disabled' : ''} />
                         <button class="btn btn-save u-shrink-0" id="btn-gamescope-add" disabled>
                             ${t('admin.gamescopeAppAdd')}
                         </button>
                     </div>
                     ${full ? `<p class="settings-hint">${t('admin.gamescopeAppsFull', { max: this._gamescopeAppsMax })}</p>` : ''}
-                </div>`;
+                </details>`;
     }
 
     _bindGamescopeApps() {
@@ -2556,9 +2559,11 @@ export class AdminView {
                 t('admin.gamescopeAppsSaveFailed', { message: /** @type {Error} */ (err).message }),
             );
         }
-        const section = this.container.querySelector('#admin-section-gamescope');
+        const section = /** @type {HTMLDetailsElement|null} */ (
+            this.container.querySelector('#admin-section-gamescope')
+        );
         if (section) {
-            section.outerHTML = this._renderGamescopeApps();
+            section.outerHTML = this._renderGamescopeApps(section.open);
             this._bindGamescopeApps();
         }
     }
