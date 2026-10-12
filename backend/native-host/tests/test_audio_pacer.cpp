@@ -168,6 +168,26 @@ void run_audio_pacer_tests()
         CHECK_EQ(pacer.nextDueUs(), int64_t(15'000));
     }
 
+    SECTION("AudioPacer — another grace than two periods (audiograce= on Windows)");
+    {
+        AudioPacer pacer(8);
+        CHECK_EQ(pacer.underrunGraceUs(), int64_t(10'000));
+        pacer.setUnderrunGraceUs(2'500);
+        CHECK_EQ(pacer.underrunGraceUs(), int64_t(2'500));
+        pacer.start(0);
+        std::vector<float> out(AudioPacer::kFrameFloats);
+        // Owed at 5 ms: waits until 7.5 ms, not 15.
+        CHECK(pacer.take(out.data(), 7'499) == AudioPacer::Take::Deferred);
+        CHECK(pacer.take(out.data(), 7'500) == AudioPacer::Take::Silence);
+        // The partial frame does not count as a frame, but is held all the same.
+        std::vector<float> half = tone(100, 0.2f);
+        pacer.push(half.data(), 100);
+        CHECK_EQ(pacer.queuedFrames(), size_t(0));
+        CHECK_EQ(pacer.queuedSamples(), size_t(100));
+        pacer.setUnderrunGraceUs(-1);
+        CHECK_EQ(pacer.underrunGraceUs(), int64_t(10'000));
+    }
+
     SECTION("AudioPacer — 20 ms bursts with 9 ms of jitter: no silence, no drop (the macOS case)");
     {
         // What ScreenCaptureKit does: 960 samples every 20 ms, delivered a

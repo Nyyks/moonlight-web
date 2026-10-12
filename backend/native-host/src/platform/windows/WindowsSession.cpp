@@ -532,7 +532,9 @@ public:
                 log::info(std::string("[native] audio: ") + how);
             }
             auto audio = std::make_unique<audio::WasapiLoopback>(
-                m_Callbacks.onAudio, m_Config.tuning.audioFrameSamples());
+                m_Callbacks.onAudio, m_Config.tuning.audioFrameSamples(),
+                m_Config.tuning.audioGraceUs < 0 ? audio::WasapiLoopback::kDefaultGraceUs
+                                                 : m_Config.tuning.audioGraceUs);
             std::string audioError;
             if (audio->start(audioError)) {
                 m_Audio = std::move(audio);

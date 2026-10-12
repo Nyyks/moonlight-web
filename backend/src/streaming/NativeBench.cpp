@@ -256,6 +256,9 @@ const char* const kUsage =
     "  audioframe=5|10|20  the Opus frame of the host's sound, in ms: 5 the product; 10 or\n"
     "                    20 send a half or a quarter of the packets, and wait that much\n"
     "                    longer before each (plan audio + DSCP, A3 L2)\n"
+    "  audiograce=<ms>   the Windows capture waits that long (0-20, decimals taken) for a\n"
+    "                    late loopback packet before sending silence; 5 the product, 0 none\n"
+    "                    (plan audio + DSCP)\n"
     "  clicktrace=0|1    the click's way through the host: each press handed to the OS,\n"
     "                    each wake-up of the capture with the OS's and the compositor's\n"
     "                    stamps, a CSV next to the log when the session ends (Windows\n"
@@ -643,6 +646,10 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
         const int v = value.toInt(&ok);
         ok = ok && (v == 5 || v == 10 || v == 20);
         tuning.audioFrameMs = v == 5 ? 0 : v;
+    } else if (key == "audiograce") {
+        const double ms = value.toDouble(&ok);
+        ok = ok && ms >= 0.0 && ms <= 20.0;
+        tuning.audioGraceUs = static_cast<int>(ms * 1000.0 + 0.5);
     } else {
         return false;
     }

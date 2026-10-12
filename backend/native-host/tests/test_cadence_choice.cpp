@@ -280,6 +280,20 @@ void run_cadence_choice_tests()
         CHECK_EQ(t.describe(), std::string("audiolog=1"));
     }
 
+    // The Windows capture's grace (plan audio + DSCP, L1 of 11/10): off unless said.
+    SECTION("audiograce= — the product's 5 ms unless said, 0 named too");
+    {
+        EncoderTuning t;
+        CHECK_EQ(t.audioGraceUs, -1);
+        CHECK(t.isDefault());
+        t.audioGraceUs = 2500;
+        CHECK(!t.isDefault());
+        CHECK_EQ(t.describe(), std::string("audiograce=2500us"));
+        t.audioGraceUs = 0;
+        CHECK(!t.isDefault());
+        CHECK_EQ(t.describe(), std::string("audiograce=0us"));
+    }
+
     // The Opus frame (plan audio + DSCP, A3 L2): 5 ms unless said.
     SECTION("audioframe= — 240 samples by default, 480 / 960 when set, named");
     {

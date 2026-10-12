@@ -518,6 +518,14 @@ struct EncoderTuning
     /// encoder, the pacer and the relay's RTP clock all follow. 0, the
     /// product: 5 ms.
     int audioFrameMs = 0;
+    /// How long the Windows capture waits for a late loopback packet before
+    /// sending silence in its place, in µs (the pacer's grace; macOS waits two
+    /// frames since `563fd71f`; plan « le son et la priorité des paquets », L1
+    /// of 11/10). Without any, a packet a little late goes out as a silent
+    /// frame and the queue drops one later: 1 to 4 of each a second under
+    /// music, heard as crackles NetEq never sees. -1, the product: 5 ms
+    /// (WasapiLoopback::kDefaultGraceUs); 0 none.
+    int audioGraceUs = -1;
 
     /// Samples per channel of one audio frame at 48 kHz: 240, 480 or 960.
     int audioFrameSamples() const
@@ -554,7 +562,7 @@ struct EncoderTuning
                aroadWindowKb == 0 && aroadBudgetPct == 0 && aroadChunk == 0 && !relayLog &&
                paceMultiple == 0 && paceBurstKb == 0 && retransCutPermille < 0 &&
                sctpBufferKb == 0 && linkHoldMs == 0 && sctpMaxBurst < 0 && sctpScheduler < 0 &&
-               sctpMtu == 0 && !audioLog && audioFrameMs == 0 && !clickTrace &&
+               sctpMtu == 0 && !audioLog && audioFrameMs == 0 && audioGraceUs < 0 && !clickTrace &&
                sckQueueDepth == 0 && sckMinIntervalUs < 0;
     }
 
@@ -677,6 +685,7 @@ struct EncoderTuning
         if (sctpMtu > 0) add("sctpmtu=" + std::to_string(sctpMtu));
         if (audioLog) add("audiolog=1");
         if (audioFrameMs > 0) add("audioframe=" + std::to_string(audioFrameMs));
+        if (audioGraceUs >= 0) add("audiograce=" + std::to_string(audioGraceUs) + "us");
         if (clickTrace) add("clicktrace=1");
         if (sckQueueDepth > 0) add("sckdepth=" + std::to_string(sckQueueDepth));
         if (sckMinIntervalUs >= 0) add("sckinterval=" + std::to_string(sckMinIntervalUs));

@@ -103,7 +103,10 @@ public:
     int frameSamples() const { return m_FrameSamples; }
     size_t frameFloats() const { return m_FrameFloats; }
     int64_t framePeriodUs() const { return m_FramePeriodUs; }
-    int64_t underrunGraceUs() const { return 2 * m_FramePeriodUs; }
+    int64_t underrunGraceUs() const { return m_GraceUs >= 0 ? m_GraceUs : 2 * m_FramePeriodUs; }
+    /// Another grace than two periods (`audiograce=<ms>` on Windows); < 0 puts
+    /// the default back.
+    void setUnderrunGraceUs(int64_t us) { m_GraceUs = us; }
 
     /// Anchor the clock: the first frame is due one period from `nowUs`.
     void start(int64_t nowUs)
@@ -187,6 +190,8 @@ public:
 
     /// Samples waiting, in frames (fractional part dropped).
     size_t queuedFrames() const { return m_Queue.size() / m_FrameFloats; }
+    /// Samples waiting (per channel), partial frame included.
+    size_t queuedSamples() const { return m_Queue.size() / kChannels; }
 
     /// The largest absolute sample of one frame (`floats` floats, a 5 ms
     /// frame's by default): the bench's audio log reads where a test tone
@@ -242,6 +247,7 @@ private:
     std::deque<float> m_Queue;
     bool m_Started = false;
     int64_t m_NextDueUs = 0;
+    int64_t m_GraceUs = -1;
     int64_t m_Dropped = 0;
     int64_t m_Underruns = 0;
     int64_t m_Reanchors = 0;
