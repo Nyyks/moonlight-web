@@ -35,6 +35,7 @@ void run_send_backlog_tests();
 void run_relay_frame_log_tests();
 void run_ice_priority_tests();
 void run_audio_path_log_tests();
+void run_packet_marking_tests();
 void run_send_pacer_tests();
 void run_link_loss_tests();
 void run_annexb_filler_tests();
@@ -91,6 +92,7 @@ int main(int argc, char** argv)
     run_relay_frame_log_tests();
     run_ice_priority_tests();
     run_audio_path_log_tests();
+    run_packet_marking_tests();
     run_send_pacer_tests();
     run_link_loss_tests();
     run_annexb_filler_tests();

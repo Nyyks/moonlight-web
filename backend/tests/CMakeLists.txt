@@ -76,6 +76,7 @@ add_executable(run_tests
     test_relay_frame_log.cpp
     test_ice_priority.cpp
     test_audio_path_log.cpp
+    test_packet_marking.cpp
     test_send_pacer.cpp
     test_link_loss.cpp
     test_annexb_filler.cpp

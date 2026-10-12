@@ -19,6 +19,7 @@
 #include "AudioPathLog.h"
 #include "ClipboardBridge.h"
 #include "InputMessageCodec.h"
+#include "PacketMarking.h"
 #include "IMediaEngine.h"
 #include "ExitNotice.h"
 // Only for the cursor-mode message, which is meaningless to any other engine:
@@ -1025,6 +1026,7 @@ void DataChannelRelay::setupPeerConnection(const rtc::Configuration& config)
                    << "bytes, SCTP packets of" << (m_SctpMtu - 108) << "bytes";
     }
 
+    PacketMarking::apply();
     m_Pc = std::make_shared<rtc::PeerConnection>(pcConfig);
 
     // `sctpss=` (plan Wi-Fi W2.3): the host's small messages on the input

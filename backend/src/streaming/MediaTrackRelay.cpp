@@ -18,6 +18,7 @@
 #include "MediaTrackRelay.h"
 #include "ClipboardBridge.h"
 #include "InputMessageCodec.h"
+#include "PacketMarking.h"
 #include "IMediaEngine.h"
 #include "NativeMediaEngine.h"
 #include "ExitNotice.h"
@@ -282,6 +283,7 @@ void MediaTrackRelay::setupPeerConnection(const rtc::Configuration& config)
 {
     qInfo() << "[MediaTrackRelay] Creating PeerConnection (media mode)";
 
+    PacketMarking::apply();
     m_Pc = std::make_shared<rtc::PeerConnection>(config);
 
     // --- Local description callback ---

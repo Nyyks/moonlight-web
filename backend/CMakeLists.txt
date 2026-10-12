@@ -165,6 +165,50 @@ add_subdirectory(native-host)
 # right ENet platform sources (win32.c vs unix.c) and links OpenSSL crypto.
 add_subdirectory(third_party/moonlight-common-c)
 
+# Our patches on submodules, kept as files in third_party/patches rather than a
+# fork: each is applied to the submodule's working tree at configure time, once
+# (a patch that already reverses cleanly is left alone).
+find_package(Git REQUIRED)
+function(mw_apply_patch dir patch)
+    set(p "${CMAKE_CURRENT_SOURCE_DIR}/third_party/patches/${patch}")
+    execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${dir}" apply --reverse --check "${p}"
+                    RESULT_VARIABLE applied OUTPUT_QUIET ERROR_QUIET)
+    if(applied EQUAL 0)
+        return()
+    endif()
+    execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${dir}" apply "${p}"
+                    RESULT_VARIABLE failed ERROR_VARIABLE why)
+    if(NOT failed EQUAL 0)
+        message(FATAL_ERROR "${patch} does not apply to ${dir}: ${why}"
+                            "(the submodule moved: refresh the patch)")
+    endif()
+    message(STATUS "applied ${patch}")
+endfunction()
+
+# libdatachannel: the DSCP of outgoing packets settable (rtc::SetDscpSettings),
+# where upstream writes EF / AF42 / AF11 in. The server puts it all in AF41
+# (plan « le son et la priorité des paquets », D5).
+mw_apply_patch("${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel"
+               libdatachannel-dscp-settings.patch)
+# libjuice gives up marking on Windows without trying; on Windows 11 an
+# unelevated setsockopt(IP_TOS) does mark, under the service too. Chosen over a
+# QoS policy laid by the installer, which Windows leaves out of force after a
+# reboot on a PC outside a domain (bench of 12/10, even with "Do not use NLA").
+option(MW_LIBJUICE_WINDOWS_DSCP "Let libjuice set the DSCP on Windows" ON)
+set(MW_LIBJUICE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel/deps/libjuice")
+if(WIN32 AND MW_LIBJUICE_WINDOWS_DSCP)
+    mw_apply_patch("${MW_LIBJUICE_DIR}" libjuice-windows-diffserv.patch)
+else()
+    # Switched back off: the patch comes out again.
+    set(p "${CMAKE_CURRENT_SOURCE_DIR}/third_party/patches/libjuice-windows-diffserv.patch")
+    execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${MW_LIBJUICE_DIR}" apply --reverse --check "${p}"
+                    RESULT_VARIABLE applied OUTPUT_QUIET ERROR_QUIET)
+    if(applied EQUAL 0)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${MW_LIBJUICE_DIR}" apply --reverse "${p}")
+        message(STATUS "took libjuice-windows-diffserv.patch out")
+    endif()
+endif()
+
 # libdatachannel (WebRTC DataChannel + media). Match the previous .bat flags.
 set(NO_WEBSOCKET ON  CACHE BOOL "" FORCE)
 set(NO_MEDIA     OFF CACHE BOOL "" FORCE)
@@ -310,6 +354,7 @@ add_executable(mw-server
     src/streaming/HostAudioSink.cpp
     src/streaming/StreamRelay.cpp
     src/streaming/DataChannelRelay.cpp
+    src/streaming/PacketMarking.cpp
     src/streaming/SctpCounters.cpp
     src/streaming/SctpFlood.cpp
     src/streaming/FrameSender.cpp

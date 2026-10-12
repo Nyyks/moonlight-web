@@ -623,6 +623,12 @@ bool AppSettings::latencyFlagEnabled() const
     return obj.value("latency_flag_enabled").toBool(false);
 }
 
+bool AppSettings::packetMarking() const
+{
+    QJsonObject obj = readAll();
+    return obj.value("packet_marking").toBool(true);
+}
+
 bool AppSettings::sharedFeedEnabled() const
 {
     QJsonObject obj = readAll();

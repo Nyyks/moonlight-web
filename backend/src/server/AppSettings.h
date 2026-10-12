@@ -97,6 +97,13 @@ public:
 
     bool latencyFlagEnabled() const;
 
+    // ── Packet priority (DSCP) ────────────────────────────────────────────────
+    // File-only setting "packet_marking", DEFAULT true: the stream's packets
+    // leave in AF41, the Wi-Fi's video queue (streaming/PacketMarking.h).
+    // false marks nothing — for a network that drops or mishandles marked
+    // packets. Read before each stream.
+    bool packetMarking() const;
+
     // ── The guests' shared feed ───────────────────────────────────────────────
     //
     // Whether the guests of this machine's native host watch ONE stream encoded

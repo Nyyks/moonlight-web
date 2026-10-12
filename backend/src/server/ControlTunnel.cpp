@@ -20,6 +20,7 @@
 #include "server/TunnelFrame.h"
 
 #include "common/Logger.h"
+#include "streaming/PacketMarking.h"
 #include "common/PairingCrypto.h"
 #include "network/RendezvousClient.h"
 #include "network/RouterPortAllocator.h"
@@ -422,6 +423,7 @@ void ControlTunnel::buildPeerConnection(Peer& p)
     // anyway. Both ends now ask the machine they are already talking to.
     config.iceServers.emplace_back(m_Settings->stunServer().toStdString());
 
+    PacketMarking::apply();
     p.pc = std::make_shared<rtc::PeerConnection>(config);
 
     const QString id = sessionId;
