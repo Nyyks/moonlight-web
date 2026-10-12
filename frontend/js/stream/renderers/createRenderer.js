@@ -52,21 +52,24 @@ export const NO_WEBGPU_ALGOS = ['smooth2d', ...WEBGL_ALGOS];
  * good. Chrome draws the same frame in 0.5 ms and keeps Canvas2D (the
  * 03/09/2026 defaults, measured on Mac and Windows).
  *
- * Only the plain path moves: an enhancer already runs on WebGL or WebGPU, HDR
- * has its own routing, and the debug menu's Canvas2D stays Canvas2D.
+ * Only the plain path moves (plainPicture).
  * @param {{gecko: boolean, hdr: boolean, algo: string, webgpu: boolean,
  *          sink: boolean, forceCanvas2d?: boolean, devCanvas2d?: boolean}} s
  */
 export function geckoPresentsOnPlainWebGl(s) {
-    return (
-        s.gecko === true &&
-        !s.hdr &&
-        s.algo === 'off' &&
-        !s.webgpu &&
-        !s.sink &&
-        !s.forceCanvas2d &&
-        !s.devCanvas2d
-    );
+    return s.gecko === true && plainPicture(s);
+}
+
+/**
+ * The plain picture: the one stream that may go on either Canvas2D or WebGL2
+ * with nothing to lose (geckoPresentsOnPlainWebGl, RendererFallback). An
+ * enhancer already runs on WebGL or WebGPU, HDR has its own routing, and the
+ * debug menu's Canvas2D stays Canvas2D.
+ * @param {{hdr: boolean, algo: string, webgpu: boolean, sink: boolean,
+ *          forceCanvas2d?: boolean, devCanvas2d?: boolean}} s
+ */
+export function plainPicture(s) {
+    return !s.hdr && s.algo === 'off' && !s.webgpu && !s.sink && !s.forceCanvas2d && !s.devCanvas2d;
 }
 
 export async function createVideoRenderer(canvas, opts) {

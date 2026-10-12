@@ -87,7 +87,13 @@ import {
     createVideoRenderer,
     geckoPresentsOnPlainWebGl,
     NO_WEBGPU_ALGOS,
+    plainPicture,
 } from '../stream/renderers/createRenderer.js';
+import {
+    RendererFallback,
+    rememberedPlainRenderer,
+    rememberPlainRenderer,
+} from '../stream/RendererFallback.js';
 import { tvPresentsThroughSink, videoSinkCtor } from '../stream/renderers/videoSink.js';
 import {
     PipelineDiag,
@@ -874,6 +880,33 @@ export class StreamView {
             forceCanvas2d,
             devCanvas2d,
         });
+        // The plain picture on the main-thread canvas path: the one the
+        // renderer fallback may move between Canvas2D and WebGL2 when its draw
+        // stops fitting a frame (RendererFallback), and the one a previous
+        // session's verdict applies to.
+        this._plainPicture =
+            plainPicture({
+                hdr: this._hdrMode !== 'none',
+                algo,
+                webgpu: this._wantWebGpu,
+                sink: this._useVideoSink || this._forceVideoSink,
+                forceCanvas2d,
+                devCanvas2d,
+            }) &&
+            !this._ultraAsked &&
+            transport !== 'webrtc-media';
+        const plainKind = this._plainPicture ? rememberedPlainRenderer() : null;
+        if (plainKind && plainKind !== (this._plainWebGl ? 'webgl' : 'canvas2d')) {
+            console.log(
+                '[StreamView] Renderer: ' + plainKind + ', where this device settled last time',
+            );
+        }
+        if (plainKind) this._plainWebGl = plainKind === 'webgl';
+        /** @type {RendererFallback|null} made with the main-thread renderer */
+        this._rendererFallback = null;
+        this._swappingRenderer = false;
+        /** A renderer's fresh canvas, put in place at its first draw. */
+        this._nextCanvas = null;
         this._workerLastDecoded = 0;
 
         // Backend timestamp tracking for stale frame detection.
@@ -2309,6 +2342,7 @@ export class StreamView {
         // rides on it: it reads the same counters, whether the stats show or not.
         this._overlayInterval = setInterval(() => {
             this._checkSilentDecoder();
+            this._checkRendererCost();
             this._updateOverlay();
         }, 500);
 
@@ -2545,6 +2579,7 @@ export class StreamView {
                 this._activeRendererKind = r.kind;
                 this._rendererHdrActive = !!r.hdrActive;
                 this._createEnhancerGovernor(r);
+                this._watchRendererCost(r);
                 this._applyRendererSink(r);
                 this._applyOutputSize();
                 this.setupDecoder();
@@ -4302,6 +4337,121 @@ export class StreamView {
         }
     }
 
+    /** The plain picture's main-thread renderer: watch what its draw costs. */
+    _watchRendererCost(r) {
+        this._rendererFallback =
+            this._plainPicture && !this._useWorker && (r.kind === 'canvas2d' || r.kind === 'webgl')
+                ? new RendererFallback(r.kind)
+                : null;
+    }
+
+    /**
+     * Feed RendererFallback on the 500 ms tick, whether the stats card shows
+     * or not, and carry out its verdict.
+     */
+    _checkRendererCost() {
+        const f = this._rendererFallback;
+        if (!f || !this._renderer || this._quitting || this._swappingRenderer) return;
+        if (!this._firstFrameRendered || this._standby) return;
+        const d = this._diag.snapshot();
+        const step = f.update({
+            submitMs: d.renderSubmitMs,
+            arrivalMs: d.arrivalAvgMs,
+            now: performance.now(),
+        });
+        if (!step) return;
+        const ms = (v) => v.toFixed(1) + ' ms';
+        const from = this._renderer.kind;
+        if (step.action === 'keep') {
+            console.log(
+                '[StreamView] Renderer: ' +
+                    step.kind +
+                    ' draws in ' +
+                    ms(step.toMs) +
+                    ', ' +
+                    ms(step.fromMs) +
+                    ' before — kept, and remembered on this device',
+            );
+            rememberPlainRenderer(step.kind);
+            return;
+        }
+        console.log(
+            '[StreamView] Renderer: ' +
+                from +
+                ' draws cost ' +
+                ms(step.action === 'switch' ? step.fromMs : step.toMs) +
+                ' a frame, frames arrive every ' +
+                ms(step.budgetMs) +
+                (step.action === 'switch'
+                    ? ' — trying ' + step.kind
+                    : ', no better than ' + ms(step.fromMs) + ' — back to ' + step.kind),
+        );
+        this._swapPlainRenderer(step.kind);
+    }
+
+    /**
+     * Put the plain picture on the other renderer. A canvas keeps the first
+     * context it was given, so the new renderer gets a fresh copy of the
+     * element, which takes the old one's place at its first draw
+     * (_showNextCanvas). Until then the old renderer keeps drawing.
+     * @param {'canvas2d'|'webgl'} kind
+     */
+    async _swapPlainRenderer(kind) {
+        this._swappingRenderer = true;
+        const el = /** @type {HTMLCanvasElement} */ (this.canvas.cloneNode(false));
+        let r = null;
+        try {
+            r = await createVideoRenderer(el, {
+                desynchronized: this._tearing,
+                videoCodec: this.videoCodec,
+                isChromeWindowsHevc: this._isChromeWindowsHevc,
+                webgpu: false,
+                algo: 'off',
+                ceiling: 'off',
+                plainWebGl: kind === 'webgl',
+            });
+        } catch (e) {
+            console.warn('[StreamView] Renderer: ' + kind + ' did not start: ' + e.message);
+        }
+        this._swappingRenderer = false;
+        // WebGL2 refused: createVideoRenderer answered with Canvas2D instead.
+        if (r && r.kind !== kind) {
+            r.dispose();
+            r = null;
+        }
+        if (!r || this._quitting || !this.renderRunning) {
+            if (r) r.dispose();
+            if (!r && this._rendererFallback) {
+                this._rendererFallback.abandon();
+                console.log('[StreamView] Renderer: no ' + kind + ' here, staying put');
+            }
+            return;
+        }
+        const old = this._renderer;
+        this._renderer = r;
+        this._nextCanvas = el;
+        this._activeRendererKind = r.kind;
+        this._rendererHdrActive = false;
+        this._governor = null;
+        this._createEnhancerGovernor(r);
+        this._contentAge.attach(r);
+        this._applyOutputSize();
+        // A draw of the old renderer may still be finishing.
+        setTimeout(() => old.dispose(), 1000);
+    }
+
+    /** The swapped renderer's canvas, in place of the old one (see _pumpRender). */
+    _showNextCanvas() {
+        const el = this._nextCanvas;
+        this._nextCanvas = null;
+        if (!this.canvas || !el) return;
+        // The touch zoom may have moved the old one since it was copied.
+        el.style.cssText = this.canvas.style.cssText;
+        this.canvas.replaceWith(el);
+        this.canvas = el;
+        this._invalidateMediaRect();
+    }
+
     /**
      * Best-effort snapshot of the last presented frame, used to bridge a
      * transport relaunch with a frozen image instead of a black loader.
@@ -4573,6 +4723,9 @@ export class StreamView {
         const frameBackendTs = frame._mwBackendTs;
         const frameHostTs = frame._mwHostTs;
         const frameLog = frame._mwLog;
+        // A swapped renderer's canvas goes on the page in the same task as its
+        // first picture, so the page never composites it empty.
+        if (this._nextCanvas) this._showNextCanvas();
         const drawStart = performance.now();
         // Queue stage: how long the decoded frame waited for its turn to draw
         // (vsync pacing in rAF mode, renderer busy in immediate mode).
@@ -4955,6 +5108,7 @@ export class StreamView {
                         this._activeRendererKind = r.kind;
                         this._rendererHdrActive = !!r.hdrActive;
                         this._createEnhancerGovernor(r);
+                        this._watchRendererCost(r);
                         console.log(
                             '[StreamView] renderer=' +
                                 r.kind +

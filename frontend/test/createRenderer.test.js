@@ -24,6 +24,7 @@ vi.mock('../js/stream/renderers/WebGlRenderer.js', () => ({
 import {
     createVideoRenderer,
     geckoPresentsOnPlainWebGl,
+    plainPicture,
 } from '../js/stream/renderers/createRenderer.js';
 import { Canvas2DRenderer } from '../js/stream/renderers/Canvas2DRenderer.js';
 import { WebGpuRenderer } from '../js/stream/renderers/WebGpuRenderer.js';
@@ -120,5 +121,21 @@ describe('geckoPresentsOnPlainWebGl', () => {
         // The debug menu's Canvas2D, and mw_force_2d, stay Canvas2D.
         expect(geckoPresentsOnPlainWebGl({ ...ff, forceCanvas2d: true })).toBe(false);
         expect(geckoPresentsOnPlainWebGl({ ...ff, devCanvas2d: true })).toBe(false);
+    });
+});
+
+/** The picture RendererFallback may move between Canvas2D and WebGL2. */
+describe('plainPicture', () => {
+    const plain = { hdr: false, algo: 'off', webgpu: false, sink: false };
+
+    it('is the SDR picture with no enhancer, in any browser', () => {
+        expect(plainPicture(plain)).toBe(true);
+    });
+
+    it('is not a picture something else already placed', () => {
+        expect(plainPicture({ ...plain, algo: 'smooth2d' })).toBe(false);
+        expect(plainPicture({ ...plain, hdr: true })).toBe(false);
+        expect(plainPicture({ ...plain, sink: true })).toBe(false);
+        expect(plainPicture({ ...plain, forceCanvas2d: true })).toBe(false);
     });
 });
