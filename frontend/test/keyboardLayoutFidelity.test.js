@@ -2,7 +2,7 @@
  * MoonlightWeb — TNR suite. Copyright (C) 2026 Bruno Martin.
  * GPLv3 — see repository LICENSE.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { StreamView } from '../js/ui/StreamView.js';
 
 /**
@@ -51,6 +51,12 @@ function keySink(overrides = {}) {
         _forgetHeldKey: StreamView.prototype._forgetHeldKey,
         _holdsThroughStall: StreamView.prototype._holdsThroughStall,
         _sendInputState: StreamView.prototype._sendInputState,
+        handleKeyPress: StreamView.prototype.handleKeyPress,
+        _deferComposedKey: StreamView.prototype._deferComposedKey,
+        _flushComposedKey: StreamView.prototype._flushComposedKey,
+        _dropComposedKey: StreamView.prototype._dropComposedKey,
+        _deadPending: false,
+        _composedKey: null,
         ...overrides,
     };
 }
@@ -226,5 +232,113 @@ describe('the wire message', () => {
             expect.objectContaining({ keyCode: VK_Q, char: 'a', nonUs: true }),
             expect.objectContaining({ keyCode: VK_SPACE, char: ' ', nonUs: false }),
         ]);
+    });
+});
+
+describe('a dead key and what it composes', () => {
+    // Chrome on Windows reports the keystroke after a dead key with the key's
+    // own character — ' ' for the Space of "~", 'n' for the n of "ñ" — and puts
+    // the composition in the keypress alone. The native host, which types
+    // characters, got a space for every tilde (12/10/2026, AZERTY → UM790Pro).
+    afterEach(() => vi.useRealTimers());
+
+    const altGr = { ctrlKey: true, altKey: true, getModifierState: (n) => n === 'AltGraph' };
+
+    function deadThen(v, code, key) {
+        v.handleKeyDown(ev('Digit2', 'Dead', altGr));
+        const next = ev(code, key);
+        let prevented = false;
+        next.preventDefault = () => (prevented = true);
+        v.handleKeyDown(next);
+        return () => prevented;
+    }
+
+    it('sends the composed tilde on the Space, and leaves the keydown to the browser', () => {
+        const v = keySink();
+        const prevented = deadThen(v, 'Space', ' ');
+        // The dead key went out, flagged; the Space is held back, and its
+        // keydown not cancelled — or the keypress would never fire.
+        expect(v.sent).toHaveLength(1);
+        expect(v.sent[0]).toMatchObject({ code: 'Digit2', dead: true });
+        expect(prevented()).toBe(false);
+
+        const press = ev('Space', '~');
+        let cancelled = false;
+        press.preventDefault = () => (cancelled = true);
+        v.handleKeyPress(press);
+        expect(cancelled).toBe(true);
+
+        v.handleKeyUp(ev('Space', ' '));
+        expect(v.sent.map((m) => [m.type, m.code, m.char])).toEqual([
+            ['keydown', 'Digit2', null],
+            ['keydown', 'Space', '~'],
+            ['keyup', 'Space', '~'],
+        ]);
+        // The position is kept for a host that composes on its own side.
+        expect(v.sent[1].keyCode).toBe(VK_SPACE);
+        expect(v.sent[1].nonUs).toBe(true);
+        expect(v.sent[1].dead).toBe(false);
+    });
+
+    it('sends ñ on the n', () => {
+        const v = keySink();
+        deadThen(v, 'KeyN', 'n');
+        v.handleKeyPress(ev('KeyN', 'ñ'));
+        v.handleKeyUp(ev('KeyN', 'n'));
+        expect(v.sent[1]).toMatchObject({ type: 'keydown', code: 'KeyN', char: 'ñ' });
+    });
+
+    it('keeps the key its own character when the pair does not compose', () => {
+        const v = keySink();
+        deadThen(v, 'KeyW', 'z');
+        v.handleKeyPress(ev('KeyW', '~'));
+        v.handleKeyPress(ev('KeyW', 'z'));
+        v.handleKeyUp(ev('KeyW', 'z'));
+        expect(v.sent[1]).toMatchObject({ type: 'keydown', code: 'KeyW', char: 'z' });
+    });
+
+    it('sends the key as it read when no keypress comes', () => {
+        // A browser that composes in the keydown itself (Firefox) and fires no
+        // keypress the page can see: the timer lets the press go as it was.
+        vi.useFakeTimers();
+        const v = keySink();
+        deadThen(v, 'KeyN', 'ñ');
+        expect(v.sent).toHaveLength(1);
+        vi.advanceTimersByTime(60);
+        expect(v.sent[1]).toMatchObject({ type: 'keydown', code: 'KeyN', char: 'ñ' });
+    });
+
+    it('lets the held-back press go before the next one', () => {
+        const v = keySink();
+        deadThen(v, 'Space', ' ');
+        v.handleKeyPress(ev('Space', '~'));
+        v.handleKeyDown(ev('KeyE', 'e'));
+        expect(v.sent.map((m) => m.code)).toEqual(['Digit2', 'Space', 'KeyE']);
+    });
+
+    it('holds back nothing once the composition is over', () => {
+        const v = keySink();
+        deadThen(v, 'Space', ' ');
+        v.handleKeyPress(ev('Space', '~'));
+        v.handleKeyUp(ev('Space', ' '));
+        v.sent.length = 0;
+
+        const e = ev('KeyE', 'e');
+        let prevented = false;
+        e.preventDefault = () => (prevented = true);
+        v.handleKeyDown(e);
+        expect(prevented).toBe(true);
+        expect(v.sent).toHaveLength(1);
+    });
+
+    it('waits through the Shift of a capital: dead key, Shift, then the letter', () => {
+        const v = keySink();
+        v.handleKeyDown(ev('Digit2', 'Dead', altGr));
+        v.handleKeyDown(ev('ShiftLeft', 'Shift', { shiftKey: true }));
+        v.handleKeyDown(ev('KeyN', 'N', { shiftKey: true }));
+        v.handleKeyPress(ev('KeyN', 'Ñ'));
+        v.handleKeyUp(ev('KeyN', 'N', { shiftKey: true }));
+        const n = v.sent.find((m) => m.type === 'keydown' && m.code === 'KeyN');
+        expect(n.char).toBe('Ñ');
     });
 });

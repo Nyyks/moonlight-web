@@ -1558,6 +1558,12 @@ export class StreamView {
         // Bound handlers
         this._onKeyDown = (e) => this.handleKeyDown(e);
         this._onKeyUp = (e) => this.handleKeyUp(e);
+        this._onKeyPress = (e) => this.handleKeyPress(e);
+        // A dead key went out and its composition is still to come (true), and
+        // the keystroke after it, held back for the character the browser
+        // composes (see _deferComposedKey).
+        this._deadPending = false;
+        this._composedKey = null;
         this._onPaste = (e) => this.handlePaste(e);
         this._onPointerDownFlush = () => this._flushPendingClipboard();
         this._onWindowBlur = () => this._releaseAllPhysKeys();
@@ -7988,6 +7994,7 @@ export class StreamView {
         // Common events (both modes)
         document.addEventListener('keydown', this._onKeyDown);
         document.addEventListener('keyup', this._onKeyUp);
+        document.addEventListener('keypress', this._onKeyPress);
         // Native paste event: the only permission-free way to read the local
         // clipboard (Ctrl/Cmd+V IS the user's consent). See handlePaste().
         document.addEventListener('paste', this._onPaste);
@@ -9051,6 +9058,8 @@ export class StreamView {
         this._hidOfferToasts = [];
         document.removeEventListener('keydown', this._onKeyDown);
         document.removeEventListener('keyup', this._onKeyUp);
+        document.removeEventListener('keypress', this._onKeyPress);
+        this._dropComposedKey();
         document.removeEventListener('paste', this._onPaste);
         document.removeEventListener('pointerdown', this._onPointerDownFlush, true);
         if (this._pendingPasteKey) {
@@ -9594,6 +9603,9 @@ export class StreamView {
         // Soft-keyboard events on the capture element are handled by its own
         // listeners (beforeinput/keydown) — don't double-process here.
         if (e.target === this._kbdCapture) return;
+        // A keystroke still waiting for its composed character goes out first:
+        // the host must see the two presses in the order they were made.
+        if (this._composedKey) this._flushComposedKey();
         // The OK that opened the remote's menu, still held: its repeats land
         // on the menu's first button the moment it takes the focus, and press
         // it — the menu closed again under the finger (measured on a Freebox).
@@ -9845,7 +9857,6 @@ export class StreamView {
             return;
         }
 
-        e.preventDefault();
         // Use physical-position-based VK code (like moonlight-qt's SDL scancode→VK).
         // e.code is always layout-independent ("KeyQ" = top-left letter row).
         // e.keyCode may be layout-dependent on some browsers (VK_A for 'a' on
@@ -9861,6 +9872,20 @@ export class StreamView {
         // A dead key (AltGr+2's tilde on AZERTY): its character comes composed
         // with the next key. Said so, for the native host to leave it out.
         const dead = e.key === 'Dead';
+
+        // The printable key after a dead key: what it types is the browser's
+        // composition, and Chrome on Windows does not put that in this event —
+        // e.key still reads ' ' for the Space of "~", 'n' for the n of "ñ". It
+        // comes in the keypress, which only fires if this keydown is left alone.
+        if (this._deadPending && !dead && cc && !e.ctrlKey && !e.metaKey) {
+            this._deadPending = false;
+            this._deferComposedKey(e, vkCode, cc);
+            return;
+        }
+        if (dead) this._deadPending = true;
+        else if (!StreamView.MODIFIER_CODES.has(e.code)) this._deadPending = false;
+
+        e.preventDefault();
 
         // ── Cmd+key on an Apple keyboard: send a tap, not a hold ──────────
         // macOS never delivers the keyup of a key pressed while Cmd is down.
@@ -9911,8 +9936,76 @@ export class StreamView {
         });
     }
 
+    /**
+     * Hold back the printable keystroke that follows a dead key, until the
+     * browser has said what the two compose to. Its keydown is left without
+     * preventDefault() so that the keypress carrying the composition fires;
+     * handleKeyPress() collects it and cancels that one instead. The press goes
+     * out at the first of: its own release, the next keydown, or 50 ms — with
+     * the composed character when one came, with the key's own otherwise.
+     *
+     * The position is unchanged, so a Sunshine host, which gets the dead key as
+     * a position too and composes on its side, sees the same two presses as
+     * before. Only the native host, which types the character, gets the "~".
+     */
+    _deferComposedKey(e, vkCode, cc) {
+        this._dropComposedKey();
+        this._composedKey = {
+            code: e.code,
+            msg: {
+                type: 'keydown',
+                keyCode: vkCode,
+                code: e.code,
+                key: e.key,
+                char: cc.char,
+                nonUs: cc.nonUs,
+                dead: false,
+                hold: this._holdsThroughStall(e.code),
+                ctrlKey: e.ctrlKey,
+                shiftKey: e.shiftKey,
+                altKey: e.altKey,
+                metaKey: e.metaKey,
+            },
+            chars: [],
+            timer: setTimeout(() => this._flushComposedKey(), 50),
+        };
+    }
+
+    /** The keypress of a keystroke held back by _deferComposedKey(). */
+    handleKeyPress(e) {
+        if (!this._composedKey || e.target === this._kbdCapture) return;
+        e.preventDefault();
+        if (typeof e.key === 'string' && [...e.key].length === 1)
+            this._composedKey.chars.push(e.key);
+    }
+
+    _flushComposedKey() {
+        const pending = this._composedKey;
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        this._composedKey = null;
+        // One keypress: the composition ("~" from the tilde and Space). Two:
+        // the pair did not compose ("~" then "z"), and the key types its own,
+        // the last one — the accent is lost there, as on a single key press
+        // there is room for one character only.
+        const composed = pending.chars.length
+            ? pending.chars[pending.chars.length - 1]
+            : pending.msg.char;
+        const msg = { ...pending.msg, char: composed };
+        if (composed !== pending.msg.char) msg.nonUs = true;
+        this._sendKeyEvent(msg);
+    }
+
+    _dropComposedKey() {
+        if (!this._composedKey) return;
+        clearTimeout(this._composedKey.timer);
+        this._composedKey = null;
+    }
+
     handleKeyUp(e) {
         if (e.target === this._kbdCapture) return;
+        // Its press, held back for a composition, goes out before its release.
+        if (this._composedKey && this._composedKey.code === e.code) this._flushComposedKey();
         // Ahead of the dialog exclusion: the OK that opened the remote's menu
         // comes back up on the menu's button, and its hold must end there.
         if (this._okHold && this._remoteOkUp(e)) return;
@@ -10024,6 +10117,13 @@ export class StreamView {
     // on the host. Mouse buttons have the same hole in gaming mode, where a
     // mouseup arriving after focus loss is dropped by the _mouseFocused gate.
     _releaseAllPhysKeys() {
+        // A press still held back would go out after the releases below, with
+        // no keyup ever coming for it: it is dropped instead.
+        if (this._composedKey) {
+            clearTimeout(this._composedKey.timer);
+            this._composedKey = null;
+        }
+        this._deadPending = false;
         // Nothing stays held, so no late keyup is worth swallowing any more.
         if (this._metaTapCodes) this._metaTapCodes.clear();
         if (this._swallowKeyUpCodes) this._swallowKeyUpCodes.clear();
