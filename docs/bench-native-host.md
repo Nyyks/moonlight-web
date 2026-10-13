@@ -6616,6 +6616,69 @@ La première série mesurait v0.3.1 avec sa propre sonde de clic, celle d'avant
   Les séries ne sont pas intercalées : ces cases montrent la dérive d'une série à
   l'autre.
 
+### 8v.5 Le clic à 60 i/s : la porte de cadence retient le drapeau (13/10/2026, soir)
+
+**La question.** Pourquoi le clic de v0.4.0 ne s'améliore-t-il pas à 60 i/s
+(médiane +1,4 ms, p90 −7,6 ms) ?
+
+**Ce que montrait déjà la comparaison** (bootstrap de la médiane regroupée) :
+- l'écart sur la médiane n'est pas établi : +1,4 ms, intervalle à 95 % de −1,4 à
+  +7,3 ;
+- la forme des distributions diffère : v0.3.1 a un mode rapide (30 % des clics
+  sous 20 ms, contre 8 %), v0.4.0 n'a plus la queue au-dessus de 60 ms.
+
+**Le banc.** Même chemin que 8v.1, en 1080p60 HEVC. 3 passes par configuration
+en rotation (ABCD, BCDA, CDAB), 60 clics par passe, ~175 clics par
+configuration. A, B et C portent `clicktrace=1` et `MW_LATENCY_FLAG_TRACE=1`,
+découpés par `clickpath/hostpath.py --from-draw --pool`. Aucune entrée sur la
+console du client.
+
+| Config | Clics | Médiane | p25 | p90 | < 20 ms | > 50 ms | Âge affiché |
+|---|---|---|---|---|---|---|---|
+| A : v0.4.0, écran virtuel à 240 Hz (défaut) | 178 | 27,5 ms | 22,4 | 44,8 | 11 % | 3 % | 17,2 ms |
+| B : v0.4.0, `MW_VDD_REFRESH=60` | 175 | 25,2 | 18,1 | 42,1 | 34 % | 6 % | 19,5 |
+| C : v0.4.0, 240 Hz, `cadence=host` (sans porte, 240 i/s) | 177 | 23,1 | 18,9 | 33,7 | 35 % | 0 % | 10,1 |
+| D : v0.3.1, écran à 60 Hz (son défaut) | 171 | 26,5 | 20,4 | 51,9 | 22 % | 10 % | 20,6 |
+
+- Écarts de médiane avec A : B −2,3 ms (de −6,0 à +0,6) ; **C −4,4 ms (de −6,5
+  à −1,7)** ; D −1,0 ms (de −5,9 à +1,9).
+- **Côté hôte, médianes, de la réception du clic à la présentation capturée** :
+
+| Config | Hôte (total) | `composed` (attente du vblank) | `present` (jusqu'à l'image capturée) | `late` / `between` |
+|---|---|---|---|---|
+| A | 23,2 ms | 3,3 | **9,7** | **2 / 2** |
+| B | 20,0 | 5,8 | 4,3 | 0 / 0 |
+| C | 15,8 | 3,5 | 2,3 | 0 / 0 |
+
+**Verdict : H1 confirmée.**
+- À 60 i/s sur l'écran virtuel à 240 Hz, `FrameCadence` n'admet que la première
+  présentation de chaque fenêtre de 16,7 ms. La page redessine à chaque vblank,
+  donc cette première présentation passe tôt dans la fenêtre.
+- La présentation qui porte le drapeau tombe ensuite : en médiane, 2 présentations
+  passent sans être encodées (`late`, `between` = 2). Elle attend la fenêtre
+  suivante, et `present` passe de 2,3 ms (C) à 9,7 ms (A).
+- Sans porte (C) ou à 60 Hz (B), le mode rapide revient : 34-35 % des clics sous
+  20 ms, contre 11 %.
+- v0.3.1 (D) se range entre les deux. Son écran à 60 Hz lui donne des clics
+  rapides (22 %), mais sa queue est la plus longue : p90 51,9 ms, 10 % au-delà de
+  50 ms.
+- Ce que la porte apporte, à garder : l'âge de l'image (A 17,2 ms contre B 19,5),
+  et un flux qui reste à 60 i/s. C coûte 240 i/s, soit 4 fois les images et le
+  débit d'un flux à 60.
+
+**Vu en route, hors de la question** : la jambe `raise` (du hook au drapeau peint)
+fait 7,5-8,5 ms en médiane et ~20 ms au p90, dans les trois configurations. C'est
+le drapeau du banc lui-même, pas le chemin d'un jeu.
+
+**Correctif proposé (pas codé, attend l'accord de Bruno)** : `inputadmit`.
+- Une entrée du client reçue depuis la dernière image admise fait admettre la
+  présentation suivante aussitôt, même si sa fenêtre a déjà servi.
+- Ce tick compte pour la fenêtre suivante : au plus une image de plus par clic,
+  débit moyen inchangé.
+- Derrière une clé de banc d'abord, mesurée A contre A + clé sur ce même banc.
+- Gain attendu : la jambe `present` de A ramenée vers celle de C, soit ~4 à 7 ms
+  sur la médiane côté hôte, en gardant l'âge et les 60 i/s de A.
+
 ## 9. Pour l'A/B
 
 Le banc encode vers un puits ; l'A/B se fait sur un vrai flux. Une session
