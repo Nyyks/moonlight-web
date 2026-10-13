@@ -9896,6 +9896,14 @@ export class StreamView {
                 return;
             }
 
+            // Stats overlay open / closed: Ctrl+Alt+Shift+I (Win) /
+            // Cmd+Option+Ctrl+I (Mac) — the same toggle as the menu's entry.
+            if (chk('i', 'KeyI')) {
+                e.preventDefault();
+                if (!e.repeat) this._toggleStatsFromMenu();
+                return;
+            }
+
             // Switch host desktop: Ctrl+Alt+Shift+Left/Right (Win, Linux) /
             // Ctrl+Option+Cmd+Left/Right (Mac). Tested on e.code, not through
             // chk(): the arrows carry no layout label, and chk() only ever

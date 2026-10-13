@@ -821,6 +821,7 @@
         "scRelease": "Quitter le mode jeu (souris + plein écran)",
         "scMouseMode": "Basculer le mode jeu souris",
         "scMute": "Couper / rétablir le son",
+        "scStats": "Afficher / masquer les stats",
         "soundOff": "Son coupé",
         "soundOn": "Son rétabli",
         "scDesktopPrev": "Bureau précédent sur l’hôte",
