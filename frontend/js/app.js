@@ -59,6 +59,7 @@ import { BackendClient } from './api/BackendClient.js';
 import { Toast } from './ui/Toast.js';
 import { DiscordLink } from './ui/DiscordLink.js';
 import * as RemoteNav from './ui/RemoteNav.js';
+import * as ViewHeaderScroll from './ui/ViewHeaderScroll.js';
 import { GamepadDriverNotice } from './ui/GamepadDriverNotice.js';
 import { VersionGuard } from './util/VersionGuard.js';
 import {
@@ -4531,5 +4532,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Arrows and pads get around the pages on a TV (nothing is attached
     // elsewhere). Before the app, so its listeners see the keys first.
     RemoteNav.init();
+    // The Settings / Admin title follows the scroll (settings.css).
+    ViewHeaderScroll.init();
     MoonlightApp.init();
 });
