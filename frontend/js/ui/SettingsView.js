@@ -1459,7 +1459,18 @@ export class SettingsView {
         // IS the behaviour: a visible switch would turn "we guessed your pad
         // wrong" into a question the user has no way to answer. In debug it is
         // the only way to tell a detection bug from a mapping bug.
-        const gamepadProfileHtml = this._debugBuild
+        // Hidden in debug too (13/10): nobody needed it since September. Kept
+        // behind localStorage mw_gamepad_profile_menu = '1'; while hidden, the
+        // profile stays 'auto' so a forced pad cannot outlive its menu.
+        let showGamepadProfile = false;
+        try {
+            showGamepadProfile =
+                this._debugBuild && localStorage.getItem('mw_gamepad_profile_menu') === '1';
+        } catch {
+            showGamepadProfile = false;
+        }
+        if (!showGamepadProfile) this._gamepadProfile = 'auto';
+        const gamepadProfileHtml = showGamepadProfile
             ? `
                     <div class="settings-field">
                         <label class="settings-label" for="settings-gamepad-profile">
