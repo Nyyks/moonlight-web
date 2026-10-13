@@ -1038,8 +1038,16 @@ export class PyroWaveDecoder extends PyroWaveFrame {
      */
     present(encoder, context, limited = true, timestampWrites) {
         const d = this.device;
+        // The format of the very texture the pass draws into: the pipeline
+        // must match it. getConfiguration() came after Chrome 126, whose
+        // fallback — the preferred format, bgra8unorm on a Mac — built the
+        // pipeline for a canvas configured rgba8unorm, and every frame was
+        // refused: a black screen (13/10/2026).
+        const target = context.getCurrentTexture();
         const format =
-            context.getConfiguration?.()?.format || navigator.gpu.getPreferredCanvasFormat();
+            target.format ||
+            context.getConfiguration?.()?.format ||
+            navigator.gpu.getPreferredCanvasFormat();
         if (!this._presentPipe || this._presentFormat !== format) {
             const module = d.createShaderModule({ code: presentWgsl(this.fp16) });
             this._presentPipe = d.createRenderPipeline({
@@ -1082,7 +1090,7 @@ export class PyroWaveDecoder extends PyroWaveFrame {
         const pass = encoder.beginRenderPass({
             colorAttachments: [
                 {
-                    view: context.getCurrentTexture().createView(),
+                    view: target.createView(),
                     loadOp: 'clear',
                     storeOp: 'store',
                     clearValue: { r: 0, g: 0, b: 0, a: 1 },
