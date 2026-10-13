@@ -432,6 +432,8 @@ def main():
     ap.add_argument("--clicks", type=int, default=0,
                     help="click → flag samples after the content-age window (needs "
                          "latency_flag_enabled in the instance's settings.json)")
+    ap.add_argument("--click-every", type=int, default=800,
+                    help="ms between two clicks (200: five a second, plan inputadmit's spam pass)")
     ap.add_argument("--raflog", action="store_true",
                     help="with --clicks: the page's animation frames over the clicks, as "
                          "<tag>.raf.csv (content-age/fluid.py)")
@@ -613,7 +615,7 @@ def main():
                     f.write(d.eval("mwFrameLog.csv()") or "")
             # A still screen: the way up with almost no video coming down.
             uplink = uplink_runs(d, a.uplink, a.tag)
-            clicks = click_flag(d, a.clicks, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
+            clicks = click_flag(d, a.clicks, a.click_every, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
             ticks = ticks_origin(d) if os.environ.get("MW_BENCH_TICKS_ORIGIN") == "1" else None
             if target is rh and rh:
                 print("  " + rh.click_target_stop(os.path.join(age.OUT, a.tag + ".target.jsonl")),
@@ -649,7 +651,7 @@ def main():
             frames_only(d, a.tag, a.secs)
             grid = None
             stepper = stepper_state(d, content_ms)
-            clicks = click_flag(d, a.clicks, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
+            clicks = click_flag(d, a.clicks, a.click_every, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
             uplink = uplink_runs(d, a.uplink, a.tag)
             d.expand_latency_detail()
             stats = d.stats()
@@ -704,7 +706,7 @@ def main():
         if a.gpu_load and a.clicks > 0:
             # The same cost again, for the clicks: the level found above.
             load, _ = start_load(a.gpu_load, a.tag + ".load-clicks.jsonl", level)
-        clicks = click_flag(d, a.clicks, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
+        clicks = click_flag(d, a.clicks, a.click_every, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
         if a.gpu_load and a.clicks > 0:
             load_seen["clicks"] = load.snapshot(30)
             load.stop()

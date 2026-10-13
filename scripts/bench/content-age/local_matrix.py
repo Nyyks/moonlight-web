@@ -155,6 +155,9 @@ def main():
     ap.add_argument("--cod-fps", type=int, default=0, help="the Call of Duty footage (pass.py --cod-fps)")
     ap.add_argument("--defaults", action="store_true", help="each version's defaults (pass.py --defaults)")
     ap.add_argument("--clicks", type=int, default=0, help="click → flag samples (pass.py --clicks)")
+    ap.add_argument("--click-every", type=int, default=0, help="ms between two clicks (pass.py --click-every)")
+    ap.add_argument("--raflog", action="store_true",
+                    help="the page's animation frames over the clicks (pass.py --raflog)")
     ap.add_argument("--uplink", default="",
                     help="HZ:SECS[,…] dated input messages, the way up alone (pass.py --uplink)")
     ap.add_argument("--tuning", default="",
@@ -191,6 +194,10 @@ def main():
         client += ["--defaults"]
     if a.clicks:
         client += ["--clicks", str(a.clicks)]
+    if a.click_every:
+        client += ["--click-every", str(a.click_every)]
+    if a.raflog:
+        client += ["--raflog"]
     if a.codec:
         client += ["--codec", a.codec]
     if a.gpu_load:

@@ -115,14 +115,16 @@ def stretch_gaps(p, key, keep=None):
 
 
 def near_click(p, t, before=40.0, after=60.0):
+    """The click whose moment is at most @p before ms after @p t or @p after ms
+    before it (its index), or None."""
     i = bisect.bisect_right(p.clicks, t + before) - 1
-    return i >= 0 and p.clicks[i] >= t - after
+    return i if i >= 0 and p.clicks[i] >= t - after else None
 
 
 def shown_steps(p, interval_ms):
     """At each animation frame, the content (hostMs) of the last frame drawn
     before it; the step from the refresh before, near a click or not."""
-    out = {"click": [], "else": []}
+    out = {"click": [], "else": [], "by_click": {}}
     for fr in p.logs:
         drawn = [r["drawnMs"] for r in fr]
         content = [r["hostMs"] for r in fr]
@@ -136,7 +138,10 @@ def shown_steps(p, interval_ms):
             if k < 0:
                 continue
             if prev is not None:
-                out["click" if near_click(p, t) else "else"].append(content[k] - prev)
+                c = near_click(p, t)
+                out["click" if c is not None else "else"].append(content[k] - prev)
+                if c is not None:
+                    out["by_click"].setdefault(c, []).append(content[k] - prev)
             prev = content[k]
     return out
 
@@ -173,8 +178,9 @@ def report(label, passes, interval_ms):
     print("  arrive  gaps p1 %.2f p50 %.2f p99 %.2f ms, over 25 ms: %d" % (
         q(arrive, .01), q(arrive, .5), q(arrive, .99), sum(1 for g in arrive if g > 25)))
     if any(p.kind_of for p in passes):
+        # Every frame but the window's: one the host's rows did not name is the grid's.
         grid = [g for p in passes
-                for g in stretch_gaps(p, "arrivedMs", lambda r, p=p: p.kind_of.get(id(r)) == "grid")]
+                for g in stretch_gaps(p, "arrivedMs", lambda r, p=p: p.kind_of.get(id(r)) != "window")]
         n_win = sum(1 for p in passes for v in p.kind_of.values() if v == "window")
         print("          the grid's alone p1 %.2f p50 %.2f p99 %.2f ms, over 25 ms: %d; the window's "
               "frames: %d (%.2f a second)" % (q(grid, .01), q(grid, .5), q(grid, .99),
@@ -190,14 +196,27 @@ def report(label, passes, interval_ms):
         print("          refreshes that drew 0 / 1 / 2 / 3+ frames: %s" % " / ".join(
             "%.1f %%" % (100.0 * hist.get(k, 0) / tot) for k in range(4)))
         steps = {"click": [], "else": []}
+        by_click = []
         for p in passes:
             s = shown_steps(p, interval_ms)
             steps["click"] += s["click"]
             steps["else"] += s["else"]
+            by_click += list(s["by_click"].values())
         for where in ("click", "else"):
             rep, dbl, off, n = step_counts(steps[where], interval_ms)
             print("  shown   %-5s %6d refreshes: repeats %.2f %%, double steps %.2f %%, off the pattern "
                   "%.2f %%" % ("near clicks" if where == "click" else "elsewhere", n, rep, dbl, off))
+        if by_click:
+            # Per click, 40 ms before it to 60 ms after: a picture held (a
+            # repeat: at the stream's own rate, a stutter), a double step, the
+            # steps off the pattern.
+            n = len(by_click)
+            rep = sum(1 for s in by_click if any(x == 0 for x in s))
+            dbl = sum(1 for s in by_click if any(x >= 1.75 * interval_ms for x in s))
+            off = sum(sum(1 for x in s if x and abs(x - round(x / interval_ms) * interval_ms) > 3)
+                      for s in by_click)
+            print("          per click (%d): a repeat in %.1f %%, a double step in %.1f %%, %.2f steps "
+                  "off the pattern" % (n, 100.0 * rep / n, 100.0 * dbl / n, off / n))
     age = []
     for p in passes:
         for fr in p.logs:
