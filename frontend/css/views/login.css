@@ -102,78 +102,6 @@
     color: var(--text-3);
 }
 
-/* The title and, when this browser knows other machines, the way to them —
-   on one line, as the header pairs the product name with the machine menu.
-   The row carries the title's spacing; a title too wide for both lets the
-   menu wrap under it, still centred. */
-.login-title-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-1) var(--space-2);
-    margin-bottom: var(--space-5);
-}
-.login-title-row .login-title {
-    margin-bottom: 0;
-}
-
-/* "Server selection" — the header's machine menu, quiet beside the product
-   name: no box until hovered, so it never reads as a field of the form. A
-   native select underneath, for the phone's own picker. */
-.login-server {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    min-width: 0;
-    max-width: 100%;
-}
-.login-server-select {
-    appearance: none;
-    -webkit-appearance: none;
-    max-width: 100%;
-    padding: 3px 26px 3px 8px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
-    color: var(--text-2);
-    font-family: inherit;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-overflow: ellipsis;
-    cursor: pointer;
-    transition:
-        background-color 0.12s ease,
-        border-color 0.12s ease;
-}
-.login-server-select:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: var(--border-1);
-    color: var(--text-1);
-}
-.login-server-select:focus-visible {
-    outline: 1px solid var(--border-2);
-    outline-offset: 1px;
-}
-/* The list a desktop browser opens is drawn by the OS: give it the page's
-   colours rather than white on a transparent field. */
-.login-server-select option {
-    background: var(--surface-2);
-    color: var(--text-1);
-}
-.login-server-caret {
-    position: absolute;
-    right: 8px;
-    display: flex;
-    color: var(--text-3);
-    pointer-events: none;
-}
-.login-server-caret .icon {
-    width: 14px;
-    height: 14px;
-}
-
 /* "Remember me" — a checkbox row plus the hint that explains what unchecking
    costs. Tighter than a normal field: it sits between the credential input and
    the submit button and must not push the button below the fold on a phone. */
@@ -294,14 +222,6 @@
     #view-login .login-logo,
     #view-login .login-title {
         display: none;
-    }
-    /* Without the title the row holds the menu alone, at the top of the box,
-       and takes no room at all when there is no menu. */
-    #view-login .login-title-row {
-        margin-bottom: 0;
-    }
-    #view-login .login-server {
-        margin-bottom: var(--space-2);
     }
     #view-login .login-subtitle {
         margin-bottom: var(--space-3);

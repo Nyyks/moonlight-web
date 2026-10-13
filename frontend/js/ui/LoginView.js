@@ -29,7 +29,7 @@ import { BackendClient } from '../api/BackendClient.js';
 import { Toast } from './Toast.js';
 import { t } from '../i18n/i18n.js';
 import { escapeHtml } from '../util/escapeHtml.js';
-import { Icons } from './icons.js';
+import { InstanceMenu } from './InstanceMenu.js';
 import { currentInstanceRef, listInstances } from '../util/instances.js';
 import { tunnelHostId } from '../net/tunnelBridge.js';
 
@@ -52,6 +52,8 @@ export class LoginView {
         this._localUrl = ''; // https://localhost[:port] — the host machine's way back in
         // The other machines this browser has already been to (see _renderServerField).
         this._otherInstances = [];
+        this._currentInstanceId = '';
+        this._serverMenu = null;
         // Keep the session across browser restarts. On by default: most people
         // log in from their own device and should never see this page twice.
         // Unchecking it is what someone on a borrowed machine wants — the cookie
@@ -75,6 +77,7 @@ export class LoginView {
         // The machines this browser can leave for, read once per visit to this
         // screen: nothing writes to that register while a login is on screen.
         this._otherInstances = this._readOtherInstances();
+        this._renderServerField();
 
         // Offer the host machine its way back in (see _buildLocalUrl).
         await this._resolveLocalUrl();
@@ -83,6 +86,7 @@ export class LoginView {
         try {
             const status = await BackendClient.getAuthStatus();
             if (status.authenticated) {
+                this._releaseServerField();
                 this.onAuthenticated();
                 return;
             }
@@ -105,6 +109,7 @@ export class LoginView {
     }
 
     destroy() {
+        this._releaseServerField();
         this._stopLockoutTimer();
         this._releaseSubmitInView();
     }
@@ -172,10 +177,7 @@ export class LoginView {
                     <div class="login-logo">
                         <span class="login-logo-img" role="img" aria-label="Moonlight"></span>
                     </div>
-                    <div class="login-title-row">
-                        <h1 class="login-title">MoonlightWeb</h1>
-                        ${this._loading ? '' : this._renderServerField()}
-                    </div>
+                    <h1 class="login-title">MoonlightWeb</h1>
 
                     <div id="login-form-area">
                         ${
@@ -295,6 +297,7 @@ export class LoginView {
     _readOtherInstances() {
         try {
             const currentId = currentInstanceRef(tunnelHostId()).id;
+            this._currentInstanceId = currentId;
             return listInstances().filter((e) => e.id !== currentId && this._isWebUrl(e.url));
         } catch {
             // No storage (private mode, a quota refusal). The login screen is
@@ -336,31 +339,28 @@ export class LoginView {
      * Absent entirely when there is nowhere to go, rather than shown empty: a
      * chooser with one unusable entry is a question with no answer.
      *
-     * It sits beside the title, as the machine menu does in the header once
-     * inside, and not in the form: among the fields to fill in, it read as one
-     * more question to answer before the PIN, when it is a way out of this
-     * screen. A native select under the quiet look of that header menu, so a
-     * phone still opens its own picker.
+     * It lives in the page header, where the machine menu sits once inside —
+     * the same component, the same place, so the way out of this screen is
+     * where the way to another machine always is. Among the fields of the
+     * form, or beside the title in the box, it read as one more question to
+     * answer before the PIN.
      */
     _renderServerField() {
-        if (this._otherInstances.length === 0) return '';
+        const mount = document.getElementById('instance-menu');
+        if (!mount || this._otherInstances.length === 0) return;
 
-        const label = this.esc(t('login.serverSelection'));
-        return `
-                        <span class="login-server">
-                            <select id="login-server-select" class="login-server-select"
-                                    aria-label="${label}" title="${label}">
-                                <option value="" selected>${this.esc(t('login.serverCurrent'))}</option>
-                                ${this._otherInstances
-                                    .map(
-                                        (e) =>
-                                            `<option value="${this.esc(e.url)}">${this.esc(e.name)}</option>`,
-                                    )
-                                    .join('')}
-                            </select>
-                            <span class="login-server-caret" aria-hidden="true">${Icons.chevronDown}</span>
-                        </span>
-        `;
+        if (!this._serverMenu) this._serverMenu = new InstanceMenu(mount);
+        const label = t('login.serverCurrent');
+        this._serverMenu.render(this._currentInstanceId, label, [
+            { id: this._currentInstanceId, name: label, url: '' },
+            ...this._otherInstances,
+        ]);
+    }
+
+    /** Hand the header back empty: the app draws its own menu once inside. */
+    _releaseServerField() {
+        this._serverMenu?.destroy();
+        this._serverMenu = null;
     }
 
     /**
@@ -442,22 +442,6 @@ export class LoginView {
         if (rememberCheck) {
             rememberCheck.addEventListener('change', () => {
                 this._remember = rememberCheck.checked;
-            });
-        }
-
-        // "Server selection" — shared by both forms. Picking a machine LEAVES
-        // this one: each install is a separate program on a separate PC with
-        // its own session, so this is a navigation and not a view switch, the
-        // same as the header menu does once inside.
-        const serverSelect = this.container.querySelector('#login-server-select');
-        if (serverSelect) {
-            serverSelect.addEventListener('change', () => {
-                const url = serverSelect.value;
-                // The empty value is the row that is already on screen; putting
-                // the selection back is all it means.
-                if (!url) return;
-                serverSelect.disabled = true;
-                window.location.href = url;
             });
         }
 
@@ -659,6 +643,7 @@ export class LoginView {
 
             if (result.status === 'ok') {
                 Toast.success(t('login.authSuccess'));
+                this._releaseServerField();
                 this.onAuthenticated();
                 return;
             }
@@ -688,6 +673,7 @@ export class LoginView {
 
             if (result.status === 'ok') {
                 Toast.success(t('login.authSuccess'));
+                this._releaseServerField();
                 this.onAuthenticated();
                 return;
             }
