@@ -5,9 +5,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // The admin's apps in gamescope (a Linux native host, plan « Idées Punktfunk »,
-// chapter G): a card each on the host, a name and the command the host runs.
-// Shown only where the server says gamescope is usable, the whole list saved
-// at each change, and the list shown afterwards always the server's.
+// chapter G), shown as "Games outside Steam": a card each on the host, a name
+// and the command the host runs. A section of its own, only where the server
+// says gamescope is usable, the whole list saved at each change, and the list
+// shown afterwards always the server's.
 vi.mock('../js/api/BackendClient.js', () => ({
     BackendClient: { getStreamingSettings: vi.fn(), saveStreamingSettings: vi.fn() },
 }));
@@ -74,36 +75,18 @@ describe('AdminView — apps in gamescope', () => {
         expect(row.querySelector('b')).toBeNull();
     });
 
-    it('sits folded under Advanced while there is no app', () => {
+    it('is a section of its own, not under Advanced', () => {
         view._gamescopeAppsSupported = true;
-        const html = view._renderAdvanced();
-        document.body.innerHTML = html;
-        const section = $('#admin-section-gamescope');
-        expect(section.closest('#admin-section-advanced')).not.toBeNull();
-        expect(section.tagName).toBe('DETAILS');
-        expect(section.open).toBe(false);
-        expect($('#gamescope-app-command').placeholder).toBe('admin.gamescopeAppCommandExample');
-    });
-
-    it('is not under Advanced where gamescope is unusable', () => {
-        view._gamescopeAppsSupported = false;
         document.body.innerHTML = view._renderAdvanced();
         expect($('#admin-section-gamescope')).toBeNull();
-    });
-
-    it('opens by itself once there is an app', () => {
-        view._gamescopeApps = [{ name: 'A', command: 'a' }];
         mount();
-        expect($('#admin-section-gamescope').open).toBe(true);
-    });
-
-    it('stays open after removing the last app', async () => {
-        view._gamescopeApps = [{ name: 'A', command: 'a' }];
-        BackendClient.saveStreamingSettings.mockResolvedValue({ gamescope_apps: [] });
-        mount();
-        document.querySelector('[data-gamescope-remove="0"]').click();
-        await vi.waitFor(() => expect(Toast.success).toHaveBeenCalled());
-        expect($('#admin-section-gamescope').open).toBe(true);
+        const section = $('#admin-section-gamescope');
+        expect(section.classList.contains('settings-section')).toBe(true);
+        expect(section.querySelector('.settings-section-title').textContent).toBe(
+            'admin.gamescopeApps',
+        );
+        expect($('#gamescope-app-command').placeholder).toBe('admin.gamescopeAppCommand');
+        expect(section.textContent).toContain('admin.gamescopeAppsHint');
     });
 
     it('says so when there is none yet', () => {
@@ -127,6 +110,7 @@ describe('AdminView — apps in gamescope', () => {
         expect($('#btn-gamescope-add').disabled).toBe(false);
         $('#btn-gamescope-add').click();
         await vi.waitFor(() => expect(Toast.success).toHaveBeenCalled());
+        expect(Toast.success).toHaveBeenCalledWith('admin.gamescopeAppAdded');
         expect(BackendClient.saveStreamingSettings).toHaveBeenCalledWith({ gamescope_apps: saved });
         expect(view._gamescopeApps).toEqual(saved);
         // Drawn again from what the server kept, the form empty.
@@ -145,6 +129,7 @@ describe('AdminView — apps in gamescope', () => {
         mount();
         document.querySelector('[data-gamescope-remove="0"]').click();
         await vi.waitFor(() => expect(Toast.success).toHaveBeenCalled());
+        expect(Toast.success).toHaveBeenCalledWith('admin.gamescopeAppRemoved');
         expect(BackendClient.saveStreamingSettings).toHaveBeenCalledWith({
             gamescope_apps: [{ name: 'B', command: 'b' }],
         });

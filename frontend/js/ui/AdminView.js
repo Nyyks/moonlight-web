@@ -1132,6 +1132,7 @@ export class AdminView {
                         </div>
                     </div>
                 </div>
+                ${this._gamescopeAppsSupported ? this._renderGamescopeApps() : ''}
                 ${this._renderAdvanced()}
             </div>
         `;
@@ -1467,7 +1468,7 @@ export class AdminView {
             });
         }
 
-        // The owner's apps in gamescope: each change saved at once.
+        // Games outside Steam (the owner's apps in gamescope): each change saved at once.
         this._bindGamescopeApps();
 
         // Diagnostics (Advanced): both modes saved at once, the archive on click.
@@ -2280,7 +2281,6 @@ export class AdminView {
                 <div class="settings-section" id="admin-section-advanced">
                     <h3 class="settings-section-title">${t('admin.advanced')}</h3>
                     ${this._videoPipelineSupported ? this._renderVideoPipeline() : ''}
-                    ${this._gamescopeAppsSupported ? this._renderGamescopeApps() : ''}
                     ${this._renderDiagMode('chk-debug-mode', this._debugMode, this._debugModeCli, 'debugMode', '--debug')}
                     ${this._renderDiagMode('chk-verbose-logs', this._verboseLogs, this._verboseLogsCli, 'verboseLogs', '--verbose')}
                     <div class="settings-field">
@@ -2454,11 +2454,11 @@ export class AdminView {
     // --- The owner's apps in gamescope (Linux native host) ---
 
     // A card each on this host, beside the displays and Steam's: the name the
-    // card shows, the command the host runs in the app's own gamescope. Under
-    // Advanced, folded: few owners need it, and its first look explained
-    // nothing (Bruno, 12/10/2026). Open once there is an app to show, or when
-    // it was open before a save drew it again.
-    _renderGamescopeApps(open = this._gamescopeApps.length > 0) {
+    // card shows, the command the host runs in the app's own gamescope. A
+    // section of its own, named for what it does ("games outside Steam"), not
+    // for the compositor that runs them: folded under Advanced, it read as a
+    // diagnostic and explained nothing (Bruno, 13/10/2026).
+    _renderGamescopeApps() {
         const full = this._gamescopeApps.length >= this._gamescopeAppsMax;
         const rows = this._gamescopeApps
             .map(
@@ -2473,27 +2473,28 @@ export class AdminView {
             )
             .join('');
         return `
-                <details class="settings-field gamescope-apps" id="admin-section-gamescope" ${open ? 'open' : ''}>
-                    <summary class="settings-label">${t('admin.gamescopeApps')}</summary>
-                    <p class="setting-desc">${t('admin.gamescopeAppsDesc')}</p>
+                <div class="settings-section gamescope-apps" id="admin-section-gamescope">
+                    <h3 class="settings-section-title">${t('admin.gamescopeApps')}</h3>
+                    <p class="settings-section-desc">${t('admin.gamescopeAppsDesc')}</p>
                     ${
                         rows
                             ? `<ul class="gamescope-app-list">${rows}</ul>`
-                            : `<p class="settings-hint">${t('admin.gamescopeAppsEmpty')}</p>`
+                            : `<p class="settings-hint gamescope-apps-empty">${t('admin.gamescopeAppsEmpty')}</p>`
                     }
-                    <div class="settings-field gamescope-app-add">
-                        <input type="text" id="gamescope-app-name" class="settings-input"
-                               maxlength="40" placeholder="${this.esc(t('admin.gamescopeAppNameExample'))}"
+                    <div class="gamescope-app-add">
+                        <input type="text" id="gamescope-app-name" class="settings-input gamescope-app-name-input"
+                               maxlength="40" placeholder="${this.esc(t('admin.gamescopeAppName'))}"
                                aria-label="${this.esc(t('admin.gamescopeAppName'))}" ${full ? 'disabled' : ''} />
-                        <input type="text" id="gamescope-app-command" class="settings-input u-grow"
-                               maxlength="1000" placeholder="${this.esc(t('admin.gamescopeAppCommandExample'))}"
+                        <input type="text" id="gamescope-app-command" class="settings-input gamescope-app-command-input"
+                               maxlength="1000" placeholder="${this.esc(t('admin.gamescopeAppCommand'))}"
                                aria-label="${this.esc(t('admin.gamescopeAppCommand'))}" ${full ? 'disabled' : ''} />
                         <button class="btn btn-save u-shrink-0" id="btn-gamescope-add" disabled>
                             ${t('admin.gamescopeAppAdd')}
                         </button>
                     </div>
+                    <p class="settings-hint gamescope-apps-hint">${t('admin.gamescopeAppsHint')}</p>
                     ${full ? `<p class="settings-hint">${t('admin.gamescopeAppsFull', { max: this._gamescopeAppsMax })}</p>` : ''}
-                </details>`;
+                </div>`;
     }
 
     _bindGamescopeApps() {
@@ -2522,17 +2523,22 @@ export class AdminView {
         }
         if (add && name && command) {
             add.addEventListener('click', () => {
-                const next = [
-                    ...this._gamescopeApps,
-                    { name: name.value.trim(), command: command.value.trim() },
-                ];
-                void this._saveGamescopeApps(next);
+                const app = { name: name.value.trim(), command: command.value.trim() };
+                void this._saveGamescopeApps(
+                    [...this._gamescopeApps, app],
+                    t('admin.gamescopeAppAdded', { name: app.name }),
+                );
             });
         }
         section.querySelectorAll('[data-gamescope-remove]').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const index = Number(/** @type {HTMLElement} */ (btn).dataset.gamescopeRemove);
-                void this._saveGamescopeApps(this._gamescopeApps.filter((_, i) => i !== index));
+                void this._saveGamescopeApps(
+                    this._gamescopeApps.filter((_, i) => i !== index),
+                    t('admin.gamescopeAppRemoved', {
+                        name: this._gamescopeApps[index]?.name ?? '',
+                    }),
+                );
             });
         });
     }
@@ -2540,23 +2546,22 @@ export class AdminView {
     /**
      * Save the whole list, then show what the server kept.
      * @param {{name: string, command: string}[]} apps
+     * @param {string} done what the change did, once the server took it
      */
-    async _saveGamescopeApps(apps) {
+    async _saveGamescopeApps(apps, done) {
         try {
             const resp = await BackendClient.saveStreamingSettings({ gamescope_apps: apps });
             this._gamescopeApps = Array.isArray(resp.gamescope_apps) ? resp.gamescope_apps : apps;
-            Toast.success(t('admin.gamescopeAppsSaved'));
+            Toast.success(done);
         } catch (err) {
             console.warn('[Admin] Failed to save the gamescope apps:', err);
             Toast.error(
                 t('admin.gamescopeAppsSaveFailed', { message: /** @type {Error} */ (err).message }),
             );
         }
-        const section = /** @type {HTMLDetailsElement|null} */ (
-            this.container.querySelector('#admin-section-gamescope')
-        );
+        const section = this.container.querySelector('#admin-section-gamescope');
         if (section) {
-            section.outerHTML = this._renderGamescopeApps(section.open);
+            section.outerHTML = this._renderGamescopeApps();
             this._bindGamescopeApps();
         }
     }
