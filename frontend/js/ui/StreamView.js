@@ -6220,7 +6220,7 @@ export class StreamView {
         // when a 10-bit profile was requested). A '*' marks that the canvas
         // actually presents in HDR (rgba16float accepted); no '*' means the
         // decode is HDR but the canvas fell back to SDR.
-        let codecLabel = codec.toUpperCase() + (this._yuv444 ? ' 4:4:4' : '');
+        let codecLabel = this._statsCodecName(codec) + (this._yuv444 ? ' 4:4:4' : '');
         // Same voice as the enhancer's '(auto)' and 'OFF (WebGL unavailable)':
         // when a setting did not take, the overlay says so where the setting
         // would have shown.
@@ -12363,6 +12363,15 @@ export class StreamView {
                 );
         }
         return this._ultraOn;
+    }
+
+    /**
+     * The stats card's codec: PyroWave once a PyroWave frame was drawn — the
+     * launch's video_codec is the HEVC it falls back to, and the card read
+     * "HEVC" over a PyroWave picture (13/10/2026). The others as they were.
+     */
+    _statsCodecName(codec) {
+        return this._ultraFrames > 0 ? 'PyroWave' : codec.toUpperCase();
     }
 
     /**
