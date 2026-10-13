@@ -41,9 +41,13 @@
  * copied here. There is exactly one copy of that code, it is the copy the
  * published digests cover, and a watchdog comparing the live host against the
  * reference copy is therefore checking the code that actually runs.
+ *
+ * When that connection drops, lineKeeper.js dials it again under the page.
  */
+import { LineKeeper, hangUp } from './lineKeeper.js';
 
-let tunnel = null;
+/** The connection, and the next one when it drops; null without a tunnel. */
+let keeper = null;
 /** The bootstrap's transport module, once startTunnel() has loaded it. */
 let transport = null;
 let hostId = null;
@@ -86,7 +90,7 @@ export function tunnelShareToken() {
 
 /** Whether this page is reached through the introduction server. */
 export function isTunnelMode() {
-    return tunnel !== null;
+    return keeper !== null;
 }
 
 /**
@@ -151,11 +155,11 @@ export function bootstrapAddressFor(id, { hash, pathname }) {
  * send(), same close() — so the calling code does not branch.
  */
 export function openSignalingSocket(url) {
-    if (!tunnel) return new WebSocket(url);
+    if (!keeper) return new WebSocket(url);
     // Only the path matters to the host; the scheme and authority describe an
     // address that does not answer on this path.
     const parsed = new URL(url, location.origin);
-    return tunnel.openSocket(parsed.pathname + parsed.search);
+    return keeper.line.openSocket(parsed.pathname + parsed.search);
 }
 
 /** How long a side connection waits for the other machine to be on the line.
@@ -185,21 +189,7 @@ const SIDE_TUNNEL_TIMEOUT_MS = 12000;
 export async function openSideTunnel(otherHostId, timeoutMs = SIDE_TUNNEL_TIMEOUT_MS) {
     if (!transport) throw new Error('this page is not on the rendezvous');
     const side = new transport.Tunnel(otherHostId);
-    const close = () => {
-        if (typeof side.close === 'function') {
-            side.close();
-            return;
-        }
-        // A bootstrap from before Tunnel.close(): put the line down by hand.
-        side.onclosed = null;
-        for (const part of [side._dc, side._pc, side._ws]) {
-            try {
-                part?.close();
-            } catch {
-                /* already gone */
-            }
-        }
-    };
+    const close = () => hangUp(side);
 
     let timer;
     const deadline = new Promise((_, reject) => {
@@ -225,7 +215,8 @@ export async function openSideTunnel(otherHostId, timeoutMs = SIDE_TUNNEL_TIMEOU
  * The worker sends the pieces of a request and a port to reply on. Anything that
  * goes wrong is reported as an error rather than left to time out: a worker
  * waiting on a port that will never be posted to is a page that hangs with no
- * explanation.
+ * explanation. The one wait is for a line being dialled again, which the keeper
+ * bounds well inside the worker's own deadline once the page is in front.
  */
 function serveWorkerRequests() {
     navigator.serviceWorker.addEventListener('message', async (event) => {
@@ -236,7 +227,7 @@ function serveWorkerRequests() {
         if (!port) return;
 
         try {
-            const response = await tunnel.fetch(msg.url, {
+            const response = await keeper.fetch(msg.url, {
                 method: msg.method,
                 headers: msg.headers,
                 body: msg.body ? new Uint8Array(msg.body) : undefined,
@@ -301,24 +292,25 @@ export async function startTunnel(onStage) {
         await new Promise(() => {});
     }
 
-    tunnel = new mod.Tunnel(hostId);
+    const first = new mod.Tunnel(hostId);
     // Reported so the seal on screen can follow something real rather than a
     // timer: identity, calling, binding, connecting, ready.
-    if (onStage) tunnel.onstatus = onStage;
-    tunnel.onclosed = () => {
-        // Go back through the bootstrap. It is the one path that can re-establish
-        // everything — connection, cached interface, worker — and it says what is
-        // happening while it does, rather than leaving a dead page on screen.
-        location.replace(bootstrapAddress());
-    };
+    if (onStage) first.onstatus = onStage;
+    // Go back through the bootstrap. It is the one path that can re-establish
+    // everything — connection, cached interface, worker — and it says what is
+    // happening while it does, rather than leaving a dead page on screen. Once
+    // the line is up, the keeper tries a new line first.
+    const toBootstrap = () => location.replace(bootstrapAddress());
+    first.onclosed = toBootstrap;
 
-    try {
-        await tunnel.connect();
-    } catch (e) {
-        tunnel = null;
-        throw e;
-    }
+    await first.connect();
 
+    keeper = new LineKeeper({
+        dial: () => new mod.Tunnel(hostId),
+        giveUp: toBootstrap,
+        streaming: () => document.body.classList.contains('streaming-active'),
+    });
+    keeper.adopt(first);
     serveWorkerRequests();
     return true;
 }
