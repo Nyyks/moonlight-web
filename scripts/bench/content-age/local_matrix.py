@@ -30,9 +30,11 @@ OUT = os.path.join(REPO, "bench-out", "content-age")
 WORKER_LOGS = os.path.join(os.environ["APPDATA"], "MoonlightWeb", "MoonlightWeb-dev", "logs")
 VDD_XML = r"C:\VirtualDisplayDriver\vdd_settings.xml"
 HOST_LINES = ("[native] cadence", "decode credit", "capture wake-ups", "capture loop",
-              "frames arrive at", "MW_NATIVE_TUNING", "[native] deadline")
+              "frames arrive at", "MW_NATIVE_TUNING", "[native] deadline", "[native] input admit")
 # "[native] cadence" also catches the detection's lines: the steps applied or
-# refused, and "cadence steps: … asked, … applied" at the end.
+# refused, and "cadence steps: … asked, … applied" at the end. "[native] input
+# admit": the admission window after a press (inputadmit=1), its end-of-session
+# count.
 
 
 def monitors():

@@ -44,7 +44,37 @@ def _ms(v):
     return "-" if v is None else "%.2f" % v
 
 
-def click_flag(d, n, every_ms=800, tag=None):
+# The page's animation frames, kept while the clicks run (--raflog): each
+# callback's frame time and the moment it ran, on the page's clock like the
+# frame log's drawnMs. A cap of 100 000 (~14 min at 120 Hz) bounds it.
+RAF_LOG_START = """(() => {
+  const log = {frame: [], ran: [], on: true};
+  const tick = (ts) => {
+    log.frame.push(ts); log.ran.push(performance.now());
+    if (log.on && log.frame.length < 100000) requestAnimationFrame(tick);
+  };
+  window.__mwRafLog = log;
+  requestAnimationFrame(tick);
+  return 1;
+})()"""
+
+
+def save_raf_log(d, tag):
+    """Stop the page's animation-frame log and write it as <tag>.raf.csv."""
+    got = d.json_eval("(() => { const l = window.__mwRafLog; if (!l) return 'null'; l.on = false; "
+                      "return JSON.stringify({frame: l.frame, ran: l.ran}); })()")
+    if not got:
+        print("  raf log: nothing kept", flush=True)
+        return
+    path = os.path.join(age.OUT, tag + ".raf.csv")
+    with open(path, "w", newline="") as f:
+        f.write("frameMs,ranMs\n")
+        for fr, ran in zip(got["frame"], got["ran"]):
+            f.write("%.3f,%.3f\n" % (fr, ran))
+    print("  saved %s (%d animation frames)" % (path, len(got["frame"])), flush=True)
+
+
+def click_flag(d, n, every_ms=800, tag=None, raflog=False):
     """@p n click → flag samples (frontend LatencyProbe.js, the host's
     LatencyFlag): the whole loop the player feels, input to picture. Started
     without waiting on it — a minute is longer than a DevTools call should
@@ -53,13 +83,18 @@ def click_flag(d, n, every_ms=800, tag=None):
     With @p tag, the client's per-frame log of the clicks' minute is saved
     (<tag>.clicks.frames.csv) with the page's time origin: a click's `ts` and
     `latencyMs` then name the frame that showed its flag, which the relay's
-    frame log follows back on the host (plan Wi-Fi W1, scripts/bench/wifi)."""
+    frame log follows back on the host (plan Wi-Fi W1, scripts/bench/wifi).
+    With @p raflog too, the page's animation frames over the clicks
+    (<tag>.raf.csv): at each refresh, which frame was on the screen
+    (plan « inputadmit », content-age/fluid.py)."""
     if d.eval("typeof (window.mwLatency && window.mwLatency.run)") != "function":
         print("  clicks: no click-to-photon probe on this stream (latency_flag_enabled?)",
               flush=True)
         return None
     if tag:
         d.eval("window.mwFrameLog && mwFrameLog.clear()")
+    if tag and raflog:
+        d.eval(RAF_LOG_START)
     time_origin = d.eval("performance.timeOrigin")
     before = d.eval("(window.mwLatencyResults || []).length") or 0
     d.eval("window.mwLatency.run(%d, %d); 1" % (n, every_ms))
@@ -68,6 +103,8 @@ def click_flag(d, n, every_ms=800, tag=None):
         if (d.eval("(window.mwLatencyResults || []).length") or 0) - before >= n:
             break
         time.sleep(2)
+    if tag and raflog:
+        save_raf_log(d, tag)
     samples = d.json_eval("JSON.stringify((window.mwLatencyResults || []).slice(%d))" % before)
     ok = sorted(s["latencyMs"] for s in samples
                 if s.get("ok") and s.get("latencyMs") is not None)
@@ -395,6 +432,9 @@ def main():
     ap.add_argument("--clicks", type=int, default=0,
                     help="click → flag samples after the content-age window (needs "
                          "latency_flag_enabled in the instance's settings.json)")
+    ap.add_argument("--raflog", action="store_true",
+                    help="with --clicks: the page's animation frames over the clicks, as "
+                         "<tag>.raf.csv (content-age/fluid.py)")
     ap.add_argument("--local-storage", action="append", default=[], metavar="KEY=VALUE",
                     help="a bench switch the page reads at launch (mw_decodequeue=pending)")
     ap.add_argument("--setting", action="append", default=[], metavar="KEY=VALUE",
@@ -573,7 +613,7 @@ def main():
                     f.write(d.eval("mwFrameLog.csv()") or "")
             # A still screen: the way up with almost no video coming down.
             uplink = uplink_runs(d, a.uplink, a.tag)
-            clicks = click_flag(d, a.clicks, tag=a.tag) if a.clicks > 0 else None
+            clicks = click_flag(d, a.clicks, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
             ticks = ticks_origin(d) if os.environ.get("MW_BENCH_TICKS_ORIGIN") == "1" else None
             if target is rh and rh:
                 print("  " + rh.click_target_stop(os.path.join(age.OUT, a.tag + ".target.jsonl")),
@@ -609,7 +649,7 @@ def main():
             frames_only(d, a.tag, a.secs)
             grid = None
             stepper = stepper_state(d, content_ms)
-            clicks = click_flag(d, a.clicks, tag=a.tag) if a.clicks > 0 else None
+            clicks = click_flag(d, a.clicks, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
             uplink = uplink_runs(d, a.uplink, a.tag)
             d.expand_latency_detail()
             stats = d.stats()
@@ -664,7 +704,7 @@ def main():
         if a.gpu_load and a.clicks > 0:
             # The same cost again, for the clicks: the level found above.
             load, _ = start_load(a.gpu_load, a.tag + ".load-clicks.jsonl", level)
-        clicks = click_flag(d, a.clicks, tag=a.tag) if a.clicks > 0 else None
+        clicks = click_flag(d, a.clicks, tag=a.tag, raflog=a.raflog) if a.clicks > 0 else None
         if a.gpu_load and a.clicks > 0:
             load_seen["clicks"] = load.snapshot(30)
             load.stop()

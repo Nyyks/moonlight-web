@@ -35,6 +35,15 @@ lets a game at the stream's rate beat against the grid. Per pass: the new pictur
 those the gate skipped, how long a skipped picture's change waited for the
 next admitted one, and that wait averaged over every instant (what a click at
 a random moment pays for the gate).
+
+--inputadmit T[,B,R,S,K] (plan « inputadmit », 13/10/2026): the admission
+window after a press on top of the gate, replayed on the pass's own presses
+(the trace's `press` rows). T in ms, B windows ahead, R windows a second, S the
+least gap in ms between two admitted pictures, K the most pictures a window
+adds (0: as many presents as the display makes in T); B, R, S and K default to
+3, 2, 0 and 3, the host's own defaults.
+Its class, InputAdmit, is a COPY of core/InputAdmit.h, like Gate's. The
+variants and what they cost the client: inputsim.py.
 """
 import argparse
 import csv
@@ -85,6 +94,106 @@ class Gate:
         return True
 
 
+class InputAdmit:
+    """core/InputAdmit.h: for T after a press, every present goes through, on
+    top of the gate, whose grid keeps its phase (it is asked first, on every
+    present, and never learns of these pictures).
+
+    ⚠️ A COPY of InputAdmit, as Gate is of FrameCadence: change both together.
+    - A window opens on a press for one token of a bucket of windows (B ahead,
+      R more a second): a window opens whole or not at all. A press inside an
+      open window carries it on to T after itself, for no token.
+    - It admits the presents made from the press to T after it (their present,
+      not their wake-up: a picture composed before the press cannot carry it),
+      at most `max_extra` beyond the grid's, each S at least after the last
+      picture admitted, grid or window.
+    - Presses between two of the loop's calls are taken together: the window
+      from the first to T after the last.
+    """
+
+    def __init__(self, window_us, burst=3, rate=2.0, gap_us=0, interval_us=16666, display_hz=240,
+                 max_extra=0):
+        # At least one interval of the stream: a shorter window can end
+        # before the grid's next picture would have come anyway.
+        self.window_us = max(int(window_us), int(interval_us))
+        self.burst = burst
+        self.rate = rate
+        self.gap_us = int(gap_us)
+        # By default the presents a window can hold at the display's rate: a
+        # source that presents faster than its display refreshes gets no more.
+        self.max_extra = max_extra or max(1, round(self.window_us * display_hz / 1e6))
+        self.tokens = float(burst)
+        self.refilled_us = None
+        self.first_us = self.last_press_us = None
+        self.start_us = self.end_us = None
+        self.extra = 0
+        self.last_us = None
+        self.presses = self.windows = self.carried = self.refused = 0
+        self.frames = self.capped = self.gapped = self.link_refused = 0
+        # Each group of presses taken: (first, last, "open" | "carried" | "refused"),
+        # for inputsim.py.
+        self.outcomes = []
+
+    def note_press(self, now_us):
+        """The input thread: a press, kept until the loop takes it."""
+        self.presses += 1
+        if self.first_us is None:
+            self.first_us = now_us
+        self.last_press_us = now_us
+
+    def _take_press(self):
+        first_us, last_us = self.first_us, self.last_press_us
+        self.first_us = self.last_press_us = None
+        if self.refilled_us is not None:
+            self.tokens = min(self.burst, self.tokens + (first_us - self.refilled_us) * self.rate / 1e6)
+        self.refilled_us = first_us
+        if self.end_us is not None and first_us < self.end_us:
+            self.end_us = last_us + self.window_us
+            self.carried += 1
+            self.outcomes.append((first_us, last_us, "carried"))
+        elif self.tokens >= 1:
+            self.tokens -= 1
+            self.start_us, self.end_us, self.extra = first_us, last_us + self.window_us, 0
+            self.windows += 1
+            self.outcomes.append((first_us, last_us, "open"))
+        else:
+            self.refused += 1
+            self.outcomes.append((first_us, last_us, "refused"))
+
+    def admit(self, grid_said, present_us, now_us, link_ok=True):
+        """@p grid_said: the gate's answer for this present. True: encode it."""
+        if self.first_us is not None:
+            self._take_press()
+        if grid_said:
+            self.last_us = now_us
+            return True
+        if self.end_us is None or not self.start_us <= present_us < self.end_us:
+            return False
+        if self.extra >= self.max_extra:
+            self.capped += 1
+            return False
+        if self.gap_us and self.last_us is not None and now_us - self.last_us < self.gap_us:
+            self.gapped += 1
+            return False
+        if not link_ok:
+            self.link_refused += 1
+            return False
+        self.extra += 1
+        self.frames += 1
+        self.last_us = now_us
+        return True
+
+
+def parse_inputadmit(text):
+    """'T[,B,R,S,K]' (ms, windows, windows a second, ms, pictures) → keyword
+    arguments of InputAdmit."""
+    parts = [float(v) for v in text.split(",")]
+    parts += [3, 2.0, 0, 3][len(parts) - 1:]
+    t_ms, burst, rate, gap_ms, most = parts[:5]
+    return {"window_us": t_ms * 1000, "burst": int(burst), "rate": rate, "gap_us": gap_ms * 1000,
+            "max_extra": int(most)}
+
+
 def pass_rates(base):
     """The stream's and the display's rates the pass ran at, from its log."""
     try:
@@ -116,8 +225,10 @@ def q(xs, p):
 
 def one(tag, a):
     base = os.path.join(a.dir, tag)
-    caps = [int(r["us"]) for r in csv.DictReader(open(base + ".click-trace.csv"))
+    rows = list(csv.DictReader(open(base + ".click-trace.csv")))
+    caps = [(int(r["us"]), int(r["presentUs"])) for r in rows
             if r["kind"] == "capture" and r["status"] == "ok"]
+    presses = sorted(int(r["startUs"]) for r in rows if r["kind"] == "press")
     if not caps:
         print("%s: no captures" % tag)
         return
@@ -127,8 +238,22 @@ def one(tag, a):
         print("%s: no rates in the log, give --fps and --hz" % tag)
         return
     gate = Gate(fps, hz, a.rule)
+    window = None
+    if a.inputadmit and not gate.ceiling:
+        window = InputAdmit(interval_us=gate.interval_ns // 1000, display_hz=hz,
+                            **parse_inputadmit(a.inputadmit))
     # The gate runs over the whole pass, as the host's did; only the scene counts.
-    admitted = [(t, gate.admit(t)) for t in caps]
+    admitted, pi = [], 0
+    for t, present in caps:
+        ok = gate.admit(t)
+        if window:
+            # The presses handed to the OS before this wake-up.
+            while pi < len(presses) and presses[pi] <= t:
+                window.note_press(presses[pi])
+                pi += 1
+            ok = window.admit(ok, present, t)
+        admitted.append((t, ok))
+    caps = [t for t, _ in caps]
     lo, hi = scene(base) or (caps[0], caps[-1])
     kept = [(t, ok) for t, ok in admitted if lo <= t <= hi]
     span = (hi - lo) / 1e6
@@ -154,6 +279,14 @@ def one(tag, a):
               tag, fps, hz, "" if a.rule == "now" else ", --" + a.rule,
               len(kept) / span, (len(kept) - skipped) / span, skipped, 100 * skipped / len(kept),
               q(skipped_waits, .5), q(skipped_waits, .9), weighted / total / 1000 if total else 0))
+    if window:
+        print("  input admit %s: %d presses, %d windows (%d carried on by a press, %d refused by the "
+              "bucket), %d pictures more (%.2f a press, %.2f/s), %d held back by the cap, %d by the gap" % (
+                  a.inputadmit, window.presses, window.windows, window.carried, window.refused,
+                  window.frames, window.frames / max(1, window.presses),
+                  window.frames * 1e6 / (caps[-1] - caps[0]), window.capped, window.gapped))
+    elif a.inputadmit:
+        print("  input admit: none under a ceiling (a stream at the display's rate)")
 
 
 def main():
@@ -168,6 +301,9 @@ def main():
     rule.add_argument("--advance", dest="rule", action="store_const", const="advance",
                       help="a late present moves the grid on by whole intervals (Android TV bench, 08/10)")
     ap.set_defaults(rule="now")
+    ap.add_argument("--inputadmit", metavar="T[,B,R,S,K]",
+                    help="the admission window after a press, on the pass's presses (ms, windows, "
+                         "windows a second, ms, pictures)")
     a = ap.parse_args()
     for tag in a.tags:
         one(tag, a)

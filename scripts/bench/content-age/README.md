@@ -105,3 +105,33 @@ Encoder and decoder on different GPUs, HAGS on, no "maximum performance" mode,
 no switch to another GPU; screens listed before and after (the script does it,
 and puts the virtual display's settings file back); series run when Bruno is
 not at his desk — the RTX's screen once left the desktop during the switches.
+
+## Smoothness, frame by frame: fluid.py (plan « inputadmit », 13/10/2026)
+
+The admission window after a press (`inputadmit=1`) sends a few pictures more
+around each click. Its gate asks for no visible artefact and nothing that harms
+the stream's smoothness. `fluid.py` reads a pass as the client lived it, one
+glob of tags per arm:
+
+```bash
+python pass.py --tag … --clicks 60 --raflog      # with clicktrace=1,relaylog=1 on the host
+python fluid.py "c60-um-A[0-9]-*" "c60-um-A'[0-9]-*" [--clicks-only] [--fps 60]
+```
+
+- `arrive`: the gaps between frames arriving, and those over 25 ms; with the
+  host's `admit` rows (`clicktrace=1`), the grid's frames alone and the window's
+  count;
+- `draw`: the gaps between draws; with `--raflog`, the refreshes that drew two
+  frames or more, which a client that tears shows each as it comes;
+- `shown`: with `--raflog`, what a client that paints at its vsync showed at
+  each refresh: repeats, double steps, steps off the stream's pattern, near the
+  clicks and elsewhere;
+- `age`: how much the age at draw moves from one frame to the next;
+- `bytes`: per frame, the grid's and the window's;
+- `relay`: the relay's outcomes (`relaylog=1`), and the frames it sent that the
+  client never drew.
+
+`--raflog` keeps the page's animation frames while the clicks run
+(`<tag>.raf.csv`, on the page's clock like the frame log's `drawnMs`). On the
+passes of 13/10, `fluid.py` gives 7 arrival gaps over 25 ms for A, 364 for B
+(the virtual display at 60 Hz) and none for C (no gate, 238 frames a second).

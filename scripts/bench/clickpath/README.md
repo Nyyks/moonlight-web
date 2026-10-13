@@ -126,6 +126,41 @@ present moves the grid on by whole intervals from the tick it missed. It gives
 the same rates on RE9, but a game at the stream's own rate, a refresh early or
 late, then beats against the grid (design §9.6.1).
 
+`--inputadmit T[,B,R,S,K]` adds the admission window after a press (plan
+« inputadmit », 13/10/2026) on the pass's own presses: for T ms after each
+press every present goes through, the gate's grid untouched. B windows ahead
+and R more a second (3 and 2), S the least gap between two pictures (0), K the
+most pictures a window adds (3). Its `InputAdmit` is a copy of
+`core/InputAdmit.h`, as `Gate` is of `FrameCadence`.
+
+## A, the window after a press — inputsim.py
+
+At 60 fps on the virtual display at 240 Hz, the picture that carries a click
+waits for the gate's next window (9.7 ms at the median, `docs/bench-native-host.md`
+§8v.5). `inputsim.py` replays the admission window, and the rules it was
+chosen against, on the passes of 09-13/10 and says what each costs:
+
+```
+python scripts/bench/clickpath/inputsim.py [--sections flag,target,game,display,spam,encode,release]
+                                           [--variants "base next 16.7 33,3,2,0,3"]
+```
+
+- `flag`: the bench's flag (`c60-um-A*`): the `present` leg, pictures more a
+  click, at 60 and 120 fps;
+- `target`: `mw-click-target`, which reacts in 1 to 7 ms;
+- `game`: RE9 at 62 to 78 pictures a second, presses at random moments and the
+  game's picture 8, 16 or 24 ms after;
+- `display`: what a client that paints at its vsync (60, 120, 144 Hz) shows
+  around each click;
+- `spam`: presses faster than the bucket, and a click's wait when it is empty;
+- `encode`: a slower encoder, the loop busy 3 to 8 ms an encode;
+- `release`: the releases taken as presses too.
+
+Its replay is checked on the pictures the client received: the gate's phase is
+set on them, and a loop busy over 50 ms (`c60-um-A3`, at its first click) is
+taken as a re-send through the gate. It then keeps 96 to 99 % of the client's
+pictures on the three A passes.
+
 ## B — gpuwait.py
 
 What the pass needs: `localStorage.mw_ultra_trace = '1'` in the client's page
