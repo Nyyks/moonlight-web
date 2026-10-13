@@ -3501,6 +3501,30 @@ UM790Pro, Chrome, câble à 1 Gbit/s) :
   Compilé, tests du front verts, **jamais streamé de bout en bout**. Limites
   connues : aucune garde réseau (seul le libellé dit « filaire ») ; un repli
   D3D12 → D3D11 en plein stream laisserait la page en PyroWave.
+- **Le choix passe au client** (`bc9f64f2`, 13/10, demande de Bruno pour la
+  v0.4.0) : le menu de l'admin est retiré (`native_video_codec` effacé de
+  settings.json au démarrage) ; « PyroWave (Wired LAN only) » / « PyroWave
+  (LAN filaire uniquement) » rejoint le menu des codecs des Réglages, après
+  l'AV1. L'hôte l'annonce sur sa carte avant le stream (`nativeDisplay.pyrowave`,
+  natif Windows avec une route D3D12) ; l'option est grisée, raison à
+  l'appui, sans hôte qui le code, sans WebGPU ni WebGL2, HDR coché ou
+  transport `<video>`. Le lancement demande `ultra_codec` à `/start` à côté
+  d'un `video_codec` HEVC, sinon il part en Auto sans un mot, le choix restant
+  mémorisé (`util/PyrowaveCodec.js`). Jamais l'Auto, jamais un invité.
+- **Vérifié le 13/10, avant le menu** (`27b72909` : `safari_lab.py`, la voie du
+  lecteur dans `pass.py`). Au labo, à 1 code de l'oracle partout : Chrome 154
+  sous Ubuntu prend **WebGL2** d'office (aucun adaptateur WebGPU ; 780M,
+  6,1 ms GPU en 1080p ; WebGPU forcé par drapeau : 0,63 ms), Chrome 155 sur Mac
+  prend **WebGPU** (M1 Pro, 0,39-0,52 ms ; WebGL2 forcé 8-8,8 ms), Safari 18.6
+  **WebGL2** (pas de `navigator.gpu`, 6-10 ms d'horloge). **Premier stream de
+  bout en bout**, RTX vers l'UM790Pro sous Ubuntu en Ethernet, 1080p 60 :
+  59,7 i/s affichées, âge 33,6 ms (p99 56), clic 42 ms (30/30, p90 63),
+  4 images perdues. Vers le Mac en Wi-Fi 7 (1080p 30) : 1 à 2 i/s, plus d'un
+  million de morceaux redemandés — la route audio en rafales ne passe pas le
+  Wi-Fi, ce que dit le libellé. Vu en chemin, hors PyroWave : l'écran virtuel
+  qui doit ajouter un mode à `vdd_settings.xml` (1108×720, 1280×720)
+  n'apparaît pas en 10 s et `/start` répond 500 ; `vdd-reset.ps1` ne voit pas
+  un écran virtuel sous DISPLAY100.
 - **Ce qui n'a pas été fait** : un lien à 2,5 Gbit/s (bloqué sur le matériel :
   les deux cartes savent le faire, l'équipement entre elles bride à 1 Gbit/s),
   l'envoi groupé (USO), une taille qui suit le contenu, P-B sur SCTP, et la
@@ -3556,9 +3580,13 @@ Sinon, il restera le transport d'Ultra seulement.
 Clos (10/10, §6.43) : PyroWave ne rejoint pas le produit. Sur un PC NVIDIA
 relié en Ethernet à 1 Gbit/s, son image arrive environ 1 ms plus tard que celle
 du HEVC d'aujourd'hui, avec un texte moins net. Il ne s'active jamais seul :
-l'admin peut le choisir dans Avancé → « Codec vidéo », pour un appareil relié
-en Ethernet seulement (environ 130 Mbit/s à 120 i/s, pas de HDR). Ce qu'il a
-appris sur le chemin de l'image dans Chrome reste écrit ici pour la suite.
+depuis la v0.4.0, chaque navigateur peut le choisir dans Réglages → « Codec
+vidéo » → « PyroWave (LAN filaire uniquement) », pour un appareil relié en
+Ethernet à un hôte natif Windows (environ 130 Mbit/s à 120 i/s, pas de HDR).
+L'option est grisée, avec la raison, là où il ne peut pas tourner. Il décode
+juste sous Linux, sur Mac (Chrome et Safari) comme sous Windows ; en Wi-Fi, il
+tombe à 1 ou 2 images par seconde. Ce qu'il a appris sur le chemin de l'image
+dans Chrome reste écrit ici pour la suite.
 
 Pas encore visible (U1.4 ter, la route audio) : la retenue de Chrome vient d'une
 horloge interne que la page ne peut pas couper. Mais elle ne touche que les
