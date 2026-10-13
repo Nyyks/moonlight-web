@@ -3277,6 +3277,12 @@ const MoonlightApp = {
             // "NVENC" / "AMF" / "oneVPL", for the stats overlay — only the
             // native host, whose encoder runs on this very machine, can name it.
             nativeEncoder: typeof result.native_encoder === 'string' ? result.native_encoder : '',
+            // The card launched (a screen on the native host), for the stats
+            // overlay. A guest launched none.
+            screenName:
+                viewOpts.playerMode !== true && this._lastStreamApp
+                    ? this._lastStreamApp.displayName || ''
+                    : '',
             // The host codes PyroWave (this browser's codec for a wired LAN,
             // util/PyrowaveCodec.js): this page decodes it itself
             // (stream/ultra/UltraPlayer.js). Never a guest's: its feed is the

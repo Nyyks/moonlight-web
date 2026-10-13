@@ -754,6 +754,7 @@
         "statFramerate": "帧率：",
         "statBitrate": "码率：",
         "statCodec": "编解码器：",
+        "statScreen": "屏幕",
         "statMachine": "主机",
         "statEncoder": "编码器",
         "statEncoderUnknown": "主机未提供",

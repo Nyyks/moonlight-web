@@ -754,6 +754,7 @@
         "statFramerate": "Framerate:",
         "statBitrate": "Bitrate:",
         "statCodec": "Codec:",
+        "statScreen": "Screen",
         "statMachine": "Machine",
         "statEncoder": "Encoder",
         "statEncoderUnknown": "not reported by the host",

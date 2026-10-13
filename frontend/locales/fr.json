@@ -754,6 +754,7 @@
         "statFramerate": "Fréquence :",
         "statBitrate": "Débit :",
         "statCodec": "Codec :",
+        "statScreen": "Écran",
         "statMachine": "Machine",
         "statEncoder": "Encodeur",
         "statEncoderUnknown": "non communiqué par l'hôte",

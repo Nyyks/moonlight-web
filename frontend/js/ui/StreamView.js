@@ -1120,6 +1120,10 @@ export class StreamView {
         // always-visible block: it is a "why is it this fast" answer, and the
         // compact card has no room to spare on a phone.
         this._nativeEncoderLabel = typeof opts.nativeEncoder === 'string' ? opts.nativeEncoder : '';
+        // The card this stream was launched from: a screen on the native host,
+        // an app ("Desktop", a game) on the others. Shown under the machine in
+        // the latency detail.
+        this._screenLabel = typeof opts.screenName === 'string' ? opts.screenName : '';
         if ('healsByInvalidation' in this.webrtc) {
             // Recovery is this view's gap handler from here on: the transport's
             // own keyframe requests (incomplete, stale, silence) stand down.
@@ -6441,6 +6445,13 @@ export class StreamView {
                 if (machine) {
                     rows.push(legRow(escapeHtml(t('stream.statMachine')), escapeHtml(machine)));
                 }
+            }
+            // Which screen of that machine, right under it: the card the stream
+            // was launched from. Absent for a guest, who chose none.
+            if (this._screenLabel) {
+                rows.push(
+                    legRow(escapeHtml(t('stream.statScreen')), escapeHtml(this._screenLabel)),
+                );
             }
             // Which encoder produced these stages. Named here rather than in
             // the compact block above because it explains the numbers under it
