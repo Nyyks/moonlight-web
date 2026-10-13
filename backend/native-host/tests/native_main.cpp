@@ -78,6 +78,7 @@ void run_hid_parking_tests();
 void run_hid_evdev_tests();
 void run_stage_stats_tests();
 void run_frame_cadence_tests();
+void run_input_admit_tests();
 void run_resample_cost_tests();
 void run_cadence_align_tests();
 void run_cadence_choice_tests();
@@ -168,6 +169,7 @@ int main(int argc, char** argv)
     RUN(hid_evdev);
     RUN(stage_stats);
     RUN(frame_cadence);
+    RUN(input_admit);
     RUN(resample_cost);
     RUN(cadence_align);
     RUN(cadence_choice);

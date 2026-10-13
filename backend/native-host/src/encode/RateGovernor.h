@@ -261,6 +261,15 @@ public:
     /// the rest.
     int retransOveruses() const { return m_RetransOveruses; }
 
+    /// At the setting, the reports coming, and every one of them quiet for at
+    /// least @p forMs before @p nowMs: a link with room to spare, for the few
+    /// pictures more a press sends (core/InputAdmit.h).
+    bool calm(int64_t nowMs, int64_t forMs) const
+    {
+        return !m_SilenceCut && m_Target >= m_Setting && nowMs - m_LastReportMs < kSilenceMs &&
+               nowMs - m_QuietSinceMs >= forMs;
+    }
+
     int targetKbps() const { return m_Target; }
     int settingKbps() const { return m_Setting; }
     int floorKbps() const

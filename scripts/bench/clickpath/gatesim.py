@@ -108,7 +108,9 @@ class InputAdmit:
       at most `max_extra` beyond the grid's, each S at least after the last
       picture admitted, grid or window.
     - Presses between two of the loop's calls are taken together: the window
-      from the first to T after the last.
+      from the first to T after the last. Presses the loop takes only once
+      their window is over open nothing.
+    - The caller's guards: the link's word, and the encoder's.
     """
 
     def __init__(self, window_us, burst=3, rate=2.0, gap_us=0, interval_us=16666, display_hz=240,
@@ -128,8 +130,8 @@ class InputAdmit:
         self.start_us = self.end_us = None
         self.extra = 0
         self.last_us = None
-        self.presses = self.windows = self.carried = self.refused = 0
-        self.frames = self.capped = self.gapped = self.link_refused = 0
+        self.presses = self.windows = self.carried = self.refused = self.late = 0
+        self.frames = self.capped = self.gapped = self.link_refused = self.encoder_refused = 0
         # Each group of presses taken: (first, last, "open" | "carried" | "refused"),
         # for inputsim.py.
         self.outcomes = []
@@ -141,9 +143,13 @@ class InputAdmit:
             self.first_us = now_us
         self.last_press_us = now_us
 
-    def _take_press(self):
+    def _take_press(self, now_us):
         first_us, last_us = self.first_us, self.last_press_us
         self.first_us = self.last_press_us = None
+        if last_us + self.window_us <= now_us:
+            self.late += 1
+            self.outcomes.append((first_us, last_us, "late"))
+            return
         if self.refilled_us is not None:
             self.tokens = min(self.burst, self.tokens + (first_us - self.refilled_us) * self.rate / 1e6)
         self.refilled_us = first_us
@@ -160,10 +166,10 @@ class InputAdmit:
             self.refused += 1
             self.outcomes.append((first_us, last_us, "refused"))
 
-    def admit(self, grid_said, present_us, now_us, link_ok=True):
+    def admit(self, grid_said, present_us, now_us, link_ok=True, encoder_ok=True):
         """@p grid_said: the gate's answer for this present. True: encode it."""
         if self.first_us is not None:
-            self._take_press()
+            self._take_press(now_us)
         if grid_said:
             self.last_us = now_us
             return True
@@ -174,6 +180,9 @@ class InputAdmit:
             return False
         if self.gap_us and self.last_us is not None and now_us - self.last_us < self.gap_us:
             self.gapped += 1
+            return False
+        if not encoder_ok:
+            self.encoder_refused += 1
             return False
         if not link_ok:
             self.link_refused += 1

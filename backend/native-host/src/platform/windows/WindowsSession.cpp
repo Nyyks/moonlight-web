@@ -28,6 +28,7 @@
 #include "../../core/DeadlineCadence.h"
 #include "../../core/DecodeCredit.h"
 #include "../../core/FrameCadence.h"
+#include "../../core/InputAdmit.h"
 #include "../../core/Log.h"
 #include "../../core/Probe.h"
 #include "../../core/RestartBackoff.h"
@@ -247,7 +248,14 @@ public:
         : m_Config(config)
         , m_Target(target)
         , m_Callbacks(callbacks)
-    {}
+    {
+        // Not under a bench cadence, which says how the loop takes its
+        // pictures, nor under PyroWave, whose ~270 KB pictures at a fixed
+        // rate would load the link three at a time (plan « inputadmit »).
+        const EncoderTuning& t = config.tuning;
+        m_InputAdmitOn = t.inputAdmit && t.cadence == EncoderTuning::Cadence::Default &&
+                         t.enc12 != EncoderTuning::Encoder12::Pyrowave;
+    }
 
     ~WindowsSession() override { stop(); }
 
@@ -354,6 +362,28 @@ public:
                 chooseCadence(m_Config.clientRefreshMilliHz, m_Config.clientVsync, m_Cadence, line);
             m_CadenceFps = m_EncodeFps;
             log::info(line);
+        }
+        if (m_InputAdmitOn) {
+            const EncoderTuning& t = m_Config.tuning;
+            InputAdmit::Settings admit;
+            if (t.inputAdmitMs > 0) admit.windowUs = t.inputAdmitMs * 1000LL;
+            if (t.inputAdmitBurst > 0) admit.burst = t.inputAdmitBurst;
+            if (t.inputAdmitRate > 0) admit.perSecond = t.inputAdmitRate;
+            if (t.inputAdmitMax > 0) admit.maxExtra = t.inputAdmitMax;
+            admit.gapUs = t.inputAdmitGapUs;
+            m_InputAdmit.configure(admit, m_Cadence.intervalUs());
+            char rate[16];
+            std::snprintf(rate, sizeof(rate), "%g", admit.perSecond);
+            log::info("[native] input admit: for " +
+                      std::to_string(m_InputAdmit.windowUs() / 1000) +
+                      " ms after a press, every present goes, " + std::to_string(admit.maxExtra) +
+                      " more at most; a bucket of " + std::to_string(admit.burst) + " windows, " +
+                      rate + " more a second");
+        } else if (m_Config.tuning.inputAdmit) {
+            log::info(std::string("[native] input admit: off under ") +
+                      (m_Config.tuning.cadence != EncoderTuning::Cadence::Default
+                           ? "a bench cadence"
+                           : "PyroWave"));
         }
 
         // The client's own frame size is whatever it asked for, or the desktop
@@ -595,6 +625,13 @@ public:
         // uncontended in steady state, since the capture thread never touches
         // input at all.
         std::lock_guard<std::mutex> lock(m_InputMutex);
+        // inputadmit=1: the admission window after a press (InputAdmit.h) is
+        // told of each press before it goes to the OS. An atomic for the loop.
+        if (m_InputAdmitOn && m_PressFilter.isPress(event)) {
+            const int64_t nowUs = steadyNowUs();
+            m_InputAdmit.notePress(nowUs);
+            if (m_Config.tuning.clickTrace) m_ClickTrace.admit("press", nowUs, 0);
+        }
         if (m_Input) m_Input->inject(event);
     }
 
@@ -2174,8 +2211,45 @@ private:
             creditHeldStamps = stamps;
             return true;
         };
-        auto emitPicture = [&](const FrameStamps& stamps) -> bool {
-            if (!aimedNow && !gateNow->admit(stamps.convertedUs)) return true;
+        // The gate's word on a picture, and for a @p present the admission
+        // window after a press on top of it (inputadmit=1, InputAdmit.h). Not
+        // for a pointer that moved alone nor for a re-send: a window spent on
+        // the cursor while the player aims would leave none for the shot.
+        auto gateSays = [&](const FrameStamps& stamps, bool present) -> bool {
+            const bool grid = gateNow->admit(stamps.convertedUs);
+            if (!present) return grid;
+            InputAdmit::Verdict verdict =
+                grid ? InputAdmit::Verdict::Grid : InputAdmit::Verdict::Skip;
+            // Not under a ceiling — every refresh already goes — nor under the
+            // gate of a client that tears (cadence=deadline).
+            if (m_InputAdmitOn && gateNow == &m_Cadence && m_Cadence.enabled() &&
+                !m_Cadence.isCeiling()) {
+                const int64_t nowUs = stamps.convertedUs;
+                const int64_t intervalUs = m_Cadence.intervalUs();
+                // An encode slower than a refresh of the display: the window's
+                // pictures, a refresh apart, would push the grid's later.
+                const int64_t refreshUs =
+                    m_DisplayMilliHz > 0 ? 1000000000LL / m_DisplayMilliHz : 0;
+                const bool encoderOk =
+                    refreshUs == 0 || m_EncodeP95Us.load(std::memory_order_relaxed) <= refreshUs;
+                // A link the governor has cut, or heard a queue on, in the last
+                // two seconds; or one the stream's own estimate says is still
+                // busy past what a window adds (a keyframe, a refinement pass).
+                const bool linkOk =
+                    governor.calm(nowUs / 1000, encode::RateGovernor::kHoldAfterCutMs) &&
+                    m_Link.backlogUs(nowUs) <= (m_InputAdmit.maxExtra() + 1) * intervalUs;
+                verdict = m_InputAdmit.admit(
+                    grid, stamps.presentUs, nowUs,
+                    m_InputAdmit.gapFor(m_ClientMilliHz.load(), m_ClientVsync.load(), intervalUs),
+                    linkOk, encoderOk);
+            }
+            if (verdict != InputAdmit::Verdict::Skip && m_Config.tuning.clickTrace)
+                m_ClickTrace.admit(verdict == InputAdmit::Verdict::Window ? "window" : "grid",
+                                   stamps.convertedUs, stamps.presentUs);
+            return verdict != InputAdmit::Verdict::Skip;
+        };
+        auto emitPicture = [&](const FrameStamps& stamps, bool present) -> bool {
+            if (!aimedNow && !gateSays(stamps, present)) return true;
             if (withheld(stamps)) return true;
             creditHeld = false;
             if (!emit(frameNumber, stamps, error)) return false;
@@ -2187,7 +2261,7 @@ private:
         // thread and the loop goes back to the capture; the cadence counts it
         // once it went out (absorbDelivered), the refinement window starts now.
         auto emitPictureLater = [&](const FrameStamps& stamps) {
-            if (!aimedNow && !gateNow->admit(stamps.convertedUs)) return;
+            if (!aimedNow && !gateSays(stamps, true)) return;
             if (withheld(stamps)) return;
             creditHeld = false;
             emitLater(frameNumber, stamps);
@@ -2257,6 +2331,8 @@ private:
                 if (chosen.intervalUs() != m_Cadence.intervalUs() || fps != m_CadenceFps) {
                     m_Cadence = chosen;
                     m_CadenceFps = fps;
+                    m_InputAdmit.setIntervalUs(m_Cadence.intervalUs());
+                    m_WindowFramesAtGate = m_InputAdmit.frames();
                     log::info(line + (!stepMoved ? " (client screen changed mid-session)"
                                       : step > 0 ? " (step asked by the client's detection)"
                                                  : " (back to the client's own rate)"));
@@ -2329,7 +2405,7 @@ private:
                         return;
                     }
                     awaitingPicture = false;
-                    if (!emitPicture(resendStamps(steadyNowUs()))) return;
+                    if (!emitPicture(resendStamps(steadyNowUs()), false)) return;
                 } else {
                     awaitingPicture = true;
                 }
@@ -2579,7 +2655,8 @@ private:
                 // a new refinement window opens, because a pointer that stops
                 // moving leaves a composited frame that deserves sharpening
                 // exactly like any other.
-                if (!emitPicture(FrameStamps{submittedUs, submittedUs, submittedUs, steadyNowUs()}))
+                if (!emitPicture(FrameStamps{submittedUs, submittedUs, submittedUs, steadyNowUs()},
+                                 false))
                     return;
                 continue;
             }
@@ -2663,7 +2740,7 @@ private:
                                      frame.capturedUs, submittedUs, steadyNowUs()};
             if (m_Pipeline->pipelined())
                 emitPictureLater(stamps);
-            else if (!emitPicture(stamps))
+            else if (!emitPicture(stamps, true))
                 return;
         }
     }
@@ -3459,7 +3536,10 @@ private:
                            std::to_string(m_CadenceFps) + " fps stream — " +
                            std::to_string(m_PresentsSeen) + " presents in " + span + " s";
         if (m_Cadence.enabled()) {
-            const int64_t skipped = m_Cadence.skipped();
+            // What the gate skipped and the window after a press sent all the
+            // same was carried.
+            int64_t skipped = m_Cadence.skipped() - (m_InputAdmit.frames() - m_WindowFramesAtGate);
+            if (skipped < 0) skipped = 0;
             const int perSecond =
                 seconds > 0 ? static_cast<int>(static_cast<double>(skipped) / seconds + 0.5) : 0;
             line += ", " + std::to_string(skipped) + " not carried (" + std::to_string(perSecond) +
@@ -3468,6 +3548,24 @@ private:
             line += ", every one carried";
         }
         log::info(line);
+
+        // The admission window after a press (inputadmit=1): the pictures it
+        // added, and what kept it from adding more.
+        if (m_InputAdmitOn) {
+            const InputAdmit& a = m_InputAdmit;
+            char rate[48];
+            std::snprintf(rate, sizeof(rate), "%.2f/s, %.2f a window",
+                          seconds > 0 ? static_cast<double>(a.frames()) / seconds : 0.0,
+                          a.windows() > 0 ? static_cast<double>(a.frames()) / a.windows() : 0.0);
+            log::info("[native] input admit: " + std::to_string(a.presses()) + " presses, " +
+                      std::to_string(a.windows()) + " windows (" + std::to_string(a.carried()) +
+                      " carried on by a press, " + std::to_string(a.refused()) +
+                      " refused by the bucket, " + std::to_string(a.late()) + " too late), " +
+                      std::to_string(a.frames()) + " pictures more (" + rate + "); held back: " +
+                      std::to_string(a.capped()) + " by the cap, " + std::to_string(a.gapped()) +
+                      " by the gap, " + std::to_string(a.linkRefused()) + " by the link, " +
+                      std::to_string(a.encoderRefused()) + " by the encoder");
+        }
 
         // The turns of the loop that had no present to carry, against the ones
         // that did: what the pointer alone costs the capture thread.
@@ -3594,6 +3692,14 @@ private:
     /// client's screen changes (chooseCadence). The encoder never follows it
     /// — its budget does, through EffectiveCadence::retarget.
     int m_CadenceFps = 0;
+    /// inputadmit=1 (InputAdmit.h), set once in the constructor: the
+    /// admission window after a press. Its presses come in on the input
+    /// thread (sendInput), its pictures are the capture thread's.
+    bool m_InputAdmitOn = false;
+    InputAdmit m_InputAdmit;
+    /// The window's pictures when the gate was last replaced: those of the
+    /// gate the last cadence line counts.
+    int64_t m_WindowFramesAtGate = 0;
     /// The client's screen as last reported — SessionConfig at start, then
     /// setClientRefresh. The dirty flag wakes the loop's re-choice.
     std::atomic<int> m_ClientMilliHz{0};
@@ -3722,6 +3828,9 @@ private:
     /// because it is created and destroyed on the session's thread but used on
     /// the network thread.
     std::mutex m_InputMutex;
+    /// What is held, to tell a press from a repeat (inputadmit=1). Guarded by
+    /// m_InputMutex.
+    PressFilter m_PressFilter;
     /// The bench's click trace (clicktrace=1). Ahead of the sink, which writes
     /// into it: it is destroyed after it.
     ClickTrace m_ClickTrace;

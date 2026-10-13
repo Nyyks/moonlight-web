@@ -54,6 +54,12 @@
 //    taken in `accumulated`, the process callback that handed it over in
 //    `deliveredUs`; with KMS, the vblank the scanout was read after and its
 //    sequence. No compositor timing beside them.
+//  - admit (Windows host): the admission window after a press
+//    (core/InputAdmit.h). `status` "press" for each press it was told of, at
+//    `us`; "grid" or "window" for each present encoded, the gate's or the
+//    window's, at the moment the loop decided, with its `presentUs`. The
+//    gate's own on every pass, the window's with inputadmit=1: the bench
+//    tells the pictures the window added from the stream's.
 //
 // A field the platform cannot tell is left empty. Only the first kMaxRows rows
 // are kept: minutes of a bench pass, not a session left running.
@@ -66,6 +72,7 @@ public:
     {
         Press,
         Capture,
+        Admit,
     };
 
     struct Row
@@ -74,7 +81,8 @@ public:
         int64_t us = 0;
         int64_t startUs = 0;
         int64_t queuedUs = 0;
-        /// Capture: "ok", "pointer", "timeout", "lost" or "failed".
+        /// Capture: "ok", "pointer", "timeout", "lost" or "failed". Admit:
+        /// "press", "grid" or "window".
         const char* status = "";
         int64_t presentUs = 0;
         int64_t presentRawUs = 0;
@@ -110,6 +118,18 @@ public:
         add(row);
     }
 
+    /// @p status "press", "grid" or "window", at @p us; @p presentUs the
+    /// picture's present, 0 for a press. @p status must outlive the trace.
+    void admit(const char* status, int64_t us, int64_t presentUs)
+    {
+        Row row;
+        row.kind = Kind::Admit;
+        row.us = us;
+        row.status = status;
+        row.presentUs = presentUs;
+        add(row);
+    }
+
     size_t rows() const
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
@@ -133,7 +153,7 @@ public:
             out += ',';
         };
         for (const Row& r : m_Rows) {
-            out += r.kind == Kind::Press ? "press," : "capture,";
+            out += r.kind == Kind::Press ? "press," : r.kind == Kind::Admit ? "admit," : "capture,";
             num(r.us, true);
             num(r.startUs, r.startUs != 0);
             num(r.queuedUs, r.queuedUs != 0);

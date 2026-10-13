@@ -81,6 +81,19 @@ void run_click_trace_tests()
         CHECK(csv.find("press,1012,1000,990,") != std::string::npos);
     }
 
+    SECTION("ClickTrace — the window after a press: its presses, the gate's pictures and its own");
+    {
+        ClickTrace trace;
+        trace.admit("press", 1000, 0);
+        trace.admit("grid", 2100, 2000);
+        trace.admit("window", 6250, 6166);
+        const std::string csv = trace.csv();
+        CHECK(csv.find("\nadmit,1000,,,press,,,,,,,,,\n") != std::string::npos);
+        CHECK(csv.find("\nadmit,2100,,,grid,2000,,,,,,,,\n") != std::string::npos);
+        CHECK(csv.find("\nadmit,6250,,,window,6166,,,,,,,,\n") != std::string::npos);
+        CHECK_EQ(trace.rows(), size_t(3));
+    }
+
     SECTION("ClickTrace — past its bound, rows are counted and not kept");
     {
         ClickTrace trace;

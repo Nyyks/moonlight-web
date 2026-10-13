@@ -47,6 +47,9 @@ refresh, 1: just before the next), `wait` shown → its next refresh, `late` how
 many refreshes after that one its frame was presented, `between` frames
 presented after the flag went up that did not carry it. The refresh grid comes
 from the presents themselves: DWM's own timing follows another screen's clock.
+On a pass whose trace has the host's `admit` rows (plan « inputadmit »), the
+summary also says how many clicks' frames the window after a press sent, the
+gate having skipped them.
 
 Usage: hostpath.py <tag> [<tag>...] [--dir bench-out/content-age] [--target file] [--clicks] [--pool]
 """
@@ -220,6 +223,9 @@ def stamp_offset(client_ms, present):
 def one(tag, a):
     base = os.path.join(a.dir, tag)
     trace = list(csv.DictReader(open(base + ".click-trace.csv")))
+    # The host's word on each present it encoded: the gate's or the window's.
+    sent_by = {num(r["presentUs"]): r["status"] for r in trace
+               if r["kind"] == "admit" and r["presentUs"]}
     presses = sorted((num(r["startUs"]), num(r["us"])) for r in trace if r["kind"] == "press")
     caps = [{k: num(v) for k, v in r.items() if k not in ("kind", "status")}
             for r in trace if r["kind"] == "capture" and r["status"] == "ok"]
@@ -273,6 +279,7 @@ def one(tag, a):
             if j < len(caps):
                 frame = caps[j]
         row = {k: None for k in LEGS}
+        row["via"] = sent_by.get(frame["presentUs"]) if frame else None
         if press:
             row["sendinput"] = (press[1] - press[0]) / 1000
             if hook:
@@ -317,6 +324,10 @@ def one(tag, a):
         where = ""
     print("%s: %d flags, %d presses, %d frames, %d client clicks (stamp offset %d us)%s" % (
         tag, len(flags), len(presses), len(caps), len(seen), x, where))
+    if sent_by:
+        via = [r["via"] for r in rows if r["via"]]
+        print("  the clicks' frames: %d sent by the gate, %d by the window after a press" % (
+            via.count("grid"), via.count("window")))
     summary(rows, a.clicks)
     return rows
 

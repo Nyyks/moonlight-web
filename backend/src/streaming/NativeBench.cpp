@@ -263,7 +263,17 @@ const char* const kUsage =
     "                    each wake-up of the capture with the OS's and the compositor's\n"
     "                    stamps, a CSV next to the log when the session ends (Windows\n"
     "                    and macOS hosts; plan attente, A0 and AM0)\n"
-    "  sckdepth=<n>      ScreenCaptureKit's pool of surfaces (queueDepth), 1-8; 3 the\n"
+    "  inputadmit=0|1    for a moment after each press, every present the cadence gate\n"
+    "                    skips goes out all the same, its grid untouched (Windows host;\n"
+    "                    plan inputadmit)\n"
+    "  inputadmitms=<ms>  its window, 8-100 (33)\n"
+    "  inputadmitburst=<n>  windows its bucket holds ahead, 1-20 (3)\n"
+    "  inputadmitrate=<n>  windows its bucket gains a second, 0.1-50 (2)\n"
+    "  inputadmitmax=<n>  pictures a window adds at most, 1-16 (3)\n"
+    "  inputadmitgap=<ms>  the least gap between two pictures, 0-50, decimals taken (the\n"
+    "                    engine's own: half an interval for a client that paints at its\n"
+    "                    vsync under twice the stream's rate, none otherwise)\n"
+    "  sckdepth=<n>     ScreenCaptureKit's pool of surfaces (queueDepth), 1-8; 3 the\n"
     "                    product (macOS host; plan attente, AM2)\n"
     "  sckinterval=<us>  the least time between two ScreenCaptureKit frames, 0-100000;\n"
     "                    0 none, one display refresh the product (macOS host; AM2)\n"
@@ -603,6 +613,26 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
         tuning.clickTrace = v == 1;
+    } else if (key == "inputadmit") {
+        const int v = value.toInt(&ok);
+        ok = ok && (v == 0 || v == 1);
+        tuning.inputAdmit = v == 1;
+    } else if (key == "inputadmitms") {
+        tuning.inputAdmitMs = value.toInt(&ok);
+        ok = ok && tuning.inputAdmitMs >= 8 && tuning.inputAdmitMs <= 100;
+    } else if (key == "inputadmitburst") {
+        tuning.inputAdmitBurst = value.toInt(&ok);
+        ok = ok && tuning.inputAdmitBurst >= 1 && tuning.inputAdmitBurst <= 20;
+    } else if (key == "inputadmitrate") {
+        tuning.inputAdmitRate = value.toDouble(&ok);
+        ok = ok && tuning.inputAdmitRate >= 0.1 && tuning.inputAdmitRate <= 50;
+    } else if (key == "inputadmitmax") {
+        tuning.inputAdmitMax = value.toInt(&ok);
+        ok = ok && tuning.inputAdmitMax >= 1 && tuning.inputAdmitMax <= 16;
+    } else if (key == "inputadmitgap") {
+        const double ms = value.toDouble(&ok);
+        ok = ok && ms >= 0.0 && ms <= 50.0;
+        tuning.inputAdmitGapUs = static_cast<int>(ms * 1000.0 + 0.5);
     } else if (key == "sckdepth") {
         tuning.sckQueueDepth = value.toInt(&ok);
         ok = ok && tuning.sckQueueDepth >= 1 && tuning.sckQueueDepth <= 8;

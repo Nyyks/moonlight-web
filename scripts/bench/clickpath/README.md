@@ -161,6 +161,13 @@ set on them, and a loop busy over 50 ms (`c60-um-A3`, at its first click) is
 taken as a re-send through the gate. It then keeps 96 to 99 % of the client's
 pictures on the three A passes.
 
+Since the window was written, the Windows host's trace has `admit` rows
+(`clicktrace=1`): `press` for each press the window was told of (keys and pads
+too, not only mouse buttons), `grid` or `window` for each present it encoded,
+with its present. `inputsim.py` then takes the host's presses and the gate's
+pictures from there, `hostpath.py` says how many clicks' frames the window
+sent, and `content-age/fluid.py` tells the window's frames from the grid's.
+
 ## B — gpuwait.py
 
 What the pass needs: `localStorage.mw_ultra_trace = '1'` in the client's page

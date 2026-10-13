@@ -467,6 +467,37 @@ void run_rate_control_tests()
         CHECK_EQ(g.targetKbps(), 12800);
     }
 
+    SECTION("RateGovernor — calm: at the setting, every report quiet for the time asked");
+    {
+        RateGovernor g;
+        g.start(20000, 0);
+        LinkFeedback quiet;
+        CHECK(!g.calm(1000, 2000));
+        g.report(quiet, 1500);
+        CHECK(g.calm(2000, 2000));
+        // A queue there but not growing: no cut, and no calm for two seconds.
+        LinkFeedback standing;
+        standing.owdRiseMs = 15;
+        CHECK(!g.report(standing, 2500));
+        CHECK(!g.limiting());
+        CHECK(!g.calm(4000, 2000));
+        g.report(quiet, 4000);
+        CHECK(g.calm(4500, 2000));
+        // A cut: not calm until the target is back at the setting.
+        LinkFeedback rising;
+        rising.owdRiseMs = 45;
+        CHECK(g.report(rising, 5000));
+        CHECK(!g.calm(5500, 0));
+        g.report(quiet, 7500);
+        CHECK(!g.calm(8000, 2000));
+        // Reports that stopped coming: not calm either.
+        RateGovernor s;
+        s.start(20000, 0);
+        s.report(quiet, 100);
+        CHECK(s.calm(3000, 2000));
+        CHECK(!s.calm(4200, 2000));
+    }
+
     SECTION("RateGovernor — SCTP's retransmissions cut only under retrcut=");
     {
         // The Windows session's own, measured (plan Wi-Fi W2 B).

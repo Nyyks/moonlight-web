@@ -23,6 +23,8 @@ rules it was chosen against, on passes recorded with clicktrace=1:
            when the bucket is empty
   encode   a slower encoder (the loop busy 3 to 8 ms an encode): what the
            window's pictures do to the grid's
+  link     the host's link guard, on its model of a link at the stream's
+           bitrate: what it refuses at 20 and 40 Mbit/s
   release  the releases taken as presses too
 
 The method. The gate is called on every present of the trace, in the order the
@@ -71,6 +73,9 @@ GAME_TAGS = ("u14att-um-smoke-hevc-rtp-dda-re9-vis-r?-v*-client-r0",
 VARIANTS = "base next 16.7 25 16.7/rephase 16.7,3,2 33,3,2,0,3 33,3,2,8.3,3"
 PROPOSAL = "33,3,2,0,3"
 LATENCY_US = 5000  # wake-up → ready to show on the client, for the display model
+# A delta's share of its interval at the stream's bitrate, for the link model:
+# 38.4 KB at the median of the A passes, for 41.7 at 20 Mbit/s and 60 fps.
+LINK_FILL = 0.92
 NO_BUCKET = 10 ** 9
 
 
@@ -97,6 +102,14 @@ class Pass:
                               if b["startUs"] and int(b["startUs"]) - int(a["us"]) > 50000)
         self.present = sorted(p for _, p in self.caps)
         self.presses = sorted(int(r["startUs"]) for r in rows if r["kind"] == "press")
+        # Since the window was written (plan « inputadmit »), the host's own
+        # word: every press it noted, keys and pads too, and each present it
+        # encoded, the gate's or the window's.
+        noted = sorted(int(r["us"]) for r in rows if r["kind"] == "admit" and r["status"] == "press")
+        if noted:
+            self.presses = noted
+        self.sent = {int(r["presentUs"]): r["status"] for r in rows
+                     if r["kind"] == "admit" and r["presentUs"]}
         self.fps, self.hz = gatesim.pass_rates(base)
         self.scene = gatesim.scene(base)
         log = base + ".server.log"
@@ -118,7 +131,11 @@ class Pass:
         self.phase = {}
 
     def real_admitted(self):
-        """The presents the client received: each frame it logged, joined to one."""
+        """The presents the host encoded at a present: its own rows when the
+        trace has them (the gate's alone: the window's are not the gate's);
+        else those the client received, each frame it logged joined to one."""
+        if self.sent:
+            return {p for p, how in self.sent.items() if how == "grid"}
         if not self.client_ms:
             return set()
         x = hostpath.stamp_offset(self.client_ms, self.present)
@@ -144,13 +161,15 @@ def parse_variant(text):
     return v
 
 
-def replay(p, fps, hz, v, presses=None, phase_ns=None, busy_us=0):
+def replay(p, fps, hz, v, presses=None, phase_ns=None, busy_us=0, link_kbps=0):
     """The pictures the loop would encode, [(present, wake-up, kind)]: kind "g"
     for the grid's, "w" for the window's (or the first idea's). @p busy_us: the
     loop encodes for that long after each picture it admits; the presents that
     come meanwhile fold into the latest, taken when it is free (Desktop
-    Duplication's AccumulatedFrames). With v["want_window"], also the
-    InputAdmit, for its counts."""
+    Duplication's AccumulatedFrames). @p link_kbps: the host's link guard, on
+    its model of a link at that rate (LinkOccupancy), every picture LINK_FILL
+    of the rate's share. With v["want_window"], also the InputAdmit, for its
+    counts."""
     gate = gatesim.Gate(fps, hz)
     if phase_ns is not None:
         gate.next_due_ns = phase_ns
@@ -158,7 +177,9 @@ def replay(p, fps, hz, v, presses=None, phase_ns=None, busy_us=0):
     win = None
     if v["mode"] == "window" and not gate.ceiling:
         win = gatesim.InputAdmit(v["T"], v["B"], v["R"], v["S"], gate.interval_ns // 1000, hz, v["K"])
-    out, pi, ri, pending, free = [], 0, 0, False, 0
+    out, pi, ri, pending, free, busy = [], 0, 0, False, 0, 0
+    link_us = int(1e6 / fps * LINK_FILL) if link_kbps else 0
+    bound_us = ((win.max_extra if win else 3) + 1) * (gate.interval_ns // 1000)
     caps, i, n = p.caps, 0, len(p.caps)
     while i < n:
         u, present = caps[i]
@@ -185,7 +206,8 @@ def replay(p, fps, hz, v, presses=None, phase_ns=None, busy_us=0):
         else:
             grid = gate.admit(u)
             kind = "g" if grid else None
-            if win and win.admit(grid, present, u) and not grid:
+            link_ok = not link_kbps or busy - u <= bound_us
+            if win and win.admit(grid, present, u, link_ok=link_ok) and not grid:
                 kind = "w"
                 if v["rephase"]:
                     gate.next_due_ns = u * 1000 + gate.interval_ns
@@ -193,6 +215,8 @@ def replay(p, fps, hz, v, presses=None, phase_ns=None, busy_us=0):
             out.append((present, u, kind))
             if busy_us:
                 free = u + busy_us
+            if link_kbps:
+                busy = max(busy, u) + link_us
         i += 1
     return (out, win) if v.get("want_window") else out
 
@@ -499,6 +523,30 @@ def section_encode(passes, v, fps, busy_list=(0, 2500, 3000, 4200, 5000, 6000, 8
     print()
 
 
+# ── link ─────────────────────────────────────────────────────────────────────
+
+def section_link(passes, v, fps, rates=(20000, 40000)):
+    print("== link: the host's guard on its model of a link at the stream's bitrate (each picture "
+          "%.0f %% of its interval's share), rule %s, stream %d fps: window pictures, and those the "
+          "model refused" % (100 * LINK_FILL, v["name"], fps))
+    rng = random.Random(7)
+    for name, step in (("the bench's clicks", None), ("clicks 2/s", 5e5), ("clicks 5/s", 2e5)):
+        row = "  %-20s" % name
+        for kbps in rates:
+            pics = refused = 0
+            for p in passes:
+                presses = p.presses if step is None else [
+                    int(p.presses[0] + i * step + rng.random() * 1e6 / fps)
+                    for i in range(int((p.presses[-1] - p.presses[0]) / step))]
+                adm, win = replay(p, fps, p.hz, dict(v, want_window=True), presses=presses,
+                                  phase_ns=align(p, fps, p.hz)[0], link_kbps=kbps)
+                pics += win.frames
+                refused += win.link_refused
+            row += "  %d kbps: %4d pictures, %4d refused |" % (kbps, pics, refused)
+        print(row)
+    print()
+
+
 # ── release ──────────────────────────────────────────────────────────────────
 
 def section_release(passes, v, fps):
@@ -526,7 +574,7 @@ def section_release(passes, v, fps):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--dir", default=OUT)
-    ap.add_argument("--sections", default="flag,target,game,display,spam,encode,release")
+    ap.add_argument("--sections", default="flag,target,game,display,spam,encode,link,release")
     ap.add_argument("--variants", help="the rules every section compares (default: each its own)")
     ap.add_argument("--proposal", default=PROPOSAL, help="the rule the encode and release sections try")
     ap.add_argument("--fps", default="60,120", help="the stream's rates for the flag section")
@@ -537,7 +585,8 @@ def main():
         return [parse_variant(t) for t in (a.variants or default).split()]
 
     proposal = parse_variant(a.proposal)
-    flag = load(a.dir, [FLAG_TAGS]) if set(sections) & {"flag", "display", "spam", "encode", "release"} else []
+    flag = load(a.dir, [FLAG_TAGS]) if set(sections) & {"flag", "display", "spam", "encode", "link",
+                                                     "release"} else []
     if "flag" in sections:
         section_flag(flag, rules(VARIANTS), [int(f) for f in a.fps.split(",")])
     if "target" in sections:
@@ -550,6 +599,8 @@ def main():
         section_spam(flag[0], rules("16.7 33,3,2,0,3 33,4,6,0,3 33,2,1,0,3"), 60)
     if "encode" in sections:
         section_encode(flag, proposal, 60)
+    if "link" in sections:
+        section_link(flag, proposal, 60)
     if "release" in sections:
         section_release(flag, proposal, 60)
 
