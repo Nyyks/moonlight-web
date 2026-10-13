@@ -283,7 +283,7 @@ def ultra_player(d, tag):
     if not raw:
         return None
     player = json.loads(raw)
-    print("  pyrowave p50 ms: " + ", ".join(
+    print("  pyrowave (%s) p50 ms: " % (player.get("api") or "?") + ", ".join(
         "%s %s" % (k, (player.get(k) or {}).get("p50"))
         for k in ("wait", "parse", "record", "done", "frame", "gpuDecode", "gpuPresent", "spin")), flush=True)
     if player.get("traced"):

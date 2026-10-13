@@ -20,7 +20,8 @@
       // and the 8-bit frame against the first shader's in f32 (or against
       // &cmpidwt=, &cmpfp16=1), &split=1 each stage timed alone, &bw=1 the
       // GPU's memory bandwidth, &present=1 the product's presentation checked
-      // once, then timed.
+      // once, then timed. &post=<url> POSTs the result there too (a browser
+      // with no DevTools protocol, like Safari: safari_lab.py).
       import { PyroWaveDecoder } from "/frontend/js/stream/ultra/PyroWaveDecoder.js";
 
       const q = new URLSearchParams(location.search);
@@ -853,6 +854,14 @@
       );
       window.__labResult.then((r) => {
         window.__labDone = r;
+        // &post=<url>: a browser nothing drives (Safari) sends its result to
+        // the lab's server (safari_lab.py), with the page's own query.
+        if (q.get("post"))
+          fetch(q.get("post"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: location.search, ua: navigator.userAgent, result: r }),
+          }).catch(() => {});
       });
     </script>
   </body>
