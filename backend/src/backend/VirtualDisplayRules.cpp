@@ -19,6 +19,7 @@
 
 #include "common/Edition.h"
 
+#include <QFile>
 #include <QJsonDocument>
 #include <QRegularExpression>
 
@@ -198,6 +199,17 @@ std::optional<Result> parseResult(const QByteArray& json)
     res.display = obj.value(QLatin1String("display")).toString();
     res.previousPrimary = obj.value(QLatin1String("previous_primary")).toString();
     return res;
+}
+
+std::optional<Result> readResult(const QString& path)
+{
+    QByteArray json;
+    {
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly)) return std::nullopt;
+        json = f.readAll();
+    }
+    return parseResult(json);
 }
 
 QByteArray toJson(const Result& res)

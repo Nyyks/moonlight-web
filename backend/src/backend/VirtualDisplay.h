@@ -340,6 +340,14 @@ struct Result
 std::optional<Result> parseResult(const QByteArray& json);
 QByteArray toJson(const Result& res);
 
+/// The result file at @p path, read and let go of before anyone acts on it:
+/// Windows deletes no file that is still open, and acting on a verdict means
+/// deleting it. Held open, the fallback's next run read its predecessor's
+/// failure again (DualRTX, 13/10/2026: 1108×720, then 0×0 "did not come up"
+/// a quarter of a second after it was asked, while it came up — and /start
+/// answered 500). nullopt while there is no complete object to read.
+std::optional<Result> readResult(const QString& path);
+
 /// The driver's vdd_settings.xml: a single monitor, our mode first (the
 /// driver picks the first as default), the common sizes after it, SDR. A
 /// @p width × @p height of 0 is the default 1920×1080; anything else is the

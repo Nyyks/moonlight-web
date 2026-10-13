@@ -55,6 +55,20 @@ const char* stateName(VirtualDisplayJob::State s)
     return "idle";
 }
 
+/// The last run's verdict taken away before the next run starts, so that a
+/// poll can only read the verdict of the run it waits for. False when the
+/// file stays (still open somewhere): no run may start then, or it would be
+/// answered by its predecessor.
+bool discardResult()
+{
+    const QString path = VirtualDisplay::resultPath();
+    if (QFile::remove(path) || !QFile::exists(path)) return true;
+    Logger::warning(QStringLiteral("[vdisplay] %1 cannot be removed — the next run's verdict "
+                                   "could not be told from the last one's")
+                        .arg(path));
+    return false;
+}
+
 /// The helper's verdict is its last stdout line; anything before it is noise.
 QByteArray lastLine(const QByteArray& out)
 {
@@ -290,7 +304,10 @@ void VirtualDisplayJob::startNext()
         return;
     }
     // Leftovers of an interrupted attempt would be acted on as-is otherwise.
-    QFile::remove(VirtualDisplay::resultPath());
+    if (!discardResult()) {
+        fail(QStringLiteral("The virtual display's last verdict cannot be removed"));
+        return;
+    }
     QFile::remove(VirtualDisplay::requestPath());
     dispatch();
 }
@@ -310,7 +327,9 @@ void VirtualDisplayJob::fail(const QString& error)
     // closer to the default one, which always comes up: the stream then runs
     // at that mode instead of failing to launch. The helper has already
     // switched the node back off and taken the client's mode out of the list.
-    if (const auto next = VirtualDisplay::fallbackTowardsDefault(m_Request, error)) {
+    // Its verdict goes first: the next run must be answered by its own.
+    if (const auto next = VirtualDisplay::fallbackTowardsDefault(m_Request, error);
+        next && discardResult()) {
         if (!m_AskedBeforeFallback) m_AskedBeforeFallback = m_Request;
         Logger::warning(QStringLiteral("[vdisplay] %1x%2@%3 did not come up — trying %4x%5@%6")
                             .arg(m_Request.width)
@@ -324,7 +343,6 @@ void VirtualDisplayJob::fail(const QString& error)
         m_Request = *next;
         m_HelperOut.clear();
         m_NextStages.clear();
-        QFile::remove(VirtualDisplay::resultPath());
         QFile::remove(VirtualDisplay::requestPath());
         dispatch();
         return;
@@ -559,10 +577,9 @@ void VirtualDisplayJob::pollResult()
         handleResult(res);
         return;
     }
-    QFile f(VirtualDisplay::resultPath());
-    if (!f.open(QIODevice::ReadOnly)) return;
-    const auto res = VirtualDisplay::parseResult(f.readAll());
-    if (!res) return; // still being written
+    // Read and closed before it is acted on: the fallback deletes it.
+    const auto res = VirtualDisplay::readResult(VirtualDisplay::resultPath());
+    if (!res) return; // not there yet, or still being written
     m_Poll.stop();
     m_Deadline.stop();
     handleResult(*res);

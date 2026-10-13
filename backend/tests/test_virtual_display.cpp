@@ -18,8 +18,10 @@
 #include "backend/VirtualDisplay.h"
 #include "test_framework.h"
 
+#include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QTemporaryDir>
 
 // The pure half of "MoonlightWeb Virtual Display": what an elevated helper
 // will act on (the request file), what it answers (the result file), what it
@@ -128,6 +130,41 @@ void run_virtual_display_tests()
         }
         // One line, so a reader taking the last stdout line gets all of it.
         CHECK_EQ(toJson(r).count('\n'), 1);
+    }
+
+    SECTION("VirtualDisplay — a result file read is let go of, so the next run can remove it");
+    {
+        // DualRTX, 13/10/2026: the file stayed open while its failure was
+        // acted on, the fallback could not remove it, and its next run was
+        // answered by that same failure — /start 500 while the display came up.
+        QTemporaryDir tmp;
+        CHECK(tmp.isValid());
+        const QString path = tmp.filePath(QStringLiteral("result.json"));
+        CHECK(!readResult(path).has_value());
+        Result failed;
+        failed.stage = QStringLiteral("mode");
+        failed.error = notAppearedError();
+        {
+            QFile f(path);
+            CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(toJson(failed));
+        }
+        const auto read = readResult(path);
+        CHECK(read.has_value());
+        if (read) {
+            CHECK(!read->ok);
+            CHECK_EQ(read->error, notAppearedError());
+        }
+        CHECK(QFile::remove(path));
+        CHECK(!readResult(path).has_value());
+        // Half written: nothing yet, and still not held.
+        {
+            QFile f(path);
+            CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write("{\"ok\":fal");
+        }
+        CHECK(!readResult(path).has_value());
+        CHECK(QFile::remove(path));
     }
 
     SECTION("VirtualDisplay — the driver settings put our mode first, SDR, default GPU");
