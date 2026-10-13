@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCH = os.path.dirname(HERE)
@@ -373,6 +374,12 @@ def main():
     ap.add_argument("--target", default="display", help="display | vdisplay")
     ap.add_argument("--display-index", default="0")
     ap.add_argument("--px", type=int, default=600, help="the page's scroll speed")
+    ap.add_argument("--defaults", action="store_true",
+                    help="each version's own defaults (the v0.3.1 / v0.4.0 comparison): only "
+                         "1080p, --fps and --codec set, no bench switch")
+    ap.add_argument("--cod-fps", type=int, default=0,
+                    help="the Call of Duty footage (cod.html, ~/.mw-bench/content/cod.webm) "
+                         "at this many distinct frames a second, instead of scroll.html")
     ap.add_argument("--game-fps", default="",
                     help="the page's rate, like a game's: 50, or 49-53 drawn at random")
     ap.add_argument("--client-port", type=int, default=0,
@@ -460,7 +467,13 @@ def main():
         d.eval("localStorage.removeItem('mw_decodequeue')")
         # The detection is on by default (UA.4): off is said, for the
         # reference modes (client, host-guarded) to stay today's Auto.
-        d.eval("localStorage.setItem('mw_autostep', %s)" % json.dumps("1" if a.autostep else "0"))
+        if a.defaults:
+            # The release comparison: each version as it ships — no switch
+            # left by a pass before, the detection at its default.
+            d.eval("localStorage.removeItem('mw_autostep')")
+            d.eval("localStorage.removeItem('mw-streaming-settings')")
+        else:
+            d.eval("localStorage.setItem('mw_autostep', %s)" % json.dumps("1" if a.autostep else "0"))
         # Each pass is this device's first stream: the steps it failed at in
         # the passes before are forgotten (mw_autostep_failed;
         # --local-storage puts them back for a pass that wants them).
@@ -468,9 +481,17 @@ def main():
         for kv in a.local_storage:
             k, _, v = kv.partition("=")
             d.eval("localStorage.setItem(%s, %s)" % (json.dumps(k), json.dumps(v)))
-        settings = dict(run.load_matrix()["base"])
-        settings.update({"stream_fps": a.fps, "tearing_default_v2": True,
-                         "tearing_enabled": a.vsync == "off"})
+        if a.defaults:
+            # Only the cell's own values over the version's defaults: 1080p,
+            # the rate, the codec; the overlay the stats are read from, and
+            # the host kept silent.
+            settings = {"stream_resolution": "custom", "stream_custom_width": 1920,
+                        "stream_custom_height": 1080, "stream_fps": a.fps,
+                        "show_performance_stats": True, "mute_host_audio": True}
+        else:
+            settings = dict(run.load_matrix()["base"])
+            settings.update({"stream_fps": a.fps, "tearing_default_v2": True,
+                             "tearing_enabled": a.vsync == "off"})
         if a.codec:
             settings["video_codec"] = a.codec
         for kv in a.setting:
@@ -575,6 +596,11 @@ def main():
         if d.eval("typeof (window.mwContentAge && window.mwContentAge.onDecoded)") != "function":
             raise SystemExit("the page runs an older content-age probe")
         page = "scroll.html?band=time&px=%d%s" % (a.px, "&fps=" + a.game_fps if a.game_fps else "")
+        if a.cod_fps:
+            clip = os.path.join(os.path.expanduser("~"), ".mw-bench", "content", "cod.webm")
+            page = "cod.html?band=time&fps=%d&src=%s" % (
+                a.cod_fps, urllib.parse.quote("file:///" + clip.replace("\\", "/"), safe=":/"))
+        needle = page.partition("?")[0]
         if rh:
             print("  " + rh.content_start(page), flush=True)
             shown = True
@@ -602,7 +628,7 @@ def main():
         # desktop).
         content_ms = d.eval("performance.now()")
         time.sleep(4)
-        age.calibrate(argparse.Namespace(port=CONTENT_PORT, tries=40))
+        age.calibrate(argparse.Namespace(port=CONTENT_PORT, tries=40, page=needle))
         # The kiosk can stay a blank white window (run.content_start), and its
         # own check cannot read the virtual display: the stream is looked at
         # instead. A band the client cannot read at all is a page not on the
@@ -614,7 +640,7 @@ def main():
                   flush=True)
             run.content_start(page, probe=False, debug_port=CONTENT_PORT)
             time.sleep(4)
-            age.calibrate(argparse.Namespace(port=CONTENT_PORT, tries=40))
+            age.calibrate(argparse.Namespace(port=CONTENT_PORT, tries=40, page=needle))
         time.sleep(a.settle)
         load_seen = {}
         level = None

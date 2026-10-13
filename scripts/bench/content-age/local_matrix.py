@@ -150,6 +150,8 @@ def main():
     ap.add_argument("--setting", action="append", default=[], metavar="KEY=VALUE",
                     help="a stream setting over the matrix's base (pass.py --setting)")
     ap.add_argument("--game-fps", default="", help="the page at a game's rate (pass.py --game-fps)")
+    ap.add_argument("--cod-fps", type=int, default=0, help="the Call of Duty footage (pass.py --cod-fps)")
+    ap.add_argument("--defaults", action="store_true", help="each version's defaults (pass.py --defaults)")
     ap.add_argument("--clicks", type=int, default=0, help="click → flag samples (pass.py --clicks)")
     ap.add_argument("--uplink", default="",
                     help="HZ:SECS[,…] dated input messages, the way up alone (pass.py --uplink)")
@@ -181,6 +183,10 @@ def main():
         client += ["--setting", kv]
     if a.game_fps:
         client += ["--game-fps", a.game_fps]
+    if a.cod_fps:
+        client += ["--cod-fps", str(a.cod_fps)]
+    if a.defaults:
+        client += ["--defaults"]
     if a.clicks:
         client += ["--clicks", str(a.clicks)]
     if a.codec:

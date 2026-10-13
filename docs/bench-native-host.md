@@ -6460,6 +6460,162 @@ DualRTX (natif Windows), clic → drapeau (`mwLatency`) et journal par image
 - Hôte distant : `series.py <client> --host um790pro|mw-mac` ; vérifier à la
   première passe l'adresse du pair dans le journal de l'hôte.
 
+## 8v. v0.3.1 contre v0.4.0, avant la release (13/10/2026)
+
+Comparaison demandée par Bruno avant les notes de release : mêmes machines, même
+chemin, mêmes contenus, réglages par défaut de chaque version.
+
+### 8v.1 Le banc
+
+- **Hôte** : DualRTX, l'écran virtuel du produit rendu par la RTX 5060 Ti, encodage
+  NVENC.
+- **Client** : l'UM790Pro sous Windows 11.
+  - Chrome 155, décodage sur le Radeon 780M, rendu Canvas2D.
+  - Écrans à 120 Hz (M27Q et VDD MTT, modes non touchés).
+- **Réseau** : Ethernet 1 Gbit/s des deux côtés, même segment (voisin ARP direct),
+  aller-retour ~0,3 ms.
+- **Contenu** : la vidéo Call of Duty des bancs, `cod.html?band=time&fps=N`.
+  - Le clip à 60 i/s est joué ×1, ×2 ou ×4 : chaque image encodée est nouvelle.
+  - La bande horaire de `scroll.html` y est ajoutée pour l'âge du contenu.
+- **Passe** : 30 s d'âge du contenu, puis 30 clics → drapeau.
+  - Le drapeau n'est armé que pendant la passe.
+  - Les journaux verbeux restent coupés.
+  - Aucune entrée clavier ou souris n'a été vue sur la console du client
+    (`GetLastInputInfo`, toutes les 2 s, pendant toute la série).
+- **Réglages** : ceux par défaut de chaque version (`pass.py --defaults`).
+  - Seuls 1080p (`custom`), la cadence et le codec sont posés.
+  - La détection « Auto » de v0.4.0 tourne comme elle sortira.
+  - Les deux versions tournent en `MW_LAN_ONLY=1`.
+- **Versions** : deux worktrees figés, servis par `build\MoonlightWeb.exe`, changé
+  à chaque passe (SHA vérifié). La tâche de l'écran virtuel ne lance que ce
+  chemin.
+  - **v0.4.0** = `509bdad0`. Il inclut trois commits d'UI du jour (`a0cd851f`,
+    `134e35d2`, `509bdad0`) sans effet sur ces mesures.
+  - **v0.3.1** = le tag `00727569`, plus la seule mesure, reprise de main
+    (branche locale `bench/v031-probe`) :
+    - la sonde d'âge du contenu (`41421448`, `46e86a06`) ;
+    - la sonde de clic corrigée (`7eb47922` = `652fc726`).
+- **Matrice** : H.264, HEVC et AV1 à 60, 120 et 240 i/s, deux passes par case,
+  en ABBA ; PyroWave en v0.4.0 seulement.
+  - Première série : 42 passes, de 15:43 à 17:20.
+  - Rejeu des 18 passes v0.3.1 avec la sonde de clic de main : de 17:24 à
+    18:06. Il n'est plus intercalé avec les passes v0.4.0.
+- **Lancement** : `local_matrix.py --defaults --cod-fps N --rates 0 --vdd-gpu
+  "NVIDIA GeForce RTX 5060 Ti"`, piloté par un script de session hors dépôt
+  (`rel_series.py`, avec `rel_report.py` pour le tableau). Il fait l'échange
+  d'exe, le dossier de données de la `--dev` remis à chaque passe et le guet de
+  3478-3481.
+
+### 8v.2 Les résultats
+
+Moyenne des 2 passes par case. Pour v0.3.1, ce sont les passes du rejeu.
+
+| Codec | i/s | Version | Reçues/s | Âge affiché (moy. / p99) | Depuis capture | Clic → drapeau | Débit | Encodage | Décodage |
+|---|---|---|---|---|---|---|---|---|---|
+| H.264 | 60 | v0.3.1 | 59,7 | 20,9 / 44,8 ms | 14,7 ms | 23,4 ms | 16,6 Mb/s | 1,93 ms | 0,60 ms |
+| | | v0.4.0 | 60,0 | 21,1 / 34,9 | 14,1 | 29,5 | 17,8 | 1,93 | 0,60 |
+| | 120 | v0.3.1 | 107,9 | 15,6 / 27,6 | 10,4 | 26,9 | 31,8 | 2,09 | 0,50 |
+| | | v0.4.0 | 120,0 | 13,4 / 21,4 | 9,6 | 25,5 | 34,5 | 2,04 | 0,40 |
+| | 240 | v0.3.1 | 239,0 | 13,8 / 30,0 | 7,9 | 25,1 | 68,8 | 1,98 | 0,50 |
+| | | v0.4.0 | 239,1 | 13,2 / 20,8 | 7,0 | 22,6 | 73,9 | 1,99 | 0,45 |
+| HEVC | 60 | v0.3.1 | 59,9 | 19,4 / 41,1 | 14,6 | 28,7 | 15,9 | 1,79 | 0,65 |
+| | | v0.4.0 | 60,0 | 19,5 / 32,4 | 13,7 | 33,2 | 16,8 | 1,79 | 0,60 |
+| | 120 | v0.3.1 | 119,5 | 17,7 / 26,6 | 9,5 | 33,0 | 32,5 | 1,93 | 0,40 |
+| | | v0.4.0 | 120,0 | 13,1 / 21,0 | 8,7 | 28,8 | 35,0 | 1,85 | 0,40 |
+| | 240 | v0.3.1 | 238,7 | 14,5 / 23,9 | 8,0 | 29,8 | 66,9 | 1,73 | 0,55 |
+| | | v0.4.0 | 238,9 | 13,4 / 21,4 | 7,6 | 30,1 | 73,7 | 1,74 | 0,50 |
+| AV1 | 60 | v0.3.1 | 59,7 | 20,1 / 38,8 | n/a | 30,1 | 16,8 | 1,71 | 0,60 |
+| | | v0.4.0 | 60,0 | 17,2 / 26,3 | 13,1 | 26,5 | 18,4 | 1,69 | 0,55 |
+| | 120 | v0.3.1 | 119,4 | 17,7 / 28,4 | n/a | 34,6 | 35,2 | 1,79 | 0,50 |
+| | | v0.4.0 | 120,0 | 12,8 / 19,7 | 8,9 | 19,5 | 37,1 | 1,75 | 0,50 |
+| | 240 | v0.3.1 | 238,6 | 13,4 / 22,2 | n/a | 25,9 | 68,1 | 1,71 | 0,45 |
+| | | v0.4.0 | 239,0 | 12,8 / 20,3 | 6,9 | 21,6 | 74,2 | 1,71 | 0,45 |
+| PyroWave | 60 | v0.4.0 | 60,0 | 19,1 / 30,7 | 15,2 | 31,2 | 128,0 | 1,39 | 0,45 |
+| | 120 | v0.4.0 | 119,9 | 13,5 / 22,3 | 9,5 | 25,9 | 127,4 | 1,33 | 0,30 |
+| | 240 | v0.4.0 | 235,2 | 12,0 / 20,1 | 6,4 | 26,2 | 126,3 | 1,29 | 0,35 |
+
+- **Pertes** : 0 % dans les 60 passes, 0 image jetée, 0 gel du lien.
+- **À 240 i/s**, le client dessine ~239 images/s, mais son écran est à 120 Hz : il
+  en montre 120 au plus.
+
+**Le clic → drapeau, tous clics réunis** (médiane / p90, ~170 clics par ligne). La
+médiane d'une passe de 30 clics varie de ±4 ms dans une même case : ces chiffres
+font foi plutôt que ceux du tableau.
+
+| | v0.3.1 | v0.4.0 | PyroWave |
+|---|---|---|---|
+| 60 i/s | 27,2 / 53,1 ms | 28,6 / 45,5 ms | 28,1 / 45,2 ms |
+| 120 i/s | 30,1 / 43,4 | **22,0 / 37,0** | 24,8 / 37,8 |
+| 240 i/s | 25,8 / 34,5 | 22,9 / 34,8 | 25,7 / 31,6 |
+| Les 9 cases (~515 clics) | 28,0 / 41,5 | 25,0 / 40,6 | |
+| AV1, 3 cadences | 28,5 / 42,4 | 22,1 / 38,1 | |
+
+### 8v.3 Ce qui explique les écarts
+
+- **L'âge baisse surtout avant la capture.**
+  - À 120 i/s, v0.3.1 garde l'écran virtuel à 120 Hz, alors que v0.4.0 le met à
+    240 Hz : défaut Windows depuis `03c189ea`, plus la détection « Auto ».
+  - Avant capture : 7,9 ms (v0.3.1) contre 3,5 ms (v0.4.0), H.264 120. Après la
+    capture, les deux versions sont à moins de 1 ms l'une de l'autre.
+  - D'où −2 à −5 ms d'âge moyen à 120 i/s.
+  - À 240 i/s, les deux versions ont l'écran à 240 Hz : l'écart tombe à
+    0,5-1 ms.
+- **Le p99 de l'âge baisse partout** : de 9 à 13 ms à 60 i/s, de 6 à 9 ms à
+  120 i/s, de 2 à 9 ms à 240 i/s. v0.4.0 a moins de queues.
+- **La cadence reçue est plus régulière.** En v0.4.0, les 12 passes à 60 et
+  120 i/s reçoivent 59,9 à 60,0 ou 119,8 à 120,0 i/s. En v0.3.1, 4 passes à
+  120 i/s sur 12 (les deux séries) tombent à 100-116 i/s.
+  - L'hôte capture alors moins de présentations : par exemple HEVC 120, première
+    série, 8 455 en 82,7 s, contre 9 077.
+  - L'écran virtuel à 120 Hz, côté hôte, en est la cause, pas le réseau
+    (0 perte).
+- **Le clic → drapeau** :
+  - −8 ms à 120 i/s, −3 ms à 240 i/s ;
+  - −6 ms en AV1, sur les trois cadences ;
+  - −3 ms toutes cases confondues.
+  - À 60 i/s, aucun écart mesurable sur la médiane (+1,4 ms), mais le p90 gagne
+    7,6 ms.
+  - Piste, non mesurée : à 60 i/s, v0.4.0 met l'écran virtuel à 240 Hz et
+    n'encode que la première présentation de chaque tranche de 16,7 ms, quand
+    v0.3.1 l'y laisse à 60 Hz.
+- **Encodage et décodage : identiques.** NVENC 1,7-2,1 ms ; décodage sur le 780M
+  0,4-0,65 ms. Le gain n'est ni dans le codec ni dans le décodeur.
+- **Le débit monte de 5 à 10 %** en v0.4.0 (même débit automatique, cadences de
+  l'écran différentes), sans perte.
+- **PyroWave** (v0.4.0, Ethernet) :
+  - âge le plus bas de la campagne à 240 i/s : 12,0 ms, p99 20,1 ;
+  - 120 et 240 i/s au niveau des meilleurs codecs ;
+  - encodage 1,3 ms, décodage WebGPU 0,3-0,45 ms ;
+  - mais 126-128 Mb/s fixes (`ultrambps` 128), soit 1,7 à 7,6 fois le HEVC ;
+  - clic → drapeau moins bon que l'AV1 : 24,8 contre 22,0 ms à 120 i/s.
+- **AV1 en v0.3.1** : l'âge depuis la capture est « n/a ». v0.3.1 ne transmet pas
+  l'heure de capture de ses images AV1 jusqu'au décodeur : sa jambe « Handoff » est
+  vide aussi. L'âge de bout en bout, mesuré par la bande, n'en dépend pas.
+- **Vu en route** : pendant un stream PyroWave, la ligne « Codec » de l'overlay dit
+  « HEVC ». Seule la ligne « Encoder » dit PyroWave.
+
+### 8v.4 Annexe : les deux sondes de clic sur v0.3.1
+
+La première série mesurait v0.3.1 avec sa propre sonde de clic, celle d'avant
+`652fc726`. Elle datait le drapeau après trois `getImageData`, soit ~4,5 ms sur le
+780M en Canvas2D.
+
+| Case | Ancienne sonde | Sonde de main | Écart |
+|---|---|---|---|
+| H.264 60 / 120 / 240 | 31,4 / 35,1 / 30,9 ms | 23,4 / 26,9 / 25,1 ms | 8,0 / 8,2 / 5,8 |
+| HEVC 60 / 120 / 240 | 29,2 / 35,0 / 36,1 | 28,7 / 33,0 / 29,8 | 0,6 / 2,0 / 6,3 |
+| AV1 60 / 120 / 240 | 31,9 / 32,1 / 30,5 | 30,1 / 34,6 / 25,9 | 1,8 / −2,6 / 4,6 |
+
+- **Tous clics réunis** : 32,5 ms contre 28,0, soit **4,5 ms**, la valeur
+  attendue. Par case, l'écart va de −2,6 à 8,2 ms : c'est le bruit de deux passes.
+- **L'âge du contenu**, mesuré avant les clics, bouge de moins de 0,5 ms entre les
+  deux séries, sauf trois cases :
+  - H.264 60 : 22,5 → 20,9 ms ;
+  - H.264 120 : 18,2 → 15,6 ms, avec une passe à 100 i/s reçus ;
+  - AV1 120 : 14,8 → 17,7 ms.
+  Les séries ne sont pas intercalées : ces cases montrent la dérive d'une série à
+  l'autre.
+
 ## 9. Pour l'A/B
 
 Le banc encode vers un puits ; l'A/B se fait sur un vrai flux. Une session

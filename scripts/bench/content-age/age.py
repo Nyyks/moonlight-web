@@ -86,7 +86,8 @@ class Page:
 
 
 def calibrate(args):
-    page = Page(f"localhost:{args.port}", "scroll.html")
+    # scroll.html, or cod.html for the footage (both carry ?band=time).
+    page = Page(f"localhost:{args.port}", getattr(args, "page", "") or "scroll.html")
     if not page.eval("typeof window.mwBand === 'object'"):
         raise SystemExit("the page has no mwBand — open scroll.html?band=time")
     best = None
