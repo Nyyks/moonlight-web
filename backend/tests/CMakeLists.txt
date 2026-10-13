@@ -86,6 +86,7 @@ add_executable(run_tests
     test_app_manifest.cpp
     test_wolf_coop.cpp
     test_start_choice.cpp
+    test_relaunch_script.cpp
     test_client_unique_id.cpp
     test_multiseat.cpp
     test_session_metrics.cpp

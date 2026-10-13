@@ -16,6 +16,7 @@
  */
 
 #include "SelfUpdater.h"
+#include "RelaunchScript.h"
 #include "UpdateChecker.h"
 #include "common/Edition.h"
 #include "common/Logger.h"
@@ -86,15 +87,10 @@ QString xmlEscape(const QString& s)
     return out;
 }
 #else
-// Single-quote a value for `sh -c`. The install commands are assembled as one
-// shell string so the whole sequence (install → stop us → relaunch) survives
-// this process being killed halfway through it.
-QString shQuote(const QString& s)
-{
-    QString out = s;
-    out.replace(QLatin1String("'"), QLatin1String("'\\''"));
-    return QLatin1Char('\'') + out + QLatin1Char('\'');
-}
+// The install commands are assembled as one shell string so the whole sequence
+// (install → stop us → relaunch) survives this process being killed halfway
+// through it.
+using relaunchscript::shQuote;
 
 bool runningAsRoot()
 {
@@ -744,19 +740,13 @@ bool SelfUpdater::launchDetached(const QString& install)
     if (qEnvironmentVariableIsEmpty("APPIMAGE") && QFileInfo(launcher).isExecutable())
         exe = launcher;
 #endif
-    QString relaunch = shQuote(exe);
-    if (!AppSettings::fileOverride().isEmpty())
-        relaunch += QStringLiteral(" --config ") + shQuote(AppSettings::fileOverride());
-
-    // The .deb/.rpm maintainer scripts already stop and relaunch the app; the
-    // explicit kill+relaunch covers the paths that do not (AppImage, .pkg) and is
-    // harmless elsewhere — the single-instance lock turns the extra launch into a
-    // no-op focus request.
-    // One multi-arg call, not chained .arg(): a path containing "%1" in an
-    // earlier argument would otherwise swallow a later substitution.
-    const QString script =
-        QStringLiteral("%1; kill %2 2>/dev/null; sleep 3; %3 >/dev/null 2>&1 &")
-            .arg(install, QString::number(QCoreApplication::applicationPid()), relaunch);
+    // The .deb/.rpm maintainer scripts stop the app, and start it again only
+    // when it is already gone by then; the .pkg's postinstall kickstarts its
+    // LaunchAgent. This relaunch covers whatever they left down (AppImage, a
+    // .deb whose old app was still exiting) and is harmless elsewhere — the
+    // single-instance lock turns the extra launch into a silent no-op.
+    const QString script = relaunchscript::build(install, QCoreApplication::applicationPid(), exe,
+                                                 AppSettings::fileOverride());
 
     if (!QProcess::startDetached(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), script})) {
         fail(QStringLiteral("Could not launch the installer"));

@@ -310,8 +310,16 @@ fi
 # Best-effort: start MoonlightWeb inside the active graphical session so the
 # first-run setup page opens right after install (postinst runs as root with no
 # display; systemd-run --user runs the app under the user's session manager).
-# Skipped when already running (e.g. upgrade) or when no session user is found —
-# the Apps menu entry covers those.
+# Skipped when already running (an upgrade whose old app is still exiting) or
+# when no session user is found — the Apps menu entry covers those.
+# On an upgrade, prerm has stopped the app and nobody clicked anything: it comes
+# back as from the login item (--autostart), without opening its admin page in
+# a browser on the desktop. deb: `configure <old-version>`; rpm: $1 >= 2.
+launchargs=""
+case "${1:-}" in
+    configure) [ -n "${2:-}" ] && launchargs="--autostart" ;;
+    [2-9]) launchargs="--autostart" ;;
+esac
 started=""
 if pgrep -f /opt/moonlightweb/bin/MoonlightWeb >/dev/null 2>&1; then
     started=1
@@ -348,10 +356,10 @@ else
         [ -n "$wl" ] && setenv="$setenv --setenv=WAYLAND_DISPLAY=$wl"
         [ -n "$dp" ] && setenv="$setenv --setenv=DISPLAY=$dp"
 
-        # $setenv is deliberately unquoted: it must split into separate flags
-        # (values are socket/display names — no whitespace).
+        # $setenv and $launchargs are deliberately unquoted: they must split into
+        # separate flags, or vanish when empty (no whitespace in their values).
         if $asuser systemd-run --user --collect --quiet $setenv \
-            /opt/moonlightweb/bin/moonlightweb-launch >/dev/null 2>&1; then
+            /opt/moonlightweb/bin/moonlightweb-launch $launchargs >/dev/null 2>&1; then
             started=1
             break
         fi
