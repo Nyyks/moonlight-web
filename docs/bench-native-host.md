@@ -6670,7 +6670,7 @@ console du client.
 fait 7,5-8,5 ms en médiane et ~20 ms au p90, dans les trois configurations. C'est
 le drapeau du banc lui-même, pas le chemin d'un jeu.
 
-**Correctif proposé (pas codé, attend l'accord de Bruno)** : `inputadmit`.
+**Correctif proposé ce soir-là** : `inputadmit`.
 - Une entrée du client reçue depuis la dernière image admise fait admettre la
   présentation suivante aussitôt, même si sa fenêtre a déjà servi.
 - Ce tick compte pour la fenêtre suivante : au plus une image de plus par clic,
@@ -6678,6 +6678,236 @@ le drapeau du banc lui-même, pas le chemin d'un jeu.
 - Derrière une clé de banc d'abord, mesurée A contre A + clé sur ce même banc.
 - Gain attendu : la jambe `present` de A ramenée vers celle de C, soit ~4 à 7 ms
   sur la médiane côté hôte, en gardant l'âge et les 60 i/s de A.
+
+Rejouée, cette règle aggrave le clic. La clé `inputadmit` porte une autre règle,
+une fenêtre après chaque appui : §8w.
+
+## 8w. Le clic à 60 i/s : une fenêtre d'admission après chaque appui (13-14/10/2026)
+
+Suite du §8v.5, plan « inputadmit ». La règle est derrière la clé de banc
+`inputadmit=1`, éteinte par défaut, sur l'hôte Windows seulement. Son code et
+ses gardes sont au §9.6.2 du design.
+
+### 8w.1 Le rejeu, avant le code
+
+**L'idée du §8v.5 aggrave le clic.** « La présentation suivante passe et compte
+pour la fenêtre suivante » fait passer `present` de 9,5 à 11,2 ms en médiane,
+rejouée sur les traces de A (180 clics). La présentation qui suit l'appui ne
+porte pas encore sa réaction : le drapeau du banc met ~10 ms à se peindre, un
+jeu une ou deux images.
+
+**Ce qui marche : une fenêtre après chaque appui.** Pendant T après l'appui,
+chaque présentation passe, et la grille de la porte garde sa phase. Le rejeu
+(`clickpath/inputsim.py`) retrouve 96 à 99 % des images reçues par le client
+sur A1-A3. Ce qu'il donne :
+- drapeau du banc, 60 i/s : `present` de 9,5 à 2,6 ms en médiane, p90 de 14,2
+  à 11,3 ms, pour 3,0 images de plus par clic. À 120 i/s : de 5,2 à 2,3 ms ;
+- `mw-click-target`, qui réagit en ~0,3 ms : l'attente de 4 à 8 ms (p90 13 ms)
+  tombe à 0 ;
+- RE9 à 78 i/s : une fenêtre de 16,7 ms ne couvre qu'une réaction de 8 ms au
+  plus. Avec 33 ms, la queue tombe à 0 jusqu'à 24 ms de réaction, pour 0,7
+  image de plus par appui. D'où T = 33 ms, avec au plus K = 3 images par
+  fenêtre ;
+- les relâchements comptés comme appuis : 5,3 images par clic au lieu de 3,0.
+  Seuls les appuis comptent ;
+- un client à 60 Hz qui peint au vsync, au modèle : les doubles pas passent de
+  8,8 à 19,0 % des clics. Un écart d'un demi-intervalle entre deux images
+  admises les ramène à 9,7 %, pour la moitié du gain (`present` à 5,8 ms).
+
+### 8w.2 Le banc (13/10/2026, 22:00-22:58)
+
+- **Hôte** : DualRTX en `--dev`, build de `ad665d40`. Écran virtuel du produit
+  à 240 Hz, rendu par la RTX ; HEVC NVENC en 1080p60 ; SCTP ; `MW_LAN_ONLY=1`.
+- **Clients**, en Ethernet :
+  - l'UM790Pro sous Windows 11, Chrome 155 à 120 Hz, en déchirement (le défaut
+    de Chrome sur PC) ;
+  - le N95, Chrome sur son écran à 60 Hz, en déchirement puis en vsync.
+- **Contenu** : `cod.html?band=time&fps=60`, comme au §8v.
+- **Passe** : 30 s d'âge du contenu, puis 60 clics, un toutes les 800 ms.
+- **Bras** : A (main) et A' (`inputadmit=1`), même build, en alternance.
+  - `clicktrace=1`, `relaylog=1` et `MW_LATENCY_FLAG_TRACE=1` ne sont armés que
+    pendant les passes.
+  - Le clic est jugé sur l'heure de dessin de l'image du drapeau.
+  - Aucune entrée sur la console des clients.
+- **Outils** : `content-age/local_matrix.py` (`--click-every`, `--raflog`),
+  `clickpath/hostpath.py --from-draw --pool` et `content-age/fluid.py`. Le
+  lanceur et les tableaux sont des scripts de session hors dépôt
+  (`ia_series.py`, `ia_report.py`, `ia_age.py`). Les passes A' y portent les
+  noms `ia-um-B*`.
+
+### 8w.3 Le clic, UM790Pro à 120 Hz (P2.1)
+
+Trois passes par bras, en ABABAB.
+
+| | A | A' (`inputadmit=1`) |
+|---|---|---|
+| Clics | 176 | 178 |
+| Clic → drapeau, médiane | 24,0 ms | **18,2 ms** |
+| p90 | 28,9 ms | 21,1 ms |
+| Sous 20 ms | 18 % | 72 % |
+| Hôte, médiane | 19,9 ms | 12,3 ms |
+| Jambe `present`, médiane / p90 | 10,3 / 14,7 ms | **2,2 / 3,7 ms** |
+| Images du clic venues de la fenêtre | 0 | 156 sur 174 |
+| Images/s pendant les clics | 60,0 | 63,5 |
+| Débit pendant les clics | 17,41 Mb/s | 17,98 Mb/s (+3,3 %) |
+| Encodage, p99 | 2,30-2,56 ms | 2,30-2,56 ms |
+
+- Écart de médiane : **−5,8 ms (IC 95 % de −7,0 à −4,8)** ; p90 −7,8 ms. Jambe
+  `present` : −8,1 ms (de −8,5 à −7,7).
+- La fenêtre a servi les 60 appuis de chaque passe : 180 images de plus par
+  passe, 3,00 par fenêtre. Le plafond K en a retenu 159 à 171 ; ni le lien ni
+  l'encodeur n'en ont refusé.
+- Aucune éviction, invalidation, coupe du gouverneur ni image clé pendant les
+  clics, dans les deux bras.
+
+### 8w.4 La fluidité (P2.1, minute des clics, `fluid.py`)
+
+Le client déchire : chaque image s'affiche dès son dessin.
+- **Dessins** : écarts p99 de 21,1 à 21,3 ms, aucun double pas. 1,5 % des
+  rafraîchissements de A' dessinent deux images ou plus (A : 0).
+- **Âge d'une image à la suivante**, ce qu'un client qui déchire voit comme un
+  mouvement inégal : p99 4,5 ms dans les deux bras ; au-delà de 4 ms, 1,85 %
+  (A) et 1,67 % (A').
+- **Ce qu'aurait montré un client en vsync à 120 Hz**, sur les rAF relevés :
+  autour des clics, les répétitions passent de 49,9 à 42,8 % des
+  rafraîchissements, sans double pas. Les pas hors du rythme du flux passent de
+  0,9 à 20,2 % : ce sont les images intermédiaires de la fenêtre (2,4 par clic).
+- **Octets** : images de fenêtre de 34,0 Ko en médiane, p99 40,45 Ko ; images
+  de grille p99 40,42 Ko dans les deux bras.
+- **Relais** : aucune image envoyée et jamais dessinée pendant les clics.
+- **Âge du contenu**, 30 s avant les clics : 8,56 → 8,65 ms (moyenne des
+  médianes), p99 12,3 → 13,0 ms.
+
+**Les écarts de grille.** Pendant les clics, les écarts d'arrivée entre images
+de grille passent de p1 15,1 / p99 18,3 ms (A) à 12,3 / 20,9 ms (A'). Ce sont
+des écarts de 12,5 et 20,8 ms : une présentation plus tôt, puis une plus tard.
+Ce n'est pas la fenêtre, mais la porte elle-même (§8w.8) :
+- la porte ne sait rien des images de la fenêtre. Rejouée seule sur l'heure de
+  présentation de chaque image, que les encodages de la fenêtre ne peuvent pas
+  retarder, elle refait 98,4 à 99,1 % des choix de grille de l'hôte dans A', et
+  98,0 à 98,5 % dans A ;
+- ces écarts apparaissent avant tout clic, dans les deux bras : 15 à 17 % des
+  écarts d'avant les clics dans A1, A2, A3 et A'2, 11 % dans A'3, 4 % dans
+  A'1 ;
+- dans A'1, ils culminent après le dernier clic : 47 % des écarts sur 5 s sans
+  aucun appui. Dans A'3, ils commencent une dizaine de secondes avant le
+  premier clic ;
+- sur les passes entières, p1 / p99 : 12,8 / 20,5 ms (A) et 12,3 / 20,9 ms
+  (A') ;
+- en P2.2, sans un seul appui, le p1 passe de 13,0 à 11,8 ms d'un bras à
+  l'autre.
+
+### 8w.5 Sans appui, en rafale, à 60 Hz, à 120 i/s
+
+**Mouvement sans clic (P2.2).** La souris du client bouge à ~250 Hz (±4 px),
+deux passes par bras, ~11 000 mouvements par passe.
+- 0 appui, 0 fenêtre, 0 image de plus.
+- Images/s, octets, répétitions et images jamais vues identiques.
+- Âge : 8,74 → 8,97 ms (moyenne des médianes), p99 10,5 → 11,4 ms.
+- Écarts d'arrivée p1 / p99 : 13,0 / 20,6 → 11,8 / 21,5 ms, sans une seule
+  image de fenêtre : c'est la glissade de la grille (§8w.8).
+
+**Rafale (P2.3, A' seul).** Un clic toutes les 200 ms et F24 tapée 8 fois par
+seconde, deux passes.
+- ~550 appuis par passe, 118 à 124 fenêtres : ce que donne le seau (3
+  d'avance, 2 par seconde). Le seau a refusé 380 à 384 appuis ; 8 à 13 ont
+  prolongé une fenêtre ouverte.
+- 310 à 322 images de plus par passe, soit 5,0 à 5,2 par seconde et 2,6 par
+  fenêtre. Débit pendant les clics +10 à +12 %, sans éviction ni coupe.
+- La garde du lien a retenu 13 à 35 images, 4 à 10 % de celles de la fenêtre.
+- Clics servis par une fenêtre : `present` 2,1 ms. Les autres : 8,8 ms (p90
+  14,5), comme A, jamais pire.
+
+**Client à 60 Hz (P2.4, N95) : non concluant.** Le N95 sature dans les deux
+bras :
+- en déchirement, le gouverneur coupe 6 à 8 fois par passe, et les écarts
+  d'arrivée ont un p99 de 46 à 52 ms ;
+- en vsync, il coupe 8 à 10 fois, et le client ne dessine que 37 à 51
+  images/s.
+
+La fenêtre y est restée éteinte, les gardes ayant joué. En déchirement, le lien
+a retenu ~350 images par passe ; en vsync, l'écart 186 à 190 et le lien 164 à
+168. Les écarts de clic entre bras n'y sont que du bruit : le flux est le même.
+
+**120 i/s (P2.5, UM790Pro, une passe par bras).**
+- `present` : 4,9 → 2,4 ms (IC −3,5 à −0,3).
+- Clic → drapeau : 18,4 → 18,0 ms (IC −1,2 à +0,6, non significatif) ; sous
+  20 ms, 66 → 78 %.
+- 2,9 images par fenêtre, 8 retenues par le lien ; débit pendant les clics
+  +4,1 %.
+
+### 8w.6 Les critères du plan
+
+| Critère | Verdict | A → A' |
+|---|---|---|
+| L1 : médiane −3 ms au moins, IC hors de 0 | ✓ | −5,8 ms (−7,0 à −4,8) |
+| L2 : p90 pas pire, 25 % des clics sous 20 ms | ✓ | 28,9 → 21,1 ms ; 18 → 72 % |
+| L3 : `present` ≤ 4 ms en médiane | ✓ | 10,3 → 2,2 ms |
+| F1 : sans appui, rien ne change | ✓ | 0 fenêtre ; p1 des arrivées −1,2 ms (§8w.8) |
+| F2 : la grille garde son rythme | ✗ tel qu'écrit | pas la fenêtre (§8w.4, §8w.8) |
+| F3 : client qui déchire | ✓ | aucun double pas ; 1,5 % de rafraîchissements à deux dessins |
+| F4 : client à 60 Hz en vsync | non mesuré | N95 saturé |
+| F5 : âge de l'image | ✓ | +0,1 ms en moyenne, +0,7 ms au p99 |
+| D1 : coût aux clics du banc | ✓ | 3,0 images par clic, +3,3 % ; aucune perte, aucune image clé |
+| D2 : rafale | ✓ | seau tenu ; +10 à +12 % ; jamais pire que A |
+| D3 : octets par image | ✓ | fenêtre p99 40,45 Ko (A : 40,42) |
+| D4 : encodage | ✓ | p99 2,30-2,56 ms dans les deux bras |
+
+F1 et F2 demandaient des écarts d'arrivée à ±1 ms de A. Entre deux passes, la
+glissade de la grille fait davantage, sans aucune fenêtre (P2.2).
+
+### 8w.7 Ce qui reste à décider (porte G1, Bruno)
+
+- Le défaut de la clé, et pour quels clients.
+- Le client à 60 Hz en vsync (F4), sur un client qui suit.
+- La garde du lien. En LAN, elle ne refuse rien aux clics du banc, et 4 à 10 %
+  des images de fenêtre sous la rafale. Sur le N95 saturé, elle a tout refusé,
+  comme prévu. Le rejeu de la phase 1 lui prêtait ~40 % de refus dès 2 clics/s :
+  le banc en voit bien moins.
+- Un essai à l'aveugle sur un vrai jeu.
+- Linux et macOS, dans un chapitre à part.
+
+### 8w.8 Vu en route : la grille de la porte glisse le long des présentations
+
+Hors de ce chantier : c'est la porte d'aujourd'hui (§9.6.1 du design), avec ou
+sans la fenêtre.
+- `FrameCadence` arrondit l'intervalle à la microseconde : 16 666 µs à 60 i/s,
+  pour 16 666,7. Sur l'écran virtuel à 240 Hz, la grille glisse donc le long des
+  présentations. Mesuré sur la trace : la présentation admise avance sur son tic
+  d'environ 36 µs par seconde, au même rythme dans A1, A'1 et A'3. L'arrondi
+  seul en fait 40.
+- À 60 i/s sur 240 Hz, le bord de chaque fenêtre, un quart d'intervalle avant
+  son tic, tombe à une période d'écran exacte du tic. Toutes les ~2 min, ce
+  bord croise une présentation.
+- Pendant ~30 s autour de chaque croisement, l'irrégularité de l'heure des
+  présentations décide alors entre deux voisines. La grille alterne des écarts
+  de 12,5 et 20,8 ms, sur 15 à 47 % des écarts par tranche de 5 s.
+- Une grille neuve s'ancre sur une présentation, donc sur ce bord : les six
+  passes de P2.1 commencent par 10 à 30 s d'écarts irréguliers, avant tout
+  clic.
+- Ancrer la grille une demi-période plus loin ne fait que déplacer ces 30 s
+  dans le temps (rejeu).
+- Ce que le client en voit :
+  - en déchirement, chaque image arrive avec l'âge de son contenu : l'âge d'une
+    image à la suivante ne bouge pas (§8w.4) ;
+  - en vsync à 60 Hz, chaque rafraîchissement ferait avancer le contenu de 12,5
+    ou de 20,8 ms au lieu de 16,7 : une saccade fine possible, pas mesurée.
+- Piste : une hystérésis sur la phase, qui garde la même voisine tant que les
+  deux restent dans l'irrégularité du bord. À rejouer avec `gatesim.py`.
+
+**Concrètement, pour l'utilisateur** : sur un hôte Windows dont le flux tourne
+moins vite que l'écran virtuel, à 60 ou 120 i/s, un clic, une touche ou un
+bouton de manette se voient plus tôt. À 60 i/s, c'est environ un tiers d'image
+de gagné, et les clics qui attendaient une image de plus deviennent
+l'exception. Viser puis tirer, ouvrir un menu, sauter : la réponse part dès que
+le jeu l'a dessinée. Quand on ne fait que bouger la souris ou regarder, le flux
+reste le même. Juste après un appui, le mouvement est un peu plus fin pendant un
+instant, sans image sautée ni répétée, puis le rythme normal reprend. Sur un
+lien chargé, la règle s'efface d'elle-même. Rien ne change pour un flux déjà au
+rythme de l'écran virtuel, ni pour les hôtes Linux et macOS. Sur un écran à
+60 Hz qui affiche en vsync (Mac, iPhone, iPad), le gain est moindre, et la
+fluidité y reste à vérifier. Pour l'instant, la clé est éteinte : personne ne
+voit de changement avant la décision de Bruno.
 
 ## 9. Pour l'A/B
 

@@ -681,6 +681,81 @@ sur RE9), le clic non plus (p50 9,6 à 12,4 ms avant, 10,0 à 11,4 après ; p90
 a été refaite. Le contenu à ~77 i/s n'a pas été reproduit au banc (RE9 à ~62
 ce jour) ; il est couvert par le rejeu et les tests.
 
+**Limite vue le 14/10 (banc §8w.8).** L'intervalle est arrondi à la
+microseconde : 16 666 µs à 60 i/s. Sur l'écran virtuel à 240 Hz, la grille
+glisse donc d'environ 36 µs par seconde le long des présentations. À 60 i/s sur
+240 Hz, le bord d'une fenêtre, un quart d'intervalle avant son tic, tombe à une
+période d'écran exacte du tic. Toutes les ~2 min, ce bord croise une
+présentation ; pendant ~30 s, la grille alterne alors des écarts de 12,5 et
+20,8 ms. Une grille neuve s'ancre sur une présentation, donc sur ce bord. Piste,
+à part : une hystérésis sur la phase.
+
+### 9.6.2 Une fenêtre d'admission après chaque appui (13/10/2026, clé de banc)
+
+**Le problème** (banc §8v.5). À 60 i/s sur l'écran virtuel à 240 Hz, la porte
+n'encode qu'une présentation sur quatre. L'image qui porte un clic n'est en
+général pas la première de sa fenêtre : elle attend la suivante, ~10 ms en
+médiane. Pour cette seule raison, le clic de v0.4.0 ne gagnait rien sur v0.3.1
+à 60 i/s.
+
+**La règle** (`core/InputAdmit.h`). Pendant 33 ms après chaque appui, chaque
+présentation que la porte saute part quand même, 3 au plus. La porte est
+consultée d'abord, sur chaque présentation, et n'apprend rien de ces images :
+sa grille garde sa phase, ses fenêtres restent servies, rien n'est retenu.
+- **Ce qui ouvre une fenêtre** (`PressFilter`) : une touche, un bouton de souris
+  ou de manette qui s'enfonce, une gâchette qui passe le quart de sa course.
+  Jamais la répétition auto, les événements `resync` du battement des touches
+  tenues, les relâchements, le mouvement, la molette ni les sticks.
+- **La fenêtre suit l'heure de présentation** de chaque image, pas l'instant où
+  la boucle la prend : une image composée avant l'appui ne peut pas le porter.
+  Les appuis reçus entre deux tours de boucle comptent ensemble. Un appui dans
+  une fenêtre ouverte la prolonge sans jeton.
+- **Seulement sur une vraie présentation** : ni le chemin du pointeur seul, ni
+  les renvois. Sinon, viser en tirant dépenserait les fenêtres sur le curseur.
+- **Un seau de fenêtres** : 3 d'avance, 2 de plus par seconde. Une fenêtre
+  s'ouvre entière ou pas du tout. Au pire, ~6 images de plus par seconde (10 %
+  à 60 i/s), et un appui refusé attend exactement comme sans la règle.
+- **La garde du lien** : une image de fenêtre ne part que si le gouverneur est
+  au débit réglé, reçoit les rapports du client et n'y a rien vu d'inquiétant
+  depuis 2 s (`RateGovernor::calm()`), et si le modèle du lien
+  (`LinkOccupancy`) n'a pas plus de K+1 intervalles de retard. La garde vit
+  dans la boucle, car `bufferedAmount` ne voit rien avant que la mémoire
+  d'envoi d'usrsctp soit pleine.
+- **La garde de l'encodeur** : rien quand le p95 d'encodage dépasse un
+  rafraîchissement de l'écran (4,2 ms à 240 Hz), cas d'AMF et de QSV. La boucle
+  synchrone encode sur le fil de capture : les images de la fenêtre
+  pousseraient celles de la grille.
+- **Un client qui peint au vsync, moins de deux fois plus vite que le flux**
+  (un écran à 60 Hz pour un flux à 60) : deux images admises restent à un
+  demi-intervalle l'une de l'autre (`gapFor()`). Sans cet écart, l'image du clic
+  arrive en avance sur la grille du client, et les doubles pas doublent au
+  rejeu.
+- **Inerte** sous un plafond (flux au débit de l'écran ou au-dessus : tout passe
+  déjà), sous une cadence de banc (`cadence=`), sous PyroWave (~267 Ko par
+  image) et hors Windows.
+
+**Le coût.** NVENC compte en images, pas en temps : chaque image de plus coûte
+ses octets, et le budget par image ne bouge pas. Au banc : 3 images de plus par
+clic, +3,3 % de débit à un clic par seconde, +10 à +12 % sous une rafale.
+
+**La clé** : `inputadmit=1` dans `MW_NATIVE_TUNING`, ou dans `native_tuning` du
+`settings.json` (banc §9). Les sous-clés : `inputadmitms=` (T, 8-100 ms),
+`inputadmitburst=`, `inputadmitrate=`, `inputadmitmax=` (K) et `inputadmitgap=`
+(l'écart imposé, en ms).
+- Le journal du worker dit la règle au démarrage, et fait le compte en fin de
+  session : appuis, fenêtres, images de plus, et ce qu'ont retenu le plafond,
+  l'écart, le lien et l'encodeur.
+- `clicktrace=1` ajoute à la trace des lignes `admit` (`press`, `grid`,
+  `window`), que `hostpath.py` lit.
+- Tests : `test_input_admit.cpp`, groupe `input_admit`. `gatesim.py
+  --inputadmit` et `inputsim.py` en gardent une copie pour le rejeu.
+
+**Banc du 13/10 (§8w).** À 60 i/s, le clic → drapeau passe de 24,0 à 18,2 ms
+en médiane (−5,8 ms), et 72 % des clics passent sous 20 ms, contre 18 %.
+Aucune perte, aucune image clé, et la grille n'est pas touchée. Le client à
+60 Hz en vsync reste à mesurer. Le défaut de la clé est la décision de Bruno
+(porte G1).
+
 ### 9.7 Écran verrouillé : la session attend, le stream reste vivant (02/09/2026)
 
 `AcquireNextFrame` rend `DXGI_ERROR_ACCESS_LOST` pour trois raisons de durées
