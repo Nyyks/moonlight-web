@@ -132,6 +132,9 @@ export class AdminView {
         // through the native host. Server-side setting: the tray obeys it, and
         // the tray may live in another process.
         this._streamNotifications = true;
+        // Network priority: the stream's packets ask the Wi-Fi for its video
+        // queue (AF41). On unless the admin unticks it for the house's sake.
+        this._packetMarking = true;
         // Start at login. Offered only where the server says it can do it (a
         // desktop session, never a service), and ticked from what the OS
         // actually holds — the installer or the tray may have set it.
@@ -244,6 +247,7 @@ export class AdminView {
             this._httpPort = admin.http_port || 80;
             this._certAuthEnabled = admin.cert_auth_enabled || false;
             this._streamNotifications = admin.stream_notifications !== false;
+            this._packetMarking = admin.packet_marking !== false;
             this._autostartSupported = admin.autostart_supported === true;
             this._autostartEnabled = admin.autostart_enabled === true;
             // Two values, not one: what was chosen (often nothing) and what the
@@ -1068,6 +1072,15 @@ export class AdminView {
                             : ''
                     }
 
+                    <div class="settings-field" id="admin-packet-marking">
+                        <label class="settings-checkbox-label">
+                            <input type="checkbox" id="chk-packet-marking"
+                                   ${this._packetMarking ? 'checked' : ''} />
+                            <span class="settings-checkbox-text">${t('admin.packetMarking')}</span>
+                        </label>
+                        <p class="setting-desc">${t('admin.packetMarkingDesc')}</p>
+                    </div>
+
                     <div class="settings-field">
                         <label class="settings-label" for="admin-instance-name">
                             ${t('admin.instanceName')}
@@ -1711,6 +1724,26 @@ export class AdminView {
                     console.error('[Admin] Failed to save start-at-login setting:', err);
                     Toast.error(t('admin.saveFailed', { message: err.message }));
                     autostartChk.checked = !enabled; // revert
+                }
+            });
+        }
+
+        // ── Network priority ───────────────────────────────────────────────
+        // Saved on the spot; the next stream reads it as it opens.
+        const markingChk = this.container.querySelector('#chk-packet-marking');
+        if (markingChk) {
+            markingChk.addEventListener('change', async () => {
+                const enabled = markingChk.checked;
+                try {
+                    await BackendClient.saveAdminSettings({ packet_marking: enabled });
+                    this._packetMarking = enabled;
+                    Toast.success(
+                        enabled ? t('admin.packetMarkingOn') : t('admin.packetMarkingOff'),
+                    );
+                } catch (err) {
+                    console.error('[Admin] Failed to save network priority:', err);
+                    Toast.error(t('admin.saveFailed', { message: err.message }));
+                    markingChk.checked = !enabled; // revert
                 }
             });
         }

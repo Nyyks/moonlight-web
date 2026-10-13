@@ -1094,6 +1094,8 @@ void registerSystemRoutes(HttpServer& server, AppSettings& appSettings, AuthMana
         obj["cert_auth_enabled"] = authManager.certAuthEnabled();
         // Whether the desktop is told when someone streams this screen.
         obj["stream_notifications"] = appSettings.streamNotifications();
+        // Whether the stream's packets ask the Wi-Fi for its video queue.
+        obj["packet_marking"] = appSettings.packetMarking();
         // Start at login. Two facts, because the page has two decisions to
         // make: whether to show the box at all (a desktop session with a
         // login-item mechanism — never under a service supervisor), and
@@ -1154,6 +1156,16 @@ void registerSystemRoutes(HttpServer& server, AppSettings& appSettings, AuthMana
             bool enabled = body["stream_notifications"].toBool();
             appSettings.setStreamNotifications(enabled);
             obj["stream_notifications"] = enabled;
+            hadChange = true;
+        }
+
+        // ── Network priority ─────────────────────────────────────────────
+        // Read by each stream as it opens (PacketMarking::apply), so the next
+        // stream follows; one already running keeps its marks.
+        if (body.contains("packet_marking")) {
+            bool enabled = body["packet_marking"].toBool();
+            appSettings.setPacketMarking(enabled);
+            obj["packet_marking"] = enabled;
             hadChange = true;
         }
 

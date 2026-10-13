@@ -56,6 +56,9 @@ void run_app_settings_tests()
     CHECK_EQ(s.gamingMode(), true);
     s.setShowPerformanceStats(true);
     CHECK_EQ(s.showPerformanceStats(), true);
+    CHECK_EQ(s.packetMarking(), true); // marked unless the admin unticks it
+    s.setPacketMarking(false);
+    CHECK_EQ(s.packetMarking(), false);
     s.setHdrEnabled(true);
     CHECK_EQ(s.hdrEnabled(), true);
     s.setChroma444Enabled(true);

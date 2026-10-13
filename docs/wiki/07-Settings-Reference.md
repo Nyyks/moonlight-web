@@ -60,6 +60,7 @@ Access is single-threaded, synchronous I/O. **Restart the server after a manual 
 | `mute_host_audio` | bool | `true` | Mute the host PC speakers while streaming. GameStream hosts receive it as `localAudioPlayMode`; the native Windows host mutes its default output when the device mutes in hardware, routes to a virtual sink otherwise, and keeps playing (with a log line) when it can do neither. |
 | `gaming_mode` | bool | `false` | Pointer-lock mouse (relative) vs absolute tracking. |
 | `show_performance_stats` | bool | `false` | Stats overlay default. |
+| `packet_marking` | bool | `true` | Stream packets in AF41, the Wi-Fi's video queue (admin › Give the stream priority on the network). `false` marks nothing. |
 | `video_enhancement` | string | `"off"` (frontend seed; the backend answers `on` for a key it never stored) | `on`/`off` — upscale/sharpen on WebGL2 (SDR) or WebGPU (HDR). Off by default since 09/2026: the plain Canvas2D path is the fastest first impression ([ch. 15](15-Client-Presentation-Benchmarks.md)). When on, transport negotiation deprioritizes webrtc-media (canvas required). |
 | `video_enhancement_algo` | string | `"auto"` | Always `auto` in production (desktop → FSR1 WebGL2, mobile/tablet → SGSR1 WebGL2, HDR → FSR1 WebGPU). Debug builds expose the full menu: `canvas2d` \| `video` \| `smooth2d` \| `gl-sgsr` \| `gl-nis` \| `gl-fsr1` \| `sgsr` \| `nis` \| `fsr1`. |
 | `audio_time_stretch` | bool | `true` | **File-only** (no UI), seeded at startup: WSOLA pitch-preserving stretch in the AudioWorklet. |

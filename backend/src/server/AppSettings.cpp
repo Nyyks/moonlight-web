@@ -629,6 +629,13 @@ bool AppSettings::packetMarking() const
     return obj.value("packet_marking").toBool(true);
 }
 
+void AppSettings::setPacketMarking(bool enabled)
+{
+    QJsonObject obj = readAll();
+    obj["packet_marking"] = enabled;
+    writeAll(obj);
+}
+
 bool AppSettings::sharedFeedEnabled() const
 {
     QJsonObject obj = readAll();
