@@ -6,10 +6,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { StreamView } from '../js/ui/StreamView.js';
 
 /**
- * Which hosts get the mouse at the device's own report rate (pointerrawupdate)
- * instead of once a frame: the native host by default, a GameStream host only
- * under the test key mw_raw_pointer = '1' — the A/B for Sunshine and Wolf.
- * '0' holds the native host to the frame cadence, as it always did.
+ * Every host gets the mouse at the device's own report rate (pointerrawupdate)
+ * instead of once a frame: the native host and, since 13/10/2026, GameStream
+ * hosts too. The diagnostics key mw_raw_pointer = '0' goes back to the frame
+ * cadence.
  */
 function view({ nativeHost, gaming = true }) {
     const sent = [];
@@ -51,15 +51,7 @@ describe('mouse at the report rate', () => {
         log.mockRestore();
     });
 
-    it('leaves a GameStream host at the frame cadence by default', () => {
-        const { v, sent } = view({ nativeHost: false });
-        expect(v._rawPointer).toBe(false);
-        rawMove(v.inputEl, 3, -2);
-        expect(sent).toEqual([]);
-    });
-
-    it('gives a GameStream host every report under mw_raw_pointer=1, and says so', () => {
-        localStorage.setItem('mw_raw_pointer', '1');
+    it('gives a GameStream host every report by default, and says so', () => {
         const { v, sent } = view({ nativeHost: false });
         expect(v._rawPointer).toBe(true);
         rawMove(v.inputEl, 3, -2);
@@ -69,21 +61,26 @@ describe('mouse at the report rate', () => {
             { type: 'mousemove', dx: 1, dy: 0 },
         ]);
         expect(log).toHaveBeenCalledWith(
-            '[StreamView] Mouse: raw report rate (pointerrawupdate, GameStream host, mw_raw_pointer=1)',
+            '[StreamView] Mouse: raw report rate (pointerrawupdate, GameStream host)',
         );
     });
 
-    it('gives the native host every report, unless mw_raw_pointer=0 holds it off', () => {
+    it('gives the native host every report by default', () => {
         expect(view({ nativeHost: true }).v._rawPointer).toBe(true);
-        localStorage.setItem('mw_raw_pointer', '0');
-        const { v, sent } = view({ nativeHost: true });
-        expect(v._rawPointer).toBe(false);
-        rawMove(v.inputEl, 3, -2);
-        expect(sent).toEqual([]);
     });
 
-    it('keeps the key meaning "frame cadence" for a GameStream host too', () => {
+    it('goes back to the frame cadence under mw_raw_pointer=0, for every host', () => {
         localStorage.setItem('mw_raw_pointer', '0');
+        for (const nativeHost of [true, false]) {
+            const { v, sent } = view({ nativeHost });
+            expect(v._rawPointer).toBe(false);
+            rawMove(v.inputEl, 3, -2);
+            expect(sent).toEqual([]);
+        }
+    });
+
+    it('leaves a browser without the event at the frame cadence', () => {
+        delete window.onpointerrawupdate;
         expect(view({ nativeHost: false }).v._rawPointer).toBe(false);
     });
 });

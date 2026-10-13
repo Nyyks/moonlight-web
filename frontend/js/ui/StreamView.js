@@ -10721,8 +10721,7 @@ export class StreamView {
     }
 
     /**
-     * Mouse motion at the device's own report rate (native host; GameStream
-     * hosts under a test key).
+     * Mouse motion at the device's own report rate, towards every host.
      *
      * `mousemove` is dispatched once per display frame with the motion since
      * the previous one summed up: a 1000 Hz mouse on a 60 Hz screen reaches
@@ -10730,11 +10729,11 @@ export class StreamView {
      * `pointerrawupdate` (Chromium) fires for every report instead, off the
      * frame clock. The native host injects each event on the thread that
      * receives it (no per-frame batching anywhere downstream), so there the
-     * extra messages buy the delay back; a GameStream host keeps the coalesced
-     * cadence its own protocol was built around — hence the gate. Whether it
-     * should too is being measured: mw_raw_pointer = '1' opens the gate for
-     * Sunshine, Wolf, Apollo and MultiSeat (moonlight-common-c sums the
-     * motions and sends them at most every millisecond).
+     * extra messages buy the delay back. Sunshine, Wolf, Apollo and MultiSeat
+     * get it too since 13/10/2026: moonlight-common-c sums the motions and
+     * sends them at most every millisecond, so the host is not flooded, and
+     * an A/B in game showed no difference either way — the rate meant to be
+     * fastest won.
      *
      * The mousemove handlers stay bound for what only they know how to do
      * (cursor styling, the pre-focus click-to-capture position) and skip the
@@ -10744,19 +10743,16 @@ export class StreamView {
         this._rawPointer = false;
         if (!this.inputEl) return;
         if (!('onpointerrawupdate' in window)) return;
-        // Diagnostics, read once here: mw_raw_pointer = '0' keeps the coalesced
-        // mousemove cadence against a native host too, '1' gives a GameStream
-        // host the raw rate — the two halves of the A/B for "is it the report
-        // rate?". Not a setting, same family as mw_pacing.
+        // Diagnostics, read once here: mw_raw_pointer = '0' goes back to the
+        // coalesced mousemove cadence. Not a setting, same family as mw_pacing.
         let key = null;
         try {
             key = localStorage.getItem('mw_raw_pointer');
         } catch (e) {}
-        if (this._nativeHost && key === '0') {
+        if (key === '0') {
             console.log('[StreamView] Mouse: raw report rate held off (mw_raw_pointer=0)');
             return;
         }
-        if (!this._nativeHost && key !== '1') return;
         this._onPointerRaw = (e) => {
             if (e.pointerType !== 'mouse') return;
             this._lastRawPointerMs = performance.now();
@@ -10782,7 +10778,7 @@ export class StreamView {
         console.log(
             this._nativeHost
                 ? '[StreamView] Mouse: raw report rate (pointerrawupdate, native host)'
-                : '[StreamView] Mouse: raw report rate (pointerrawupdate, GameStream host, mw_raw_pointer=1)',
+                : '[StreamView] Mouse: raw report rate (pointerrawupdate, GameStream host)',
         );
     }
 
