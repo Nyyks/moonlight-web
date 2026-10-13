@@ -261,6 +261,24 @@ int NativeHostBackend::codecModeSupport()
     return mask;
 }
 
+bool NativeHostBackend::pyrowaveSupported()
+{
+#if defined(Q_OS_WIN)
+    // The same machines as the admin's D3D12 choice (SystemRoutes'
+    // nativeVideoPipelineSupported): a Snapdragon's Media Foundation encoder
+    // has no D3D12 route, nor has a machine with no GPU encoder at all.
+    if (!isEnabled()) return false;
+    const mw::native::Capabilities caps = probeEngine();
+    if (!caps.available) return false;
+    for (const mw::native::GpuInfo& gpu : caps.gpus)
+        for (mw::native::EncoderApi api : gpu.encoders)
+            if (api == mw::native::EncoderApi::Nvenc || api == mw::native::EncoderApi::Amf ||
+                api == mw::native::EncoderApi::Vpl)
+                return true;
+#endif
+    return false;
+}
+
 QString NativeHostBackend::hostDisplayName()
 {
     QString host = QHostInfo::localHostName();

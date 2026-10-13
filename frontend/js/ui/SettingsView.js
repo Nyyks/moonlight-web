@@ -83,8 +83,22 @@ import {
     fitPixelBudget,
     readResolutionChoice,
 } from '../util/StreamResolution.js';
+import {
+    CODEC_PYROWAVE,
+    PYROWAVE_FALLBACK,
+    anyHostCodesPyrowave,
+    pyrowaveBlocker,
+} from '../util/PyrowaveCodec.js';
 
 const STORAGE_KEY = 'mw-streaming-settings';
+
+/** Why PyroWave is greyed out, by pyrowaveBlocker()'s answer. */
+const PYROWAVE_REASON_KEYS = {
+    transport: 'settings.pyrowaveNoTransport',
+    browser: 'settings.pyrowaveNoBrowser',
+    hdr: 'settings.pyrowaveNoHdr',
+    host: 'settings.pyrowaveNoHost',
+};
 
 /**
  * Enhancer choices, in menu order after 'auto': Canvas2D resampling, then each
@@ -167,6 +181,9 @@ export class SettingsView {
 
         // Per-codec browser support map: { h264:bool, hevc:bool, av1:bool } or null
         this._codecSupport = null;
+        // Whether a host this page knows codes PyroWave (its card says so:
+        // util/PyrowaveCodec.js); null until the host list answers.
+        this._pyrowaveHost = null;
 
         // True when this browser holds a session worth ending — see
         // _checkSession(). False for the host machine's own browser, whichever
@@ -190,6 +207,7 @@ export class SettingsView {
     async start() {
         await this._loadState();
         this._codecSupport = await this._checkCodecSupport();
+        await this._loadPyrowaveHost();
         this._webgpuUsable = await this._checkWebGpuSupport();
         // The static half of the HDR gate (WebGPU adapter, 10-bit decoder); the
         // display half is asked live at every render.
@@ -576,8 +594,13 @@ export class SettingsView {
         // and all other clients get these defaults on first visit.
         const host = window.location.hostname;
         if ((host === 'localhost' || host === '127.0.0.1') && !BackendClient.adminLocked) {
+            // PyroWave is a device's own choice (the one on Ethernet), never
+            // the codec every other browser starts with: the server's default
+            // keeps what it had.
+            const shared = { ...settings };
+            if (shared.video_codec === CODEC_PYROWAVE) delete shared.video_codec;
             try {
-                await BackendClient.saveStreamingSettings(settings);
+                await BackendClient.saveStreamingSettings(shared);
             } catch (err) {
                 console.warn('[Settings] Failed to save to server:', err);
             }
@@ -648,6 +671,32 @@ export class SettingsView {
     }
 
     /**
+     * Whether a host this page knows codes PyroWave: the menu offers it only
+     * then. Unknown (null) when the list does not answer — the option stays
+     * open, and the launch asks Auto of a host that cannot.
+     */
+    async _loadPyrowaveHost() {
+        try {
+            const data = await BackendClient.getHosts();
+            this._pyrowaveHost = anyHostCodesPyrowave(data?.hosts);
+        } catch {
+            this._pyrowaveHost = null;
+        }
+    }
+
+    /**
+     * Why PyroWave cannot be chosen here ('transport' | 'browser' | 'hdr' |
+     * 'host'), or null when it can (util/PyrowaveCodec.js).
+     */
+    _pyrowaveBlocker() {
+        return pyrowaveBlocker({
+            hostCodes: this._pyrowaveHost,
+            hdr: this._hdrEnabled,
+            mediaTrackOnly: this._mediaTrackOnlyH264 || this._powerSave,
+        });
+    }
+
+    /**
      * Probe WebGPU usability for the Video Enhancement feature (consumed by the
      * UI graying in a later commit). Probes the adapter, NOT the device — the
      * device is created by the renderer at launch (Canvas2D fallback on failure).
@@ -669,17 +718,30 @@ export class SettingsView {
      * 3. Fallback chain: h264 > hevc > av1
      *
      * Does NOT modify this._videoCodec (user preference remains in storage).
+     *
+     * PyroWave shows as itself where it can be chosen (_pyrowaveBlocker), and
+     * elsewhere as the codec its launch falls back to (util/PyrowaveCodec.js).
      */
     _getEffectiveCodec() {
         if (this._mediaTrackOnlyH264) return 'h264';
+        if (this._videoCodec === CODEC_PYROWAVE) {
+            return this._pyrowaveBlocker()
+                ? this._effectiveCodecFrom(PYROWAVE_FALLBACK)
+                : CODEC_PYROWAVE;
+        }
+        return this._effectiveCodecFrom(this._videoCodec);
+    }
+
+    /** The fallback chain above, from @p codec (one of the browser's three). */
+    _effectiveCodecFrom(codec) {
         // HDR has no H.264 path (H.264 HDR isn't decodable in practice): when HDR
         // is on, H.264 is excluded from selection / fallback entirely.
         const hdr = this._hdrEnabled;
         if (!this._codecSupport) {
-            return hdr && this._videoCodec === 'h264' ? 'hevc' : this._videoCodec;
+            return hdr && codec === 'h264' ? 'hevc' : codec;
         }
-        if (this._codecSupport[this._videoCodec] && !(hdr && this._videoCodec === 'h264')) {
-            return this._videoCodec;
+        if (this._codecSupport[codec] && !(hdr && codec === 'h264')) {
+            return codec;
         }
         if (hdr) {
             if (this._codecSupport.hevc) return 'hevc';
@@ -689,7 +751,7 @@ export class SettingsView {
         if (this._codecSupport.h264) return 'h264';
         if (this._codecSupport.hevc) return 'hevc';
         if (this._codecSupport.av1) return 'av1';
-        return this._videoCodec;
+        return codec;
     }
 
     destroy() {
@@ -910,10 +972,12 @@ export class SettingsView {
         this._saveTimer = setTimeout(async () => {
             this._saveTimer = null;
 
-            // When MediaTrack transport is forced, only H.264 is available
-            const codec = this._mediaTrackOnlyH264
-                ? 'h264'
-                : this.container.querySelector('#settings-video-codec')?.value || this._videoCodec;
+            // When MediaTrack transport is forced, only H.264 is available.
+            // Otherwise the preference, set when the menu changes: the menu
+            // itself shows the effective codec, and reading it back here would
+            // put a PyroWave chosen for another host, or an AV1 this browser
+            // cannot decode, away at the next change of anything else.
+            const codec = this._mediaTrackOnlyH264 ? 'h264' : this._videoCodec;
             const gamingMode =
                 this.container.querySelector('#settings-gaming-mode')?.checked ?? this._gamingMode;
             const showPerf =
@@ -1176,13 +1240,29 @@ export class SettingsView {
         const tearingLocked = tearingUnavailable ? ' settings-field-locked' : psLocked;
         const tearingChecked = this._tearing && !tearingUnavailable ? 'checked' : '';
 
-        // Codec options (explicit, no "Auto")
+        // Codec options (explicit, no "Auto"). PyroWave last, for a device on
+        // Ethernet: greyed out like an AV1 this browser cannot decode when no
+        // host here codes it, this browser cannot decode it, HDR is ticked or
+        // the transport is the <video> one — the option's title and, chosen,
+        // the note under the menu say which (util/PyrowaveCodec.js).
         const codecs = [
             { value: 'h264', label: t('settings.codecH264') },
             { value: 'hevc', label: t('settings.codecHevc') },
             { value: 'av1', label: t('settings.codecAv1') },
         ];
         const effectiveCodec = this._getEffectiveCodec();
+        const pyrowaveBlocked = this._pyrowaveBlocker();
+        const pyrowaveWhy = pyrowaveBlocked ? t(PYROWAVE_REASON_KEYS[pyrowaveBlocked]) : '';
+        const pyrowaveLabel = !pyrowaveBlocked
+            ? t('settings.codecPyrowave')
+            : pyrowaveBlocked === 'hdr'
+              ? t('settings.codecHdrUnavailable', { codec: 'PyroWave' })
+              : t('settings.codecUnavailable', { codec: 'PyroWave' });
+        const pyrowaveOption =
+            `<option value="${CODEC_PYROWAVE}"` +
+            (effectiveCodec === CODEC_PYROWAVE ? ' selected' : '') +
+            (pyrowaveBlocked ? ` disabled title="${this.esc(pyrowaveWhy)}"` : '') +
+            `>${this.esc(pyrowaveLabel)}</option>`;
         const codecOptions = codecs
             .map((c) => {
                 const browserDisabled = this._codecSupport && !this._codecSupport[c.value];
@@ -1210,7 +1290,18 @@ export class SettingsView {
             this._codecSupport[this._videoCodec] === false &&
             effectiveCodec !== this._videoCodec;
         let codecHintHtml = '';
-        if (codecChanged) {
+        if (this._videoCodec === CODEC_PYROWAVE && !this._mediaTrackOnlyH264) {
+            // Chosen: what it asks of the network, or why it cannot run here
+            // and what streams instead.
+            codecHintHtml = `<div class="settings-note">${this.esc(
+                pyrowaveBlocked
+                    ? t('settings.codecPyrowaveFallback', {
+                          reason: pyrowaveWhy,
+                          effective: effectiveCodec.toUpperCase(),
+                      })
+                    : t('settings.codecPyrowaveNote'),
+            )}</div>`;
+        } else if (codecChanged) {
             codecHintHtml = `<div class="settings-note">
                 ${this.esc(
                     t('settings.codecFallback', {
@@ -1510,7 +1601,7 @@ export class SettingsView {
                         </label>
                         <span class="setting-desc">${t('settings.videoCodecDesc')}</span>
                         <select id="settings-video-codec" class="settings-select"${psDisabled}>
-                            ${codecOptions}
+                            ${codecOptions}${pyrowaveOption}
                         </select>
                         ${codecHintHtml}
                     </div>
@@ -1823,8 +1914,17 @@ export class SettingsView {
             statsChk.addEventListener('change', () => this._setStatsConsent(statsChk));
         }
 
+        // A codec picked is the preference at once (the menu shows only the
+        // effective one, see _getEffectiveCodec); re-rendered for the note
+        // under it, which PyroWave fills.
         const codecSelect = this.container.querySelector('#settings-video-codec');
-        if (codecSelect) codecSelect.addEventListener('change', () => this._autoSave());
+        if (codecSelect)
+            codecSelect.addEventListener('change', () => {
+                this._videoCodec = codecSelect.value;
+                this.render();
+                this.bindEvents();
+                this._autoSave();
+            });
 
         // Resolution / FPS / HDR changes recompute the recommended bitrate
         // from the 1080p60 SDR reference before saving.

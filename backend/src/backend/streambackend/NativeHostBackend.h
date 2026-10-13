@@ -98,6 +98,14 @@ public:
     /// Zero when the engine is unavailable, which is then the truth.
     static int codecModeSupport();
 
+    /// Whether this machine can code a session in PyroWave, the intra-only
+    /// wavelet codec of a wired LAN (docs/design/ultra-lan-poc.md §6.43): a
+    /// Windows host whose GPU has a D3D12 route (NVENC, AMF or oneVPL), where
+    /// its encoder runs. Never Linux or macOS. Announced on the host's card
+    /// (nativeDisplay.pyrowave), so a browser's Settings can offer the codec
+    /// before any stream.
+    static bool pyrowaveSupported();
+
     /// "<hostname> — MoonlightWeb Host".
     static QString hostDisplayName();
 

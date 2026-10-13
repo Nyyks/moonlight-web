@@ -408,6 +408,9 @@ QJsonObject ComputerManager::nativeDisplayJson()
     // any stream: "ok", or why not in a word the page explains (the stream's
     // hidcaps stays the authority once it runs).
     obj["hid"] = QString::fromLatin1(mw::native::HidPassthrough::supportToken());
+    // Whether this host codes PyroWave (Windows, the D3D12 route): Settings'
+    // codec menu offers it only where a host says so, before any stream.
+    obj["pyrowave"] = NativeHostBackend::pyrowaveSupported();
     return obj;
 }
 

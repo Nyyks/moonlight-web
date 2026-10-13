@@ -389,6 +389,16 @@ void AppSettings::seedDocumentedDefaults()
         obj["session_location_enabled"] = false;
         changed = true;
     }
+    // The admin's codec of a native session (8f8d9307, never released): PyroWave
+    // moved to each browser's Settings → Video codec, where it is chosen per
+    // device — the one on Ethernet — rather than for every browser at once.
+    if (obj.contains("native_video_codec")) {
+        Logger::info(QString("settings.json: native_video_codec=%1 dropped — PyroWave is "
+                             "chosen per browser now (Settings → Video codec)")
+                         .arg(obj.value("native_video_codec").toString()));
+        obj.remove("native_video_codec");
+        changed = true;
+    }
     if (changed) writeAll(obj);
 }
 
@@ -1068,22 +1078,6 @@ bool AppSettings::setNativeVideoPipeline(const QString& pipeline)
     if (v.isEmpty()) return false;
     QJsonObject obj = readAll();
     obj["native_video_pipeline"] = v;
-    writeAll(obj);
-    return true;
-}
-
-QString AppSettings::nativeVideoCodec() const
-{
-    const QString v = readAll().value("native_video_codec").toString().trimmed().toLower();
-    return v == QLatin1String("pyrowave") ? v : QStringLiteral("auto");
-}
-
-bool AppSettings::setNativeVideoCodec(const QString& codec)
-{
-    const QString v = codec.trimmed().toLower();
-    if (v != QLatin1String("auto") && v != QLatin1String("pyrowave")) return false;
-    QJsonObject obj = readAll();
-    obj["native_video_codec"] = v;
     writeAll(obj);
     return true;
 }

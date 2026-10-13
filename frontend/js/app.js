@@ -78,6 +78,7 @@ import {
     measuredFps,
 } from './util/RefreshRate.js';
 import { computeAutoBitrate } from './util/AutoBitrate.js';
+import { applyPyrowaveChoice } from './util/PyrowaveCodec.js';
 import { DEFAULT_ASPECT, loadHostAspect, saveHostAspect } from './util/AspectRatio.js';
 import {
     readResolutionChoice,
@@ -1962,6 +1963,12 @@ const MoonlightApp = {
         if (hdrOverride !== undefined) {
             streamingSettings.hdr_enabled = hdrOverride === true;
         }
+        // « PyroWave (Wired LAN only) »: asked of a host that says it codes it,
+        // by a browser that decodes it, with the HDR box off; otherwise this
+        // launch is an Auto one, without a word (util/PyrowaveCodec.js). Read
+        // before the native host's HDR below, which follows the screens and
+        // gives way to PyroWave on the host (8-bit SDR).
+        applyPyrowaveChoice(streamingSettings, host, { codecOverride, hdrOverride });
         // The native host decides HDR from both screens, never from the
         // checkbox: asked whenever this screen can show it, granted when the
         // host's display is in HDR. An SDR screen gets SDR from an HDR host —
@@ -3270,9 +3277,12 @@ const MoonlightApp = {
             // "NVENC" / "AMF" / "oneVPL", for the stats overlay — only the
             // native host, whose encoder runs on this very machine, can name it.
             nativeEncoder: typeof result.native_encoder === 'string' ? result.native_encoder : '',
-            // The host codes PyroWave (the admin's codec for a wired LAN):
-            // this page decodes it itself (stream/ultra/UltraPlayer.js).
-            ultraCodec: result.ultra_codec === 'pyrowave' ? 'pyrowave' : '',
+            // The host codes PyroWave (this browser's codec for a wired LAN,
+            // util/PyrowaveCodec.js): this page decodes it itself
+            // (stream/ultra/UltraPlayer.js). Never a guest's: its feed is the
+            // owner's H.264, HEVC or AV1.
+            ultraCodec:
+                viewOpts.playerMode !== true && result.ultra_codec === 'pyrowave' ? 'pyrowave' : '',
             // What /start told the host this screen refreshes at, so the view
             // only speaks up again when the number changes.
             clientRefreshMilliHz: currentRefreshMilliHz(),

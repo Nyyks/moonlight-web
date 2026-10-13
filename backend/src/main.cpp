@@ -3390,20 +3390,19 @@ int main(int argc, char* argv[])
                 << ":" << chainMode << "internal=" << internalTransport
                 << "iceTcp=" << enableIceTcp;
 
-        // The admin's codec (Advanced, AppSettings::nativeVideoCodec): PyroWave
-        // for a native Windows host, when the browser says it decodes it and
-        // the frames reach the page (the DataChannel's transport, not the
-        // <video> of webrtc-media). Its frames ride the audio road
-        // (ultra-lan-poc.md §6.41), and it codes 8-bit SDR only: no HDR asked.
-        // A bench's own native_tuning and rtp_video still come after.
-#if defined(Q_OS_WIN)
+        // The browser's codec (Settings → Video codec, « PyroWave (Wired LAN
+        // only) »): asked as ultra_codec by a page that decodes it, for a native
+        // Windows host that codes it (NativeHostBackend::pyrowaveSupported, on
+        // its card), when the frames reach the page (the DataChannel's
+        // transport, not the <video> of webrtc-media). Anything else streams
+        // as if it had not been asked: the codec the page sent beside it. Its
+        // frames ride the audio road (ultra-lan-poc.md §6.41), and it codes
+        // 8-bit SDR only: no HDR asked. A bench's own native_tuning and
+        // rtp_video still come after.
         const bool nativePyrowave = backendType == QStringLiteral("native") &&
-                                    appSettings.nativeVideoCodec() == QLatin1String("pyrowave") &&
-                                    body["pyrowave"].toBool(false) &&
-                                    internalTransport == QLatin1String("webrtc");
-#else
-        const bool nativePyrowave = false;
-#endif
+                                    body["ultra_codec"].toString() == QLatin1String("pyrowave") &&
+                                    internalTransport == QLatin1String("webrtc") &&
+                                    NativeHostBackend::pyrowaveSupported();
         QString nativeTuningSpec = appSettings.nativeTuning();
         QString rtpVideoSpec = appSettings.rtpVideo();
         if (nativePyrowave) {
@@ -3411,7 +3410,7 @@ int main(int argc, char* argv[])
             nativeTuningSpec = QStringLiteral("pipeline=d3d12,enc12=pyrowave") +
                                (nativeTuningSpec.isEmpty() ? QString() : "," + nativeTuningSpec);
             if (rtpVideoSpec.isEmpty()) rtpVideoSpec = QStringLiteral("native:h264+hevc+av1+aroad");
-            qInfo() << "[Session] PyroWave (the admin's codec, wired LAN): D3D12, audio road";
+            qInfo() << "[Session] PyroWave (the browser's codec, wired LAN): D3D12, audio road";
         }
 
         // ── Helper: attach lifecycle relay tracking for a new session ───────────

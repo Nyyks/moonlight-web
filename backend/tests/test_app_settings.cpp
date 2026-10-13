@@ -409,6 +409,21 @@ void run_app_settings_tests()
         CHECK(!s.readAll().contains("router_ports"));
     }
 
+    // The admin's codec of a native session is gone (PyroWave is each
+    // browser's choice now): a file that still names it loses the key at the
+    // next start, and nothing else in it moves.
+    {
+        QJsonObject obj = s.readAll();
+        obj["native_video_codec"] = "pyrowave";
+        s.writeAll(obj);
+        s.seedDocumentedDefaults();
+        const QJsonObject after = s.readAll();
+        CHECK(!after.contains("native_video_codec"));
+        CHECK_EQ(after.value("native_video_pipeline").toString(),
+                 obj.value("native_video_pipeline").toString());
+        CHECK_EQ(after.value("native_host_enabled").toBool(), true);
+    }
+
     // The bench's engine knobs: absent, empty and never seeded; read trimmed
     // once hand-added.
     CHECK(s.nativeTuning().isEmpty());
