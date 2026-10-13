@@ -12353,6 +12353,10 @@ export class StreamView {
      */
     _handleUltraFrame(data, backendTs, arrivalAbs, frameId) {
         this.stats.received++;
+        // Its bytes in the stats' bitrate, as handleVideoFrame counts every
+        // other frame's: it hands PyroWave over before that line, and the
+        // card read 0.0 Mbps while the picture came (13/10/2026).
+        this._totalBytes += data.length;
         if (!this._ultraPlayer) {
             if (this._ultraStarting || data.length < 8) return;
             const dv = new DataView(data.buffer, data.byteOffset, 8);
