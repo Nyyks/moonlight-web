@@ -61,6 +61,13 @@ import { DiscordLink } from './ui/DiscordLink.js';
 import * as RemoteNav from './ui/RemoteNav.js';
 import * as ViewHeaderScroll from './ui/ViewHeaderScroll.js';
 import { GamepadDriverNotice } from './ui/GamepadDriverNotice.js';
+import { BMC_LOGO } from './ui/bmcLogo.js';
+import {
+    SUPPORT_CHANGED_EVENT,
+    noteGoodSession,
+    showSupportButton,
+    takeSupportIntroduction,
+} from './util/supportNudge.js';
 import { VersionGuard } from './util/VersionGuard.js';
 import {
     IS_MOBILE_OR_TABLET,
@@ -216,6 +223,10 @@ const MoonlightApp = {
     // re-launch loops. Reset to 0 each time the user initiates a new stream
     // (not a fallback). If H.264 also fails, stop falling back.
     _fallbackAttemptCount: 0,
+
+    // performance.now() when the owner's current stream was launched; 0 when
+    // none is running (see _noteSupportSession).
+    _streamStartedAt: 0,
 
     // ── Navigation state (never destroyed by overlays) ──────────────────────
     _nav: {
@@ -1728,6 +1739,32 @@ const MoonlightApp = {
                 }
             });
         }
+
+        // Buy me a coffee: a plain link, so the browser opens the new tab. It
+        // comes and goes with the count and the Settings switch.
+        const btnBmc = document.getElementById('btn-bmc');
+        if (btnBmc && !btnBmc.dataset.wired) {
+            // Wired once: this runs again after a login.
+            btnBmc.dataset.wired = '1';
+            const logo = btnBmc.querySelector('.header-btn-bmc-logo');
+            if (logo) logo.innerHTML = BMC_LOGO;
+            btnBmc.addEventListener('click', () => btnBmc.classList.remove('is-new'));
+            window.addEventListener(SUPPORT_CHANGED_EVENT, () => this._refreshSupportButton());
+            this._refreshSupportButton();
+        }
+    },
+
+    /**
+     * Show or hide the header's Buy me a coffee button (util/supportNudge.js
+     * decides). Never in booth mode. The visit it first appears on, it glows.
+     */
+    _refreshSupportButton() {
+        const btnBmc = document.getElementById('btn-bmc');
+        if (!btnBmc) return;
+        const show = !BackendClient.adminLocked && showSupportButton();
+        btnBmc.hidden = !show;
+        if (show && takeSupportIntroduction()) btnBmc.classList.add('is-new');
+        if (!show) btnBmc.classList.remove('is-new');
     },
 
     _updateNavHighlight(active) {
@@ -1910,6 +1947,10 @@ const MoonlightApp = {
         // Store host/app for HEVC fallback re-launch
         this._lastStreamHost = host;
         this._lastStreamApp = app;
+
+        // When this evening's stream started, for _noteSupportSession. A codec
+        // fallback relaunch is the same stream carrying on: it keeps the time.
+        if (!codecOverride) this._streamStartedAt = performance.now();
 
         // A user-initiated launch clears any previous abort (a codec/HDR
         // fallback relaunch is a continuation of the aborted one — it must
@@ -4336,6 +4377,12 @@ const MoonlightApp = {
      * infinite loops if H.264 also fails.
      */
     _onStreamingQuit() {
+        // A stream that lasted counts toward the coffee thank-you — read before
+        // anything below drops the view. A codec fallback is not an end: the
+        // relaunch carries the same stream on.
+        if (!(this.streamView && this.streamView._codecFallbackRequested))
+            this._noteSupportSession();
+
         // Drop any lingering transport-relaunch loader and the upgrade poll,
         // and any standby leg of a seamless transition (the live stream ended).
         this._hideRelaunchLoader();
@@ -4457,6 +4504,18 @@ const MoonlightApp = {
             this._renderMainView();
             history.replaceState({ view: 'hosts' }, '', '/');
         }
+    },
+
+    /**
+     * One owner stream is over: hand its length to util/supportNudge.js, which
+     * counts it if it lasted. Guests quit through their own path and never get
+     * here. Spends the start time, so a second call for the same stream is a
+     * no-op.
+     */
+    _noteSupportSession() {
+        const started = this._streamStartedAt;
+        this._streamStartedAt = 0;
+        if (started > 0) noteGoodSession((performance.now() - started) / 1000);
     },
 
     // =========================================================================

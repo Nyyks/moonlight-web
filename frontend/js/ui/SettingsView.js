@@ -33,6 +33,8 @@ import { t, getLanguage, setLanguage, AVAILABLE_LANGUAGES } from '../i18n/i18n.j
 import { escapeHtml } from '../util/escapeHtml.js';
 import { shortcutsGridHtml, shortcutsTitle } from '../util/shortcutsHelp.js';
 import { noticeDetailsHtml } from './PrivacyNotice.js';
+import { BMC_LOGO } from './bmcLogo.js';
+import { SUPPORT_URL, isSupportHidden, setSupportHidden } from '../util/supportNudge.js';
 import {
     GamepadRemapDialog,
     connectedPads,
@@ -264,6 +266,32 @@ export class SettingsView {
         } finally {
             checkbox.disabled = false;
         }
+    }
+
+    /**
+     * "Buy me a coffee": what a coffee pays for, the link, and the one switch
+     * that hides the button everywhere — the header's and the stream bar's
+     * (util/supportNudge.js). The switch is unticked by default and lives in
+     * this browser only, like the count behind the button. "Reset to defaults"
+     * leaves it alone: it is not a streaming setting.
+     */
+    _renderSupportSection() {
+        return `
+                <div class="settings-section" id="settings-section-support">
+                    <h3 class="settings-section-title">${escapeHtml(t('support.title'))}</h3>
+                    <p class="setting-desc">${escapeHtml(t('support.desc'))}</p>
+                    <div class="settings-field">
+                        <a class="btn btn-neutral settings-support-link" href="${SUPPORT_URL}"
+                           target="_blank" rel="noopener noreferrer">${BMC_LOGO}${escapeHtml(t('support.action'))}</a>
+                    </div>
+                    <div class="settings-field">
+                        <label class="settings-checkbox-label">
+                            <input type="checkbox" id="settings-support-hidden"
+                                   ${isSupportHidden() ? 'checked' : ''} />
+                            <span class="settings-checkbox-text">${escapeHtml(t('support.hideToggle'))}</span>
+                        </label>
+                    </div>
+                </div>`;
     }
 
     /**
@@ -1822,6 +1850,9 @@ export class SettingsView {
                      operable from the machine itself. -->
                 ${this._renderPrivacySection()}
 
+                <!-- ── Buy me a coffee ─────────────────────────────────────── -->
+                ${this._renderSupportSection()}
+
                 <!-- ── Reset ───────────────────────────────────────────────── -->
                 <div class="settings-section">
                     <button class="btn btn-neutral" id="btn-settings-reset">
@@ -1924,6 +1955,14 @@ export class SettingsView {
         if (statsChk) {
             statsChk.addEventListener('change', () => this._setStatsConsent(statsChk));
         }
+
+        // Buy me a coffee: the link opens its own tab by itself (a plain link);
+        // the switch hides the button everywhere, or brings it back.
+        const supportChk = /** @type {HTMLInputElement|null} */ (
+            this.container.querySelector('#settings-support-hidden')
+        );
+        if (supportChk)
+            supportChk.addEventListener('change', () => setSupportHidden(supportChk.checked));
 
         // A codec picked is the preference at once (the menu shows only the
         // effective one, see _getEffectiveCodec); re-rendered for the note

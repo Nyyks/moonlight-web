@@ -135,6 +135,8 @@ import { escapeHtml } from '../util/escapeHtml.js';
 import { shortcutsGridHtml, shortcutsTitle } from '../util/shortcutsHelp.js';
 import { Icons } from './icons.js';
 import { ShareMenu } from './ShareMenu.js';
+import { openSupportPage, showSupportButton } from '../util/supportNudge.js';
+import { BMC_LOGO } from './bmcLogo.js';
 import { StreamViewKeyboard } from './StreamViewKeyboard.js';
 import { StreamViewTouch } from './StreamViewTouch.js';
 import { StreamViewFullscreen } from './StreamViewFullscreen.js';
@@ -1674,6 +1676,9 @@ export class StreamView {
         this._kbdVisible = false;
         this._kbdBlurAt = 0; // timestamp of last capture blur
         this._onViewportResize = null; // VisualViewport handler (keyboard push-up)
+
+        // The owner's Buy me a coffee button in the bar (_mountSupportButton).
+        this._supportBtn = null;
 
         // Mobile fullscreen button state
         this._mobileFsBtn = null;
@@ -4120,6 +4125,40 @@ export class StreamView {
         if (this._kbdBtn) this._kbdBtn.classList.remove('stream-ctl-prestart');
         this._mountGamepadButton();
         this._mountShareMenu();
+        this._mountSupportButton();
+    }
+
+    /**
+     * The owner's "Buy me a coffee" button, first of the bar's right-hand
+     * controls — the same button as the header's, once this browser has
+     * streamed enough for it (util/supportNudge.js decides, and Settings can
+     * hide it for good). CSS drops it from a phone held upright, where the bar
+     * has no room, and keeps only the logo on a phone turned sideways.
+     *
+     * A <button>, not a link: this overlay is a trackpad, and its touch layer
+     * lets only buttons through. It opens the page in a new tab, so the stream
+     * keeps running in this one. Never for a guest, never in booth mode.
+     * Idempotent.
+     */
+    _mountSupportButton() {
+        if (this._supportBtn || this._playerMode || BackendClient.adminLocked || !this._rootEl)
+            return;
+        const brand = this._rootEl.querySelector('.stream-header .stream-brand');
+        if (!brand || !showSupportButton()) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-neutral stream-support-btn';
+        btn.innerHTML = `${BMC_LOGO}<span class="stream-support-label">${escapeHtml(t('support.action'))}</span>`;
+        btn.title = t('support.tooltip');
+        btn.setAttribute('aria-label', t('support.action'));
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openSupportPage();
+        });
+        // Right after the mark: the controls that follow (Console, keyboard,
+        // Share…) all go in before Stop, so this one stays leftmost.
+        brand.after(btn);
+        this._supportBtn = btn;
     }
 
     /**

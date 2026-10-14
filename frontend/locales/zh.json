@@ -23,7 +23,9 @@
         "streamingSettings": "串流设置",
         "instances": "您的设备",
         "instanceSwitch": "切换到其他设备",
-        "community": "加入 Discord 社区 — 获取帮助与版本更新"
+        "community": "加入 Discord 社区 — 获取帮助与版本更新",
+        "adminLabel": "管理",
+        "settingsLabel": "设置"
     },
     "setup": {
         "title": "欢迎使用 MoonlightWeb",
@@ -1081,5 +1083,12 @@
         "quitting": "正在退出 {{name}}…",
         "quitFailed": "无法退出 {{name}}。请重试，或继续它。",
         "unknownApp": "一个应用"
+    },
+    "support": {
+        "title": "请我喝杯咖啡",
+        "desc": "MoonlightWeb 免费、开源、无广告。一杯咖啡可以帮忙支付让你在外也能连回家的服务器、域名和 DNS 的费用。",
+        "action": "请我喝杯咖啡",
+        "hideToggle": "在应用中隐藏 Buy me a coffee",
+        "tooltip": "支持 MoonlightWeb"
     }
 }

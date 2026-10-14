@@ -1117,6 +1117,38 @@ body.streaming-active::after {
 .btn-stream-pad:active {
     transform: scale(0.95);
 }
+/* The owner's "Buy me a coffee" button (StreamView._mountSupportButton): the
+   header's yellow button, at Stop's size, first of the bar's right-hand
+   controls. A phone held upright has no room for it; turned sideways it keeps
+   the logo alone, and goes first even ahead of the keyboard button, which
+   otherwise heads the bar on a touch screen. */
+.stream-support-btn {
+    margin-right: 12px;
+    padding: 7px 14px;
+    font-size: 12.5px;
+    text-decoration: none;
+}
+/* A phone on its side is short as well as narrow-ish: the logo alone, or the
+   right-hand group would reach the fullscreen button centred in the bar. */
+@media (max-width: 767px), (max-height: 500px) {
+    .stream-support-btn {
+        padding: 7px 10px;
+    }
+    .stream-support-label {
+        display: none;
+    }
+}
+/* With the mark hidden, put it ahead of the keyboard button too. */
+@media (max-width: 767px) {
+    .stream-header .stream-support-btn {
+        order: -1;
+    }
+}
+@media (max-width: 767px) and (orientation: portrait) {
+    .stream-header .stream-support-btn {
+        display: none;
+    }
+}
 /* A pad is connected that nothing maps: the button is where to fix it. */
 .btn-stream-pad.is-attention {
     color: var(--kbd-on-edge);

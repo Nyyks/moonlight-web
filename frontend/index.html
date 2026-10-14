@@ -73,10 +73,30 @@
                          Settings for an authenticated user, Server Settings only
                          for someone who can actually reach the admin page. The
                          shell paints long before that answer arrives, so a
-                         visible default flashes buttons a guest never gets. -->
+                         visible default flashes buttons a guest never gets.
+                         On a phone the three are icons; wider, each carries
+                         its name (.header-btn-label). -->
+                    <!-- Buy me a coffee — from the 10th good session on
+                         (util/supportNudge.js). The logo is put in by
+                         _initNavButtons(): one copy of it, in bmcLogo.js. -->
+                    <a
+                        class="btn btn-neutral header-btn-bmc"
+                        id="btn-bmc"
+                        href="https://buymeacoffee.com/brunoocto"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        hidden
+                        title="Support MoonlightWeb"
+                        data-i18n-attr="title:support.tooltip"
+                    >
+                        <span class="header-btn-bmc-logo"></span>
+                        <span class="header-btn-label" data-i18n="support.action"
+                            >Buy me a coffee</span
+                        >
+                    </a>
                     <!-- Server Settings (localhost only) -->
                     <button
-                        class="btn-icon"
+                        class="btn-icon has-label"
                         id="btn-admin"
                         style="display: none"
                         title="Server Settings"
@@ -96,10 +116,11 @@
                                 d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
                             />
                         </svg>
+                        <span class="header-btn-label" data-i18n="header.adminLabel">Admin</span>
                     </button>
                     <!-- Streaming Settings -->
                     <button
-                        class="btn-icon"
+                        class="btn-icon has-label"
                         id="btn-settings"
                         style="display: none"
                         title="Streaming Settings"
@@ -116,6 +137,9 @@
                                 d="M19 9a1 1 0 10-2 0v2h-1a1 1 0 100 2h1v3a1 1 0 102 0v-3h1a1 1 0 100-2h-1V9z"
                             />
                         </svg>
+                        <span class="header-btn-label" data-i18n="header.settingsLabel"
+                            >Settings</span
+                        >
                     </button>
                 </div>
             </header>

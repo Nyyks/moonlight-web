@@ -23,7 +23,9 @@
         "streamingSettings": "Streaming Settings",
         "instances": "Your machines",
         "instanceSwitch": "Switch to another machine",
-        "community": "Join the community on Discord — help and release news"
+        "community": "Join the community on Discord — help and release news",
+        "adminLabel": "Admin",
+        "settingsLabel": "Settings"
     },
     "setup": {
         "title": "Welcome to MoonlightWeb",
@@ -1081,5 +1083,12 @@
         "quitting": "Quitting {{name}}…",
         "quitFailed": "Could not quit {{name}}. Try again, or resume it.",
         "unknownApp": "An app"
+    },
+    "support": {
+        "title": "Buy me a coffee",
+        "desc": "MoonlightWeb is free, open source and ad-free. A coffee helps pay for the server that connects you when you are away from home, the domain and the DNS.",
+        "action": "Buy me a coffee",
+        "hideToggle": "Hide Buy me a coffee in the app",
+        "tooltip": "Support MoonlightWeb"
     }
 }
