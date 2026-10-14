@@ -168,6 +168,58 @@ with its present. `inputsim.py` then takes the host's presses and the gate's
 pictures from there, `hostpath.py` says how many clicks' frames the window
 sent, and `content-age/fluid.py` tells the window's frames from the grid's.
 
+## A, the gate locked on the display — gatesim.py --lock, locksim.py
+
+Today's gate keeps its grid in whole microseconds: 16 666 µs for 60 fps, so on
+the virtual display at 240 Hz it slips some 36 µs a second along the presents.
+Every two minutes or so a window's edge lies on a present, and for ~30 s the
+gaps between pictures go 12.5 / 20.8 ms instead of 16.7 (`docs/bench-native-host.md`
+§8w.8). The locked gate (plan « glissade », 14/10/2026) follows the display's
+presents with a lattice, and keeps the start of each window halfway between
+two of its presents.
+
+`gatesim.py --lock` replays it on a pass. Its `Lattice` is a copy of
+`core/PresentLattice.h`, and `Gate._admit_locked()` of the locked branch of
+`FrameCadence`: change them together. Both work in whole nanoseconds, and every
+division rounds down.
+
+- The lattice is fed each present's own time, skipped or not, before the gate
+  decides. Its phase follows a present's offset e / 32, bounded to ±T/4.
+- It engages once 64 presents are in and the mean |e| is under T/10, and lets
+  go above T/5. After a pause of 10 s, or of 1 s that left the phase beyond T/4,
+  the phase starts again on the present.
+- While it is engaged and the stream's interval is N >= 2 display periods to
+  within 0.2 %, the gate decides on the picture's own time: a present's, a
+  pointer's wake-up. Otherwise it is today's gate, call for call.
+- The lattice's period and the gate's interval are the host's (its line
+  `cadence lock: period <ns> ns, interval <ns> ns`), else `--period-ns` and
+  `--interval-ns`, else one period of the display's rate and 1e6 / fps rounded
+  to the µs. A pointer alone goes through the gate when the pass drew it into
+  the picture (`--pointers auto|on|off`).
+
+`--parity` says how many of the pictures the host's gate took (the trace's
+`admit` rows) the replay takes too. On the passes of 13/10 the gate of today
+finds 97.8 to 99.7 % of them. A client on its vsync is the exception (31 %):
+the exact interval of its aligned cadence is in no log of that day. `--selftest` runs the golden train, a synthetic pass of
+known presents through the locked gate, and checks the counts that
+`test_cadence_lock.cpp` holds.
+
+```
+python scripts/bench/clickpath/gatesim.py <tag> --lock [--parity] [--period-ns 4166666]
+python scripts/bench/clickpath/gatesim.py --selftest
+```
+
+`locksim.py` gives the table per family of passes, today's gate against the
+locked one: the steps a whole refresh off the stream's interval (those of the
+content, whose refresh had no present, and those of the gate), the pictures
+carried a second, the wait of a change for the next carried picture, and the
+lattice's engagements. The `vsync` family replays the passes of a client on its
+vsync with the exact interval of their aligned cadence, 0 and ±15 ppm off.
+
+```
+python scripts/bench/clickpath/locksim.py [--family dense,target,game,clock,linux,mac,vsync] [--passes]
+```
+
 ## B — gpuwait.py
 
 What the pass needs: `localStorage.mw_ultra_trace = '1'` in the client's page
