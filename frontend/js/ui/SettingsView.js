@@ -33,7 +33,7 @@ import { t, getLanguage, setLanguage, AVAILABLE_LANGUAGES } from '../i18n/i18n.j
 import { escapeHtml } from '../util/escapeHtml.js';
 import { shortcutsGridHtml, shortcutsTitle } from '../util/shortcutsHelp.js';
 import { noticeDetailsHtml } from './PrivacyNotice.js';
-import { BMC_LOGO } from './bmcLogo.js';
+import { BMC_FULL_LOGO } from './bmcLogo.js';
 import { SUPPORT_URL, isSupportHidden, setSupportHidden } from '../util/supportNudge.js';
 import {
     GamepadRemapDialog,
@@ -282,7 +282,8 @@ export class SettingsView {
                     <p class="setting-desc">${escapeHtml(t('support.desc'))}</p>
                     <div class="settings-field">
                         <a class="btn btn-neutral settings-support-link" href="${SUPPORT_URL}"
-                           target="_blank" rel="noopener noreferrer">${BMC_LOGO}${escapeHtml(t('support.action'))}</a>
+                           target="_blank" rel="noopener noreferrer"
+                           aria-label="${escapeHtml(t('support.action'))}">${BMC_FULL_LOGO}</a>
                     </div>
                     <div class="settings-field">
                         <label class="settings-checkbox-label">

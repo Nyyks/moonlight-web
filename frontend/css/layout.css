@@ -254,6 +254,21 @@
     height: 1.4em;
     flex-shrink: 0;
 }
+/* The cup with its wordmark (bmcLogo.js), where the button has room for a
+   name. The brand draws the words near-black; on these dark, yellow-tinted
+   buttons they are white. The cup alone stands in for it on a phone. */
+.bmc-full-logo {
+    width: auto;
+    height: 1.9em;
+    flex-shrink: 0;
+    color: #fff;
+}
+.header-btn-bmc-full {
+    display: inline-flex;
+}
+.header-btn-bmc .header-btn-bmc-logo {
+    display: none;
+}
 /* The visit it first appears on, it lights up a few times, then settles —
    inside the button: the notched clip-path would cut any glow around it. */
 .header-btn-bmc.is-new {
@@ -379,6 +394,9 @@ html.remote-nav .app-header {
        which components.css loads after this file. */
     .header-btn-label {
         display: none;
+    }
+    .header-btn-bmc .header-btn-bmc-logo {
+        display: inline-flex;
     }
     .btn-icon.has-label {
         width: 38px;

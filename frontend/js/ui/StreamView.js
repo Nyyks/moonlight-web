@@ -136,7 +136,7 @@ import { shortcutsGridHtml, shortcutsTitle } from '../util/shortcutsHelp.js';
 import { Icons } from './icons.js';
 import { ShareMenu } from './ShareMenu.js';
 import { openSupportPage, showSupportButton } from '../util/supportNudge.js';
-import { BMC_LOGO } from './bmcLogo.js';
+import { BMC_LOGO, BMC_FULL_LOGO } from './bmcLogo.js';
 import { StreamViewKeyboard } from './StreamViewKeyboard.js';
 import { StreamViewTouch } from './StreamViewTouch.js';
 import { StreamViewFullscreen } from './StreamViewFullscreen.js';
@@ -4148,7 +4148,7 @@ export class StreamView {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn btn-neutral stream-support-btn';
-        btn.innerHTML = `${BMC_LOGO}<span class="stream-support-label">${escapeHtml(t('support.action'))}</span>`;
+        btn.innerHTML = `<span class="stream-support-cup">${BMC_LOGO}</span><span class="stream-support-label">${BMC_FULL_LOGO}</span>`;
         btn.title = t('support.tooltip');
         btn.setAttribute('aria-label', t('support.action'));
         btn.addEventListener('click', (e) => {

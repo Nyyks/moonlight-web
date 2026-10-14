@@ -1128,6 +1128,13 @@ body.streaming-active::after {
     font-size: 12.5px;
     text-decoration: none;
 }
+/* The cup and wordmark; the cup alone where the bar is short of room. */
+.stream-support-label {
+    display: inline-flex;
+}
+.stream-support-cup {
+    display: none;
+}
 /* A phone on its side is short as well as narrow-ish: the logo alone, or the
    right-hand group would reach the fullscreen button centred in the bar. */
 @media (max-width: 767px), (max-height: 500px) {
@@ -1136,6 +1143,9 @@ body.streaming-active::after {
     }
     .stream-support-label {
         display: none;
+    }
+    .stream-support-cup {
+        display: inline-flex;
     }
 }
 /* With the mark hidden, put it ahead of the keyboard button too. */

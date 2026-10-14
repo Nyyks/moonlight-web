@@ -61,7 +61,7 @@ import { DiscordLink } from './ui/DiscordLink.js';
 import * as RemoteNav from './ui/RemoteNav.js';
 import * as ViewHeaderScroll from './ui/ViewHeaderScroll.js';
 import { GamepadDriverNotice } from './ui/GamepadDriverNotice.js';
-import { BMC_LOGO } from './ui/bmcLogo.js';
+import { BMC_LOGO, BMC_FULL_LOGO } from './ui/bmcLogo.js';
 import {
     SUPPORT_CHANGED_EVENT,
     noteGoodSession,
@@ -1748,6 +1748,8 @@ const MoonlightApp = {
             btnBmc.dataset.wired = '1';
             const logo = btnBmc.querySelector('.header-btn-bmc-logo');
             if (logo) logo.innerHTML = BMC_LOGO;
+            const full = btnBmc.querySelector('.header-btn-bmc-full');
+            if (full) full.innerHTML = BMC_FULL_LOGO;
             btnBmc.addEventListener('click', () => btnBmc.classList.remove('is-new'));
             window.addEventListener(SUPPORT_CHANGED_EVENT, () => this._refreshSupportButton());
             this._refreshSupportButton();
