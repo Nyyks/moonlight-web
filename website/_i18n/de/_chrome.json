@@ -4,5 +4,11 @@
   "nav.faq": "FAQ",
   "nav.support": "Kaffee",
   "nav.contact": "Kontakt",
-  "nav.connect": "Verbinden"
+  "nav.connect": "Verbinden",
+  "foot.play": "Spielen auf:",
+  "foot.cb": "Chromebook",
+  "foot.ios": "iPhone und iPad",
+  "foot.tv": "TV",
+  "foot.sunshine": "Web-Client für Sunshine",
+  "foot.why": "Warum ein Browser-Client"
 }

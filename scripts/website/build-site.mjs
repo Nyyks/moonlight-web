@@ -115,6 +115,20 @@ function footer(lang, t) {
     navLinks(lang, t, null, ' · ') +
     ` · <a href="${GITHUB}" target="_blank" rel="noopener" data-umami-event="github" data-umami-event-loc="footer">GitHub</a>` +
     ` · <a href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-umami-event="buy-me-a-coffee" data-umami-event-loc="footer" class="bmc-link"><span data-bmc-logo></span><span>${esc(t['nav.support'] ?? 'Coffee')}</span></a>` +
+    '</span>' +
+    // The pages for one device or one host, linked from every page: nothing
+    // else on the site points at them, and a search engine weighs a page by
+    // the links it finds to it.
+    `<span class="foot-play">${esc(t['foot.play'] ?? 'Play from:')} ` +
+    [
+      ['/play/chromebook.html', 'foot.cb', 'Chromebook'],
+      ['/play/iphone-ipad.html', 'foot.ios', 'iPhone & iPad'],
+      ['/play/tv.html', 'foot.tv', 'TV'],
+      ['/sunshine-web-client.html', 'foot.sunshine', 'Sunshine web client'],
+      ['/browser-game-streaming.html', 'foot.why', 'Why a browser client'],
+    ]
+      .map(([url, key, en]) => `<a href="${localUrl(lang, url)}">${esc(t[key] ?? en)}</a>`)
+      .join(' · ') +
     '</span></div>'
   );
 }

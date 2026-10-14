@@ -415,6 +415,9 @@
   .dl-card .cmd.ok .ico-ok{display:block}
   .dl-card .cmd-note{margin:.55rem 0 0; font-size:.74rem}
   .dl-card .cmd-note a{color:var(--muted)}
+  .dl-card .dl-guide{margin:.9rem 0 0; font-size:.82rem}
+  .dl-card .dl-guide a{color:var(--cyan); text-decoration:none}
+  .dl-card .dl-guide a:hover{text-decoration:underline}
   .dl-card .cmd-note a:hover{color:var(--cyan)}
   @media(hover:hover){
     .dl-card:hover{border-color:var(--line-glow); transform:translateY(-3px)}
@@ -769,6 +772,7 @@
           <a data-asset="win-x64" href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener" data-umami-event="download" data-umami-event-asset="win-x64">x64 .exe</a>
           <a data-asset="win-arm64" href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener" data-umami-event="download" data-umami-event-asset="win-arm64">arm64 .exe</a>
         </div>
+        <p class="dl-guide"><a href="guides/windows.html" data-i18n="dl.windows.guide" data-umami-event="guide" data-umami-event-loc="dl-windows">Step-by-step install guide →</a></p>
       </div>
       <div class="dl-card cyb reveal">
         <svg class="os" viewBox="0 0 24 24" role="img" aria-label="Apple logo"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>
@@ -777,6 +781,7 @@
         <div class="fmt">
           <a data-asset="mac" href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener" data-umami-event="download" data-umami-event-asset="mac">arm64 .pkg</a>
         </div>
+        <p class="dl-guide"><a href="guides/macos.html" data-i18n="dl.macos.guide" data-umami-event="guide" data-umami-event-loc="dl-macos">Step-by-step install guide →</a></p>
         <!-- Unnotarized .pkg: a browser download trips Gatekeeper, and both of
              these install the very same file without the prompt. Homebrew comes
              first — it is the one that also brings `brew upgrade` along. -->
@@ -796,6 +801,7 @@
           <a data-asset="linux-rpm" href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener" data-umami-event="download" data-umami-event-asset="linux-rpm">.rpm</a>
           <a data-asset="linux-appimage" href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener" data-umami-event="download" data-umami-event-asset="linux-appimage">.AppImage</a>
         </div>
+        <p class="dl-guide"><a href="guides/linux.html" data-i18n="dl.linux.guide" data-umami-event="guide" data-umami-event-loc="dl-linux">Step-by-step install guide →</a></p>
         <!-- A downloaded package never updates itself. The signed apt/dnf
              repositories do, and put the app in the software centre. One recipe
              covers all of them — install.sh detects apt, dnf, zypper and yum,
@@ -817,7 +823,7 @@
       </div>
     </div>
     <p class="muted reveal" style="text-align:center; font-size:.88rem; margin-top:1.6rem" data-i18n-html="dl.foot">
-      Playing from a phone, tablet or TV? Nothing to download — the client is your browser.
+      Playing from a <a href="play/iphone-ipad.html">phone or tablet</a>, a <a href="play/chromebook.html">Chromebook</a> or a <a href="play/tv.html">TV</a>? Nothing to download — the client is your browser.
       <a href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener" data-umami-event="download" data-umami-event-loc="all-releases">All releases →</a>
     </p>
   </div>
@@ -841,7 +847,7 @@
 </main>
 
 <!-- Footer written by scripts/website/build-site.mjs -->
-<footer id="site-footer"><div class="wrap"><span><img src="/assets/icon-192.png" alt="" width="18" height="18" style="border-radius:4px;vertical-align:-3px;margin-right:6px"> MoonlightWeb · © 2026 Bruno Martin · GPL‑3.0</span><span><a href="/">Home</a> · <a href="/guides/">Guides</a> · <a href="/faq.html">FAQ</a> · <a href="/contact.html">Contact</a> · <a href="/server-access/">Connect</a> · <a href="https://github.com/linckosz/moonlight-web" target="_blank" rel="noopener" data-umami-event="github" data-umami-event-loc="footer">GitHub</a> · <a href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-umami-event="buy-me-a-coffee" data-umami-event-loc="footer" class="bmc-link"><span data-bmc-logo></span><span>Coffee</span></a></span></div></footer>
+<footer id="site-footer"><div class="wrap"><span><img src="/assets/icon-192.png" alt="" width="18" height="18" style="border-radius:4px;vertical-align:-3px;margin-right:6px"> MoonlightWeb · © 2026 Bruno Martin · GPL‑3.0</span><span><a href="/">Home</a> · <a href="/guides/">Guides</a> · <a href="/faq.html">FAQ</a> · <a href="/contact.html">Contact</a> · <a href="/server-access/">Connect</a> · <a href="https://github.com/linckosz/moonlight-web" target="_blank" rel="noopener" data-umami-event="github" data-umami-event-loc="footer">GitHub</a> · <a href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-umami-event="buy-me-a-coffee" data-umami-event-loc="footer" class="bmc-link"><span data-bmc-logo></span><span>Coffee</span></a></span><span class="foot-play">Play from: <a href="/play/chromebook.html">Chromebook</a> · <a href="/play/iphone-ipad.html">iPhone &amp; iPad</a> · <a href="/play/tv.html">TV</a> · <a href="/sunshine-web-client.html">Sunshine web client</a> · <a href="/browser-game-streaming.html">Why a browser client</a></span></div></footer>
 </div><!-- /#scroll -->
 
 <div id="lb"><img alt=""></div>

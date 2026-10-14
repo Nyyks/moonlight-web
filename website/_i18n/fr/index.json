@@ -96,10 +96,13 @@
   "dl.linux.aur": "Arch · Manjaro (AUR)",
   "dl.linux.docker": "Docker",
   "dl.linux.manual": "Plutôt apt/dnf à la main ? →",
-  "dl.foot": "Vous jouez depuis un téléphone, une tablette ou une TV ? Rien à télécharger — le client, c’est votre navigateur. <a href=\"https://github.com/linckosz/moonlight-web/releases\" target=\"_blank\" rel=\"noopener\" data-umami-event=\"download\" data-umami-event-loc=\"all-releases\">Toutes les versions →</a>",
+  "dl.foot": "Vous jouez depuis un <a href=\"play/iphone-ipad.html\">téléphone ou une tablette</a>, un <a href=\"play/chromebook.html\">Chromebook</a> ou une <a href=\"play/tv.html\">TV</a> ? Rien à télécharger — le client, c’est votre navigateur. <a href=\"https://github.com/linckosz/moonlight-web/releases\" target=\"_blank\" rel=\"noopener\" data-umami-event=\"download\" data-umami-event-loc=\"all-releases\">Toutes les versions →</a>",
   "cta.kicker": "Gratuit & open source",
   "cta.h2": "Appuyez sur play sur votre propre cloud.",
   "cta.p": "GPL‑3.0, auto‑hébergé, sans compte, sans abonnement. Développé par un contributeur de longue date de l’écosystème Moonlight. Un pourboire facultatif — le prix d’un café — aide à garder le domaine DNS partagé en ligne. ☕",
   "cta.btn1": "⭐ Star sur GitHub",
-  "cta.btn2": "Offrez‑moi un café"
+  "cta.btn2": "Offrez‑moi un café",
+  "dl.windows.guide": "Guide d’installation pas à pas →",
+  "dl.macos.guide": "Guide d’installation pas à pas →",
+  "dl.linux.guide": "Guide d’installation pas à pas →"
 }

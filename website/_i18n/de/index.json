@@ -96,10 +96,13 @@
   "dl.linux.aur": "Arch · Manjaro (AUR)",
   "dl.linux.docker": "Docker",
   "dl.linux.manual": "Lieber apt/dnf von Hand? →",
-  "dl.foot": "Du spielst auf Smartphone, Tablet oder TV? Nichts herunterzuladen — der Client ist dein Browser. <a href=\"https://github.com/linckosz/moonlight-web/releases\" target=\"_blank\" rel=\"noopener\" data-umami-event=\"download\" data-umami-event-loc=\"all-releases\">Alle Releases →</a>",
+  "dl.foot": "Du spielst auf <a href=\"play/iphone-ipad.html\">Smartphone oder Tablet</a>, <a href=\"play/chromebook.html\">Chromebook</a> oder <a href=\"play/tv.html\">TV</a>? Nichts herunterzuladen — der Client ist dein Browser. <a href=\"https://github.com/linckosz/moonlight-web/releases\" target=\"_blank\" rel=\"noopener\" data-umami-event=\"download\" data-umami-event-loc=\"all-releases\">Alle Releases →</a>",
   "cta.kicker": "Kostenlos & Open Source",
   "cta.h2": "Drück Play in deiner eigenen Cloud.",
   "cta.p": "GPL‑3.0, selbst gehostet, keine Konten, keine Abos. Entwickelt von einem langjährigen Mitwirkenden im Moonlight‑Ökosystem. Ein freiwilliges Trinkgeld — der Preis eines Kaffees — hilft, die gemeinsame DNS‑Domain online zu halten. ☕",
   "cta.btn1": "⭐ Star auf GitHub",
-  "cta.btn2": "Spendier mir einen Kaffee"
+  "cta.btn2": "Spendier mir einen Kaffee",
+  "dl.windows.guide": "Installationsanleitung Schritt für Schritt →",
+  "dl.macos.guide": "Installationsanleitung Schritt für Schritt →",
+  "dl.linux.guide": "Installationsanleitung Schritt für Schritt →"
 }

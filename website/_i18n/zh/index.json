@@ -96,10 +96,13 @@
   "dl.linux.aur": "Arch · Manjaro（AUR）",
   "dl.linux.docker": "Docker",
   "dl.linux.manual": "想手动用 apt/dnf？→",
-  "dl.foot": "用手机、平板或电视畅玩？无需下载——你的浏览器就是客户端。<a href=\"https://github.com/linckosz/moonlight-web/releases\" target=\"_blank\" rel=\"noopener\" data-umami-event=\"download\" data-umami-event-loc=\"all-releases\">全部版本 →</a>",
+  "dl.foot": "用<a href=\"play/iphone-ipad.html\">手机或平板</a>、<a href=\"play/chromebook.html\">Chromebook</a>或<a href=\"play/tv.html\">电视</a>畅玩？无需下载——你的浏览器就是客户端。<a href=\"https://github.com/linckosz/moonlight-web/releases\" target=\"_blank\" rel=\"noopener\" data-umami-event=\"download\" data-umami-event-loc=\"all-releases\">全部版本 →</a>",
   "cta.kicker": "免费 & 开源",
   "cta.h2": "在你自己的云上按下开始。",
   "cta.p": "GPL‑3.0、自托管、无需账户、无需订阅。由 Moonlight 生态的长期贡献者打造。一笔自愿打赏——一杯咖啡的价钱——有助于维持共享 DNS 域名的在线运行。☕",
   "cta.btn1": "⭐ 在 GitHub 上加星",
-  "cta.btn2": "请我喝杯咖啡"
+  "cta.btn2": "请我喝杯咖啡",
+  "dl.windows.guide": "分步安装指南 →",
+  "dl.macos.guide": "分步安装指南 →",
+  "dl.linux.guide": "分步安装指南 →"
 }
