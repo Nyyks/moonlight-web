@@ -192,15 +192,19 @@ division rounds down.
   within 0.2 %, the gate decides on the picture's own time: a present's, a
   pointer's wake-up. Otherwise it is today's gate, call for call.
 - The lattice's period and the gate's interval are the host's (its line
-  `cadence lock: period <ns> ns, interval <ns> ns`), else `--period-ns` and
-  `--interval-ns`, else one period of the display's rate and 1e6 / fps rounded
-  to the µs. A pointer alone goes through the gate when the pass drew it into
-  the picture (`--pointers auto|on|off`).
+  `cadence lock: period <ns> ns, interval <ns> ns`, the interval as its gate
+  held it: an aligned cadence's exact one, a ceiling's shortened one), else
+  `--period-ns` and `--interval-ns`, else one period of the display's rate and
+  1e6 / fps rounded to the µs. A pointer alone goes through the gate when the
+  pass drew it into the picture (`--pointers auto|on|off`).
 
 `--parity` says how many of the pictures the host's gate took (the trace's
 `admit` rows) the replay takes too. On the passes of 13/10 the gate of today
 finds 97.8 to 99.7 % of them. A client on its vsync is the exception (31 %):
-the exact interval of its aligned cadence is in no log of that day. `--selftest` runs the golden train, a synthetic pass of
+the exact interval of its aligned cadence is in no log of that day. Since the
+lock's code (plan « glissade » P1), the `admit` rows also say whether the
+host's gate decided locked (`locked`) and the lattice's point nearest the
+picture (`latticeUs`). `--selftest` runs the golden train, a synthetic pass of
 known presents through the locked gate, and checks the counts that
 `test_cadence_lock.cpp` holds.
 

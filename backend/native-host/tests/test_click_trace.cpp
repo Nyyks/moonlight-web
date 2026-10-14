@@ -44,11 +44,11 @@ void run_click_trace_tests()
         const std::string csv = trace.csv();
         const std::string header =
             "kind,us,startUs,queuedUs,status,presentUs,presentRawUs,mouseUs,accumulated,"
-            "vblankUs,periodUs,composeUs,composedFrames,deliveredUs\n";
+            "vblankUs,periodUs,composeUs,composedFrames,deliveredUs,locked,latticeUs\n";
         CHECK_EQ(csv.substr(0, header.size()), header);
         CHECK_EQ(csv.substr(header.size()),
-                 std::string("press,1012,1000,,,,,,,,,,,\n"
-                             "capture,9000,2000,,ok,8500,8500,,1,8333,8333,8400,77,\n"));
+                 std::string("press,1012,1000,,,,,,,,,,,,,\n"
+                             "capture,9000,2000,,ok,8500,8500,,1,8333,8333,8400,77,,,\n"));
         CHECK_EQ(trace.rows(), size_t(2));
     }
 
@@ -69,7 +69,7 @@ void run_click_trace_tests()
         row.deliveredUs = 8900;
         trace.add(row);
         const std::string csv = trace.csv();
-        CHECK(csv.find("\ncapture,9000,8000,,ok,8500,8500,,2,8333,16667,,5,8900\n") !=
+        CHECK(csv.find("\ncapture,9000,8000,,ok,8500,8500,,2,8333,16667,,5,8900,,\n") !=
               std::string::npos);
     }
 
@@ -88,10 +88,22 @@ void run_click_trace_tests()
         trace.admit("grid", 2100, 2000);
         trace.admit("window", 6250, 6166);
         const std::string csv = trace.csv();
-        CHECK(csv.find("\nadmit,1000,,,press,,,,,,,,,\n") != std::string::npos);
-        CHECK(csv.find("\nadmit,2100,,,grid,2000,,,,,,,,\n") != std::string::npos);
-        CHECK(csv.find("\nadmit,6250,,,window,6166,,,,,,,,\n") != std::string::npos);
+        CHECK(csv.find("\nadmit,1000,,,press,,,,,,,,,,,\n") != std::string::npos);
+        CHECK(csv.find("\nadmit,2100,,,grid,2000,,,,,,,,,,\n") != std::string::npos);
+        CHECK(csv.find("\nadmit,6250,,,window,6166,,,,,,,,,,\n") != std::string::npos);
         CHECK_EQ(trace.rows(), size_t(3));
+    }
+
+    SECTION("ClickTrace — the gate locked on the display's presents, or not, and the lattice");
+    {
+        ClickTrace trace;
+        trace.admit("grid", 2100, 2000, 1, 2003);
+        trace.admit("window", 6250, 6166, 0, 6170);
+        trace.admit("grid", 9100, 9000, 0, 0);
+        const std::string csv = trace.csv();
+        CHECK(csv.find("\nadmit,2100,,,grid,2000,,,,,,,,,1,2003\n") != std::string::npos);
+        CHECK(csv.find("\nadmit,6250,,,window,6166,,,,,,,,,0,6170\n") != std::string::npos);
+        CHECK(csv.find("\nadmit,9100,,,grid,9000,,,,,,,,,0,\n") != std::string::npos);
     }
 
     SECTION("ClickTrace — past its bound, rows are counted and not kept");

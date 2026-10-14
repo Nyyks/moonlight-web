@@ -274,6 +274,10 @@ const char* const kUsage =
     "  inputadmitgap=<ms>  the least gap between two pictures, 0-50, decimals taken (the\n"
     "                    engine's own: half an interval for a client that paints at its\n"
     "                    vsync under twice the stream's rate, none otherwise)\n"
+    "  cadencelock=0|1   the stream's gate locked on the display's presents: its windows\n"
+    "                    open halfway between two of them, decided on each picture's own\n"
+    "                    present; the product's: off until the bench decides (Windows\n"
+    "                    host, Desktop Duplication; plan glissade)\n"
     "  sckdepth=<n>     ScreenCaptureKit's pool of surfaces (queueDepth), 1-8; 3 the\n"
     "                    product (macOS host; plan attente, AM2)\n"
     "  sckinterval=<us>  the least time between two ScreenCaptureKit frames, 0-100000;\n"
@@ -634,6 +638,10 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
         const double ms = value.toDouble(&ok);
         ok = ok && ms >= 0.0 && ms <= 50.0;
         tuning.inputAdmitGapUs = static_cast<int>(ms * 1000.0 + 0.5);
+    } else if (key == "cadencelock") {
+        const int v = value.toInt(&ok);
+        ok = ok && (v == 0 || v == 1);
+        tuning.cadenceLock = v;
     } else if (key == "sckdepth") {
         tuning.sckQueueDepth = value.toInt(&ok);
         ok = ok && tuning.sckQueueDepth >= 1 && tuning.sckQueueDepth <= 8;

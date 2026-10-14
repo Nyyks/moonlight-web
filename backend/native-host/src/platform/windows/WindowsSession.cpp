@@ -30,6 +30,7 @@
 #include "../../core/FrameCadence.h"
 #include "../../core/InputAdmit.h"
 #include "../../core/Log.h"
+#include "../../core/PresentLattice.h"
 #include "../../core/Probe.h"
 #include "../../core/RestartBackoff.h"
 #include "../../core/Selector.h"
@@ -366,6 +367,8 @@ public:
             m_CadenceFps = m_EncodeFps;
             log::info(line);
         }
+        armCadenceLock();
+        logCadenceLock("");
         if (m_InputAdmitOn) {
             const EncoderTuning& t = m_Config.tuning;
             InputAdmit::Settings admit;
@@ -1682,6 +1685,10 @@ private:
         log::info("[native] capture restarted at " + std::to_string(m_Capture->width()) + "x" +
                   std::to_string(m_Capture->height()) + ", streaming " +
                   std::to_string(m_Info.width) + "x" + std::to_string(m_Info.height));
+        // Another mode, another backend, or the same display after a wait:
+        // the presents' phase is not the one the lattice followed.
+        armCadenceLock();
+        logCadenceLock(" (a new lattice with the capture)");
         reportDisplayFormat();
         return Restart::Restarted;
     }
@@ -2216,8 +2223,28 @@ private:
         // window after a press on top of it (InputAdmit.h). Not
         // for a pointer that moved alone nor for a re-send: a window spent on
         // the cursor while the player aims would leave none for the shot.
+        //
+        // The stream's gate locks on the display's presents where it may
+        // (FrameCadence.h, PresentLattice.h): it then decides on the
+        // picture's own time, a present's, a pointer's wake-up or a re-send's
+        // now. Whether it could have is counted either way, for the bench's
+        // arm without the lock to say so too.
         auto gateSays = [&](const FrameStamps& stamps, bool present) -> bool {
-            const bool grid = gateNow->admit(stamps.convertedUs);
+            bool grid = false;
+            if (gateNow == &m_Cadence) {
+                m_GateCalls++;
+                if (m_Lattice.engaged() && m_Cadence.lockRatio(m_Lattice.periodNs()) > 0)
+                    m_LockableCalls++;
+                grid = m_LockArmed
+                           ? m_Cadence.admit(stamps.convertedUs, stamps.presentUs, m_Lattice.view())
+                           : m_Cadence.admit(stamps.convertedUs);
+                if (m_Cadence.lastRule() == FrameCadence::Rule::Empty)
+                    m_LockedAfterEmpty++;
+                else if (m_Cadence.lastRule() == FrameCadence::Rule::Pause)
+                    m_LockedAfterPause++;
+            } else {
+                grid = gateNow->admit(stamps.convertedUs);
+            }
             if (!present) return grid;
             InputAdmit::Verdict verdict =
                 grid ? InputAdmit::Verdict::Grid : InputAdmit::Verdict::Skip;
@@ -2247,9 +2274,14 @@ private:
                     m_InputAdmit.gapFor(m_ClientMilliHz.load(), m_ClientVsync.load(), intervalUs),
                     linkOk, encoderOk);
             }
-            if (verdict != InputAdmit::Verdict::Skip && m_Config.tuning.clickTrace)
+            if (verdict != InputAdmit::Verdict::Skip && m_Config.tuning.clickTrace) {
+                const bool locked = gateNow == &m_Cadence && m_Cadence.lastLocked();
+                const int64_t latticeUs =
+                    m_Lattice.started() ? m_Lattice.view().slotNs(stamps.presentUs * 1000) / 1000
+                                        : 0;
                 m_ClickTrace.admit(verdict == InputAdmit::Verdict::Window ? "window" : "grid",
-                                   stamps.convertedUs, stamps.presentUs);
+                                   stamps.convertedUs, stamps.presentUs, locked ? 1 : 0, latticeUs);
+            }
             return verdict != InputAdmit::Verdict::Skip;
         };
         auto emitPicture = [&](const FrameStamps& stamps, bool present) -> bool {
@@ -2340,6 +2372,8 @@ private:
                     log::info(line + (!stepMoved ? " (client screen changed mid-session)"
                                       : step > 0 ? " (step asked by the client's detection)"
                                                  : " (back to the client's own rate)"));
+                    // The lattice stays: it is the display's, not the gate's.
+                    logCadenceLock(" (a new gate)");
                     if (effective.retarget(fps))
                         applyBitrate(boosted ? encode::stillBitrateKbps(baseKbps) : baseKbps);
                 } else if (m_Config.tuning.cadence != EncoderTuning::Cadence::Default) {
@@ -2701,6 +2735,8 @@ private:
             }
 
             m_PresentsSeen++;
+            // Before the gate decides on it, skipped or not.
+            noteLattice(frame.presentUs);
             const int64_t submittedUs = steadyNowUs();
 
             // See pointerToDraw(): an empty state draws nothing, which is how
@@ -3510,6 +3546,68 @@ private:
         m_PresentsPerSecond.store(m_PresentRate.perSecond(), std::memory_order_relaxed);
     }
 
+    /// A new lattice of the display's presents for the capture just opened,
+    /// and whether the stream's gate may lock on it (PresentLattice.h,
+    /// FrameCadence.h): at start, then at each restart of the capture. Its
+    /// period is the mode the duplication read, else the session's refresh,
+    /// which "Match my screen" leaves in whole hertz (239 for 239.757).
+    void armCadenceLock()
+    {
+        int64_t periodNs = m_Capture ? m_Capture->refreshPeriodNs() : 0;
+        if (periodNs < kLatticeMinPeriodNs || periodNs > kLatticeMaxPeriodNs)
+            periodNs = PresentLattice::periodNsFromMilliHz(m_DisplayMilliHz);
+        m_Lattice.restart(periodNs);
+        m_LockArmed = cadenceLockArmed(m_Config.tuning.cadenceLock, productCadence(),
+                                       m_CaptureApi == CaptureApi::DxgiDuplication, periodNs);
+    }
+
+    bool productCadence() const
+    {
+        return m_Config.tuning.cadence == EncoderTuning::Cadence::Default;
+    }
+
+    /// Whether the gate may lock on the display's presents, on how many
+    /// periods a picture, or why not: at start, at a new gate, at a new
+    /// capture (@p why).
+    void logCadenceLock(const char* why)
+    {
+        log::info("[native] cadence lock: " +
+                  cadenceLockText(m_Config.tuning.cadenceLock, productCadence(),
+                                  m_CaptureApi == CaptureApi::DxgiDuplication, m_Lattice.periodNs(),
+                                  m_Cadence) +
+                  why);
+    }
+
+    /// A real present's time, for the lattice, before the gate decides on
+    /// it. What it changed is said, the first five times and then one in
+    /// twenty. Capture thread.
+    void noteLattice(int64_t presentUs)
+    {
+        const PresentLattice::Change change = m_Lattice.note(presentUs * 1000);
+        if (change == PresentLattice::Change::None) return;
+        const int64_t said = m_LatticeLines++;
+        if (said >= 5 && said % 20 != 0) return;
+        if (change == PresentLattice::Change::Resynced) {
+            log::info("[native] cadence lock: the lattice's phase starts again on a present, "
+                      "after a pause");
+            return;
+        }
+        char offset[64];
+        std::snprintf(offset, sizeof(offset), "mean offset %.3f of a period, %lld µs",
+                      m_Lattice.sharpness(),
+                      static_cast<long long>(m_Lattice.meanOffsetNs() / 1000));
+        const bool locks = m_LockArmed && m_Cadence.lockRatio(m_Lattice.periodNs()) > 0;
+        if (change == PresentLattice::Change::Engaged)
+            log::info(std::string("[native] cadence lock: engaged, the display's presents keep to "
+                                  "its period (") +
+                      offset + ")" +
+                      (locks ? "; the gate locks on them" : "; the gate does not lock on them"));
+        else
+            log::info(std::string("[native] cadence lock: let go, the display's presents stray "
+                                  "from its period (") +
+                      offset + ")" + (locks ? "; the gate is today's again" : ""));
+    }
+
     /// A step of "Auto"'s detection came into force, or went (0): counted for
     /// the session's last cadence line. Capture thread.
     void noteStep(int step)
@@ -3552,6 +3650,45 @@ private:
             line += ", every one carried";
         }
         log::info(line);
+
+        // The lattice of the display's presents (plan « glissade »). Its
+        // period and the gate's interval come first, exact: the bench's
+        // replay reads them (gatesim.py). Then what the gate decided on it —
+        // or would have, in the bench's arm without the lock.
+        if (m_Lattice.taken() > 0) {
+            const int64_t periodNs = m_Lattice.periodNs();
+            const int64_t n = m_Cadence.lockRatio(periodNs);
+            char share[96];
+            std::snprintf(share, sizeof(share), "%.1f %% of the gate's %lld calls %s",
+                          m_GateCalls > 0 ? 100.0 * static_cast<double>(m_LockableCalls) /
+                                                static_cast<double>(m_GateCalls)
+                                          : 0.0,
+                          static_cast<long long>(m_GateCalls),
+                          m_LockArmed ? "locked" : "would have been locked");
+            char engaged[64] = "never engaged";
+            if (m_Lattice.firstEngagedNs() >= 0)
+                std::snprintf(
+                    engaged, sizeof(engaged), "engaged %.2f s after the first present",
+                    static_cast<double>(m_Lattice.firstEngagedNs() - m_Lattice.firstNs()) / 1e9);
+            char sharp[64] = "no sharpness yet";
+            if (m_Lattice.sharpness() >= 0)
+                std::snprintf(sharp, sizeof(sharp), "sharpness %.3f (mean offset %lld µs)",
+                              m_Lattice.sharpness(),
+                              static_cast<long long>(m_Lattice.meanOffsetNs() / 1000));
+            log::info("[native] cadence lock: " + cadenceLockHead(periodNs, m_Cadence) + ", " +
+                      (n > 0 ? std::to_string(n) + " periods a picture"
+                             : std::string("no whole number of periods a picture")) +
+                      "; " +
+                      cadenceLockState(m_Config.tuning.cadenceLock, productCadence(),
+                                       m_CaptureApi == CaptureApi::DxgiDuplication, periodNs) +
+                      ": " + share + ", " + std::to_string(m_LockedAfterEmpty) +
+                      " after an empty window, " + std::to_string(m_LockedAfterPause) +
+                      " after a pause; " + engaged + "; " +
+                      std::to_string(m_Lattice.engagements()) + " engaged, " +
+                      std::to_string(m_Lattice.releases()) + " let go, " +
+                      std::to_string(m_Lattice.resyncs()) + " resyncs, " +
+                      std::to_string(m_Lattice.restarts()) + " new lattices; " + sharp);
+        }
 
         // The admission window after a press: the pictures it added, and what
         // kept it from adding more.
@@ -3696,6 +3833,23 @@ private:
     /// client's screen changes (chooseCadence). The encoder never follows it
     /// — its budget does, through EffectiveCadence::retarget.
     int m_CadenceFps = 0;
+    /// The display's presents as a lattice of its refresh (PresentLattice.h),
+    /// fed by the loop, a new one with each capture (armCadenceLock), and
+    /// whether the gate may lock on it. For the log: the gate's calls, those
+    /// it decided locked — or would have, the key off — the locked pictures
+    /// after an empty window and after a pause, the lattice's lines said.
+    /// Capture thread once the loop runs.
+    PresentLattice m_Lattice;
+    bool m_LockArmed = false;
+    int64_t m_GateCalls = 0;
+    int64_t m_LockableCalls = 0;
+    int64_t m_LockedAfterEmpty = 0;
+    int64_t m_LockedAfterPause = 0;
+    int64_t m_LatticeLines = 0;
+    /// The periods a display's mode is taken at for the lattice: 1000 Hz to
+    /// 1 Hz. Anything else is a mode DXGI does not know.
+    static constexpr int64_t kLatticeMinPeriodNs = 1000000;
+    static constexpr int64_t kLatticeMaxPeriodNs = 1000000000;
     /// The admission window after a press (InputAdmit.h) may serve this
     /// session's client; set once in the constructor. Its presses come in on
     /// the input thread (sendInput), its pictures are the capture thread's.

@@ -197,13 +197,15 @@ class Gate:
 
     def __init__(self, fps, display_hz, rule="now", interval_ns=None):
         self.interval_ns = (1000000 // fps) * 1000
-        if interval_ns:
-            # FrameCadence::fromIntervalNs: a cadence aligned on a client that
-            # paints on its vsync, an exact multiple of its measured period.
-            self.interval_ns = int(interval_ns)
         self.ceiling = fps >= display_hz
         if self.ceiling:
             self.interval_ns = self.interval_ns * self.CEILING_HEADROOM // (self.CEILING_HEADROOM + 1)
+        if interval_ns:
+            # The interval as the host's gate held it (its end-of-session line):
+            # a cadence aligned on a client that paints on its vsync, an exact
+            # multiple of its measured period (FrameCadence::fromIntervalNs),
+            # or a ceiling's, already shortened.
+            self.interval_ns = int(interval_ns)
         self.reanchor_ns = (1000000 // display_hz) * 1000
         interval_us = self.interval_ns // 1000
         self.slack_us = interval_us if self.ceiling else interval_us // self.SLACK_DIVISOR
@@ -770,25 +772,28 @@ GOLDEN = {
 def guard_case():
     """The guard, built by hand: it acts only when a window's start is off the
     lattice's halfway points (an engagement, a resync) and the picture comes in
-    its window's last sliver. Presents on an exact 240 Hz lattice engage it; the
-    grid is then left 0.7 of a period past a present, as today's gate can leave
-    it; a present 0.4 period early on its refresh comes in the sliver. The
-    nearest halfway point one interval on lies before that present, so the
-    next window starts half a period after the present's refresh instead.
-    Returns (the next window's start, the present's refresh, the guard's start)
-    in ns, from the lattice's first present."""
+    its window's last sliver. Today's gate, before the lattice engaged,
+    restarted its grid on a call at 323.75 ms: its next window starts 0.7 of a
+    period past a present of the 240 Hz lattice that the presents then engage.
+    A present 0.4 period early on its refresh comes in the sliver. The nearest
+    halfway point one interval on lies before that present, so the next window
+    starts half a period after the present's refresh instead. Returns whether
+    it was admitted, whether the lattice was engaged, and in ns the next
+    window's start, the present's refresh and the nearest halfway point.
+    test_cadence_lock.cpp builds the same case."""
     t = period_ns_from_rational(240, 1)
     lattice = Lattice(t)
     gate = Gate(60, 240)
+    gate.admit(323750)
+    before = gate.next_due_ns - gate.slack_us * 1000
     for k in range(80):
         lattice.note(k * t)
-    gate.next_due_ns = 80 * t + 7 * t // 10 + gate.slack_us * 1000
     present_us = (84 * t + 6 * t // 10) // 1000
     lattice.note(present_us * 1000)
     admitted = gate.admit(present_us, present_us, lattice)
     start = gate.next_due_ns - gate.slack_us * 1000
     slot = lattice.slot_ns(present_us * 1000)
-    return admitted, lattice.engaged, start, slot, lattice.mid_ns(84 * t + 7 * t // 10)
+    return admitted, lattice.engaged, start, slot, lattice.mid_ns(before + 4 * t)
 
 
 def selftest():

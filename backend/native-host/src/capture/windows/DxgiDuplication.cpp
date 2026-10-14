@@ -18,6 +18,7 @@
 #include "DxgiDuplication.h"
 
 #include "../../core/Log.h"
+#include "../../core/PresentLattice.h"
 #include "CursorShape.h"
 
 #include <chrono>
@@ -189,6 +190,11 @@ bool DxgiDuplication::start(std::string& error)
     m_Duplication->GetDesc(&duplDesc);
     m_Width = static_cast<int>(duplDesc.ModeDesc.Width);
     m_Height = static_cast<int>(duplDesc.ModeDesc.Height);
+    // The mode's refresh as a rational, for the lattice the stream's gate
+    // locks on: 239.757 Hz where the session's own figure, after "Match my
+    // screen", says 239.
+    const DXGI_RATIONAL rate = duplDesc.ModeDesc.RefreshRate;
+    m_RefreshPeriodNs = PresentLattice::periodNsFromRational(rate.Numerator, rate.Denominator);
 
     // ⚠️ ModeDesc.Format is the DISPLAY MODE's format, not the duplication's
     // output format. The two agree only because the list above never makes
@@ -219,12 +225,17 @@ bool DxgiDuplication::start(std::string& error)
     m_QpcOrigin = qpcNow.QuadPart;
     m_SteadyOriginUs = steadyNowUs();
 
+    char hz[48] = "";
+    if (m_RefreshPeriodNs > 0)
+        std::snprintf(hz, sizeof(hz), ", mode at %.3f Hz",
+                      1e9 / static_cast<double>(m_RefreshPeriodNs));
     log::info("[native] duplication started: " + std::to_string(m_Width) + "x" +
               std::to_string(m_Height) +
               (m_Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? " (HDR, FP16)"
                : m_Format == DXGI_FORMAT_B8G8R8A8_UNORM
                    ? " (SDR, BGRA8)"
-                   : " (format " + std::to_string(static_cast<int>(m_Format)) + ")"));
+                   : " (format " + std::to_string(static_cast<int>(m_Format)) + ")") +
+              hz);
     return true;
 }
 
@@ -473,6 +484,7 @@ void DxgiDuplication::stop()
     m_Device.Reset();
     m_Width = 0;
     m_Height = 0;
+    m_RefreshPeriodNs = 0;
 }
 
 } // namespace mw::native::capture

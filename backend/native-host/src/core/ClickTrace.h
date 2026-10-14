@@ -59,7 +59,11 @@
 //    `us`; "grid" or "window" for each present encoded, the gate's or the
 //    window's, at the moment the loop decided, with its `presentUs`. The
 //    gate's own on every pass, the window's with inputadmit=1: the bench
-//    tells the pictures the window added from the stream's.
+//    tells the pictures the window added from the stream's. For a present,
+//    `locked` 1 when the gate decided on it locked on the display's presents
+//    (plan « glissade », FrameCadence.h), 0 when not, and `latticeUs` the
+//    point of the presents' lattice nearest it (core/PresentLattice.h),
+//    empty before the lattice has a present.
 //
 // A field the platform cannot tell is left empty. Only the first kMaxRows rows
 // are kept: minutes of a bench pass, not a session left running.
@@ -93,6 +97,9 @@ public:
         int64_t composeUs = 0;
         int64_t composedFrames = -1;
         int64_t deliveredUs = 0;
+        /// Admit: whether the gate decided locked (1) or not (0); -1 empty.
+        int locked = -1;
+        int64_t latticeUs = 0;
     };
 
     static constexpr size_t kMaxRows = size_t(1) << 18;
@@ -119,14 +126,18 @@ public:
     }
 
     /// @p status "press", "grid" or "window", at @p us; @p presentUs the
-    /// picture's present, 0 for a press. @p status must outlive the trace.
-    void admit(const char* status, int64_t us, int64_t presentUs)
+    /// picture's present, 0 for a press; @p locked and @p latticeUs as the
+    /// columns say (-1 and 0: empty). @p status must outlive the trace.
+    void admit(const char* status, int64_t us, int64_t presentUs, int locked = -1,
+               int64_t latticeUs = 0)
     {
         Row row;
         row.kind = Kind::Admit;
         row.us = us;
         row.status = status;
         row.presentUs = presentUs;
+        row.locked = locked;
+        row.latticeUs = latticeUs;
         add(row);
     }
 
@@ -146,7 +157,8 @@ public:
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         std::string out = "kind,us,startUs,queuedUs,status,presentUs,presentRawUs,mouseUs,"
-                          "accumulated,vblankUs,periodUs,composeUs,composedFrames,deliveredUs\n";
+                          "accumulated,vblankUs,periodUs,composeUs,composedFrames,deliveredUs,"
+                          "locked,latticeUs\n";
         out.reserve(out.size() + m_Rows.size() * 96);
         const auto num = [&out](int64_t v, bool known) {
             if (known) out += std::to_string(v);
@@ -167,7 +179,9 @@ public:
             num(r.periodUs, r.periodUs != 0);
             num(r.composeUs, r.composeUs != 0);
             num(r.composedFrames, r.composedFrames >= 0);
-            if (r.deliveredUs != 0) out += std::to_string(r.deliveredUs);
+            num(r.deliveredUs, r.deliveredUs != 0);
+            num(r.locked, r.locked >= 0);
+            if (r.latticeUs != 0) out += std::to_string(r.latticeUs);
             out += '\n';
         }
         return out;

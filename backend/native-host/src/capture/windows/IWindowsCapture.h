@@ -146,6 +146,11 @@ public:
     /// sum since start(), or -1 where the capture cannot tell.
     virtual int64_t foldedPresents() const { return -1; }
 
+    /// The display's refresh period as the mode this capture opened on says,
+    /// in ns — for the lattice the stream's gate locks on
+    /// (core/PresentLattice.h). 0 where the capture cannot tell.
+    virtual int64_t refreshPeriodNs() const { return 0; }
+
 protected:
     IWindowsCapture() = default;
 };

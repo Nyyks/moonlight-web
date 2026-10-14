@@ -77,6 +77,8 @@ public:
     int cursorHotspotY() const override { return m_CursorHotspotY; }
     bool pointerPaintedIn() const override { return m_PaintedPointer.paintedIn(); }
     int64_t foldedPresents() const override { return m_FoldedPresents; }
+    /// From the duplication's ModeDesc.RefreshRate, read at each start().
+    int64_t refreshPeriodNs() const override { return m_RefreshPeriodNs; }
 
     /// Whether the last start() was refused for a reason that can pass, so
     /// that a later one may succeed: the secure desktop below SYSTEM
@@ -134,6 +136,7 @@ private:
 
     int m_Width = 0;
     int m_Height = 0;
+    int64_t m_RefreshPeriodNs = 0;
     DXGI_FORMAT m_Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     DesktopRect m_DesktopRect;
 

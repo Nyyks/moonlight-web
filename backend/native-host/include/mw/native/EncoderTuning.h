@@ -468,6 +468,14 @@ struct EncoderTuning
     /// engine's own, half an interval for a client that paints at its vsync
     /// under twice the stream's rate, none otherwise.
     int inputAdmitGapUs = -1;
+    /// The stream's gate locked on the display's presents (plan « glissade »,
+    /// 14/10/2026; src/core/PresentLattice.h): its windows open halfway
+    /// between two presents, decided on each picture's own present, while
+    /// the presents keep to the display's refresh and the interval is N >= 2
+    /// refreshes. Windows host, Desktop Duplication, the product's cadence.
+    /// -1, the product: off until the bench decides (kCadenceLockProduct);
+    /// 0: off; 1: on. The lattice is kept and logged whatever this says.
+    int cadenceLock = -1;
     /// ScreenCaptureKit's pool of surfaces (SCStreamConfiguration.queueDepth,
     /// macOS host; plan « attente », AM2). 0, the product: 3.
     int sckQueueDepth = 0;
@@ -584,7 +592,7 @@ struct EncoderTuning
                sctpBufferKb == 0 && linkHoldMs == 0 && sctpMaxBurst < 0 && sctpScheduler < 0 &&
                sctpMtu == 0 && !audioLog && audioFrameMs == 0 && audioGraceUs < 0 && !clickTrace &&
                inputAdmit < 0 && inputAdmitMs == 0 && inputAdmitBurst == 0 && inputAdmitRate == 0 &&
-               inputAdmitMax == 0 && inputAdmitGapUs < 0 && sckQueueDepth == 0 &&
+               inputAdmitMax == 0 && inputAdmitGapUs < 0 && cadenceLock < 0 && sckQueueDepth == 0 &&
                sckMinIntervalUs < 0;
     }
 
@@ -719,6 +727,7 @@ struct EncoderTuning
         }
         if (inputAdmitMax > 0) add("inputadmitmax=" + std::to_string(inputAdmitMax));
         if (inputAdmitGapUs >= 0) add("inputadmitgap=" + std::to_string(inputAdmitGapUs) + "us");
+        if (cadenceLock >= 0) add("cadencelock=" + std::to_string(cadenceLock));
         if (sckQueueDepth > 0) add("sckdepth=" + std::to_string(sckQueueDepth));
         if (sckMinIntervalUs >= 0) add("sckinterval=" + std::to_string(sckMinIntervalUs));
         return s;
