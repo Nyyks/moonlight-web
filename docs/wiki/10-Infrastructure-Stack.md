@@ -62,6 +62,7 @@ The official image already ships `pdns.conf`, the gsqlite3 schema and the API wi
 - **`pdns/init.sh`** — idempotent zone bootstrap run as entrypoint (then `exec`s the official wrapper):
   - creates the zone if absent with A records for `@`, `www`, `stats`, `stream`, `stream.dev`, `ns1`, `ns2`, `api`, `dnsapi`, `updates`, `metrics` → `MW_PUBLIC_IP`, NS records, then `secure-zone` (DNSSEC) + `rectify-zone`, and **prints the DS record** to submit to the registrar;
   - **backfills** missing records on pre-existing zones (`ensure_a` guards — note: a bare re-`add-record` would duplicate, hence the greps);
+  - states that the domain handles **no mail** — `TXT "v=spf1 -all"`, `_dmarc TXT "v=DMARC1; p=reject"`, null `MX 0 .` (RFC 7505) — so nobody can send phishing "from" it and get the domain onto a domain blocklist. Each is added only when its name has nothing of the kind (`ensure_rr`), so a fork that runs mail keeps its own records if it sets them before first boot;
   - replaces the image's placeholder SOA when found.
 
 The zone holds the stack's **own** names and nothing else: no instance is named in it, and no record is created at runtime on anyone's behalf. An instance is found through the introduction server, not through DNS — which is why enabling Internet Access publishes nothing and issues no certificate ([Overview §1.2](01-Overview.md#internet-access)).

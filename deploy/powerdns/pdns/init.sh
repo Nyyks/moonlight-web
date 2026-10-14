@@ -78,6 +78,27 @@ ensure_a stream # stream — rendezvous host: bootstrap page + /v1 API (0.3.0+)
 # a host moves rendezvous, STUN and the handed-out address together.
 ensure_a stream.dev
 
+# The domain sends and receives no mail. Saying so in DNS keeps anyone from
+# sending phishing "from" it, which is how a clean domain lands on a domain
+# blocklist (Spamhaus DBL): an SPF that authorises no sender, a DMARC that has
+# receivers reject what fails it, and a null MX (RFC 7505). Each is added only
+# when its name carries nothing of the kind, so a fork that runs mail on its
+# domain keeps its own records — it just has to set them before first boot.
+ensure_rr() {  # ensure_rr <name> <type> <content-substring> <content>
+    name="$1"; type="$2"; match="$3"; content="$4"
+    fqdn="$( [ "$name" = "@" ] && echo "$MW_DOMAIN" || echo "${name}.${MW_DOMAIN}" )"
+    if ! $PDNSUTIL list-zone "$MW_DOMAIN" 2>/dev/null \
+         | grep -iE "^${fqdn}\.?[[:space:]].*[[:space:]]${type}[[:space:]]" \
+         | grep -qF -- "$match"; then
+        echo "[mw] Adding missing ${type} record ${fqdn} -> ${content}"
+        $PDNSUTIL add-record "$MW_DOMAIN" "$name" "$type" "$content"
+        NEED_RECTIFY=1
+    fi
+}
+ensure_rr @      TXT 'v=spf1'   '"v=spf1 -all"'
+ensure_rr _dmarc TXT 'v=DMARC1' '"v=DMARC1; p=reject"'
+ensure_rr @      MX  ''         '0 .'   # any MX at all counts: mail is set up
+
 # Zones created before default-soa-content was set (zz-mw.conf) carry the image
 # placeholder SOA ("a.misconfigured.dns.server.invalid"); swap in a real one.
 if $PDNSUTIL list-zone "$MW_DOMAIN" 2>/dev/null | grep -q 'misconfigured\.dns\.server\.invalid'; then
