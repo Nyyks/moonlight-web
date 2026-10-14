@@ -58,6 +58,12 @@ const REQUEST_TIMEOUT_MS = 30000;
 const CONNECT_TIMEOUT_MS = 25000;
 
 /**
+ * How long the machine has to say something on the channel once the signalling
+ * line has gone from under a working tunnel. See _lineLost().
+ */
+const LINE_LOST_CHECK_MS = 5000;
+
+/**
  * The protocol revision this page speaks INSIDE /v1/, sent as `?v=` when it
  * asks for a machine. Not the app version: it moves only when this page starts
  * understanding something the introduction server can send, and every such
@@ -295,6 +301,9 @@ export class Tunnel {
         this._nextId = 1;
         this._pending = new Map(); // request id → { resolve, reject, head, chunks }
         this._sockets = new Map(); // socket id → TunnelSocket
+        // Frames received from the host, counted so that _lineLost() can tell a
+        // machine that is still there from a channel that only looks open.
+        this._framesIn = 0;
 
         /** Called with a short status word so a page can say what is happening. */
         this.onstatus = null;
@@ -351,13 +360,53 @@ export class Tunnel {
                     settle(new Error('The introduction server hung up.'));
                     return;
                 }
-                // The line dropped under a working tunnel. The host treats that
-                // as the browser leaving and takes its side down, so waiting for
-                // the data channel to notice would only add a silent gap first.
-                this._teardown('the introduction server hung up');
+                this._lineLost();
             };
             this._onChannelOpen = settle;
         });
+    }
+
+    /**
+     * The signalling line went away under a working tunnel — and the tunnel
+     * stays.
+     *
+     * It used to go down with the line, on the reasoning that the host takes a
+     * closed line for the browser leaving. That is true of one thing only: the
+     * introduction server telling the host this browser's session is over. The
+     * host does nothing to its tunnels when its OWN line drops. So when the
+     * server itself goes — a restart, a deploy, a reboot — both lines fall
+     * together, nobody tells the host anything, and the channel is still a
+     * perfectly good direct connection between the two machines. Tearing it
+     * down was the only thing that ended every session on the server's way out,
+     * the ones on the same LAN as their machine included, and every stream with
+     * them.
+     *
+     * Whether the host is still there is asked of the host, over the channel:
+     * one request, and any frame back within LINE_LOST_CHECK_MS settles it. Any
+     * frame, not the answer to that request in particular — the answer can be
+     * queued behind a large body the channel is still carrying. Silence means
+     * the line went because the network did, and the tunnel goes down as it
+     * always did. A host that did hear "the browser left" closes the channel
+     * itself, which ends it by the ordinary route below.
+     *
+     * The line is not dialled again. A new one would be a new session, with a
+     * new offer from the host for a connection this page already has.
+     */
+    _lineLost() {
+        console.warn('[MW] Keeping the tunnel without its signalling line — asking the machine');
+        const heard = this._framesIn;
+        this.fetch('/api/health').catch(() => {
+            /* only an occasion for the host to speak; the count is the verdict */
+        });
+        setTimeout(() => {
+            // Closed meanwhile: the channel's own close has said so already.
+            if (!this.connected) return;
+            if (this._framesIn > heard) {
+                console.info('[MW] The machine still answers — the tunnel carries on');
+                return;
+            }
+            this._teardown('the introduction server hung up and the machine went silent');
+        }, LINE_LOST_CHECK_MS);
     }
 
     /**
@@ -608,6 +657,7 @@ export class Tunnel {
     }
 
     _onChannelMessage(bytes) {
+        this._framesIn++;
         if (bytes.length < 5) return;
         const kind = bytes[0];
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
