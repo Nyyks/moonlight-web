@@ -696,9 +696,9 @@ void run_cadence_lock_tests()
     {
         CHECK(cadenceLockArmed(1, true, true, kT));
         CHECK(!cadenceLockArmed(0, true, true, kT));
-        // The product's: off until the bench decides (gate G2).
+        // The product's: on since the bench (gate G2).
         CHECK_EQ(cadenceLockArmed(-1, true, true, kT), mw::native::kCadenceLockProduct);
-        CHECK(!cadenceLockArmed(-1, true, true, kT));
+        CHECK(cadenceLockArmed(-1, true, true, kT));
         CHECK(!cadenceLockArmed(1, false, true, kT));
         CHECK(!cadenceLockArmed(1, true, false, kT));
         CHECK(!cadenceLockArmed(1, true, true, 0));
@@ -1036,8 +1036,8 @@ void run_cadence_lock_tests()
                  std::string("off (cadencelock=0) — it would be 4 periods of 4166666 ns a "
                              "picture; the lattice is kept for the log"));
         CHECK_EQ(cadenceLockText(-1, true, true, kT, at60),
-                 std::string("off until the bench decides — it would be 4 periods of 4166666 ns a "
-                             "picture; the lattice is kept for the log"));
+                 std::string("on — 4 periods of 4166666 ns a picture, once the display's presents "
+                             "keep to them"));
         CHECK_EQ(cadenceLockText(1, true, false, kT, at60),
                  std::string("off under Windows.Graphics.Capture — it would be 4 periods of "
                              "4166666 ns a picture; the lattice is kept for the log"));
@@ -1057,7 +1057,7 @@ void run_cadence_lock_tests()
                  std::string("on (cadencelock=1) — never for this gate, which encodes every "
                              "present; the lattice is kept for the log"));
         CHECK_EQ(cadenceLockState(1, true, true, kT), std::string("on (cadencelock=1)"));
-        CHECK_EQ(cadenceLockState(-1, true, true, kT), std::string("off until the bench decides"));
+        CHECK_EQ(cadenceLockState(-1, true, true, kT), std::string("on"));
         // gatesim.py's lock_line() reads this head, the aligned cadence's
         // exact interval with it.
         CHECK_EQ(cadenceLockHead(kT, at60), std::string("period 4166666 ns, interval 16666000 ns"));

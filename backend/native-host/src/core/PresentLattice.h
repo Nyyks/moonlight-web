@@ -288,9 +288,9 @@ private:
     int64_t m_FirstEngagedNs = 0;
 };
 
-/// What EncoderTuning::cadenceLock's -1, the product's, means: off until the
-/// bench decides (plan « glissade », gate G2).
-inline constexpr bool kCadenceLockProduct = false;
+/// What EncoderTuning::cadenceLock's -1, the product's, means: on since the
+/// bench (plan « glissade », gate G2, 14/10/2026).
+inline constexpr bool kCadenceLockProduct = true;
 
 /// Whether the stream's gate may lock on the lattice: the bench's key
 /// (@p mode, EncoderTuning::cadenceLock: -1 the product's, 0 off, 1 on); the

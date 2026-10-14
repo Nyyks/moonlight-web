@@ -419,7 +419,7 @@ inline std::string cadenceLockState(int mode, bool productCadence, bool duplicat
     if (!productCadence) return "off under a bench cadence";
     if (!duplication) return "off under Windows.Graphics.Capture";
     if (!cadenceLockArmed(mode, productCadence, duplication, periodNs))
-        return mode == 0 ? "off (cadencelock=0)" : "off until the bench decides";
+        return mode == 0 ? "off (cadencelock=0)" : "off";
     return mode == 1 ? "on (cadencelock=1)" : "on";
 }
 

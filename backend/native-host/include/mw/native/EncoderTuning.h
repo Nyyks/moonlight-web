@@ -473,7 +473,7 @@ struct EncoderTuning
     /// between two presents, decided on each picture's own present, while
     /// the presents keep to the display's refresh and the interval is N >= 2
     /// refreshes. Windows host, Desktop Duplication, the product's cadence.
-    /// -1, the product: off until the bench decides (kCadenceLockProduct);
+    /// -1, the product: on since the bench (kCadenceLockProduct, gate G2);
     /// 0: off; 1: on. The lattice is kept and logged whatever this says.
     int cadenceLock = -1;
     /// ScreenCaptureKit's pool of surfaces (SCStreamConfiguration.queueDepth,
