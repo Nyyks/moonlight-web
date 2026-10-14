@@ -18,6 +18,13 @@
   clip-path:polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }
 .btn-primary{background:linear-gradient(100deg,var(--cyan),#0fa8d6); color:#031017}
+
+/* The Buy Me a Coffee cup (chrome.js fills every [data-bmc-logo] slot): sized
+   on the text it sits beside, its outline in that text's colour. */
+[data-bmc-logo]{display:inline-flex}
+.bmc-logo{height:1.3em; width:auto; flex-shrink:0}
+.bmc-link{display:inline-flex; align-items:center; gap:.3em; vertical-align:bottom}
+.bmc-link .bmc-logo{height:1.15em}
 @media(hover:hover){
   .btn-primary:hover{filter:brightness(1.12); text-decoration:none; transform:translateY(-1px)}
 }

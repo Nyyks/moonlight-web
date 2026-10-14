@@ -511,7 +511,7 @@
       <strong>Free and open source. Nothing to install on the client. Just a URL.</strong></p>
     <div class="cta cta-hero">
       <a class="btn btn-primary" href="#download" data-i18n="hero.cta1" data-umami-event="download-cta" data-umami-event-loc="hero">Download free</a>
-      <a class="btn btn-yellow" href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-i18n="hero.cta2" data-umami-event="buy-me-a-coffee" data-umami-event-loc="hero">☕ Buy me a coffee</a>
+      <a class="btn btn-yellow" href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-umami-event="buy-me-a-coffee" data-umami-event-loc="hero"><span data-bmc-logo></span><span data-i18n="hero.cta2">Buy me a coffee</span></a>
     </div>
 
     <div class="flow reveal" aria-label="Your gaming PC streams over the Internet to any browser">
@@ -826,7 +826,7 @@
         Moonlight ecosystem. An optional tip — the price of a coffee — helps keep the shared DNS domain online. ☕</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/linckosz/moonlight-web" target="_blank" rel="noopener" data-i18n="cta.btn1" data-umami-event="github" data-umami-event-loc="cta">⭐ Star on GitHub</a>
-        <a class="btn btn-yellow" href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-i18n="cta.btn2" data-umami-event="buy-me-a-coffee" data-umami-event-loc="cta">☕ Buy me a coffee</a>
+        <a class="btn btn-yellow" href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-umami-event="buy-me-a-coffee" data-umami-event-loc="cta"><span data-bmc-logo></span><span data-i18n="cta.btn2">Buy me a coffee</span></a>
       </div>
     </div>
   </div>
@@ -1027,14 +1027,14 @@
   // EN is the default. Add a language: drop a dictionary here, register it in
   // DICTS, add a data-i18n-lang button, and a T.<code> block above.
   const FR = {
-    'nav.home':'Accueil', 'nav.guides':'Guides', 'nav.faq':'FAQ', 'nav.support':'☕ Un café', 'nav.contact':'Contact', 'nav.connect':'Se connecter',
+    'nav.home':'Accueil', 'nav.guides':'Guides', 'nav.faq':'FAQ', 'nav.support':'Un café', 'nav.contact':'Contact', 'nav.connect':'Se connecter',
     'nav.features':'Fonctionnalités', 'nav.showcase':'En images',
     'nav.how':'Comment ça marche', 'nav.download':'Télécharger',
 
     'hero.kicker':'100% web · open source · auto‑hébergé',
     'hero.h1':'Votre PC gamer.<br><span class="grad">Streamé dans le navigateur.</span>',
     'hero.lead':'MoonlightWeb streame votre PC gamer vers n’importe quel appareil doté d’un navigateur<br>téléphone, tablette, ordinateur, TV. <strong>Gratuit et open source. Rien à installer côté client. Juste une URL.</strong>',
-    'hero.cta1':'Télécharger gratuitement', 'hero.cta2':'☕ Offrez‑moi un café',
+    'hero.cta1':'Télécharger gratuitement', 'hero.cta2':'Offrez‑moi un café',
     'hud.k1':'Latence Wi‑Fi', 'hud.k2':'Résolution', 'hud.k3':'Fréquence',
     'hud.k4':'Codecs', 'hud.k5':'Install. client', 'hud.v3':'jusqu’à 240fps',
     'flow.pc':'<span>MoonlightWeb</span>',
@@ -1117,18 +1117,18 @@
 
     'cta.kicker':'Gratuit & open source', 'cta.h2':'Appuyez sur play sur votre propre cloud.',
     'cta.p':'GPL‑3.0, auto‑hébergé, sans compte, sans abonnement. Développé par un contributeur de longue date de l’écosystème Moonlight. Un pourboire facultatif — le prix d’un café — aide à garder le domaine DNS partagé en ligne. ☕',
-    'cta.btn1':'⭐ Star sur GitHub', 'cta.btn2':'☕ Offrez‑moi un café',
+    'cta.btn1':'⭐ Star sur GitHub', 'cta.btn2':'Offrez‑moi un café',
   };
 
   const ZH = {
-    'nav.home':'首页', 'nav.guides':'指南', 'nav.faq':'常见问题', 'nav.support':'☕ 咖啡', 'nav.contact':'联系', 'nav.connect':'连接主机',
+    'nav.home':'首页', 'nav.guides':'指南', 'nav.faq':'常见问题', 'nav.support':'咖啡', 'nav.contact':'联系', 'nav.connect':'连接主机',
     'nav.features':'功能', 'nav.showcase':'实拍',
     'nav.how':'工作原理', 'nav.download':'下载',
 
     'hero.kicker':'100% 网页 · 开源 · 自托管',
     'hero.h1':'你的游戏 PC。<br><span class="grad">串流到任意浏览器。</span>',
     'hero.lead':'MoonlightWeb 将你的游戏主机串流到任何带浏览器的设备<br>手机、平板、笔记本、电视。<strong>免费开源。客户端无需安装。只需一个网址。</strong>',
-    'hero.cta1':'免费下载', 'hero.cta2':'☕ 请我喝杯咖啡',
+    'hero.cta1':'免费下载', 'hero.cta2':'请我喝杯咖啡',
     'hud.k1':'Wi‑Fi 延迟', 'hud.k2':'分辨率', 'hud.k3':'帧率',
     'hud.k4':'编解码器', 'hud.k5':'客户端安装', 'hud.v3':'最高 240fps',
     'flow.pc':'<span>MoonlightWeb</span>',
@@ -1211,7 +1211,7 @@
 
     'cta.kicker':'免费 & 开源', 'cta.h2':'在你自己的云上按下开始。',
     'cta.p':'GPL‑3.0、自托管、无需账户、无需订阅。由 Moonlight 生态的长期贡献者打造。一笔自愿打赏——一杯咖啡的价钱——有助于维持共享 DNS 域名的在线运行。☕',
-    'cta.btn1':'⭐ 在 GitHub 上加星', 'cta.btn2':'☕ 请我喝杯咖啡',
+    'cta.btn1':'⭐ 在 GitHub 上加星', 'cta.btn2':'请我喝杯咖啡',
   };
 
   // Registered translation catalogs (EN = source HTML, so no entry needed).
