@@ -1,18 +1,10 @@
-/* Shared site chrome (header + footer) for every MoonlightWeb page.
+/* Shared behaviour of every MoonlightWeb page.
 
-   ONE source of truth for the nav / footer markup — injected into the
-   <header id="site-header"> and <footer id="site-footer"> placeholders that
-   each page carries. Add a nav link or change the footer here once and every
-   page updates; the two headers can never drift apart again.
-
-   LOAD ORDER MATTERS: include this as a *blocking* <script> placed AFTER the
-   placeholders but BEFORE the page's i18n script (the inline block on the
-   landing page, assets/i18n.js on the sub-pages). Both i18n systems snapshot
-   every [data-i18n] element and wire up #lang-select on load, so the markup
-   must already be in the DOM when they run. Styling lives in assets/chrome.css.
-
-   All URLs are absolute (/...) so the same markup works from / and from
-   /guides/. */
+   The header and footer themselves are plain HTML in each page, written by
+   scripts/website/build-site.mjs (edit them there): a search engine follows
+   the links of the HTML, not those a script adds. This file only adds what a
+   crawler does not need — the floating Discord button, the Buy Me a Coffee
+   logo — and drives the language switcher. Styling lives in assets/chrome.css. */
 (function () {
   /* The community server, in ONE place for the whole site — the floating
      Discord button below and nothing else reads it. Empty string means the
@@ -115,50 +107,6 @@
     '441 11.3264 31.1424 12.1854C31.4841 12.7706 31.5296 13.5536 31.4768 14.2148C31.4605 14.5029 31.3354 ' +
     '14.7739 31.127 14.9722H31.1277Z" fill="currentColor"/></svg>';
 
-  var header =
-    '<div class="wrap">' +
-      '<a class="brand" href="/">' +
-        '<img src="/assets/icon-192.png" alt="MoonlightWeb logo" width="28" height="28">' +
-        ' MOONLIGHTWEB' +
-      '</a>' +
-      '<nav aria-label="Main navigation">' +
-        '<a href="/" data-nav="home" data-i18n="nav.home">Home</a>' +
-        '<a href="/guides/" data-nav="guides" data-i18n="nav.guides">Guides</a>' +
-        '<a href="/faq.html" data-nav="faq" data-i18n="nav.faq">FAQ</a>' +
-        '<a href="/contact.html" data-nav="contact" data-i18n="nav.contact">Contact</a>' +
-        /* Opens a host by typing its code — for a device with no address bar,
-           which can reach this site from a search but cannot type the host's
-           link (Discord, 05/10/2026). */
-        '<a href="/server-access/" data-nav="connect" data-i18n="nav.connect">Connect</a>' +
-      '</nav>' +
-      /* Controls, not nav links — kept OUTSIDE <nav> so mobile can hoist them
-         onto the brand row (top right) while the links wrap to their own row. */
-      '<div class="hdr-actions">' +
-        '<span class="lang">' +
-          '<select id="lang-select" aria-label="Language" data-umami-event="lang">' +
-            '<option value="en">English</option>' +
-            '<option value="fr">Français</option>' +
-            '<option value="zh" lang="zh">中文</option>' +
-          '</select>' +
-        '</span>' +
-        '<a class="btn btn-primary gh-btn" href="https://github.com/linckosz/moonlight-web" target="_blank" rel="noopener" aria-label="GitHub" data-umami-event="github" data-umami-event-loc="nav">★ <span class="gh-label">GitHub</span></a>' +
-      '</div>' +
-    '</div>';
-
-  var footer =
-    '<div class="wrap">' +
-      '<span><img src="/assets/icon-192.png" alt="" width="18" height="18" style="border-radius:4px;vertical-align:-3px;margin-right:6px"> MoonlightWeb · © 2026 Bruno Martin · GPL‑3.0</span>' +
-      '<span>' +
-        '<a href="/" data-i18n="nav.home">Home</a> · ' +
-        '<a href="/guides/" data-i18n="nav.guides">Guides</a> · ' +
-        '<a href="/faq.html" data-i18n="nav.faq">FAQ</a> · ' +
-        '<a href="/contact.html" data-i18n="nav.contact">Contact</a> · ' +
-        '<a href="/server-access/" data-i18n="nav.connect">Connect</a> · ' +
-        '<a href="https://github.com/linckosz/moonlight-web" target="_blank" rel="noopener" data-umami-event="github" data-umami-event-loc="footer">GitHub</a> · ' +
-        '<a href="https://buymeacoffee.com/brunoocto" target="_blank" rel="noopener" data-umami-event="buy-me-a-coffee" data-umami-event-loc="footer" class="bmc-link"><span data-bmc-logo></span><span data-i18n="nav.support">Coffee</span></a>' +
-      '</span>' +
-    '</div>';
-
   /* Floating community button — bottom right of every page, above the fold and
      below it, because "where do I ask a question?" is asked at any point of a
      page and not only at its end (the footer already carries the links for the
@@ -176,8 +124,8 @@
     /* No visible label: the round blurple mark IS the label, exactly like the
        chat launchers this shape is borrowed from. title + aria-label carry the
        word for the tooltip and for a screen reader — just "Discord", which
-       needs no translation: the site's i18n only rewrites text nodes, never
-       attributes, so a sentence here would stay English on the FR/ZH pages. */
+       needs no translation, where a sentence would have to exist in every
+       language of the site. */
     fab.title = 'Discord';
     fab.setAttribute('aria-label', 'Discord');
     fab.setAttribute('data-umami-event', 'discord');
@@ -189,26 +137,32 @@
     document.body.appendChild(fab);
   }
 
-  var h = document.getElementById('site-header');
-  if (h) h.innerHTML = header;
-  var f = document.getElementById('site-footer');
-  if (f) f.innerHTML = footer;
-
   var slots = document.querySelectorAll('[data-bmc-logo]');
   for (var i = 0; i < slots.length; i++) slots[i].innerHTML = BMC_LOGO;
 
-  // Highlight the nav link for the current page (matches the old per-page
-  // aria-current="page"). Normalise "/index.html" and trailing "/" to "/".
-  var path = location.pathname.replace(/index\.html$/, '');
-  if (path === '' ) path = '/';
-  var active = path === '/' ? 'home'
-             : path.indexOf('/guides/') === 0 ? 'guides'
-             : /\/faq\.html$/.test(path) ? 'faq'
-             : /\/contact\.html$/.test(path) ? 'contact'
-             : path.indexOf('/server-access/') === 0 ? 'connect'
-             : null;
-  if (active && h) {
-    var link = h.querySelector('nav a[data-nav="' + active + '"]');
-    if (link) link.setAttribute('aria-current', 'page');
+  /* Language: every language has its own URL (/fr/…, /de/…, /zh/…), written
+     by scripts/website/build-site.mjs, and each <option> of the switcher
+     carries the address of this same page in its language. Picking one goes
+     there and remembers the choice; a later visit to a page in another
+     language comes back to the remembered one — a link from a search result
+     or from a friend lands on the reader's language, not on the link's.
+     Its own key: the old client-side switcher wrote 'mw_lang' = 'en' for every
+     visitor, chosen or not, and would send them all away from /de/ or /fr/. */
+  var PICK = 'mw_lang_pick';
+  var sel = document.getElementById('lang-select');
+  if (sel) {
+    var here = document.documentElement.lang;
+    var saved = null;
+    try { saved = localStorage.getItem(PICK); } catch (e) { /* private mode */ }
+    var want = saved && saved !== here && sel.querySelector('option[value="' + saved + '"]');
+    if (want) {
+      location.replace(want.dataset.href + location.hash);
+      return;
+    }
+    sel.addEventListener('change', function () {
+      var opt = sel.options[sel.selectedIndex];
+      try { localStorage.setItem(PICK, opt.value); } catch (e) { /* private mode */ }
+      location.href = opt.dataset.href + location.hash;
+    });
   }
 })();
