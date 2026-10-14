@@ -52,6 +52,7 @@ The rules (--variants, separated by spaces):
 
     python inputsim.py [--sections flag,target,game,display,spam,encode,release]
                        [--variants "base next 16.7 16.7,3,2"] [--dir bench-out/content-age]
+                       [--fps 60,120] [--rate 60]   (the flag's rates; the target's and game's)
 """
 import argparse
 import bisect
@@ -578,6 +579,8 @@ def main():
     ap.add_argument("--variants", help="the rules every section compares (default: each its own)")
     ap.add_argument("--proposal", default=PROPOSAL, help="the rule the encode and release sections try")
     ap.add_argument("--fps", default="60,120", help="the stream's rates for the flag section")
+    ap.add_argument("--rate", type=int, default=60,
+                    help="the stream's rate for the target and game sections")
     a = ap.parse_args()
     sections = a.sections.split(",")
 
@@ -590,9 +593,9 @@ def main():
     if "flag" in sections:
         section_flag(flag, rules(VARIANTS), [int(f) for f in a.fps.split(",")])
     if "target" in sections:
-        section_target(load(a.dir, TARGET_TAGS), rules("base 16.7 33,3,2,0,3 33,3,2,0,2"), 60)
+        section_target(load(a.dir, TARGET_TAGS), rules("base 16.7 33,3,2,0,3 33,3,2,0,2"), a.rate)
     if "game" in sections:
-        section_game(load(a.dir, GAME_TAGS), rules("base 16.7 25 33,3,2,0,3"), 60)
+        section_game(load(a.dir, GAME_TAGS), rules("base 16.7 25 33,3,2,0,3"), a.rate)
     if "display" in sections:
         section_display(flag, rules("base 16.7 33,3,2,0,3 33,3,2,0,2 25,3,2,8.3 33,3,2,8.3,3"), 60)
     if "spam" in sections:
