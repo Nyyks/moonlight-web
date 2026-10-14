@@ -211,6 +211,19 @@ public:
         Window,
     };
 
+    /// Whether the window serves this client, for the bench's @p mode
+    /// (EncoderTuning::inputAdmit: -1 the product, 0 off, 1 every client).
+    /// The product: a client whose tearing is real (@p tearingReal, Chromium
+    /// on Windows) and that does not paint at its vsync now (@p clientVsync,
+    /// which the client may change mid-session). On its vsync a client gained
+    /// nothing at 60 and 120 Hz and stepped over pictures on 12 to 21 % of
+    /// clicks; a client that tears at 60 Hz gained 7.6 ms (bench §8w.9).
+    static bool forClient(int mode, bool tearingReal, bool clientVsync)
+    {
+        if (mode >= 0) return mode == 1;
+        return tearingReal && !clientVsync;
+    }
+
     /// For a stream whose gate's interval is @p intervalUs.
     void configure(const Settings& settings, int64_t intervalUs)
     {

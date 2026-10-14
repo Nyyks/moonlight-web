@@ -597,7 +597,8 @@ int runStreamWorker(QCoreApplication& app)
     session->setSharedFeed(cfg["feedPipe"].toString(), cfg["feedToken"].toString().toLatin1(),
                            cfg["feedSlot"].toInt(-1));
     session->setClientPresentation(cfg["clientRefreshMilliHz"].toInt(0),
-                                   cfg["clientVsync"].toBool(false));
+                                   cfg["clientVsync"].toBool(false),
+                                   cfg["clientTearingReal"].toBool(false));
     // Absent (an older parent, or a rate the viewer named) → no ceiling, and
     // the cadence keeps every freedom it had.
     session->setMaxFps(cfg["fpsCeiling"].toInt(0));

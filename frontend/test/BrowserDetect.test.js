@@ -388,3 +388,43 @@ describe('BrowserDetect.supportsGamingMode', () => {
         expect(m.supportsGamingMode()).toBe(false);
     });
 });
+
+// The native host's admission window after a press serves a client whose
+// tearing is real: Chromium on Windows. Chromium on macOS tears into a
+// compositor that still waits for vsync; Linux was never measured.
+describe('BrowserDetect.CANVAS_TEARING_IS_REAL', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    async function realFor(userAgent) {
+        vi.resetModules();
+        vi.stubGlobal('navigator', { userAgent, maxTouchPoints: 0 });
+        const m = await import('../js/util/BrowserDetect.js');
+        return m.CANVAS_TEARING_IS_REAL;
+    }
+
+    it('Chrome and Edge on Windows', async () => {
+        expect(await realFor(UA.desktop)).toBe(true);
+        expect(
+            await realFor(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/141.0 Safari/537.36 Edg/141.0',
+            ),
+        ).toBe(true);
+    });
+
+    it('not Chrome on macOS or Linux, nor Firefox on Windows, nor a Windows tablet', async () => {
+        expect(
+            await realFor(
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/141.0 Safari/537.36',
+            ),
+        ).toBe(false);
+        expect(await realFor('Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0 Safari/537.36')).toBe(
+            false,
+        );
+        expect(
+            await realFor(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko Firefox/140.0',
+            ),
+        ).toBe(false);
+        expect(await realFor(UA.winTablet)).toBe(false);
+    });
+});

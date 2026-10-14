@@ -75,6 +75,7 @@ const RIDE_OUT_LOSS = true;
 
 import { loadOrCreateIdentity, rememberHostIdentity } from '../util/pairingCrypto.js';
 import {
+    CANVAS_TEARING_IS_REAL,
     decoderRidesOutGaps,
     decoderTakesReferenceRepairs,
     resolveTearing,
@@ -383,6 +384,10 @@ export class BackendClient {
                 // util/RefreshRate.js. Other hosts ignore both.
                 client_refresh_mhz: currentRefreshMilliHz(),
                 client_vsync: !resolveTearing(streamingSettings),
+                // And whether that tearing is real (Chromium on Windows): the
+                // native host then sends every picture for a moment after a
+                // press. Other hosts ignore it.
+                client_tearing_real: CANVAS_TEARING_IS_REAL,
                 ...streamingSettings,
             },
             // Fail fast if the backend hangs/crashes instead of waiting for the

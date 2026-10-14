@@ -172,6 +172,15 @@ struct SessionConfig
     /// on: the setting is followed as it is, which is the lowest latency.
     bool clientVsync = false;
 
+    /// True when the client's tearing is real: with clientVsync false, its
+    /// canvas shows each frame the moment it is drawn — Chromium on Windows.
+    /// A browser that tears into a compositor that waits for vsync anyway
+    /// (Chromium on macOS) or one not measured (Linux) says false, as does an
+    /// older frontend. The admission window after a press follows it
+    /// (EncoderTuning::inputAdmit): a client on its vsync gained nothing from
+    /// it and stepped over pictures (bench §8w.9).
+    bool clientTearingReal = false;
+
     /// True when the viewer cuts every decoded frame to the size the session
     /// announces (SessionInfo, DisplayFormat). An encoder that has to pad the
     /// frame past the picture says the picture in a field browsers skip — AV1's

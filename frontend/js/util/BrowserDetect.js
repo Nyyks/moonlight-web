@@ -423,6 +423,17 @@ export const SUPPORTS_CANVAS_TEARING =
     platform.type === 'desktop' && /chrome\/\d+/i.test(navigator.userAgent || '');
 
 /**
+ * True when tearing, once on, is real: a frame drawn is on the screen at once,
+ * mid-refresh. Chromium on Windows. Chromium on macOS asks for the same canvas
+ * and its compositor still shows each frame at the next vsync; on Linux it
+ * depends on the desktop and was never measured. The native host opens its
+ * admission window after a press only for such a client (bench §8w.9: a
+ * client on its vsync gained nothing from it and stepped over pictures).
+ */
+export const CANVAS_TEARING_IS_REAL =
+    SUPPORTS_CANVAS_TEARING && /windows nt/i.test(navigator.userAgent || '');
+
+/**
  * Resolve the effective "allow tearing" preference from a saved settings blob.
  *
  * Tearing is the DEFAULT wherever the platform can actually tear (Chromium

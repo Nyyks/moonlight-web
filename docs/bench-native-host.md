@@ -6684,8 +6684,9 @@ une fenêtre après chaque appui : §8w.
 
 ## 8w. Le clic à 60 i/s : une fenêtre d'admission après chaque appui (13-14/10/2026)
 
-Suite du §8v.5, plan « inputadmit ». La règle est derrière la clé de banc
-`inputadmit=1`, éteinte par défaut, sur l'hôte Windows seulement. Son code et
+Suite du §8v.5, plan « inputadmit ». La règle a été mesurée derrière la clé de
+banc `inputadmit=1`, sur l'hôte Windows seulement. Depuis le 14/10, elle est
+allumée par défaut pour un client dont le tearing est réel (§8w.7). Son code et
 ses gardes sont au §9.6.2 du design.
 
 ### 8w.1 Le rejeu, avant le code
@@ -6873,6 +6874,17 @@ Décisions de Bruno, le 14/10 :
   en vsync, qui attendaient F4 ;
 - F4, mesuré sur l'UM790Pro (§8w.9), propose de les laisser sans la clé.
 
+Le défaut, décidé par Bruno le 14/10 après F4 :
+- la règle est allumée pour un client dont le tearing est réel, Chromium sous
+  Windows, tant qu'il ne peint pas au vsync ;
+- elle reste éteinte en vsync, au rythme du flux comme au double, et pour
+  Chromium sous macOS et Linux. macOS compose chaque fenêtre au vsync, même
+  quand la page demande le tearing ; Linux n'a pas été mesuré ;
+- le navigateur envoie `client_tearing_real` au /start, sans rien de visible
+  dans l'interface ;
+- `inputadmit=0` ou `1` passe outre, pour le banc ;
+- l'essai à l'aveugle passe après la v0.4.0.
+
 ### 8w.8 Vu en route : la grille de la porte glisse le long des présentations
 
 Hors de ce chantier : c'est la porte d'aujourd'hui (§9.6.1 du design), avec ou
@@ -7030,8 +7042,8 @@ lien chargé, la règle s'efface d'elle-même. Rien ne change pour un flux déj�
 rythme de l'écran virtuel, ni pour les hôtes Linux et macOS. Sur un écran qui
 affiche en vsync (Mac, iPhone, iPad, ou un PC réglé ainsi), la règle n'apporte
 rien de mesurable et peut faire sauter une image juste après un clic : elle y
-restera éteinte. Pour l'instant, la clé est éteinte partout : personne ne voit
-de changement avant la décision de Bruno.
+reste éteinte. Elle est allumée par défaut pour Chrome et Edge sous Windows,
+avec « Autoriser le tearing » coché, ce qui est leur réglage d'origine.
 
 ## 9. Pour l'A/B
 

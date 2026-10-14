@@ -210,10 +210,13 @@ public:
     /// vsync (tearing off, or a browser that cannot tear). Only the native
     /// engine acts on it: a vsync client gets a stream cadence that divides
     /// its refresh, so frames land on its grid instead of beating against it.
-    void setClientPresentation(int refreshMilliHz, bool vsync)
+    /// @p tearingReal: its tearing shows each frame as it is drawn — see
+    /// SessionConfig::clientTearingReal.
+    void setClientPresentation(int refreshMilliHz, bool vsync, bool tearingReal)
     {
         m_ClientRefreshMilliHz = refreshMilliHz;
         m_ClientVsync = vsync;
+        m_ClientTearingReal = tearingReal;
     }
 
     /// A rate this session may not exceed, alignment included. "Auto" states
@@ -546,6 +549,7 @@ private:
     /// The client's screen at /start — see setClientPresentation.
     int m_ClientRefreshMilliHz = 0;
     bool m_ClientVsync = false;
+    bool m_ClientTearingReal = false;
 
     /// See setMaxFps.
     int m_MaxFps = 0;

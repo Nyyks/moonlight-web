@@ -273,6 +273,7 @@ void NativeMediaEngine::startCapture(const StartParams& params)
         config.clientRefreshMilliHz = params.clientRefreshMilliHz;
         config.clientVsync = params.clientVsync;
     }
+    config.clientTearingReal = params.clientTearingReal;
     // The client cuts each decoded frame to the size the session says.
     config.clientCropsToFrame = params.cropsToFrame;
 

@@ -437,4 +437,19 @@ void run_input_admit_tests()
                      firstPresent(r, 700000 + react));
         CHECK(r.window <= 3);
     }
+
+    SECTION("InputAdmit — the product's client: real tearing, not on its vsync");
+    {
+        // The product (-1): Chromium on Windows that tears, and nothing else.
+        CHECK(InputAdmit::forClient(-1, true, false));
+        CHECK(!InputAdmit::forClient(-1, true, true));
+        CHECK(!InputAdmit::forClient(-1, false, false));
+        CHECK(!InputAdmit::forClient(-1, false, true));
+        // The bench's keys: every client, or none.
+        for (bool real : {false, true})
+            for (bool vsync : {false, true}) {
+                CHECK(InputAdmit::forClient(1, real, vsync));
+                CHECK(!InputAdmit::forClient(0, real, vsync));
+            }
+    }
 }

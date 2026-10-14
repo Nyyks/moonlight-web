@@ -132,6 +132,9 @@ public:
         /// SessionConfig::clientRefreshMilliHz.
         int clientRefreshMilliHz = 0;
         bool clientVsync = false;
+        /// And whether its tearing is real — see
+        /// SessionConfig::clientTearingReal.
+        bool clientTearingReal = false;
         /// The viewer administers MoonlightWeb on this machine (reached it
         /// from the host itself, or unlocked the admin password). Anyone
         /// else is kept out of windows that run as administrator — see

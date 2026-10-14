@@ -3599,8 +3599,11 @@ int main(int argc, char* argv[])
             s->setCropsToFrame(body["crops_to_frame"].toBool(false));
             // The client's screen: its measured refresh and whether it paints
             // on vsync. Absent (an older frontend) → unknown, no alignment.
+            // And whether its tearing is real (Chromium on Windows): absent →
+            // no, and no admission window after a press.
             s->setClientPresentation(body["client_refresh_mhz"].toInt(0),
-                                     body["client_vsync"].toBool(false));
+                                     body["client_vsync"].toBool(false),
+                                     body["client_tearing_real"].toBool(false));
             // A rate chosen FOR the viewer states the ceiling it was chosen
             // against; one the viewer named states none.
             s->setMaxFps(reqFpsCeiling);
@@ -3758,6 +3761,7 @@ int main(int argc, char* argv[])
             cfg["fpsCeiling"] = reqFpsCeiling;
             cfg["clientRefreshMilliHz"] = body["client_refresh_mhz"].toInt(0);
             cfg["clientVsync"] = body["client_vsync"].toBool(false);
+            cfg["clientTearingReal"] = body["client_tearing_real"].toBool(false);
             cfg["followDisplayShape"] = body["follow_display_shape"].toBool(false);
             cfg["fitRequestedBox"] = reqFitBox;
             cfg["allowUpscale"] = reqAllowUpscale;

@@ -264,8 +264,9 @@ const char* const kUsage =
     "                    stamps, a CSV next to the log when the session ends (Windows\n"
     "                    and macOS hosts; plan attente, A0 and AM0)\n"
     "  inputadmit=0|1    for a moment after each press, every present the cadence gate\n"
-    "                    skips goes out all the same, its grid untouched (Windows host;\n"
-    "                    plan inputadmit)\n"
+    "                    skips goes out all the same, its grid untouched; 1 for every\n"
+    "                    client, 0 for none; the product: a client whose tearing is\n"
+    "                    real and that is not on its vsync (Windows host; inputadmit)\n"
     "  inputadmitms=<ms>  its window, 8-100 (33)\n"
     "  inputadmitburst=<n>  windows its bucket holds ahead, 1-20 (3)\n"
     "  inputadmitrate=<n>  windows its bucket gains a second, 0.1-50 (2)\n"
@@ -616,7 +617,7 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
     } else if (key == "inputadmit") {
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
-        tuning.inputAdmit = v == 1;
+        tuning.inputAdmit = v;
     } else if (key == "inputadmitms") {
         tuning.inputAdmitMs = value.toInt(&ok);
         ok = ok && tuning.inputAdmitMs >= 8 && tuning.inputAdmitMs <= 100;

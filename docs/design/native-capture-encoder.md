@@ -734,7 +734,7 @@ sa grille garde sa phase, ses fenêtres restent servies, rien n'est retenu.
     clics, sur 11,7 et 20,8 % des clics, sans gain démontré.
   - Au double du flux, elle ne fait pas de dégât, mais le client absorbe aussi
     son gain.
-  - Proposé : la règle seulement pour les clients qui déchirent.
+  - Le défaut l'y laisse donc éteinte (ci-dessous).
 - **Inerte** sous un plafond (flux au débit de l'écran ou au-dessus : tout passe
   déjà), sous une cadence de banc (`cadence=`), sous PyroWave (~267 Ko par
   image) et hors Windows.
@@ -743,8 +743,23 @@ sa grille garde sa phase, ses fenêtres restent servies, rien n'est retenu.
 ses octets, et le budget par image ne bouge pas. Au banc : 3 images de plus par
 clic, +3,3 % de débit à un clic par seconde, +10 à +12 % sous une rafale.
 
-**La clé** : `inputadmit=1` dans `MW_NATIVE_TUNING`, ou dans `native_tuning` du
-`settings.json` (banc §9). Les sous-clés : `inputadmitms=` (T, 8-100 ms),
+**Qui l'a, par défaut** (décision de Bruno, 14/10/2026) : un client dont le
+tearing est réel et qui ne peint pas au vsync en ce moment
+(`InputAdmit::forClient()`).
+- Le navigateur le dit au /start : `client_tearing_real`
+  (`CANVAS_TEARING_IS_REAL`, `BrowserDetect.js`), vrai pour Chromium sous
+  Windows. Il arrive à `SessionConfig::clientTearingReal`.
+- `client_vsync` (la case « Autoriser le tearing ») suit, au /start puis par
+  `clientrefresh` : un client qui passe au vsync en cours de session la perd.
+- Chromium sous macOS déchire dans un compositeur qui attend quand même le
+  vsync, et Linux n'a pas été mesuré : la règle y reste éteinte. Un frontend
+  plus ancien n'envoie pas le champ, et n'a pas la règle.
+- Le journal du worker dit au démarrage si la règle sert ce client, et
+  pourquoi pas.
+
+**La clé** : `inputadmit=0` l'éteint, `inputadmit=1` l'allume pour tout client
+(le banc), dans `MW_NATIVE_TUNING` ou dans `native_tuning` du `settings.json`
+(banc §9). Les sous-clés : `inputadmitms=` (T, 8-100 ms),
 `inputadmitburst=`, `inputadmitrate=`, `inputadmitmax=` (K) et `inputadmitgap=`
 (l'écart imposé, en ms).
 - Le journal du worker dit la règle au démarrage, et fait le compte en fin de
@@ -767,7 +782,7 @@ Aucune perte, aucune image clé, et la grille n'est pas touchée.
   −4,1 ms à 75 i/s, −3,7 à 90, −2,9 à 120, −1,2 à 145. Le coût reste d'environ
   3 images par clic.
 
-Le défaut de la clé est la décision de Bruno (porte G1).
+Le défaut, décidé par Bruno sur ces chiffres, est ci-dessus.
 
 ### 9.7 Écran verrouillé : la session attend, le stream reste vivant (02/09/2026)
 

@@ -249,11 +249,14 @@ public:
         , m_Target(target)
         , m_Callbacks(callbacks)
     {
-        // Not under a bench cadence, which says how the loop takes its
-        // pictures, nor under PyroWave, whose ~270 KB pictures at a fixed
-        // rate would load the link three at a time (plan « inputadmit »).
+        // The product's for a client whose tearing is real (Chromium on
+        // Windows), the bench's inputadmit=1 for every one. Not under a bench
+        // cadence, which says how the loop takes its pictures, nor under
+        // PyroWave, whose ~270 KB pictures at a fixed rate would load the
+        // link three at a time (plan « inputadmit »).
         const EncoderTuning& t = config.tuning;
-        m_InputAdmitOn = t.inputAdmit && t.cadence == EncoderTuning::Cadence::Default &&
+        m_InputAdmitOn = (t.inputAdmit == 1 || (t.inputAdmit < 0 && config.clientTearingReal)) &&
+                         t.cadence == EncoderTuning::Cadence::Default &&
                          t.enc12 != EncoderTuning::Encoder12::Pyrowave;
     }
 
@@ -374,16 +377,19 @@ public:
             m_InputAdmit.configure(admit, m_Cadence.intervalUs());
             char rate[16];
             std::snprintf(rate, sizeof(rate), "%g", admit.perSecond);
-            log::info("[native] input admit: for " +
-                      std::to_string(m_InputAdmit.windowUs() / 1000) +
-                      " ms after a press, every present goes, " + std::to_string(admit.maxExtra) +
-                      " more at most; a bucket of " + std::to_string(admit.burst) + " windows, " +
-                      rate + " more a second");
-        } else if (m_Config.tuning.inputAdmit) {
-            log::info(std::string("[native] input admit: off under ") +
-                      (m_Config.tuning.cadence != EncoderTuning::Cadence::Default
-                           ? "a bench cadence"
-                           : "PyroWave"));
+            log::info(
+                "[native] input admit: for " + std::to_string(m_InputAdmit.windowUs() / 1000) +
+                " ms after a press, every present goes, " + std::to_string(admit.maxExtra) +
+                " more at most; a bucket of " + std::to_string(admit.burst) + " windows, " + rate +
+                " more a second; " +
+                (t.inputAdmit == 1 ? "every client (inputadmit=1)" : "while the client tears"));
+        } else if (m_Config.tuning.inputAdmit != 0) {
+            const EncoderTuning& t = m_Config.tuning;
+            log::info(std::string("[native] input admit: off ") +
+                      (t.cadence != EncoderTuning::Cadence::Default ? "under a bench cadence"
+                       : t.enc12 == EncoderTuning::Encoder12::Pyrowave
+                           ? "under PyroWave"
+                           : "for a client whose tearing is not known to be real"));
         }
 
         // The client's own frame size is whatever it asked for, or the desktop
@@ -625,8 +631,8 @@ public:
         // uncontended in steady state, since the capture thread never touches
         // input at all.
         std::lock_guard<std::mutex> lock(m_InputMutex);
-        // inputadmit=1: the admission window after a press (InputAdmit.h) is
-        // told of each press before it goes to the OS. An atomic for the loop.
+        // The admission window after a press (InputAdmit.h) is told of each
+        // press before it goes to the OS. An atomic for the loop.
         if (m_InputAdmitOn && m_PressFilter.isPress(event)) {
             const int64_t nowUs = steadyNowUs();
             m_InputAdmit.notePress(nowUs);
@@ -2212,7 +2218,7 @@ private:
             return true;
         };
         // The gate's word on a picture, and for a @p present the admission
-        // window after a press on top of it (inputadmit=1, InputAdmit.h). Not
+        // window after a press on top of it (InputAdmit.h). Not
         // for a pointer that moved alone nor for a re-send: a window spent on
         // the cursor while the player aims would leave none for the shot.
         auto gateSays = [&](const FrameStamps& stamps, bool present) -> bool {
@@ -2221,9 +2227,12 @@ private:
             InputAdmit::Verdict verdict =
                 grid ? InputAdmit::Verdict::Grid : InputAdmit::Verdict::Skip;
             // Not under a ceiling — every refresh already goes — nor under the
-            // gate of a client that tears (cadence=deadline).
+            // gate of a client that tears (cadence=deadline), nor, the
+            // product's, while the client paints at its vsync.
             if (m_InputAdmitOn && gateNow == &m_Cadence && m_Cadence.enabled() &&
-                !m_Cadence.isCeiling()) {
+                !m_Cadence.isCeiling() &&
+                InputAdmit::forClient(m_Config.tuning.inputAdmit, m_Config.clientTearingReal,
+                                      m_ClientVsync.load())) {
                 const int64_t nowUs = stamps.convertedUs;
                 const int64_t intervalUs = m_Cadence.intervalUs();
                 // An encode slower than a refresh of the display: the window's
@@ -3549,8 +3558,8 @@ private:
         }
         log::info(line);
 
-        // The admission window after a press (inputadmit=1): the pictures it
-        // added, and what kept it from adding more.
+        // The admission window after a press: the pictures it added, and what
+        // kept it from adding more.
         if (m_InputAdmitOn) {
             const InputAdmit& a = m_InputAdmit;
             char rate[48];
@@ -3692,9 +3701,9 @@ private:
     /// client's screen changes (chooseCadence). The encoder never follows it
     /// — its budget does, through EffectiveCadence::retarget.
     int m_CadenceFps = 0;
-    /// inputadmit=1 (InputAdmit.h), set once in the constructor: the
-    /// admission window after a press. Its presses come in on the input
-    /// thread (sendInput), its pictures are the capture thread's.
+    /// The admission window after a press (InputAdmit.h) may serve this
+    /// session's client; set once in the constructor. Its presses come in on
+    /// the input thread (sendInput), its pictures are the capture thread's.
     bool m_InputAdmitOn = false;
     InputAdmit m_InputAdmit;
     /// The window's pictures when the gate was last replaced: those of the
@@ -3828,7 +3837,7 @@ private:
     /// because it is created and destroyed on the session's thread but used on
     /// the network thread.
     std::mutex m_InputMutex;
-    /// What is held, to tell a press from a repeat (inputadmit=1). Guarded by
+    /// What is held, to tell a press from a repeat (InputAdmit). Guarded by
     /// m_InputMutex.
     PressFilter m_PressFilter;
     /// The bench's click trace (clicktrace=1). Ahead of the sink, which writes
