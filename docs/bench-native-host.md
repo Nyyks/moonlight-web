@@ -6846,7 +6846,7 @@ a retenu ~350 images par passe ; en vsync, l'écart 186 à 190 et le lien 164 à
 | F1 : sans appui, rien ne change | ✓ | 0 fenêtre ; p1 des arrivées −1,2 ms (§8w.8) |
 | F2 : la grille garde son rythme | ✗ tel qu'écrit | pas la fenêtre (§8w.4, §8w.8) |
 | F3 : client qui déchire | ✓ | aucun double pas ; 1,5 % de rafraîchissements à deux dessins |
-| F4 : client à 60 Hz en vsync | non mesuré | N95 saturé |
+| F4 : client à 60 Hz en vsync | ✗ | doubles pas sur 0 → 11,7 % des clics ; aucun gain démontré (§8w.9) |
 | F5 : âge de l'image | ✓ | +0,1 ms en moyenne, +0,7 ms au p99 |
 | D1 : coût aux clics du banc | ✓ | 3,0 images par clic, +3,3 % ; aucune perte, aucune image clé |
 | D2 : rafale | ✓ | seau tenu ; +10 à +12 % ; jamais pire que A |
@@ -6866,6 +6866,12 @@ glissade de la grille fait davantage, sans aucune fenêtre (P2.2).
   le banc en voit bien moins.
 - Un essai à l'aveugle sur un vrai jeu.
 - Linux et macOS, dans un chapitre à part.
+
+Décisions de Bruno, le 14/10 :
+- la garde du lien reste telle quelle ;
+- la clé passera par défaut après son essai à l'aveugle, sauf pour les clients
+  en vsync, qui attendaient F4 ;
+- F4, mesuré sur l'UM790Pro (§8w.9), propose de les laisser sans la clé.
 
 ### 8w.8 Vu en route : la grille de la porte glisse le long des présentations
 
@@ -6890,10 +6896,127 @@ sans la fenêtre.
 - Ce que le client en voit :
   - en déchirement, chaque image arrive avec l'âge de son contenu : l'âge d'une
     image à la suivante ne bouge pas (§8w.4) ;
-  - en vsync à 60 Hz, chaque rafraîchissement ferait avancer le contenu de 12,5
-    ou de 20,8 ms au lieu de 16,7 : une saccade fine possible, pas mesurée.
+  - en vsync à 60 Hz, chaque rafraîchissement fait alors avancer le contenu de
+    12,5 ou de 20,8 ms au lieu de 16,7. Mesuré le 14/10 (§8w.9) : sans la
+    fenêtre, loin des clics, 6,8 % des rafraîchissements montrent un tel pas.
 - Piste : une hystérésis sur la phase, qui garde la même voisine tant que les
   deux restent dans l'irrégularité du bord. À rejouer avec `gatesim.py`.
+
+### 8w.9 Le client en vsync (F4, 14/10/2026, 02:45-03:36)
+
+**Le banc.** Même hôte, mêmes bras et même passe qu'au §8w.2. Le client est
+l'UM790Pro sous Windows, avec Chrome 155 maximisé sur le M27Q, son écran
+principal.
+- Chrome sous Windows bat au rythme de l'écran principal, pas de celui où est
+  sa fenêtre : sur l'écran virtuel de MTT passé seul à 60 Hz, son rAF restait à
+  8,3 ms. Les deux écrans de l'UM790Pro sont donc passés à 60 Hz pour la série,
+  puis revenus à 120 Hz. Bruno a donné son accord pour le mode du M27Q, pour ce
+  banc seulement.
+- Le rAF est contrôlé avant chaque passe : 16,7 ms à 60 Hz, 8,3 ms à 120 Hz.
+  L'hôte voit « a 60 Hz client presenting on vsync ».
+- Quatre séries, de deux passes par bras :
+  - client à 60 Hz qui déchire, flux à 60 i/s (`ia-um-t*`) ;
+  - client à 60 Hz en vsync, flux à 60 i/s (`ia-um-v[AB]*`) ;
+  - client à 120 Hz en vsync, flux à 120 i/s (`ia-um-v12*`) ;
+  - client à 120 Hz en vsync, flux à 60 i/s (`ia-um-v6*`).
+- Le lanceur `f4_series.py` et le découpage `f4_split.py` sont des scripts de
+  session, hors dépôt.
+
+**La mesure, en vsync.**
+- Le client garde chaque image décodée un ou deux rafraîchissements avant de la
+  dessiner, et cette file change d'une passe à l'autre. Elle fait 31 ms dans
+  vA1, 14 à 16 ms dans les trois autres passes à 60 Hz.
+- De bout en bout, vA1 a 14 ms de plus que vA2 pour cette seule raison.
+- Le clic est donc jugé jusqu'au décodage de l'image dessinée. En vsync, cette
+  mesure désavantage A' : le client ne dessine que la dernière image de chaque
+  rafraîchissement, et A' en envoie davantage autour du clic.
+
+| Client | Flux | Clic → image décodée, A → A' | Écart (IC 95 %) | De bout en bout |
+|---|---|---|---|---|
+| 60 Hz, déchire | 60 i/s | 27,8 → 20,2 ms | **−7,6** (−9,4 à −4,4) | 28,0 → 20,4 ms |
+| 60 Hz, vsync | 60 i/s | 29,9 → 32,3 ms | +2,4 (+0,7 à +4,0) | 49,5 → 45,3 ms ; sans vA1, 46,3 → 45,3 |
+| 120 Hz, vsync | 120 i/s | 26,3 → 25,2 ms | −1,1 (−5,5 à +2,3) | 35,7 → 30,6 ms |
+| 120 Hz, vsync | 60 i/s | 27,8 → 21,8 ms | −6,0 (−11,7 à +7,4) | 34,1 → 33,6 ms |
+
+- À 120 Hz pour un flux à 60, la jambe `present` de l'hôte gagne bien 5,2 ms
+  (IC −6,2 à −3,6), mais de bout en bout, rien ne reste.
+- Ailleurs, l'écart de bout en bout suit surtout la file du client : 11,8 ms
+  dans v12A2, 5,5 à 5,9 dans les trois autres passes à 120 Hz.
+
+**La fluidité**, sur les vrais rafraîchissements du client (`fluid.py`, minute
+des clics) :
+
+| Client, flux | | A | A' |
+|---|---|---|---|
+| 60 Hz vsync, 60 i/s | doubles pas, par clic | 0 % | **11,7 %** |
+| | pas hors du rythme, par clic | 0,47 | 1,66 |
+| | répétitions | 0 | 0 |
+| | images envoyées et jamais dessinées | 0,8 par min | 94 par min |
+| 120 Hz vsync, 120 i/s | doubles pas, par clic | 6,7 % | **20,8 %** |
+| | pas hors du rythme, par clic | 1,08 | 2,52 |
+| | répétitions, par clic | 10,0 % | 0,8 % |
+| 120 Hz vsync, 60 i/s | doubles pas, par clic | 0 % | 0 % |
+| | répétitions près des clics | 50 % des rafraîchissements | 32 % |
+| | pas hors du rythme, par clic | 0,67 | 3,62 |
+| 60 Hz, déchire | âge d'une image à la suivante, au-delà de 4 ms | 1,34 % | 1,07 % |
+| | rafraîchissements à 3 dessins ou plus | 0 | 2,1 % |
+
+- La fenêtre a servi les 60 appuis de chaque passe A'.
+- Sous deux fois le débit, en vsync, l'écart d'un demi-intervalle a retenu 233
+  à 238 images par passe à 60 Hz, et 116 à 126 à 120 Hz. La fenêtre a ajouté
+  1,8 à 2,0 images par appui à 60 Hz, 1,7 à 1,8 à 120 Hz, contre 3 sur un
+  client qui déchire ou en vsync au double du flux.
+- La garde du lien n'a rien refusé sur ce client. Le N95 saturé refusait tout.
+- Aucune éviction, invalidation, coupe du gouverneur ni image clé, dans aucune
+  passe.
+
+**Verdict F4 : ✗.**
+- Sur un client en vsync, à 60 comme à 120 Hz, la fenêtre n'apporte aucun gain
+  démontré.
+- Sous deux fois le débit, elle ajoute des doubles pas autour des clics : 11,7
+  et 20,8 % des clics, quand le critère en tolère 3 %.
+- Au double du flux, elle ne fait pas de dégât, car ses images deviennent des
+  images intermédiaires. Mais le client absorbe aussi les 5 ms gagnées par
+  l'hôte.
+- Sur un client à 60 Hz qui déchire, elle gagne autant qu'à 120 Hz.
+- Défaut proposé : la clé allumée pour un client qui déchire, éteinte pour un
+  client qui peint au vsync.
+
+**Vu en route.**
+- La glissade de la grille (§8w.8) se voit sur un client en vsync. Dans A, loin
+  des clics, 6,8 % des rafraîchissements à 60 Hz montrent un pas hors du
+  rythme, contre 7,4 % à 120 Hz pour un flux à 120.
+- La file du client en vsync, d'un ou de deux rafraîchissements, pèse 14 ms sur
+  le clic entre deux passes A. Elle dépend sans doute de la phase entre la
+  grille de l'hôte et le vsync du client.
+- Dans les deux passes A', les images de clic, venues de la fenêtre et donc
+  hors grille, n'attendaient qu'un rafraîchissement. Celles de la grille en
+  attendaient deux. Deux passes par bras ne séparent pas cet effet du hasard :
+  c'est la piste de l'émission calée sur le vsync du client (`cadence=deadline`,
+  design §33.8).
+
+### 8w.10 Les autres débits, au rejeu (14/10/2026)
+
+C'est une question de Bruno. Les traces viennent du §8v, avec l'écran virtuel à
+240 Hz. Les commandes : `inputsim.py --sections flag --fps 60,75,90,120,145`,
+et `--sections target,game --rate 75`, 90 ou 145.
+
+| Flux | `present` p50, porte → fenêtre | Images de plus par clic |
+|---|---|---|
+| 60 i/s | 9,5 → 2,6 ms | 3,0 |
+| 75 i/s | 6,7 → 2,5 ms | 3,0 |
+| 90 i/s | 6,1 → 2,4 ms | 3,0 |
+| 120 i/s | 5,2 → 2,3 ms | 2,9 |
+| 145 i/s | 3,4 → 2,3 ms | 2,8 |
+
+- `mw-click-target` réagit en ~0,3 ms. Son attente p90 de 8,8 ms (75 i/s), 8,2
+  ms (90) et 4,9 ms (145) tombe à 0, pour 2,1 à 2,3 images de plus par clic.
+- RE9 tourne de 62 à 78 i/s. Dès 75 i/s, la porte prend déjà presque toutes ses
+  images : la fenêtre n'y coûte que 0 à 0,18 image par appui. Elle n'y gagne
+  plus rien, sauf une queue de 12 ms à 75 i/s pour une réaction de 24 ms.
+- La correction de la glissade (§8w.8) ne vaut qu'aux fractions exactes de
+  l'écran : 120, 80 ou 60 i/s sur 240 Hz. À 75, 90 ou 145 i/s, le rythme est
+  irrégulier par nature : à 90 i/s, une image tous les 2 ou 3 rafraîchissements.
 
 **Concrètement, pour l'utilisateur** : sur un hôte Windows dont le flux tourne
 moins vite que l'écran virtuel, à 60 ou 120 i/s, un clic, une touche ou un
@@ -6904,10 +7027,11 @@ le jeu l'a dessinée. Quand on ne fait que bouger la souris ou regarder, le flux
 reste le même. Juste après un appui, le mouvement est un peu plus fin pendant un
 instant, sans image sautée ni répétée, puis le rythme normal reprend. Sur un
 lien chargé, la règle s'efface d'elle-même. Rien ne change pour un flux déjà au
-rythme de l'écran virtuel, ni pour les hôtes Linux et macOS. Sur un écran à
-60 Hz qui affiche en vsync (Mac, iPhone, iPad), le gain est moindre, et la
-fluidité y reste à vérifier. Pour l'instant, la clé est éteinte : personne ne
-voit de changement avant la décision de Bruno.
+rythme de l'écran virtuel, ni pour les hôtes Linux et macOS. Sur un écran qui
+affiche en vsync (Mac, iPhone, iPad, ou un PC réglé ainsi), la règle n'apporte
+rien de mesurable et peut faire sauter une image juste après un clic : elle y
+restera éteinte. Pour l'instant, la clé est éteinte partout : personne ne voit
+de changement avant la décision de Bruno.
 
 ## 9. Pour l'A/B
 

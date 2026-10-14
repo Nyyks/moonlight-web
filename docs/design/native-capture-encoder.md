@@ -729,7 +729,12 @@ sa grille garde sa phase, ses fenêtres restent servies, rien n'est retenu.
   (un écran à 60 Hz pour un flux à 60) : deux images admises restent à un
   demi-intervalle l'une de l'autre (`gapFor()`). Sans cet écart, l'image du clic
   arrive en avance sur la grille du client, et les doubles pas doublent au
-  rejeu.
+  rejeu. Mesuré le 14/10 (banc §8w.9), l'écart ne suffit pas.
+  - En vsync, à 60 comme à 120 Hz, la fenêtre ajoute des doubles pas autour des
+    clics, sur 11,7 et 20,8 % des clics, sans gain démontré.
+  - Au double du flux, elle ne fait pas de dégât, mais le client absorbe aussi
+    son gain.
+  - Proposé : la règle seulement pour les clients qui déchirent.
 - **Inerte** sous un plafond (flux au débit de l'écran ou au-dessus : tout passe
   déjà), sous une cadence de banc (`cadence=`), sous PyroWave (~267 Ko par
   image) et hors Windows.
@@ -752,9 +757,17 @@ clic, +3,3 % de débit à un clic par seconde, +10 à +12 % sous une rafale.
 
 **Banc du 13/10 (§8w).** À 60 i/s, le clic → drapeau passe de 24,0 à 18,2 ms
 en médiane (−5,8 ms), et 72 % des clics passent sous 20 ms, contre 18 %.
-Aucune perte, aucune image clé, et la grille n'est pas touchée. Le client à
-60 Hz en vsync reste à mesurer. Le défaut de la clé est la décision de Bruno
-(porte G1).
+Aucune perte, aucune image clé, et la grille n'est pas touchée.
+
+**Banc du 14/10 (§8w.9).**
+- Sur un client à 60 Hz qui déchire, le gain est le même : −7,6 ms.
+- Sur un client en vsync, il n'y a aucun gain démontré, et des doubles pas
+  apparaissent sous deux fois le débit.
+- Au rejeu (§8w.10), le gain de la jambe `present` baisse quand le débit monte :
+  −4,1 ms à 75 i/s, −3,7 à 90, −2,9 à 120, −1,2 à 145. Le coût reste d'environ
+  3 images par clic.
+
+Le défaut de la clé est la décision de Bruno (porte G1).
 
 ### 9.7 Écran verrouillé : la session attend, le stream reste vivant (02/09/2026)
 
