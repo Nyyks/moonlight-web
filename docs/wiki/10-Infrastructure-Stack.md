@@ -60,7 +60,7 @@ The official image already ships `pdns.conf`, the gsqlite3 schema and the API wi
 
 - **`pdns/zz-mw.conf`** — hardening snippet merged via include-dir: `disable-axfr`, `version-string=anonymous`, default SOA content, internal ports.
 - **`pdns/init.sh`** — idempotent zone bootstrap run as entrypoint (then `exec`s the official wrapper):
-  - creates the zone if absent with A records for `@`, `www`, `stats`, `stream`, `stream.dev`, `ns1`, `ns2`, `api`, `dnsapi`, `updates` → `MW_PUBLIC_IP` (no `metrics`: the session census stays off, §10.11), NS records, then `secure-zone` (DNSSEC) + `rectify-zone`, and **prints the DS record** to submit to the registrar;
+  - creates the zone if absent with A records for `@`, `www`, `stats`, `stream`, `stream.dev`, `ns1`, `ns2`, `api`, `dnsapi`, `updates`, `metrics` → `MW_PUBLIC_IP`, NS records, then `secure-zone` (DNSSEC) + `rectify-zone`, and **prints the DS record** to submit to the registrar;
   - **backfills** missing records on pre-existing zones (`ensure_a` guards — note: a bare re-`add-record` would duplicate, hence the greps);
   - replaces the image's placeholder SOA when found.
 
@@ -219,7 +219,7 @@ MoonlightWeb 0.3.0+ POSTs a small JSON body, authenticated with the same restric
 - **Records**: resolution, frame rate, negotiated codec, HDR and 4:4:4 flags, a bitrate *band*, backend family, the transport that won, LAN-or-internet, a coarse device class, owner-or-player, and — at the end — a duration *bucket*.
 - **Never records**: host name or UUID, account, session token, pairing identity, **the application launched**, or any raw address. Every field is matched against an allowlist or collapsed into a bucket before it goes anywhere, so a forged client can neither inject strings into the dashboard nor blow up its cardinality; there is no free-text field at all.
 - **Never load-bearing**: the endpoint answers `204` whether or not it counts anything, the instance drops a failed report without retrying, and nothing about a stream depends on the answer.
-- **Consent first**: same single answer as §10.10 — nothing is reported until the machine's owner has been asked and has agreed, and withdrawing in **Settings → Privacy** stops it immediately.
+- **Who reports**: 0.3.0 only once its owner has said yes to the first-launch question; 0.3.1+ by default, disclosed in **Settings → Privacy**, whose single switch stops both censuses immediately.
 - **Opt-out**: `session_metrics_enabled: false` or `MW_NO_TELEMETRY` in the app ([Settings §7](07-Settings-Reference.md)). Self-built binaries never reach it — it needs the `MW_PDNS_TOKEN` only official builds carry. Fleet-wide, deleting the `metrics` A record switches the whole census off without touching the update path, which is why it is its own host rather than a path under `updates.`.
 
 **Dashboard.** Set `MW_UMAMI_SESSIONS_WEBSITE_ID` to a *third* Umami website (suggested `MoonlightWeb sessions` / `metrics.{domain}`). Its own website on purpose: there, "views" means "sessions started" and nothing else is mixed in. With that, the built-in reports need no configuration:

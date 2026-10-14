@@ -38,6 +38,7 @@ if ! $PDNSUTIL list-all-zones 2>/dev/null | grep -qx "$MW_DOMAIN"; then
     $PDNSUTIL add-record "$MW_DOMAIN" api A  "$MW_PUBLIC_IP"
     $PDNSUTIL add-record "$MW_DOMAIN" dnsapi A "$MW_PUBLIC_IP"
     $PDNSUTIL add-record "$MW_DOMAIN" updates A "$MW_PUBLIC_IP"
+    $PDNSUTIL add-record "$MW_DOMAIN" metrics A "$MW_PUBLIC_IP"
     $PDNSUTIL add-record "$MW_DOMAIN" @   NS "ns1.${MW_DOMAIN}."
     $PDNSUTIL add-record "$MW_DOMAIN" @   NS "ns2.${MW_DOMAIN}."
     $PDNSUTIL secure-zone "$MW_DOMAIN"
@@ -68,8 +69,9 @@ ensure_a api    # api    — PowerDNS REST API (direct, compatibility)
 ensure_a dnsapi # dnsapi — restricted DNS-registration API (mw-proxy, 0.2.0+)
 ensure_a stats  # stats  — Umami analytics dashboard
 ensure_a updates # updates — update relay / version census (mw-proxy, 0.3.0+)
-# No `metrics` record: the session census is off until someone turns it on, and
-# it takes BOTH this record and a site block in the Caddyfile (README).
+ensure_a metrics # metrics — session census (mw-proxy /v1/session, 0.3.0+). The
+                 # Caddyfile's site block needs this record first: Caddy orders a
+                 # certificate for every name it serves.
 ensure_a stream # stream — rendezvous host: bootstrap page + /v1 API (0.3.0+)
 # stream.dev — the staging rendezvous (docker-compose.dev.yml), same address:
 # production's Caddy fronts it. A label of its own so MW_DOMAIN=dev.{domain} on

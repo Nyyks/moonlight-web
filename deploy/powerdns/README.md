@@ -14,7 +14,7 @@ Internet ─:53──────> [dnsdist] ──> pdns:5300         anti-ampl
 Internet ─:80/:443─> [caddy] ┬─ api.{domain} ──────> pdns:8081        direct PowerDNS API (compatibility)
                              ├─ dnsapi.{domain} ───> mw-proxy:8080 ─> pdns:8081   restricted API (0.2.0+)
                              ├─ updates.{domain} ──> mw-proxy:8080 ─> GitHub      release relay + version census (0.3.0+)
-                             ├─ metrics.{domain} ──> (not deployed — see Session census)
+                             ├─ metrics.{domain} ──> mw-proxy:8080 ─> umami   session census (0.3.0+)
                              ├─ packages.{domain} ─> /root/mw-packages   APT/DNF repo (0.3.0+, see deploy-packages.sh)
                              └─ stats.{domain} ────> umami:3000      analytics dashboard
                      [pdns]     (internal, non-root)  PowerDNS authoritative + REST API
@@ -243,10 +243,9 @@ used, so "is 720p still worth supporting?", "did AV1 take off?", "how long does
 a session actually last?" have no data behind them.
 
 `https://metrics.{MW_DOMAIN}` (`mw-proxy/session.go`, same container again, path
-`/v1/session`) is where that would be collected — **it is not deployed**. The
-code ships, instances know how to report to it, and nothing answers: there is no
-`metrics` A record and no site block for it in the Caddyfile. Read the rest of
-this section as a description of what turning it on would collect.
+`/v1/session`) is where that is collected. The stack serves the host (`pdns/init.sh`
+adds the A record, `caddy/Caddyfile.tmpl` the site); it counts nothing until a
+Umami website is named for it (steps 3-4 below).
 
 MoonlightWeb **0.3.0+** POSTs a small JSON body —
 with the same restricted key — when a stream first carries a picture, again when
@@ -263,9 +262,9 @@ matched against an allowlist or collapsed into a bucket before it goes anywhere
 — there is no free-text field at all — so a forged client can neither inject
 strings into the dashboard nor invent a million distinct rows.
 
-**Consent covers this too.** The same question asked at first launch governs
-both censuses: until it is answered nothing is reported, and withdrawing it in
-the admin page stops this one on the spot.
+**Who reports.** 0.3.0 reports only once its owner has said yes to the
+first-launch question. 0.3.1+ reports by default and says so in **Settings →
+Privacy**, where one switch stops both censuses on the spot.
 
 **It is never load-bearing.** The endpoint answers `204` whether or not it
 counts anything, a failed report is dropped without a retry, and no part of a
@@ -277,30 +276,19 @@ is its own host rather than another path on `updates.`.
 
 **Turning it on** — four steps, and the **order matters**: publish the name
 before Caddy is asked to certify it, or it will order a certificate for a name
-that does not resolve, fail, and retry forever.
+that does not resolve, fail, and retry forever. A fresh install does steps 1-2
+by itself; a zone created before them needs both by hand.
 
-1. Add the A record: `pdnsutil add-record {MW_DOMAIN} metrics A {MW_PUBLIC_IP}`
+1. The A record: `pdnsutil add-record {MW_DOMAIN} metrics A {MW_PUBLIC_IP}`
    then `pdnsutil rectify-zone {MW_DOMAIN}` (a DNSSEC zone serves nothing until
-   it is rectified). Check it resolves from outside before continuing.
-2. Add the site block to `caddy/Caddyfile.tmpl` — it belongs where the comment
-   marks its place, next to `updates.`:
-
-   ```
-   metrics.@MW_DOMAIN@ {
-   	@SITE_TLS_LINE@
-   	rate_limit {
-   		zone mw_metrics {
-   			key {remote_host}
-   			events 60
-   			window 1m
-   		}
-   	}
-   	reverse_proxy mw-proxy:8080
-   }
-   ```
-
-   Then `docker compose up -d --build caddy` — the template lives *in* the
-   image, so a restart alone changes nothing.
+   it is rectified) — or `docker compose restart pdns`, whose `ensure_a`
+   backfills it at the cost of a one-second DNS blip. Check it resolves from
+   outside before continuing.
+2. The site block `metrics.@MW_DOMAIN@` in `caddy/Caddyfile.tmpl`, next to
+   `updates.`. Deploying a tag that carries it rebuilds Caddy
+   (`deploy-prod.sh`); by hand it is `docker compose up -d --no-deps --build
+   caddy` — the template lives *in* the image, so a restart alone changes
+   nothing.
 3. In Umami, add a **third website**: name `MoonlightWeb sessions`, domain
    `metrics.{MW_DOMAIN}`. Its own website on purpose — there, "views" means
    "sessions started" and nothing else is mixed in.
