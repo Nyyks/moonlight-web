@@ -51,6 +51,11 @@ const PAGES = [
   { src: 'faq.html', url: '/faq.html', nav: 'faq' },
   { src: 'contact.html', url: '/contact.html', nav: 'contact' },
   { src: 'server-access/index.html', url: '/server-access/', nav: 'connect' },
+  { src: 'play/chromebook.html', url: '/play/chromebook.html', nav: null },
+  { src: 'play/iphone-ipad.html', url: '/play/iphone-ipad.html', nav: null },
+  { src: 'play/tv.html', url: '/play/tv.html', nav: null },
+  { src: 'sunshine-web-client.html', url: '/sunshine-web-client.html', nav: null },
+  { src: 'browser-game-streaming.html', url: '/browser-game-streaming.html', nav: null },
 ];
 const PAGE_URLS = new Set(PAGES.map((p) => p.url));
 
