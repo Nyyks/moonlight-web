@@ -129,6 +129,8 @@ main() {
         && notes+=("bootstrap/ is bind-mounted: served on the next request, nothing to rebuild")
     grep -q '^website/' <<<"$changed" \
         && notes+=("website/ is bind-mounted: served on the next request, nothing to rebuild")
+    grep -q '^website/' <<<"$changed" \
+        && notes+=("website/ changed: once it is served, resubmit sitemap.xml in Search Console and request indexing of the new or changed pages")
     grep -q '^deploy/powerdns/pdns/' <<<"$changed" \
         && notes+=("pdns/ changed: bind-mounted, takes effect on 'docker compose restart pdns' (DNS blips for a second — pick the moment)")
     grep -q '^deploy/powerdns/dnsdist/' <<<"$changed" \
