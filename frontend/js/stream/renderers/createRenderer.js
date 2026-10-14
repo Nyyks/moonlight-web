@@ -72,6 +72,29 @@ export function plainPicture(s) {
     return !s.hdr && s.algo === 'off' && !s.webgpu && !s.sink && !s.forceCanvas2d && !s.devCanvas2d;
 }
 
+/**
+ * Whether this view's frames wait for the screen's vsync: what the native host
+ * is told (`client_vsync` at /start, then `clientrefresh`), to run the stream
+ * at a divisor of this screen's refresh and to open its window after a press
+ * only for a client that tears (bench §8w.9).
+ *
+ * "Allow tearing" is a wish, and /start can only say the wish: the renderer is
+ * made later. Only a canvas that skips the compositor makes it real, Canvas2D
+ * or WebGL2 with the desynchronized hint. WebGPU has no such hint, and a
+ * <video> element (the HDR sink, a TV, the media transport) is the compositor's
+ * to show: both paint at the vsync whatever the setting. Every HDR stream lands
+ * on one of the two.
+ * @param {{tearing: boolean, transport: string, kind: ?string}} s
+ *        `kind` the renderer's (VideoRenderer.kind), null before it is made:
+ *        the setting is then all there is to go on
+ * @returns {boolean}
+ */
+export function presentsOnVsync(s) {
+    if (!s.tearing || s.transport === 'webrtc-media') return true;
+    if (!s.kind) return false;
+    return s.kind !== 'canvas2d' && s.kind !== 'webgl';
+}
+
 export async function createVideoRenderer(canvas, opts) {
     // HDR: route decoded frames to a <video> element via the track generator.
     // The canvas paths (WebGPU/Canvas2D) tone-map HDR away (importExternalTexture /

@@ -749,8 +749,10 @@ tearing est réel et qui ne peint pas au vsync en ce moment
 - Le navigateur le dit au /start : `client_tearing_real`
   (`CANVAS_TEARING_IS_REAL`, `BrowserDetect.js`), vrai pour Chromium sous
   Windows. Il arrive à `SessionConfig::clientTearingReal`.
-- `client_vsync` (la case « Autoriser le tearing ») suit, au /start puis par
-  `clientrefresh` : un client qui passe au vsync en cours de session la perd.
+- `client_vsync` suit, au /start puis par `clientrefresh` : un client qui passe
+  au vsync en cours de session la perd. Le /start ne dit que la case « Autoriser
+  le tearing » ; le rendu, une fois fait, dit le vsync réel. WebGPU, donc tout le
+  HDR, et l'élément `<video>` peignent au vsync, case cochée ou non (§9.11).
 - Chromium sous macOS déchire dans un compositeur qui attend quand même le
   vsync, et Linux n'a pas été mesuré : la règle y reste éteinte. Un frontend
   plus ancien n'envoie pas le champ, et n'a pas la règle.
@@ -1184,6 +1186,21 @@ sur le canal d'input et l'hôte re-choisit **entre deux images**, sans rien
 relancer (`Session::setClientRefresh`, natif seulement, `qobject_cast` sur les
 deux relais). Le message est traité comme `framefloor` : accepté par
 `InputPolicy`, inerte pour tout host GameStream.
+
+**Le vsync du rendu** (14/10/2026). `client_vsync = !tearing` ne dit que la case
+« Autoriser le tearing ». Un rendu qui passe par le compositeur peint au vsync,
+case cochée ou non : WebGPU, donc tout le HDR, et l'élément `<video>` (le puits
+HDR, une TV, le transport `webrtc-media`).
+- Une fois son rendu fait, le client envoie son vsync réel par `clientrefresh`,
+  avec le taux que l'hôte a déjà (`presentsOnVsync()`,
+  `stream/renderers/createRenderer.js`).
+- L'hôte garde les deux valeurs (`storeClientRefresh()`, `core/CadenceAlign.h`).
+  Un `&&` entre les deux échanges perdait le vsync quand le taux changeait, sur
+  les trois plates-formes.
+- Linux et macOS reprennent l'écran du /start à l'ouverture, comme Windows. Un
+  décodeur qui demande moins d'images fait re-choisir la cadence, et ce re-choix
+  partait d'un écran inconnu qui déchire.
+- Couvert par les tests unitaires, pas encore vu au banc.
 
 Vérifié le 04/09 sur l'instance dev (client Chrome dédié, *tearing* coupé, écran
 165 Hz) : `/start` porte 164 972 mHz, l'hôte ouvre à **55 fps, un

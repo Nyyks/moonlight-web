@@ -6885,6 +6885,17 @@ Le défaut, décidé par Bruno le 14/10 après F4 :
 - `inputadmit=0` ou `1` passe outre, pour le banc ;
 - l'essai à l'aveugle passe après la v0.4.0.
 
+Un trou, vu et corrigé le 14/10 :
+- `client_vsync` disait la case « Autoriser le tearing », pas le rendu. WebGPU
+  (tout le HDR) et l'élément `<video>` (le puits HDR, une TV, `webrtc-media`)
+  peignent au vsync, case cochée ou non.
+- Un client HDR de Chrome sous Windows avait donc la fenêtre, et une cadence que
+  l'hôte n'alignait pas sur son écran : 60 i/s au lieu de 72 sur un écran à
+  144 Hz.
+- Le client dit maintenant son vsync réel dès que son rendu est fait, et l'hôte
+  garde enfin ce message en entier (design §9.11).
+- Couvert par les tests unitaires, pas encore vu au banc.
+
 ### 8w.8 Vu en route : la grille de la porte glisse le long des présentations
 
 Hors de ce chantier : c'est la porte d'aujourd'hui (§9.6.1 du design), avec ou

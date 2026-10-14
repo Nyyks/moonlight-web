@@ -88,6 +88,7 @@ import {
     geckoPresentsOnPlainWebGl,
     NO_WEBGPU_ALGOS,
     plainPicture,
+    presentsOnVsync,
 } from '../stream/renderers/createRenderer.js';
 import {
     RendererFallback,
@@ -1092,7 +1093,9 @@ export class StreamView {
         // wait for its vsync unless tearing is on, and /start carried its
         // measured refresh. A vsync client gets a stream cadence that divides
         // its refresh; when the window changes screen mid-stream the new rate
-        // goes out as `clientrefresh` — see _startRefreshWatch.
+        // goes out as `clientrefresh` — see _startRefreshWatch. /start could
+        // only say the setting: the renderer, once made, may wait for the
+        // vsync anyway, and the host is then told — see _notePresentation.
         this._clientVsync = !this._tearing;
         this._sentClientRefresh = opts.clientRefreshMilliHz || 0;
         this._offRefreshChange = null;
@@ -2590,6 +2593,7 @@ export class StreamView {
                 this._renderer = r;
                 this._contentAge.attach(r);
                 this._activeRendererKind = r.kind;
+                this._notePresentation(r.kind);
                 this._rendererHdrActive = !!r.hdrActive;
                 this._createEnhancerGovernor(r);
                 this._watchRendererCost(r);
@@ -2612,6 +2616,7 @@ export class StreamView {
             case 'rendererinfo':
                 // Worker reports which renderer it created (for the stats overlay).
                 this._activeRendererKind = m.kind;
+                this._notePresentation(m.kind);
                 this._rendererHdrActive = !!m.hdr;
                 break;
             case 'codecfallback':
@@ -4447,6 +4452,7 @@ export class StreamView {
         this._renderer = r;
         this._nextCanvas = el;
         this._activeRendererKind = r.kind;
+        this._notePresentation(r.kind);
         this._rendererHdrActive = false;
         this._governor = null;
         this._createEnhancerGovernor(r);
@@ -5071,6 +5077,8 @@ export class StreamView {
                 // Media track mode: video arrives natively via <video> element.
                 // No WebCodecs decoder needed. The first video frame triggers
                 // the 'live' status via the video element's playing event.
+                // That element waits for the vsync, tearing or not.
+                this._notePresentation(null);
                 if (this.videoEl) {
                     const onMediaLive = () => {
                         if (this._firstFrameRendered) return;
@@ -5122,6 +5130,7 @@ export class StreamView {
                     }).then((r) => {
                         this._renderer = r;
                         this._activeRendererKind = r.kind;
+                        this._notePresentation(r.kind);
                         this._rendererHdrActive = !!r.hdrActive;
                         this._createEnhancerGovernor(r);
                         this._watchRendererCost(r);
@@ -5595,6 +5604,30 @@ export class StreamView {
             this._offRefreshChange();
             this._offRefreshChange = null;
         }
+    }
+
+    /**
+     * The renderer this view paints with, once made (`kind` null: none, the
+     * media transport's own <video>). /start told the native host what "Allow
+     * tearing" asks for; on WebGPU — every HDR stream — or on a <video>
+     * element the frames wait for the vsync all the same (presentsOnVsync).
+     * The host is told the truth, with the refresh it already has: it then
+     * runs the stream at a divisor of this screen's refresh and keeps its
+     * window after a press for a client that tears. A measurement still on
+     * its way (_startRefreshWatch) carries the same word.
+     * @param {?string} kind
+     */
+    _notePresentation(kind) {
+        const vsync = presentsOnVsync({ tearing: this._tearing, transport: this._transport, kind });
+        if (vsync === this._clientVsync) return;
+        this._clientVsync = vsync;
+        if (!this._nativeHost || !this.webrtc) return;
+        this._sendToHost({ type: 'clientrefresh', mhz: this._sentClientRefresh, vsync });
+        console.log(
+            `[StreamView] ${kind || 'The <video> element'} paints ` +
+                `${vsync ? 'on the vsync' : 'as frames arrive'}, told to the host`,
+        );
+        if (this._stepper) this._stepper.linkChanged('the renderer changed', performance.now());
     }
 
     // ── This screen's size, for a resolution choice that follows it ──────

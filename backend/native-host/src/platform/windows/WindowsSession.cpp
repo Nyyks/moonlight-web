@@ -770,13 +770,8 @@ public:
 
     void setClientRefresh(int milliHz, bool vsync) override
     {
-        // Bounded rather than trusted: it crosses the network from a page.
-        // Nothing presents above 1000 Hz; below 1 Hz is "unknown".
-        if (milliHz < 1000) milliHz = 0;
-        if (milliHz > 1000000) milliHz = 1000000;
-        const bool same =
-            m_ClientMilliHz.exchange(milliHz) == milliHz && m_ClientVsync.exchange(vsync) == vsync;
-        if (same) return;
+        // Bounded, and both values kept: see storeClientRefresh.
+        if (!storeClientRefresh(m_ClientMilliHz, m_ClientVsync, milliHz, vsync)) return;
         // The loop owns the gate and the budget; it re-chooses on its next
         // wake-up, between two frames.
         m_ClientRefreshDirty.store(true);

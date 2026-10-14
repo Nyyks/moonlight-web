@@ -360,6 +360,11 @@ public:
             }
         }
 
+        // The client's screen as /start said it, for the loop's re-choices: a
+        // decoder that asks for fewer frames re-chooses too (setClientFpsCap),
+        // and found an unknown screen that tears instead.
+        m_ClientMilliHz.store(m_Config.clientRefreshMilliHz);
+        m_ClientVsync.store(m_Config.clientVsync);
         {
             std::string line;
             m_EncodeFps =
@@ -772,11 +777,7 @@ public:
 
     void setClientRefresh(int milliHz, bool vsync) override
     {
-        if (milliHz < 1000) milliHz = 0;
-        if (milliHz > 1000000) milliHz = 1000000;
-        const bool same =
-            m_ClientMilliHz.exchange(milliHz) == milliHz && m_ClientVsync.exchange(vsync) == vsync;
-        if (same) return;
+        if (!storeClientRefresh(m_ClientMilliHz, m_ClientVsync, milliHz, vsync)) return;
         m_ClientRefreshDirty.store(true);
     }
 

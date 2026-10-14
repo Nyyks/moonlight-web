@@ -25,6 +25,7 @@ import {
     createVideoRenderer,
     geckoPresentsOnPlainWebGl,
     plainPicture,
+    presentsOnVsync,
 } from '../js/stream/renderers/createRenderer.js';
 import { Canvas2DRenderer } from '../js/stream/renderers/Canvas2DRenderer.js';
 import { WebGpuRenderer } from '../js/stream/renderers/WebGpuRenderer.js';
@@ -137,5 +138,36 @@ describe('plainPicture', () => {
         expect(plainPicture({ ...plain, hdr: true })).toBe(false);
         expect(plainPicture({ ...plain, sink: true })).toBe(false);
         expect(plainPicture({ ...plain, forceCanvas2d: true })).toBe(false);
+    });
+});
+
+/**
+ * What the native host is told about this view's vsync: "Allow tearing" said
+ * "tearing" for every renderer, and an HDR stream, always on WebGPU or on the
+ * <video> sink, waits for the vsync whatever the setting (14/10/2026).
+ */
+describe('presentsOnVsync', () => {
+    const tears = { tearing: true, transport: 'webrtc', kind: 'canvas2d' };
+
+    it('tears only on a canvas that skips the compositor, tearing on', () => {
+        expect(presentsOnVsync(tears)).toBe(false);
+        expect(presentsOnVsync({ ...tears, kind: 'webgl' })).toBe(false);
+        expect(presentsOnVsync({ ...tears, transport: 'wss' })).toBe(false);
+    });
+
+    it('waits for the vsync on WebGPU and on a <video> element', () => {
+        expect(presentsOnVsync({ ...tears, kind: 'webgpu' })).toBe(true);
+        expect(presentsOnVsync({ ...tears, kind: 'video-element' })).toBe(true);
+        // The media transport presents on its own <video>: no renderer at all.
+        expect(presentsOnVsync({ ...tears, transport: 'webrtc-media', kind: null })).toBe(true);
+    });
+
+    it('waits for the vsync whatever the renderer, tearing off', () => {
+        for (const kind of ['canvas2d', 'webgl', 'webgpu', 'video-element', null])
+            expect(presentsOnVsync({ ...tears, tearing: false, kind })).toBe(true);
+    });
+
+    it('keeps the setting until the renderer is made', () => {
+        expect(presentsOnVsync({ ...tears, kind: null })).toBe(false);
     });
 });
