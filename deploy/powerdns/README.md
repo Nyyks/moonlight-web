@@ -481,6 +481,63 @@ Rolling back is the same two blocks with the previous tag. The script refuses
 a dirty tree, refuses to run outside `~/moonlight-web`, and asks nothing
 interactively — a prompt in the middle of a paste would eat the next line.
 
+### Cold backup and restore
+
+`--apply` (here and in `deploy-packages.sh`) first runs `backup-prod.sh`, and
+deploys nothing if it fails. It writes one dated ZIP to `/root/mw-backups/`,
+`mw-prod-<UTC date>-<tag>.zip`, root only, and keeps the three newest. Inside:
+the whole `~/moonlight-web` (`.git`, `.env`, `.env.bak-*`, `certs/`),
+`/root/mw-packages`, the stack's docker volumes file by file (zone DB, Caddy's
+certificates, rendezvous claims, ownership store), Umami as a `pg_dump`, every
+DNS zone as text, ufw/fail2ban/sshd/docker settings and root's crontab, and a
+`MANIFEST.txt` (tag, commit, containers, image ids). Images are not in it: a
+rollback rebuilds them from the previous tag. Nothing is stopped while it runs.
+
+By hand, at any time (`--list` shows what is kept):
+
+```bash
+cd ~/moonlight-web/deploy/powerdns
+./backup-prod.sh
+cd ~
+```
+
+The first deploy of a tag that ships the script runs from a checkout that does
+not have it; `deploy-prod.sh` then takes it from the target tag. To take one
+before that deploy anyway:
+
+```bash
+git -C ~/moonlight-web fetch --tags origin
+git -C ~/moonlight-web show <tag>:deploy/powerdns/backup-prod.sh > /tmp/mw-backup-prod.sh
+bash /tmp/mw-backup-prod.sh
+```
+
+**Restore** — first try the ordinary rollback above (previous tag); restore
+from the ZIP only what that does not bring back. Unpack it next to production,
+never over it, and read `MANIFEST.txt`:
+
+```bash
+mkdir -p /root/restore && cd /root/restore
+python3 -m zipfile -e /root/mw-backups/mw-prod-<date>-<tag>.zip .
+cat MANIFEST.txt
+```
+
+Then, piece by piece, with the stack's services stopped only for the piece
+being restored (`docker compose stop <service>`, then `start`):
+
+- `.env` and the other untracked files: copy them from
+  `moonlight-web/deploy/powerdns/` into `~/moonlight-web/deploy/powerdns/`.
+- `mw-packages/`: `rsync -a --delete mw-packages/ /root/mw-packages/`.
+- A volume: `rsync -a --delete volumes/<name>/ "$(docker volume inspect -f '{{.Mountpoint}}' <name>)/"`.
+  ZIP keeps file modes, not owners: give the files back to the owner the live
+  volume had (`ls -ln` before overwriting it).
+- Umami: `docker compose exec -T umami-db psql -U umami -d umami < dumps/umami.sql`
+  into an emptied database (`dropdb`/`createdb` inside the container first).
+- A DNS zone: compare `dumps/zone-<name>.txt` with `pdnsutil list-zone`, and
+  put back only the records that differ (`pdnsutil` or the API).
+- `system/`: compare before copying; ufw and fail2ban need a reload after.
+
+Remove `/root/restore` afterwards: it holds `.env` and the database dump.
+
 ### Pointing a host at staging
 
 `MW_DOMAIN=dev.{MW_DOMAIN}` moves everything a host derives from the domain at
