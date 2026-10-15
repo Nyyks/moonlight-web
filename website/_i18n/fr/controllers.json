@@ -19,7 +19,7 @@
   "host.1": "<strong>Windows</strong> (x64) — l’installeur pose le pilote MoonlightWeb Virtual HID ; le Secure Boot reste actif. Un jeu resté ouvert garde son volant et son retour de force 10 minutes entre deux streams.",
   "host.2": "<strong>Linux</strong> — rien de plus à installer avec le paquet de MoonlightWeb.",
   "host.3": "<strong>macOS</strong> — les appareils arrivent au jeu en manette Xbox.",
-  "note": "<strong>À partir de MoonlightWeb 0.4.0.</strong> Envoyer un appareil tel quel demande l’hôte de MoonlightWeb ; un hôte Sunshine, Apollo ou Wolf reçoit une manette Xbox.",
+  "note": "Envoyer un appareil tel quel demande l’hôte de MoonlightWeb ; un hôte Sunshine, Apollo ou Wolf reçoit une manette Xbox.",
   "tm": "Logitech, Radiomaster, Moza, Simucube, Fanatec, EdgeTX et les jeux cités appartiennent à leurs propriétaires.",
   "read.h": "À lire ensuite",
   "x.guides.t": "Guides d’installation",
