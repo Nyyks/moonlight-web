@@ -32,11 +32,13 @@ Under **20 ms** glass‑to‑glass over Wi‑Fi on a LAN, ~**25 ms** over the In
 
 Moonlight‑Web turns your gaming PC into a stream, and **any device with a modern browser** (PC, Mac, tablet, phone, TV) into the client. Only the server gets installed.
 
+*Moonlight‑Web ([moonlightweb.top](https://moonlightweb.top/)) and [moonlight-web-stream](https://github.com/MrCreativ3001/moonlight-web-stream) are two separate projects with close names: moonlight-web-stream is a web client for a Sunshine host; Moonlight‑Web streams the PC it is installed on by itself, and pairs with Sunshine too.*
+
 - 🖥️ **Its own capture & encode engine** — the machine it runs on is a host straight away: no Sunshine, no pairing, no PIN. One card per display. Windows, Linux and macOS.
 - 🎮 **Low‑latency streaming** up to 4K HDR, 240 FPS, **H.264 / HEVC / AV1**, on **NVENC · AMF · Quick Sync · VA‑API · VideoToolbox** (software fallback).
 - 🌐 **WebRTC transport** (DataChannels + RTP media tracks), automatic WSS fallback.
 - 🔊 **Opus audio**, adaptive jitter buffer, surround.
-- ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble. On Windows it reaches the lock screen and UAC prompts too, and **Ctrl+Alt+Del** works from the touch keyboard bar (Ctrl, Alt, then Del).
+- ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble. On Windows it reaches the lock screen and UAC prompts too, and **Ctrl+Alt+Del** works from the touch keyboard bar (Ctrl, Alt, then Del). **Racing wheels, flight sticks and RC radios** too, as an Xbox pad or sent to the game as themselves, force feedback included ([see below](#controllers)).
 - 🤝 **Pairs with other hosts too** — Sunshine/Apollo, Wolf, MultiSeat: [see below](#other-hosts-it-can-pair-with). mDNS discovery, PIN pairing, multi‑host.
 - 🌍 **Internet access** opt‑in, at a `stream.moonlightweb.top/「id」` address, with nothing published in your name.
 - 🪄 **Video Enhancement** (bonus): GPU upscaling & sharpening in the browser.
