@@ -26,6 +26,21 @@
  * measured period, and 164 800 mHz for a 165 Hz panel is a better number for
  * that than a snapped 165 000 would be if the panel really runs at 164.8.
  *
+ * ── To the millihertz ───────────────────────────────────────────────────────
+ *
+ * Ninety refreshes tell 119.872 Hz from 120 only just (±0.035 % on the bench,
+ * 14/10/2026), and the host may match its virtual display to this screen
+ * (`vddmatch`, plan glissade): at 240.000 Hz for a panel at 119.872, the
+ * stream loses a picture every 7.8 s; matched within 0.01 %, one a minute and
+ * more. So once the page is visible for a while, rAF is followed for
+ * PRECISE_MS more and the period is the SLOPE of its timestamps against the
+ * refresh each one falls on — a skipped frame only skips an index, and the
+ * coarsened clock's error is spread over twelve seconds instead of one. That
+ * reading replaces the quick one when the two agree (the same screen), and is
+ * kept in this browser (PRECISE_KEY) for the next page on it: a /start soon
+ * after a load carries it too. Nothing of it shows; a TV, whose first reading
+ * stands, is not followed.
+ *
  * ── On a TV ─────────────────────────────────────────────────────────────────
  *
  * A TV is measured once: its first good reading stands for the page's
@@ -50,6 +65,42 @@ let _resizeTimer = null;
 
 /** A change under one percent is jitter, not a new screen. */
 const CHANGE_THRESHOLD = 0.01;
+
+/** How long the precise reading follows rAF, and the least it keeps. */
+const PRECISE_MS = 12000;
+const PRECISE_MIN_MS = 10000;
+/** A quick reading this close to the precise one is the same screen. */
+const PRECISE_AGREES = 0.003;
+/** Where the precise reading is kept, for the next page on this screen. */
+const PRECISE_KEY = 'mw_refresh_precise_mhz';
+
+/** @type {number} The last precise reading, millihertz. 0 = none. */
+let _preciseMilliHz = 0;
+/** @type {boolean} A precise reading is being taken. */
+let _preciseRunning = false;
+
+/** The precise reading this browser kept, 0 when none (or no storage). */
+function _storedPrecise() {
+    try {
+        const v = Number(localStorage.getItem(PRECISE_KEY));
+        return Number.isFinite(v) && v > 0 ? Math.round(v) : 0;
+    } catch (e) {
+        return 0;
+    }
+}
+
+function _storePrecise(mhz) {
+    try {
+        localStorage.setItem(PRECISE_KEY, String(mhz));
+    } catch (e) {
+        /* no storage here: this page keeps it */
+    }
+}
+
+/** Does a quick reading @p mhz come from the screen @p precise was read on? */
+function _agrees(mhz, precise) {
+    return precise > 0 && Math.abs(mhz - precise) <= precise * PRECISE_AGREES;
+}
 
 /**
  * Measure the refresh rate now. Resolves with millihertz, or with the last
@@ -121,7 +172,15 @@ function _settle(stamps) {
         count++;
     }
     const period = count > 0 ? sum / count : median;
-    const mhz = Math.round(1e6 / period);
+    let mhz = Math.round(1e6 / period);
+    // The same screen as the precise reading (this page's, else this
+    // browser's last): that one stands — it is the better number of the two.
+    if (!_preciseMilliHz) {
+        const stored = _storedPrecise();
+        if (_agrees(mhz, stored)) _preciseMilliHz = stored;
+    }
+    if (_agrees(mhz, _preciseMilliHz)) mhz = _preciseMilliHz;
+    else _preciseMilliHz = 0;
     const before = _milliHz;
     _milliHz = mhz;
     if (before === 0 || Math.abs(mhz - before) > before * CHANGE_THRESHOLD) {
@@ -134,6 +193,111 @@ function _settle(stamps) {
         }
     }
     return mhz;
+}
+
+/**
+ * The period of a run of rAF timestamps, in ms, as the slope of the stamps
+ * against the refresh each one falls on: a least-squares line, a skipped
+ * frame only leaving its index out. Each stamp's index is counted from the
+ * one before (@p approxMs apart, rounded), so that the quick reading's own
+ * error does not add up over the run. 0 when the run is too short, too
+ * sparse (fewer than half its refreshes) or does not sit on one grid — a
+ * screen that changed under it, a page that paused.
+ * @param {number[]} stamps
+ * @param {number} approxMs
+ * @returns {number}
+ */
+export function slopePeriodMs(stamps, approxMs) {
+    if (!(approxMs > 0) || stamps.length < 8) return 0;
+    const t0 = stamps[0];
+    const span = stamps[stamps.length - 1] - t0;
+    if (span < PRECISE_MIN_MS) return 0;
+    let n = 0;
+    let sx = 0;
+    let sy = 0;
+    let sxx = 0;
+    let sxy = 0;
+    /** @type {number[]} */
+    const indices = [];
+    let index = 0;
+    let prev = t0;
+    for (const t of stamps) {
+        const step = Math.round((t - prev) / approxMs);
+        if (indices.length > 0 && step < 1) {
+            indices.push(-1); // the same refresh twice: left out
+            continue;
+        }
+        index += indices.length > 0 ? step : 0;
+        prev = t;
+        indices.push(index);
+        const y = t - t0;
+        n++;
+        sx += index;
+        sy += y;
+        sxx += index * index;
+        sxy += index * y;
+    }
+    const refreshes = Math.round(span / approxMs);
+    if (n < 8 || n * 2 < refreshes) return 0;
+    const den = n * sxx - sx * sx;
+    if (!(den > 0)) return 0;
+    const slope = (n * sxy - sx * sy) / den;
+    // Every stamp within a third of a refresh of the line, or it is not one grid.
+    const intercept = (sy - slope * sx) / n;
+    for (let i = 0; i < stamps.length; i++) {
+        if (indices[i] < 0) continue;
+        if (Math.abs(stamps[i] - t0 - (intercept + slope * indices[i])) > approxMs / 3) return 0;
+    }
+    return slope;
+}
+
+/**
+ * Follow rAF for PRECISE_MS and read this screen to the millihertz ("To the
+ * millihertz" above). Resolves with the reading, or 0 when there was none to
+ * take: a hidden tab, a TV, a quick reading still missing, one already
+ * running, a screen that changed meanwhile. A reading that agrees with the
+ * quick one replaces it, silently: it is the same screen.
+ * @param {{durationMs?: number}} [opts]
+ * @returns {Promise<number>}
+ */
+export function measureRefreshRatePrecisely(opts = {}) {
+    if (IS_TV || _preciseRunning || !(_milliHz > 0)) return Promise.resolve(0);
+    if (typeof document !== 'undefined' && document.hidden) return Promise.resolve(0);
+    if (typeof requestAnimationFrame !== 'function') return Promise.resolve(0);
+    const durationMs = opts.durationMs || PRECISE_MS;
+    const approxMs = 1e6 / _milliHz;
+    _preciseRunning = true;
+    return new Promise((resolve) => {
+        /** @type {number[]} */
+        const stamps = [];
+        let first = 0;
+        const tick = (now) => {
+            if (typeof document !== 'undefined' && document.hidden) {
+                _preciseRunning = false;
+                resolve(0);
+                return;
+            }
+            if (!first) first = now;
+            stamps.push(now);
+            if (now - first < durationMs) {
+                requestAnimationFrame(tick);
+                return;
+            }
+            _preciseRunning = false;
+            // The first stamps after a request may land mid-refresh.
+            const period = slopePeriodMs(stamps.slice(4), approxMs);
+            const mhz = period > 0 ? Math.round(1e6 / period) : 0;
+            if (!mhz || Math.abs(mhz - _milliHz) > _milliHz * PRECISE_AGREES) {
+                resolve(0);
+                return;
+            }
+            _preciseMilliHz = mhz;
+            _milliHz = mhz;
+            _storePrecise(mhz);
+            resolve(mhz);
+        };
+        requestAnimationFrame(tick);
+    });
 }
 
 /** The last measured refresh rate in millihertz, 0 when none was taken yet. */
@@ -223,11 +387,14 @@ export function onRefreshRateChange(cb) {
 export function startRefreshRateMonitor() {
     if (_monitorStarted || typeof window === 'undefined') return;
     _monitorStarted = true;
+    // The quick reading, then the precise one on the screen it read.
+    const measureBoth = () =>
+        measureRefreshRate()
+            .then((mhz) => (mhz > 0 ? measureRefreshRatePrecisely() : 0))
+            .catch(() => {});
     const remeasure = () => {
         clearTimeout(_resizeTimer);
-        _resizeTimer = setTimeout(() => {
-            measureRefreshRate().catch(() => {});
-        }, 400);
+        _resizeTimer = setTimeout(measureBoth, 400);
     };
     window.addEventListener('resize', remeasure);
     document.addEventListener('visibilitychange', () => {
@@ -242,5 +409,5 @@ export function startRefreshRateMonitor() {
     } catch (e) {
         /* no screen events here */
     }
-    measureRefreshRate().catch(() => {});
+    measureBoth();
 }
