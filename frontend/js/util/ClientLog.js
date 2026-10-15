@@ -34,6 +34,12 @@
  * not caught here.
  *
  * Also where pages learn the server's verbose mode (serverDiag.verbose).
+ *
+ * Through the rendezvous, every request rides the page's tunnel, which is not
+ * up yet when this module loads: the first /api/health has no answer, and the
+ * lines wait (bounded) for the one app.js asks once the tunnel is (14/10/2026:
+ * a Mac over the Internet, debug on, and not one line nor a `[perf]` reached
+ * the host). A page reached directly that gets no answer stops as before.
  */
 
 const LEVELS = /** @type {const} */ (['log', 'info', 'warn', 'error', 'debug']);
@@ -217,6 +223,13 @@ export async function flushClientLog({ beacon = false } = {}) {
     }
 }
 
+/** This document was served by the bootstrap's worker, i.e. down a tunnel
+ *  (net/tunnelBridge.js pageCameThroughTunnel, which this first import cannot
+ *  load without the modules it would then miss the lines of). */
+function cameThroughTunnel() {
+    return !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+}
+
 function stop() {
     state = 'off';
     unwrap();
@@ -235,7 +248,8 @@ async function tick() {
 
 /**
  * Ask the server for its modes and start or stop accordingly. Called once as
- * the page loads, and again when the admin page switches debug mode.
+ * the page loads, once the rendezvous tunnel is up (app.js), and again when
+ * the admin page switches debug mode.
  */
 export async function refreshClientLog() {
     let health = null;
@@ -245,6 +259,9 @@ export async function refreshClientLog() {
     } catch {
         // No answer: the next call decides.
     }
+    // No answer on a page the tunnel serves: the tunnel is still being made.
+    // Keep listening; app.js asks again once it is up.
+    if (!health && state === 'probing' && cameThroughTunnel()) return;
     serverDiag.debug = !!(health && health.debug === true);
     serverDiag.verbose = !!(health && health.verbose === true);
     if (!serverDiag.debug) {

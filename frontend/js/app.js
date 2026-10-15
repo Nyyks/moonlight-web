@@ -47,7 +47,7 @@
  */
 // First, before any module prints: the page's console for the client log in
 // debug mode (util/ClientLog.js).
-import './util/ClientLog.js';
+import { refreshClientLog } from './util/ClientLog.js';
 import { HostListView } from './ui/HostListView.js';
 import { StreamView } from './ui/StreamView.js';
 import { SettingsView } from './ui/SettingsView.js';
@@ -258,7 +258,9 @@ const MoonlightApp = {
         // server, it is what every request below travels on, so it has to be up
         // before the first of them is made.
         try {
-            await startTunnel((stage) => SecuringOverlay.stage(stage));
+            // Up: this console can reach the host now, which it could not
+            // when util/ClientLog.js first asked (debug mode, `[perf]` lines).
+            if (await startTunnel((stage) => SecuringOverlay.stage(stage))) void refreshClientLog();
             // Closes the padlock and lifts the seal on its own schedule. Not
             // awaited: everything below renders behind it, so the moment it
             // holds costs the reveal and not the work.
