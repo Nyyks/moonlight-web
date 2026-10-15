@@ -41,23 +41,28 @@ set -Eeuo pipefail
 # --quiet fetch refusing a tag did exactly that — reads like a hang.
 trap 'echo "deploy-prod.sh: stopped at line $LINENO — \"$BASH_COMMAND\" failed (exit $?)" >&2' ERR
 
-# Who is on the line, from the two places that know. The rendezvous counts the
-# host lines it holds (/healthz "online"); Caddy counts the requests open to
-# the rendezvous (admin API, num_requests) — a WebSocket is one long request,
-# so that is host lines plus browsers. Best effort: a stack that does not
-# answer prints "unknown" and stops nothing.
+# Who is on the line. The rendezvous counts the host lines it holds and the
+# browser sessions on them (/healthz "online" and "sessions"). A rendezvous
+# older than "sessions" leaves the browsers to Caddy, which counts the
+# requests open to the rendezvous (admin API, num_requests) — a WebSocket is
+# one long request, so that is host lines plus browsers. Best effort: a stack
+# that does not answer prints "unknown" and stops nothing.
 line_census() {
-    local online open
-    online="$(docker exec moonlight-mw-rendezvous wget -qO- http://127.0.0.1:8090/healthz 2>/dev/null \
-        | python3 -c 'import json, sys; print(json.load(sys.stdin)["online"])' 2>/dev/null)" || online=""
-    open="$(docker exec moonlight-caddy wget -qO- http://127.0.0.1:2019/reverse_proxy/upstreams 2>/dev/null \
-        | python3 -c 'import json, sys; print(sum(u.get("num_requests", 0) for u in json.load(sys.stdin) if u["address"].startswith("mw-rendezvous:")))' 2>/dev/null)" || open=""
-    if [[ -z "$online" || -z "$open" ]]; then
+    local health online browsers open
+    health="$(docker exec moonlight-mw-rendezvous wget -qO- http://127.0.0.1:8090/healthz 2>/dev/null)" || health=""
+    online="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["online"])' <<<"$health" 2>/dev/null)" || online=""
+    browsers="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["sessions"])' <<<"$health" 2>/dev/null)" || browsers=""
+    if [[ -n "$online" && -z "$browsers" ]]; then
+        open="$(docker exec moonlight-caddy wget -qO- http://127.0.0.1:2019/reverse_proxy/upstreams 2>/dev/null \
+            | python3 -c 'import json, sys; print(sum(u.get("num_requests", 0) for u in json.load(sys.stdin) if u["address"].startswith("mw-rendezvous:")))' 2>/dev/null)" || open=""
+        [[ -n "$open" ]] && browsers=$((open > online ? open - online : 0))
+    fi
+    if [[ -z "$online" || -z "$browsers" ]]; then
         echo "  host lines / browsers: unknown (the rendezvous or Caddy did not answer)"
         return 0
     fi
     echo "  host lines online : $online"
-    echo "  browsers connected: $((open > online ? open - online : 0))"
+    echo "  browsers connected: $browsers"
 }
 
 main() {

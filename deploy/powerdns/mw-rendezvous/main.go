@@ -60,6 +60,7 @@ type config struct {
 	maxMessage  int           // MW_RDV_MAX_MESSAGE_BYTES  (default 64 KiB)
 	pingEvery   time.Duration // MW_RDV_PING_SECONDS       (default 45s)
 	minProto    int           // MW_RDV_MIN_PROTO          (default 1; see protoCurrent)
+	closeDelay  time.Duration // MW_RDV_CLOSE_DELAY_MS     (default 3s; see closeLater)
 }
 
 func mustEnv(name string) string {
@@ -104,7 +105,8 @@ func loadConfig() config {
 		// Raising this is how clients too old to keep serving are retired: they
 		// get a code that says so, instead of a failure that looks like the
 		// network. Decide it on the version census, never on a hunch.
-		minProto: envInt("MW_RDV_MIN_PROTO", 1, 1, protoCurrent),
+		minProto:   envInt("MW_RDV_MIN_PROTO", 1, 1, protoCurrent),
+		closeDelay: time.Duration(envInt("MW_RDV_CLOSE_DELAY_MS", 3000, 0, 30000)) * time.Millisecond,
 	}
 }
 
@@ -451,7 +453,7 @@ func (s *server) handlePeer(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		close(done)
 		if line.dropSession(sess.id) {
-			_ = sendHost(line.conn, hostFrame{T: msgClose, S: sess.id})
+			s.closeLater(line, sess.id)
 		}
 		_ = conn.Close()
 	}()
@@ -482,6 +484,33 @@ func (s *server) handlePeer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// closeLater tells the host that a browser's socket ended — closeDelay from
+// now, and only if the host's own line is still the one that was up.
+//
+// A host takes that word as the browser leaving and takes its tunnel down. But a
+// socket also ends when whatever stands in front of this server restarts: the
+// proxy closes every socket it holds, one by one, and a browser's that goes
+// before its host's line used to be reported at once, down a line that was
+// about to go too. The host then ended a tunnel that was still perfectly good —
+// a stream on its own LAN included — for a departure that never happened. Held
+// back a moment, the word goes nowhere when the host's line falls in the
+// meantime: that line is marked gone, and nothing is sent down it.
+//
+// The session itself is released at once (the caller dropped it): its slot is
+// free for the next browser, and nothing more can be relayed to it.
+func (s *server) closeLater(line *hostLine, sessionID string) {
+	send := func() {
+		if line.alive() {
+			_ = sendHost(line.conn, hostFrame{T: msgClose, S: sessionID})
+		}
+	}
+	if s.cfg.closeDelay <= 0 {
+		send()
+		return
+	}
+	time.AfterFunc(s.cfg.closeDelay, send)
+}
+
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
 func (s *server) routes() *http.ServeMux {
@@ -490,10 +519,13 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("/v1/host", s.handleHost)
 	mux.HandleFunc("/v1/peer", s.handlePeer)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		// sessions: browsers on the line right now. Read before touching the
+		// proxy in front of this server, it says who a restart would cut off.
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":     true,
-			"online": s.hub.onlineCount(),
-			"claims": s.store.count(),
+			"ok":       true,
+			"online":   s.hub.onlineCount(),
+			"sessions": s.hub.sessionCount(),
+			"claims":   s.store.count(),
 		})
 	})
 	return mux
@@ -517,7 +549,7 @@ func main() {
 		// the one thing this service must not do.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("[mw-rendezvous] listening on %s — %d claims on file, ping %s, %d sessions/host, %d KiB max message",
-		cfg.listen, store.count(), cfg.pingEvery, cfg.maxSessions, cfg.maxMessage/1024)
+	log.Printf("[mw-rendezvous] listening on %s — %d claims on file, ping %s, %d sessions/host, %d KiB max message, close after %s",
+		cfg.listen, store.count(), cfg.pingEvery, cfg.maxSessions, cfg.maxMessage/1024, cfg.closeDelay)
 	log.Fatal(srv.ListenAndServe())
 }

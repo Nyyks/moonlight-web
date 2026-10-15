@@ -488,8 +488,14 @@ Caddy closes the `stream.` WebSockets one by one; a browser's closing before
 its host's line would make a running rendezvous tell that host "the browser
 left", and the host would take down a tunnel a stream may still be using —
 on its own LAN too. Stopped first, the rendezvous says nothing. Both runs print
-the host lines online and the browsers connected (`/healthz` and Caddy's
+the host lines online and the browsers connected (`/healthz` "online" and
+"sessions"; a rendezvous older than "sessions" leaves the browsers to Caddy's
 admin API); the apply counts again 20 s after, once hosts have reconnected.
+
+The rendezvous also holds back its "the browser left" to a host by
+`MW_RDV_CLOSE_DELAY_MS` (3 s by default), and drops it if the host's line goes
+in the meantime: an unplanned restart of Caddy — a Docker daemon restart, a
+reboot without the steps below — then cuts no tunnel either.
 Browser pages loaded before `srv-2026-10-14-b1` still lose their tunnel when
 the line drops, so pick a quiet moment.
 
