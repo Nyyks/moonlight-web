@@ -572,6 +572,8 @@ Release order: server first (`deploy-prod.sh` on the tag), application second.
 deploy/powerdns/
 ├── install.sh               # one-shot installer (Docker, security, firewall, up)
 ├── deploy-prod.sh           # PRODUCTION: move to a tag, rebuild only what it changed
+├── deploy-packages.sh       # PRODUCTION: put a release's APT/DNF tree in /root/mw-packages
+├── backup-prod.sh           # PRODUCTION: dated cold-backup ZIP, three kept, before every deploy
 ├── renew-certs.sh           # re-issue TLS certs once DNS delegation has propagated
 ├── docker-compose.yml       # PRODUCTION: dnsdist + pdns + mw-proxy + mw-rendezvous
 │                            #   + coturn + caddy + umami (+ umami-db)
