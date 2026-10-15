@@ -154,6 +154,21 @@ main() {
         exit 0
     fi
 
+    # Cold backup before anything moves (backup-prod.sh: dated ZIP, three
+    # kept). No backup, no deploy. A checkout older than the backup script
+    # takes it from the target tag, so the first deploy that ships it is
+    # covered too.
+    echo
+    if [[ -f backup-prod.sh ]]; then
+        bash ./backup-prod.sh
+    elif git cat-file -e "$target:deploy/powerdns/backup-prod.sh" 2>/dev/null; then
+        git show "$target:deploy/powerdns/backup-prod.sh" > /tmp/mw-backup-prod.sh
+        bash /tmp/mw-backup-prod.sh
+    else
+        echo "refusing: neither this checkout nor $ref has backup-prod.sh — no backup, no deploy" >&2
+        exit 1
+    fi
+
     echo
     echo "checking out $ref…"
     git checkout --quiet --detach "$target"
