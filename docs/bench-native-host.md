@@ -6663,8 +6663,10 @@ console du client.
   rapides (22 %), mais sa queue est la plus longue : p90 51,9 ms, 10 % au-delà de
   50 ms.
 - Ce que la porte apporte, à garder : l'âge de l'image (A 17,2 ms contre B 19,5),
-  et un flux qui reste à 60 i/s. C coûte 240 i/s, soit 4 fois les images et le
-  débit d'un flux à 60.
+  et un flux qui reste à 60 i/s. C coûte 240 i/s, soit 4 fois les images d'un
+  flux à 60, mais pas 4 fois le débit : ~19 Mb/s contre ~17,5 pour A, chaque
+  image ~3,6 fois plus petite. Le coût est l'encodage et le décodage, et une
+  image moins nette.
 
 **Vu en route, hors de la question** : la jambe `raise` (du hook au drapeau peint)
 fait 7,5-8,5 ms en médiane et ~20 ms au p90, dans les trois configurations. C'est
