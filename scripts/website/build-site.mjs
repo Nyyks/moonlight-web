@@ -56,6 +56,7 @@ const PAGES = [
   { src: 'play/tv.html', url: '/play/tv.html', nav: null },
   { src: 'sunshine-web-client.html', url: '/sunshine-web-client.html', nav: null },
   { src: 'browser-game-streaming.html', url: '/browser-game-streaming.html', nav: null },
+  { src: 'controllers.html', url: '/controllers.html', nav: null },
 ];
 const PAGE_URLS = new Set(PAGES.map((p) => p.url));
 

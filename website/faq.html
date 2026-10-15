@@ -73,6 +73,11 @@
         },
         {
           "@type": "Question",
+          "name": "Is MoonlightWeb the same project as moonlight-web-stream?",
+          "acceptedAnswer": {"@type": "Answer", "text": "No. They are two separate open-source projects with close names. moonlight-web-stream (github.com/MrCreativ3001/moonlight-web-stream) is a web client for a Sunshine host. MoonlightWeb (moonlightweb.top, github.com/linckosz/moonlight-web) has its own capture and encode engine: installed on the gaming PC, it streams that PC by itself, with no Sunshine needed. It can also pair with Sunshine, Apollo, Wolf and MultiSeat hosts."}
+        },
+        {
+          "@type": "Question",
           "name": "Can I play PC games on an iPhone or iPad?",
           "acceptedAnswer": {"@type": "Answer", "text": "Yes — open the URL in Safari, nothing from the App Store. Your phone becomes a full client: multi-touch trackpad (1 finger aims, 2 scroll and pinch), a native virtual keyboard with modifier keys, and game controllers with rumble, at up to 240 fps with under 20 ms Wi-Fi latency."}
         },
@@ -109,7 +114,7 @@
         {
           "@type": "Question",
           "name": "Does it work with game controllers?",
-          "acceptedAnswer": {"@type": "Answer", "text": "Yes — Xbox and PlayStation controllers work with rumble, alongside keyboard, pointer-lock mouse, touch trackpad and a virtual keyboard. Most other pads are recognized automatically, and any pad can be remapped in Settings (Switch Pro controllers: over USB)."}
+          "acceptedAnswer": {"@type": "Answer", "text": "Yes — Xbox and PlayStation controllers work with rumble, alongside keyboard, pointer-lock mouse, touch trackpad and a virtual keyboard. Most other pads are recognized automatically, and any pad can be remapped in Settings (Switch Pro controllers: over USB). Racing wheels, flight sticks and RC radios work too: from Chrome or Edge on a computer, MoonlightWeb's own host can hand the game the real device, every axis included, with force feedback for wheels on Windows and Linux hosts."}
         },
         {
           "@type": "Question",
@@ -177,6 +182,15 @@
     <div class="a" data-i18n-html="q4.a"><p>No. The client is 100% web: you just open a URL in the browser.
       The only install is the server, on the gaming PC itself.</p></div>
   </details>
+  <details>
+    <summary data-i18n="q17.s">Is MoonlightWeb the same project as moonlight-web-stream?</summary>
+    <div class="a" data-i18n-html="q17.a"><p>No. They are two separate open-source projects with close names.
+      <a href="https://github.com/MrCreativ3001/moonlight-web-stream" target="_blank" rel="noopener">moonlight-web-stream</a>
+      is a web client for a Sunshine host. MoonlightWeb (this site,
+      <a href="https://github.com/linckosz/moonlight-web" target="_blank" rel="noopener">linckosz/moonlight-web</a>) has its own
+      capture and encode engine: installed on the gaming PC, it streams that PC by itself, with no Sunshine needed.
+      It can also <a href="/sunshine-web-client.html">pair with Sunshine</a>, Apollo, Wolf and MultiSeat hosts.</p></div>
+  </details>
 
   <h2 data-i18n="h2.devices">Devices</h2>
   <details>
@@ -195,7 +209,10 @@
     <summary data-i18n="q7.s">Does it work with game controllers?</summary>
     <div class="a" data-i18n-html="q7.a"><p>Yes — Xbox and PlayStation controllers work, rumble included, alongside keyboard,
       pointer-lock mouse, touch trackpad and a virtual keyboard. Most other pads are recognized automatically,
-      and any pad can be remapped in Settings (Switch Pro controllers: over USB).</p></div>
+      and any pad can be remapped in Settings (Switch Pro controllers: over USB).</p>
+      <p><a href="/controllers.html">Racing wheels, flight sticks and RC radios</a> work too: from Chrome or Edge on a
+      computer, MoonlightWeb's own host can hand the game the real device, every axis included, with force feedback
+      for wheels on Windows and Linux hosts.</p></div>
   </details>
 
   <h2 data-i18n="h2.perf">Performance</h2>

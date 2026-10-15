@@ -64,20 +64,23 @@
   "name": "MoonlightWeb",
   "url": "https://moonlightweb.top/fr/",
   "image": "https://moonlightweb.top/assets/desktop.jpg",
-  "description": "A 100% web game-streaming client. Stream your PC games to any device with a browser — up to 4K HDR, 240 fps, under 20 ms Wi-Fi latency. Nothing to install on the client, just a URL.",
+  "description": "A 100% web game-streaming client. Installed on the gaming PC, it captures and encodes that PC itself, with no Sunshine or other streaming server to set up. Stream your PC games to any device with a browser — up to 4K HDR, 240 fps, under 20 ms Wi-Fi latency. Nothing to install on the client, just a URL.",
   "applicationCategory": "GameApplication",
   "operatingSystem": "Windows, macOS, Linux",
-  "softwareRequirements": "MoonlightWeb installed on the gaming PC; any modern browser as client (Chrome, Edge, Safari, Firefox)",
+  "softwareRequirements": "MoonlightWeb installed on the gaming PC (it captures and encodes that PC itself; no Sunshine needed); any modern browser as client (Chrome, Edge, Safari, Firefox)",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
   "downloadUrl": "https://github.com/linckosz/moonlight-web/releases",
   "author": { "@type": "Person", "name": "Bruno Martin" },
   "featureList": [
     "Game streaming in the browser, no client install",
+    "Its own capture and hardware encode engine (NVENC, AMF, Quick Sync, VA-API, VideoToolbox) on Windows, Linux and macOS: no Sunshine needed",
     "Up to 4K HDR at up to 240 fps (H264, HEVC, AV1)",
     "Under 20 ms latency over Wi-Fi (WebRTC UDP)",
     "GPU Video Enhancement: SGSRv1 and FSR1 upscaling in WebGPU",
     "Keyboard, mouse, touch trackpad, Xbox and PlayStation gamepads with rumble",
+    "Racing wheels with force feedback, flight sticks and RC radios (EdgeTX, OpenTX), sent to the game as themselves",
+    "Also pairs with Sunshine, Apollo, Wolf and MultiSeat hosts",
     "mDNS auto-discovery of gaming PCs, PIN pairing",
     "Direct peer-to-peer WebRTC streams; opt-in Internet access",
     "Session sharing: invite up to 3 players into one running game, local co-op from anywhere"
@@ -594,7 +597,7 @@
           <circle cx="152" cy="84" r="14" fill="#0f1a28" stroke="#19d3ff" stroke-width="1.6" stroke-opacity=".7"/>
           <circle cx="152" cy="84" r="8.4" fill="#101c2b" stroke="#19d3ff" stroke-width="1.4"/>
         </svg>
-        <h3 data-i18n="card5.h3">Toutes les commandes, vibrations comprises</h3><p data-i18n="card5.p">Clavier, souris en pointer‑lock, trackpad tactile, clavier virtuel, et manettes Xbox &amp; PlayStation avec vibrations.</p>
+        <h3 data-i18n="card5.h3">Toutes les commandes, vibrations comprises</h3><p data-i18n-html="card5.p">Clavier, souris en pointer‑lock, trackpad tactile, clavier virtuel, manettes Xbox &amp; PlayStation avec vibrations — et <a href="/fr/controllers.html">volants, joysticks de vol et radiocommandes RC</a>.</p>
       </div>
       <div class="card cyb reveal"><div class="ico">🔎</div><h3 data-i18n="card6.h3">Découverte sans configuration</h3><p data-i18n="card6.p">Vos PC gamer apparaissent automatiquement via mDNS. Appairage par PIN, multi‑hôtes, sessions persistantes.</p></div>
       <div class="card cyb reveal"><div class="ico">🌍</div><h3 data-i18n="card7.h3">Pair‑à‑pair par conception</h3><p data-i18n="card7.p">Le flux va droit de votre PC à votre navigateur — aucun cloud au milieu. Un lien d’accès distant rejoint votre PC de n’importe où, sans exposer le moindre port web.</p></div>
@@ -730,12 +733,12 @@
       <p data-i18n="how.p">Trois étapes, un seul installeur, aucun devoir de réseau à faire.</p>
     </div>
     <div class="steps">
-      <div class="step cyb reveal"><h3 data-i18n="step1.h3">Installez</h3><p data-i18n="step1.p">Un installeur sur le PC gamer. L’assistant configure tout — accès Internet compris — et laisse une icône dans la zone de notification. Rien à installer sur les appareils depuis lesquels vous jouez.</p></div>
+      <div class="step cyb reveal"><h3 data-i18n="step1.h3">Installez</h3><p data-i18n="step1.p">Un installeur sur le PC gamer : il capture et encode ce PC lui-même, sans Sunshine ni second serveur de streaming. L’assistant configure tout — accès Internet compris — et laisse une icône dans la zone de notification. Rien à installer sur les appareils depuis lesquels vous jouez.</p></div>
       <div class="step cyb reveal"><h3 data-i18n="step2.h3">Appairez</h3><p data-i18n="step2.p">Ouvrez la page depuis n’importe quel appareil : votre PC est déjà listé. Saisissez le PIN affiché, une seule fois. Cet appareil est approuvé pour de bon.</p></div>
       <div class="step cyb reveal"><h3 data-i18n="step3.h3">Jouez à distance !</h3><p data-i18n="step3.p">Votre lien privé fonctionne de partout — Wi‑Fi d’hôtel, canapé d’un ami, 4G. Choisissez un jeu ou le bureau complet, manette en main, c’est parti.</p></div>
     </div>
 
-    <p class="muted reveal" style="text-align:center; max-width:760px; margin:3rem auto 0" data-i18n-html="how.under">Sous le capot : un backend C++/Qt embarque <code style="font-family:var(--mono); color:var(--cyan)">moonlight‑common‑c</code>, dialogue en GameStream (RTSP/RTP/ENet) avec l’hôte, et relaie vidéo, audio et entrées vers le navigateur via WebRTC — avec bascule UDP vers TCP automatique. Le décodage se fait en WebCodecs, le rendu en WebGPU, l’audio dans un AudioWorklet.</p>
+    <p class="muted reveal" style="text-align:center; max-width:760px; margin:3rem auto 0" data-i18n-html="how.under">Sous le capot : un serveur C++/Qt capture le PC gamer lui-même et donne chaque image directement à son encodeur GPU (NVENC, AMF, Quick Sync, VA‑API, VideoToolbox), puis au navigateur via WebRTC — avec bascule UDP vers TCP automatique. Vous utilisez déjà Sunshine, Apollo ou Wolf ? Il embarque <code style="font-family:var(--mono); color:var(--cyan)">moonlight‑common‑c</code> pour s’appairer aussi avec ces hôtes. Le décodage se fait en WebCodecs, le rendu en WebGPU, l’audio dans un AudioWorklet.</p>
     <div class="chips reveal">
       <span class="chip">C++17 · Qt 6</span><span class="chip">WebRTC</span><span class="chip">WebCodecs</span>
       <span class="chip">WebGPU</span><span class="chip">AudioWorklet</span><span class="chip">Opus</span>
