@@ -728,6 +728,8 @@
         "webcodecsUnsupported": "WebCodecs non pris en charge",
         "codecUnsupported": "Codec non pris en charge par le navigateur",
         "streamDisconnected": "Flux déconnecté",
+        "lineReconnecting": "Reconnexion à votre machine… le stream continue.",
+        "lineOutOfReach": "Les commandes de votre machine sont hors d'atteinte — le stream continue.",
         "gamepadIgnored": "« {{name}} » n’est pas transmise : sa disposition est inconnue. Configurez-la une fois et elle fonctionnera.",
         "textInputNeedsIme": "Clavier tactile : sur un hôte Linux, le texte passe par IBus. Sans méthode de saisie active dans la session de l'hôte, rien d'utilisable n'est tapé.",
         "webrtcError": "Erreur de connexion WebRTC",

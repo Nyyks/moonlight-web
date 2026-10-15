@@ -45,6 +45,7 @@
  * When that connection drops, lineKeeper.js dials it again under the page.
  */
 import { LineKeeper, hangUp } from './lineKeeper.js';
+import { showLineNotice } from '../ui/LineNotice.js';
 
 /** The connection, and the next one when it drops; null without a tunnel. */
 let keeper = null;
@@ -309,6 +310,7 @@ export async function startTunnel(onStage) {
         dial: () => new mod.Tunnel(hostId),
         giveUp: toBootstrap,
         streaming: () => document.body.classList.contains('streaming-active'),
+        notice: showLineNotice,
     });
     keeper.adopt(first);
     serveWorkerRequests();

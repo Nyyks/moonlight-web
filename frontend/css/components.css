@@ -685,6 +685,32 @@ body.ios .settings-checkbox-label input[type='checkbox']:checked::before {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+   Line notice (ui/LineNotice.js)
+
+   The line to the machine away under a running stream: a small grey pill at
+   the top centre, over the picture and over the CSS-fallback fullscreen
+   (z-index 9999). Nothing to click, so it lets every click through.
+   ════════════════════════════════════════════════════════════════════════ */
+.line-notice {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + var(--space-3));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    max-width: calc(100vw - 2 * var(--space-3));
+    padding: 5px 14px;
+    border-radius: 999px;
+    background: rgba(24, 24, 28, 0.72);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    text-align: center;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
    Statistics disclosure
 
    What the census covers, folded shut. There is no consent bar to style: the

@@ -3,7 +3,14 @@
  * GPLv3 — see repository LICENSE.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LineKeeper, hangUp, REDIAL_ATTEMPTS, REDIAL_BUDGET_MS } from '../js/net/lineKeeper.js';
+import {
+    LineKeeper,
+    hangUp,
+    NOTICE_DELAY_MS,
+    REDIAL_ATTEMPTS,
+    REDIAL_BUDGET_MS,
+    STREAM_REDIAL_EVERY_MS,
+} from '../js/net/lineKeeper.js';
 
 /**
  * Through the rendezvous, a phone that put the browser aside for two seconds
@@ -85,11 +92,20 @@ function setup({ lines = [], streaming = false } = {}) {
     const queue = [...lines];
     const dial = vi.fn(() => queue.shift() ?? new FakeLine());
     const giveUp = vi.fn();
-    const keeper = new LineKeeper({ dial, giveUp, streaming: () => streaming, doc });
+    const stream = { on: streaming };
+    /** @type {(string | null)[]} what the page said over the stream, in order */
+    const said = [];
+    const keeper = new LineKeeper({
+        dial,
+        giveUp,
+        streaming: () => stream.on,
+        notice: (state) => said.push(state),
+        doc,
+    });
     const first = new FakeLine();
     first.connected = true;
     keeper.adopt(first);
-    return { doc, dial, giveUp, keeper, first };
+    return { doc, dial, giveUp, keeper, first, stream, said };
 }
 
 describe('LineKeeper', () => {
@@ -133,13 +149,83 @@ describe('LineKeeper', () => {
         expect((await asked).via).toBe(next);
     });
 
-    it('keeps the entry page as the answer while a stream depends on the line', () => {
-        const { first, dial, giveUp } = setup({ streaming: true });
+    it('dials the line again behind a stream, and says nothing when it is back at once', async () => {
+        const next = new FakeLine();
+        const { keeper, first, giveUp, said } = setup({ streaming: true, lines: [next] });
 
         first.drop();
+        expect((await keeper.fetch('/api/hosts')).via).toBe(next);
+        await vi.advanceTimersByTimeAsync(NOTICE_DELAY_MS * 2);
+
+        expect(giveUp).not.toHaveBeenCalled();
+        expect(said.filter(Boolean)).toEqual([]);
+    });
+
+    it('says it is reconnecting, then out of reach, and requests fail at once meanwhile', async () => {
+        const lines = Array.from({ length: 20 }, () => new FakeLine({ connect: 'hang' }));
+        const { keeper, first, giveUp, said } = setup({ streaming: true, lines });
+
+        first.drop();
+        await vi.advanceTimersByTimeAsync(NOTICE_DELAY_MS - 1);
+        expect(said).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(said).toEqual(['reconnecting']);
+
+        await vi.advanceTimersByTimeAsync(REDIAL_BUDGET_MS);
+        expect(said).toEqual(['reconnecting', 'out-of-reach']);
+        await expect(keeper.fetch('/api/hosts')).rejects.toThrow('not open');
+        expect(giveUp).not.toHaveBeenCalled();
+    });
+
+    it('keeps trying behind the stream, every so often, and clears the notice once back', async () => {
+        const fail = () => new FakeLine({ connect: 'fail' });
+        const next = new FakeLine();
+        // Enough failures to outlast the budget, where they come a second apart.
+        const lines = [...Array.from({ length: 12 }, fail), next];
+        const { keeper, first, dial, giveUp, said } = setup({ streaming: true, lines });
+
+        first.drop();
+        await vi.advanceTimersByTimeAsync(REDIAL_BUDGET_MS);
+        expect(said.at(-1)).toBe('out-of-reach');
+        const inBudget = dial.mock.calls.length;
+
+        // Past the budget, one attempt per period, no more.
+        await vi.advanceTimersByTimeAsync(STREAM_REDIAL_EVERY_MS * 3);
+        expect(dial.mock.calls.length - inBudget).toBeLessThanOrEqual(4);
+
+        await vi.advanceTimersByTimeAsync(STREAM_REDIAL_EVERY_MS * 10);
+        expect(keeper.line).toBe(next);
+        expect(said.at(-1)).toBeNull();
+        expect((await keeper.fetch('/api/hosts')).via).toBe(next);
+        expect(giveUp).not.toHaveBeenCalled();
+    });
+
+    it('goes back through the entry page when the stream ends with the line still down', async () => {
+        const lines = Array.from({ length: 20 }, () => new FakeLine({ connect: 'fail' }));
+        const { first, giveUp, said, stream } = setup({ streaming: true, lines });
+
+        first.drop();
+        await vi.advanceTimersByTimeAsync(REDIAL_BUDGET_MS + STREAM_REDIAL_EVERY_MS);
+        expect(giveUp).not.toHaveBeenCalled();
+
+        stream.on = false;
+        await vi.advanceTimersByTimeAsync(STREAM_REDIAL_EVERY_MS);
 
         expect(giveUp).toHaveBeenCalledTimes(1);
-        expect(dial).not.toHaveBeenCalled();
+        expect(said.at(-1)).toBeNull();
+    });
+
+    it('leaves at once when a request comes after the stream, with the line still down', async () => {
+        const lines = Array.from({ length: 20 }, () => new FakeLine({ connect: 'fail' }));
+        const { keeper, first, giveUp, stream } = setup({ streaming: true, lines });
+
+        first.drop();
+        await vi.advanceTimersByTimeAsync(REDIAL_BUDGET_MS);
+        stream.on = false;
+        void keeper.fetch('/api/hosts');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(giveUp).toHaveBeenCalledTimes(1);
     });
 
     it(`goes back through the entry page after ${REDIAL_ATTEMPTS} failed attempts`, async () => {

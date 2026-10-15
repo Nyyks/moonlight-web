@@ -31,12 +31,20 @@
  * in the line — so the session the old line carried is the one the new line
  * carries. Requests made in the meantime wait for it instead of failing.
  *
- * The entry page stays the answer in two cases:
- *   - a stream is on screen or being set up. Its signalling rides this line,
- *     and what a stream does when the line goes is a question of its own;
- *   - no new line within REDIAL_BUDGET_MS of the page being back in front, or
- *     REDIAL_ATTEMPTS failures. The entry page says what is happening and keeps
- *     trying, where this page has nothing on screen to say it with.
+ * The entry page stays the answer when no new line comes within
+ * REDIAL_BUDGET_MS of the page being back in front, or after REDIAL_ATTEMPTS
+ * failures. The entry page says what is happening and keeps trying, where this
+ * page has nothing on screen to say it with.
+ *
+ * Under a stream it is not the answer. Going there ends the stream, and the
+ * stream does not need the line: its own connection goes straight between the
+ * two machines, and its signalling socket is closed on purpose once that
+ * connection is up. So the line is dialled again behind the stream, for as
+ * long as the stream lasts, and the page says so — `notice` — once it has been
+ * away NOTICE_DELAY_MS: reconnecting, then, after the first budget, out of
+ * reach, with one attempt every STREAM_REDIAL_EVERY_MS. Requests made while it
+ * is out of reach fail at once rather than wait for it. A stream that ends with
+ * the line still down goes to the entry page, as before.
  *
  * Nothing is dialled while the page is hidden. A suspended page cannot finish a
  * handshake, and one started in the seconds before the suspension would be found
@@ -52,6 +60,16 @@ export const REDIAL_PAUSE_MS = 1000;
 export const REDIAL_ATTEMPTS = 3;
 /** Less time than this left in the budget is not worth another attempt. */
 const MIN_ATTEMPT_MS = 2000;
+/** Under a stream: how long the line may be away before the page says so. A
+ *  line back sooner is a hiccup nobody needs to read about. */
+export const NOTICE_DELAY_MS = 3000;
+/** Under a stream, past the first budget: one attempt this often. Each counts
+ *  against the introduction server's limit on attempts per address. */
+export const STREAM_REDIAL_EVERY_MS = 10000;
+/** The longest one of those attempts may take. */
+const STREAM_ATTEMPT_MS = 8000;
+/** How often a wait under a stream looks whether the stream is still on. */
+const STREAM_CHECK_MS = 1000;
 
 /** Methods that can be asked again on a new line without doing anything twice. */
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
@@ -103,19 +121,24 @@ export class LineKeeper {
      * @param {object} opts
      * @param {() => any} opts.dial          a new line to the same machine, not yet connected
      * @param {() => void} opts.giveUp       hand the page over to the entry page
-     * @param {() => boolean} opts.streaming whether a stream depends on the line
+     * @param {() => boolean} opts.streaming whether a stream is on screen
+     * @param {(state: 'reconnecting' | 'out-of-reach' | null) => void} [opts.notice]
+     *   what to say over a stream about the line; null takes it away
      * @param {Document} [opts.doc]
      */
-    constructor({ dial, giveUp, streaming, doc = document }) {
+    constructor({ dial, giveUp, streaming, notice = () => {}, doc = document }) {
         this._dial = dial;
         this._giveUp = giveUp;
         this._streaming = streaming;
+        this._notice = notice;
         this._doc = doc;
         /** The line requests go out on. */
         this.line = null;
         /** @type {Promise<any> | null} the next line, while it is being dialled */
         this._redial = null;
         this._leaving = false;
+        /** Under a stream, past the first budget: requests fail at once. */
+        this._outOfReach = false;
 
         // Back in front with a line that died without a word (its close still
         // queued behind the page's return): dial now, before a request finds out.
@@ -139,23 +162,25 @@ export class LineKeeper {
      */
     lost(line, why) {
         if (line !== this.line || this._redial || this._leaving) return;
-        if (this._streaming()) {
-            this._leave();
-            return;
-        }
+        const underStream = this._streaming();
         console.warn(
-            `[MW] The line to the host dropped (${why || 'no reason'}) — dialling it again`,
+            `[MW] The line to the host dropped (${why || 'no reason'}) — dialling it again` +
+                (underStream ? ' behind the stream' : ''),
         );
         // What is left of it (a socket the far end still counts) goes too.
         hangUp(line);
-        this._redial = this._dialAgain();
+        this._redial = underStream ? this._dialUnderStream() : this._dialAgain();
     }
 
     /** The line to send on: the one in use, or the next one while it is dialled. */
     async ready() {
         if (!this._redial && this.line && !this.line.connected)
             this.lost(this.line, 'found closed');
+        // The stream this was waiting behind is over: the page has nothing to
+        // wait for any more.
+        if (this._outOfReach && !this._streaming()) this._leave();
         if (this._leaving) return new Promise(() => {});
+        if (this._outOfReach) throw new Error('the connection to your machine is not open');
         return this._redial || this.line;
     }
 
@@ -175,7 +200,7 @@ export class LineKeeper {
             if (line === this.line && !this._redial) {
                 if (line.connected) throw e; // the line is fine; the request failed
                 this.lost(line, e.message); // a close not reported yet
-                if (!this._redial) throw e; // a stream: the page is leaving
+                if (!this._redial) throw e; // the page is leaving
             }
             return (await this.ready()).fetch(url, init);
         }
@@ -220,6 +245,77 @@ export class LineKeeper {
                 }
                 await sleep(REDIAL_PAUSE_MS);
             }
+        }
+    }
+
+    /**
+     * The line dialled again behind a stream, for as long as the stream lasts.
+     * The first budget is spent as _dialAgain() spends it; then one attempt
+     * every STREAM_REDIAL_EVERY_MS, with the page saying the machine is out of
+     * reach. Hidden, nothing is dialled, as there.
+     */
+    async _dialUnderStream() {
+        const started = Date.now();
+        const noticeTimer = setTimeout(() => this._notice('reconnecting'), NOTICE_DELAY_MS);
+        let budgetEnd = started + REDIAL_BUDGET_MS;
+        while (this._streaming()) {
+            if (this._doc.visibilityState !== 'visible') {
+                await whenVisible(this._doc);
+                // The budget counts from the page's return.
+                if (!this._outOfReach) budgetEnd = Date.now() + REDIAL_BUDGET_MS;
+                continue;
+            }
+            const attemptStarted = Date.now();
+            try {
+                const line = await this._attempt(
+                    this._outOfReach ? STREAM_ATTEMPT_MS : budgetEnd - attemptStarted,
+                );
+                clearTimeout(noticeTimer);
+                this._outOfReach = false;
+                this._redial = null;
+                this.adopt(line);
+                this._notice(null);
+                console.info(
+                    `[MW] The line to the host is back after ${Date.now() - started} ms, ` +
+                        'behind the stream',
+                );
+                return line;
+            } catch (e) {
+                if (e === HIDDEN) continue;
+                if (
+                    !this._outOfReach &&
+                    budgetEnd - Date.now() < REDIAL_PAUSE_MS + MIN_ATTEMPT_MS
+                ) {
+                    this._outOfReach = true;
+                    clearTimeout(noticeTimer);
+                    this._notice('out-of-reach');
+                    console.warn(
+                        `[MW] The line to the host could not be dialled again (${e.message}) — ` +
+                            `the stream carries on; trying every ${STREAM_REDIAL_EVERY_MS / 1000} s`,
+                    );
+                }
+                await this._pauseUnderStream(
+                    this._outOfReach
+                        ? attemptStarted + STREAM_REDIAL_EVERY_MS - Date.now()
+                        : REDIAL_PAUSE_MS,
+                );
+            }
+        }
+        clearTimeout(noticeTimer);
+        this._notice(null);
+        console.warn(
+            '[MW] The stream ended with the line to the host still down — ' +
+                'going back through the entry page',
+        );
+        this._leave();
+        return new Promise(() => {}); // the page is leaving
+    }
+
+    /** Wait, but no longer than the stream lasts. @param {number} ms */
+    async _pauseUnderStream(ms) {
+        const until = Date.now() + ms;
+        while (this._streaming() && Date.now() < until) {
+            await sleep(Math.min(STREAM_CHECK_MS, until - Date.now()));
         }
     }
 

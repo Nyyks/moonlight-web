@@ -728,6 +728,8 @@
         "webcodecsUnsupported": "不支持 WebCodecs",
         "codecUnsupported": "浏览器不支持该编解码器",
         "streamDisconnected": "串流已断开",
+        "lineReconnecting": "正在重新连接您的电脑…串流不受影响。",
+        "lineOutOfReach": "暂时无法操作您的电脑——串流不受影响。",
         "gamepadIgnored": "“{{name}}”未被转发：布局未知。映射一次即可使用。",
         "textInputNeedsIme": "触摸键盘：在 Linux 主机上，文本通过 IBus 输入。若主机会话中没有运行输入法，将无法正确输入。",
         "webrtcError": "WebRTC 连接错误",
