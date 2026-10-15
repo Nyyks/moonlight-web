@@ -93,6 +93,8 @@ import {
     resolveStreamSize,
     fitPixelBudget,
     tvOverAsk,
+    devicePixelSize,
+    nearlySameStreamSize,
 } from './util/StreamResolution.js';
 import {
     hardwareDecodeLimit,
@@ -188,6 +190,9 @@ const SIDE_KEYS_KEEP_MS = 6 * 3600 * 1000;
  *  by the time the shortcut is actually made. */
 const SIDE_KEYS_RETRY_MS = 10 * 60 * 1000;
 const SIDE_KEYS_STORE = 'mw-hs-side-keys';
+/** A screen change seen while a relaunch is on its way is looked at again
+ *  this long after (App._onClientScreenChanged), until none is. */
+const SCREEN_RECHECK_MS = 1500;
 
 /** An address rendered as a clickable, copyable link in a banner. */
 const linkHtml = (u) =>
@@ -3002,11 +3007,24 @@ const MoonlightApp = {
      * monitor of another size or scale — and the choice follows this screen
      * (Auto on the native host, "Match my screen"): the stream is relaunched
      * at the new size, seamlessly where the host allows two sessions. Nothing
-     * happens when the size the host is asked for does not change.
+     * happens when the size the host is asked for does not change, or only by
+     * a few pixels (nearlySameStreamSize).
+     *
+     * One relaunch at a time: a change while one is on its way is looked at
+     * again once it is over, against the screen as it is by then. Two in a row
+     * superseded each other on the host, and the second one's virtual display
+     * was asked for while the first was still being set (15/10/2026).
      */
     _onClientScreenChanged(device) {
         if (!this._sizeFollowsScreen || this._nav.overlay !== 'streaming') return;
-        if (this._standbyView) return;
+        if (this._standbyView || this._standbyLaunching || this._relaunching) {
+            clearTimeout(this._screenRecheckTimer);
+            this._screenRecheckTimer = setTimeout(
+                () => this._onClientScreenChanged(devicePixelSize()),
+                SCREEN_RECHECK_MS,
+            );
+            return;
+        }
         const settings = this._lastStreamingSettings;
         const host = this._lastStreamHost;
         if (!settings || !host) return;
@@ -3040,8 +3058,10 @@ const MoonlightApp = {
             knownHardwareDecodeLimit(settings.video_codec),
         );
         if (
-            bounded.height === settings.stream_height &&
-            bounded.aspect === settings.stream_aspect &&
+            nearlySameStreamSize(bounded, {
+                height: settings.stream_height,
+                aspect: settings.stream_aspect,
+            }) &&
             settings.stream_fps === fps
         )
             return;
@@ -3995,12 +4015,17 @@ const MoonlightApp = {
         console.log('[MW] Seamless transition: preparing standby stream on slot', standbySlot);
 
         let result;
+        // Until the host answers there is no standby view yet, and a screen
+        // change must not start a second launch on the same slot.
+        this._standbyLaunching = true;
         try {
             result = await BackendClient.launchApp(host.uuid, app.id, settings);
         } catch (err) {
+            this._standbyLaunching = false;
             console.warn('[MW] Standby launch failed — legacy relaunch:', err);
             return this._relaunchTransport(relaunchIndex);
         }
+        this._standbyLaunching = false;
         if (result.status === 'dual_unavailable') {
             // Capability probe answered: this host cannot host a second
             // concurrent session — remember it and use the legacy path.

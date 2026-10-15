@@ -230,6 +230,33 @@ export function devicePixelSize(win) {
     return { width: Math.max(a, b), height: Math.min(a, b) };
 }
 
+/** How far apart two stream widths of the same height may be and still count
+ *  as the same size: a screen read a few pixels off is no new screen. */
+export const SCREEN_SIZE_TOLERANCE = 0.01;
+
+/**
+ * Whether two stream sizes (`{height, aspect}`, aspect "W:H") are the same to
+ * the eye: the same height, widths within SCREEN_SIZE_TOLERANCE. A window
+ * moved between two monitors of the same size, or a page zoom, can read the
+ * screen 4 px wider (2564×1440 for 2560×1440, 15/10/2026): relaunching for
+ * that turned the host's virtual display over for nothing — and twice, when
+ * the reading came back.
+ * @param {{height: number, aspect?: string}} a
+ * @param {{height: number, aspect?: string}} b
+ */
+export function nearlySameStreamSize(a, b) {
+    if (!a || !b || a.height !== b.height) return false;
+    if ((a.aspect || '') === (b.aspect || '')) return true;
+    const width = (s) => {
+        const m = /^(\d+):(\d+)$/.exec(s.aspect || '');
+        return m ? (Number(m[1]) * s.height) / Number(m[2]) : 0;
+    };
+    const wa = width(a);
+    const wb = width(b);
+    if (!(wa > 0) || !(wb > 0)) return false;
+    return Math.abs(wa - wb) <= Math.max(wa, wb) * SCREEN_SIZE_TOLERANCE;
+}
+
 /**
  * A size brought under Auto's ceiling, its shape kept: a 3840×2160 screen is
  * 2560×1440, a 2560×1080 ultrawide is itself. Even, as every encoder wants.

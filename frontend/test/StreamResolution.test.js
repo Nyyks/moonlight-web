@@ -24,6 +24,7 @@ import {
     clampCustomSize,
     devicePixelSize,
     fitPixelBudget,
+    nearlySameStreamSize,
     readResolutionChoice,
     resolveStreamSize,
     tvOverAsk,
@@ -537,5 +538,35 @@ describe('tvOverAsk — a TV asked more than its Auto would take', () => {
     it('a rate alone past Auto is enough; an unknown Auto rate is no reason', () => {
         expect(tvOverAsk({ height: 720, fps: 60, autoFps: 30 })?.autoFps).toBe(30);
         expect(tvOverAsk({ height: 720, fps: 60, autoFps: 0 })).toBeNull();
+    });
+});
+
+describe('nearlySameStreamSize', () => {
+    it('a screen read 4 px wider is the same screen (15/10/2026)', () => {
+        expect(
+            nearlySameStreamSize(
+                { height: 1080, aspect: '1922:1080' },
+                { height: 1080, aspect: '1920:1080' },
+            ),
+        ).toBe(true);
+    });
+
+    it('a real change of shape or height is not', () => {
+        const fhd = { height: 1080, aspect: '1920:1080' };
+        expect(nearlySameStreamSize({ height: 1080, aspect: '2560:1080' }, fhd)).toBe(false);
+        expect(nearlySameStreamSize({ height: 1080, aspect: '1728:1080' }, fhd)).toBe(false);
+        expect(nearlySameStreamSize({ height: 1440, aspect: '2560:1440' }, fhd)).toBe(false);
+    });
+
+    it('the tolerance is 1 % of the width', () => {
+        const fhd = { height: 1080, aspect: '1920:1080' };
+        expect(nearlySameStreamSize({ height: 1080, aspect: '1938:1080' }, fhd)).toBe(true);
+        expect(nearlySameStreamSize({ height: 1080, aspect: '1942:1080' }, fhd)).toBe(false);
+    });
+
+    it('equal or missing aspects compare as they are', () => {
+        expect(nearlySameStreamSize({ height: 720 }, { height: 720 })).toBe(true);
+        expect(nearlySameStreamSize({ height: 720, aspect: '16:9' }, { height: 720 })).toBe(false);
+        expect(nearlySameStreamSize(null, { height: 720 })).toBe(false);
     });
 });
