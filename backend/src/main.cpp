@@ -6000,6 +6000,13 @@ int main(int argc, char* argv[])
     // It is created unconditionally: it does nothing at all until the rendezvous
     // line announces a browser, and the line only runs with consent.
     ControlTunnel controlTunnel(&server, &authManager, &appSettings, &rendezvous, &routerPorts);
+    // A device that signed in, or a player holding a live invitation, keeps its
+    // tunnel when the introduction server goes away under it (TunnelPeerPolicy).
+    controlTunnel.setKnownCaller([&server, &shareManager](const HttpRequest& req) {
+        return server.isAuthenticated(req) ||
+               shareManager.slotForCookie(
+                   HttpServer::cookieFromRequest(req, QStringLiteral("mw_player"))) >= 0;
+    });
 
     // Phase N: System tray icon. Its entries open the public domain (with the
     // host key) once Internet Access is live, https://localhost otherwise.

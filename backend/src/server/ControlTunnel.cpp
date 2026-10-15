@@ -28,6 +28,7 @@
 #include "server/AppSettings.h"
 #include "server/AuthManager.h"
 #include "server/HttpServer.h"
+#include "server/TunnelPeerPolicy.h"
 #include "streaming/SdpFingerprint.h"
 
 #include <QCryptographicHash>
@@ -117,7 +118,13 @@ ControlTunnel::ControlTunnel(HttpServer* http, AuthManager* auth, AppSettings* s
     // Nor should one whose owner turned UPnP off: the allocator reads that
     // switch, and this is the first place the tunnel honours it.
     connect(m_Rendezvous, &RendezvousClient::onlineChanged, this, [this](bool online) {
-        if (!online || !m_Ports->enabled()) return;
+        // An open tunnel does not need the line, and its own end says when it
+        // goes. One still being set up does: nothing more will reach it.
+        if (!online) {
+            dropUnfinishedPeers();
+            return;
+        }
+        if (!m_Ports->enabled()) return;
         m_Ports->ensureStarted();
         // Already discovered on behalf of a stream: the signal below has fired.
         if (m_Ports->gatewayState() == RouterPortAllocator::GatewayState::Ready &&
@@ -304,6 +311,16 @@ void ControlTunnel::onSessionOpened(const QString& sessionId)
     m_Peers.insert(sessionId, std::move(owned));
 
     Logger::info(QStringLiteral("[Tunnel] Browser arrived on session %1").arg(sessionId.left(8)));
+
+    // A browser that never opens its channel — gone mid-handshake, its answer
+    // lost — was otherwise kept, router hole and all, until the host restarted.
+    QTimer::singleShot(TunnelPeerPolicy::kHandshakeDeadlineMs, this, [this, sessionId]() {
+        Peer* pp = peer(sessionId);
+        if (!pp || channelOpen(*pp)) return;
+        m_Rendezvous->closeSession(sessionId);
+        dropPeer(sessionId, QStringLiteral("no channel within %1 s")
+                                .arg(TunnelPeerPolicy::kHandshakeDeadlineMs / 1000));
+    });
 
     // A hole is free: build the connection on it now, the common case.
     p.port = takeTunnelPort();
@@ -536,8 +553,14 @@ void ControlTunnel::buildPeerConnection(Peer& p)
         QMetaObject::invokeMethod(
             this,
             [this, id, attempt]() {
+                const Peer* pp = peer(id);
                 // A replaced connection's end is not the session's (see above).
-                if (const Peer* pp = peer(id); pp && pp->attempt != attempt) return;
+                if (pp && pp->attempt != attempt) return;
+                // Detached: the server has already closed this session.
+                if (pp && pp->detached) {
+                    dropPeer(id, QStringLiteral("the peer connection ended"));
+                    return;
+                }
                 // The introduction server is told, and that is not a courtesy.
                 // It is the only party that knows this session is over: the
                 // browser's socket to it is still open — a page whose connection
@@ -564,6 +587,21 @@ void ControlTunnel::buildPeerConnection(Peer& p)
         },
         [](rtc::string) { /* the tunnel speaks binary only */ });
 
+    // The channel is the whole tunnel: once it closes there is nothing left to
+    // keep. This used to be left to the server's `close`, which a detached
+    // tunnel no longer gets.
+    p.dc->onClosed([this, id, attempt]() {
+        QMetaObject::invokeMethod(
+            this,
+            [this, id, attempt]() {
+                const Peer* pp = peer(id);
+                if (!pp || pp->attempt != attempt) return;
+                if (!pp->detached) m_Rendezvous->closeSession(id);
+                dropPeer(id, QStringLiteral("the channel closed"));
+            },
+            Qt::QueuedConnection);
+    });
+
     p.dc->onBufferedAmountLow([this, id]() {
         QMetaObject::invokeMethod(
             this,
@@ -577,7 +615,66 @@ void ControlTunnel::buildPeerConnection(Peer& p)
 
 void ControlTunnel::onSessionClosed(const QString& sessionId)
 {
-    dropPeer(sessionId, QStringLiteral("the browser left"));
+    Peer* pp = peer(sessionId);
+    if (!pp || pp->detached) return;
+
+    // The server's `close` is not always the browser leaving: a restart of the
+    // proxy in front of it closes every socket, and a browser's that goes before
+    // this machine's line is reported as a departure. A tunnel whose channel is
+    // open no longer needs the server, so it stays — for a browser on this LAN,
+    // by the address ICE settled on, or a device a request has vouched for. A
+    // browser that really left closes the channel itself, or ICE consent runs
+    // out. See TunnelPeerPolicy.h.
+    const bool open = channelOpen(*pp);
+    const bool onLan = AuthManager::isLanAddress(peerAddress(*pp));
+    if (!TunnelPeerPolicy::keepOnClose(open, onLan, pp->known)) {
+        dropPeer(sessionId, QStringLiteral("the browser left"));
+        return;
+    }
+    pp->detached = true;
+    pp->detachOrder = ++m_DetachSeq;
+    const QString who = onLan ? QStringLiteral("on this LAN") : QStringLiteral("a known device");
+    Logger::info(QStringLiteral("[Tunnel] Session %1 kept after the server closed it — its channel "
+                                "is open and it is %2")
+                     .arg(sessionId.left(8), who));
+    enforceDetachedCap();
+}
+
+bool ControlTunnel::channelOpen(const Peer& p)
+{
+    return p.dc && p.dc->isOpen();
+}
+
+void ControlTunnel::noteCaller(Peer& p, const HttpRequest& req)
+{
+    if (p.known) return;
+    p.known = m_KnownCaller ? m_KnownCaller(req) : m_Http->isAuthenticated(req);
+}
+
+void ControlTunnel::dropUnfinishedPeers()
+{
+    const QStringList ids = m_Peers.keys();
+    for (const QString& id : ids) {
+        const Peer* pp = peer(id);
+        if (!pp || channelOpen(*pp)) continue;
+        dropPeer(id, QStringLiteral("the line to the introduction server dropped before the "
+                                    "channel opened"));
+    }
+}
+
+void ControlTunnel::enforceDetachedCap()
+{
+    for (;;) {
+        std::vector<TunnelPeerPolicy::Detached> detached;
+        for (const auto& owned : std::as_const(m_Peers)) {
+            if (owned->detached)
+                detached.push_back({owned->sessionId, owned->detachOrder, owned->known});
+        }
+        const QString victim = TunnelPeerPolicy::evictOne(detached);
+        if (victim.isEmpty()) return;
+        dropPeer(victim, QStringLiteral("more than %1 tunnels kept without the server")
+                             .arg(TunnelPeerPolicy::kMaxDetached));
+    }
 }
 
 void ControlTunnel::dropPeer(const QString& sessionId, const QString& why)
@@ -603,6 +700,7 @@ void ControlTunnel::dropPeer(const QString& sessionId, const QString& why)
     if (owned->dc) {
         owned->dc->onMessage(nullptr, nullptr);
         owned->dc->onBufferedAmountLow(nullptr);
+        owned->dc->onClosed(nullptr);
         owned->dc->close();
     }
     if (owned->pc) {
@@ -874,6 +972,8 @@ void ControlTunnel::handleRequestFrame(Peer& p, quint32 id, const QByteArray& pa
     }
     req.headers.insert(QStringLiteral("content-length"), QString::number(req.body.size()));
 
+    noteCaller(p, req);
+
     const QString hostHeader = req.headers.value(QStringLiteral("host"));
     const QString sessionId = p.sessionId;
     p.inFlight++;
@@ -941,6 +1041,7 @@ void ControlTunnel::handleWsOpen(Peer& p, quint32 id, const QByteArray& payload)
     const QJsonObject headers = head.value(QStringLiteral("h")).toObject();
     for (auto it = headers.begin(); it != headers.end(); ++it)
         asRequest.headers.insert(it.key().toLower(), it.value().toString());
+    noteCaller(p, asRequest);
 
     QString error;
     const quint16 port = m_Http->authorizeTunnelWebSocket(asRequest, &error);

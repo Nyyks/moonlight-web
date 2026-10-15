@@ -42,6 +42,7 @@ void run_annexb_filler_tests();
 void run_link_freeze_log_tests();
 void run_host_lag_tracker_tests();
 void run_tunnel_frame_tests();
+void run_tunnel_peer_policy_tests();
 void run_app_manifest_tests();
 void run_wolf_coop_tests();
 void run_start_choice_tests();
@@ -100,6 +101,7 @@ int main(int argc, char** argv)
     run_link_freeze_log_tests();
     run_host_lag_tracker_tests();
     run_tunnel_frame_tests();
+    run_tunnel_peer_policy_tests();
     run_app_manifest_tests();
     run_wolf_coop_tests();
     run_start_choice_tests();
