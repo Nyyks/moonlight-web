@@ -127,6 +127,13 @@ struct DisplayInfo;
  * intervals. On macOS the display runs at the stream's rate; no measurement
  * — an old client, a hidden tab at launch — keeps the 120 Hz default.
  *
+ * Under `vddmatch` (Windows, off until the bench; plan glissade, section V)
+ * the rate is a whole multiple of the client's own instead, to the
+ * millihertz (matchedRefreshMilliHz): 239.744 Hz for a "120 Hz" panel that
+ * runs at 119.872, where 240.000 beats against it. Every rate from here to
+ * the driver is therefore in millihertz: the request file, the driver's list
+ * (decimal), and the mode Windows applies (an exact fraction).
+ *
  * Everything in this header that has no OS dependency (the request parser,
  * the settings XML, the names) is pure and covered by
  * tests/test_virtual_display.cpp on every platform.
@@ -184,15 +191,67 @@ constexpr int kRateMin = 24;
 constexpr int kRateMax = 240;
 constexpr int kRateDriverMax = 500;
 
+/// Every rate below the stream's choice of one is in millihertz: a client's
+/// screen that refreshes at 119.872 Hz gets a display at 239.744, exactly —
+/// the driver takes a decimal rate in its list and Windows applies the mode
+/// as the rational it is (29968/125), where a whole 240 beats against that
+/// screen and loses a picture every 7.8 s (plan glissade, V0 of 14/10/2026).
+constexpr int kMilliHz = 1000;
+
 /// The mode a request asks for, pinned into bounds and made even. Returns
 /// false — and leaves 0×0 — when there is nothing usable to ask for, which is
 /// the normal case: the default mode then applies.
 bool normaliseMode(int& width, int& height);
 
-/// The refresh rate a request asks for, pinned into [kRateMin,
-/// kRateDriverMax]. Returns false — and leaves 0 — when there is none, in
-/// which case kRefreshHz applies.
-bool normaliseRate(int& hz);
+/// The refresh rate a request asks for, in millihertz, pinned into
+/// [kRateMin, kRateDriverMax] Hz. Returns false — and leaves 0 — when there
+/// is none, in which case kRefreshHz applies.
+bool normaliseRate(int& milliHz);
+
+/// A rate in millihertz as the driver's settings file spells it: "240" when
+/// it is whole, "239.744" when it is not (no trailing zeros).
+QString rateText(int milliHz);
+
+/// A rate in millihertz as the display mode Windows applies: the fraction
+/// milliHz / 1000 in lowest terms (29968/125 for 239.744, 240/1 for 240).
+/// The driver lists exactly that mode, and SetDisplayConfig finds no other —
+/// a 240/1 asked of a display that lists 239.744 is refused, silently.
+struct RateFraction
+{
+    unsigned numerator = 0;
+    unsigned denominator = 1;
+};
+RateFraction rateFraction(int milliHz);
+
+/// The display's rate matched to the client's screen (key `vddmatch`, plan
+/// glissade, section V): k × @p clientMilliHz for the largest whole k that
+/// keeps it within @p capHz, so that the stream's gate locks on a whole
+/// number of the display's presents AND each of them lands on a refresh of
+/// the client's screen. Only when the stream (@p streamFps) runs at the
+/// client's rate or a whole divisor of it, to 0.2 % (the gate's own
+/// tolerance, PresentLattice.h): a 120 fps stream for a 119.872 Hz screen,
+/// a 60 for a 59.94. And only for a k × that divisor of 1 or an even number:
+/// "Auto"'s detection may step the stream to twice its rate (frontend
+/// CadenceStepper.js), which must still divide the display.
+///
+///   - 119.872 Hz, 120 fps, cap 330 → 239.744; 59.94 Hz, 60 fps → 239.76
+///   - 144 Hz, 144 fps → 288; 165 Hz, 165 fps → 330
+///   - 240 Hz, 240 fps → 240 (k = 1)
+///
+/// 0 when nothing fits — no measurement, a stream that is no divisor of the
+/// client's rate (a 120 fps stream for a 144 Hz screen), a screen faster than
+/// the cap: the caller keeps the display at its usual rate.
+int matchedRefreshMilliHz(int clientMilliHz, int streamFps, int capHz);
+
+/// The ceiling matchedRefreshMilliHz() is given by the product, until the
+/// bench has measured a capture above it (V2 of plan glissade): 330 Hz, a
+/// 165 Hz screen's twice. The bench raises it with `vddmatchmax=`, up to the
+/// driver's 500.
+constexpr int kMatchedRateMaxHz = 330;
+
+/// What EncoderTuning::vddMatch's -1, the product's, means: off until the
+/// bench (V2 of plan glissade) has measured it.
+constexpr bool kVddMatchProduct = false;
 
 /// The refresh rate a stream asks of the display.
 ///   - @p faster (the product on Windows, decision A of plan framerate-hote,
@@ -292,10 +351,12 @@ struct Request
     /// [kModeMin, kModeMax] and even once parsed.
     int width = 0;
     int height = 0;
-    /// Activate: the rate the client's own screen refreshes at, measured by
-    /// the browser (util/RefreshRate.js). 0 — no measurement — is kRefreshHz.
-    /// Always within [kRateMin, kRateMax] once parsed.
-    int refresh = 0;
+    /// Activate: the rate the display is to run at, in millihertz
+    /// (refreshForStream, or matchedRefreshMilliHz). 0 — none asked — is
+    /// kRefreshHz. Always within [kRateMin, kRateDriverMax] Hz once parsed.
+    /// The request file says it as `refresh_mhz`; a file with the whole
+    /// hertz of an older server (`refresh`) is read too.
+    int refreshMilliHz = 0;
     /// Activate, macOS: make the display able to show HDR (EDR) — asked only
     /// when the viewer asked for HDR. Applied in process, never written to
     /// the request file: Windows' display is SDR, whatever this says.
@@ -351,35 +412,35 @@ std::optional<Result> readResult(const QString& path);
 /// The driver's vdd_settings.xml: a single monitor, our mode first (the
 /// driver picks the first as default), the common sizes after it, SDR. A
 /// @p width × @p height of 0 is the default 1920×1080; anything else is the
-/// client's own size, added ahead of the list. @p refresh of 0 is kRefreshHz;
-/// anything else is the rate the client's screen runs at, which every mode in
-/// the file is then offered at.
+/// client's own size, added ahead of the list. @p refreshMilliHz of 0 is
+/// kRefreshHz; anything else is the rate the display is to run at, which
+/// every mode in the file is then offered at.
 ///
 /// Written when none exists, and rewritten — with the node restarted so the
 /// driver re-reads it — when the mode changes. Never over a file this project
 /// did not write: an owner's own VDD configured that one (see isOurSettings).
-QString settingsXml(int width = 0, int height = 0, int refresh = 0);
+QString settingsXml(int width = 0, int height = 0, int refreshMilliHz = 0);
 
 /// Does this vdd_settings.xml carry our marker, i.e. did we write it?
 bool isOurSettings(const QString& xml);
 
 /// @p existing — a settings file someone else wrote — with @p width ×
-/// @p height at @p refresh Hz added to its mode list, ahead of the rest, and
+/// @p height at @p refreshMilliHz added to its mode list, ahead of the rest, and
 /// everything else left exactly as it was. The one edit this project makes to
 /// a file it does not own: without the mode in that list the driver will not
 /// offer it, and "Match my screen" has nothing to switch to. Returns the file
 /// unchanged (@p changed false) when that very size and rate are already
 /// listed, when there is no `<resolutions>` element to add them to, or when
 /// there is no size to add.
-QString settingsWithMode(const QString& existing, int width, int height, int refresh,
+QString settingsWithMode(const QString& existing, int width, int height, int refreshMilliHz,
                          bool* changed);
 
 /// @p existing with the mode settingsWithMode() added for @p width ×
-/// @p height at @p refresh taken out again: the block exactly as it went in,
+/// @p height at @p refreshMilliHz taken out again: the block exactly as it went in,
 /// so the owner's file comes back byte for byte, or else the first block that
 /// lists those three values. Returns the file unchanged (@p changed false)
 /// when no block lists that mode.
-QString settingsWithoutMode(const QString& existing, int width, int height, int refresh,
+QString settingsWithoutMode(const QString& existing, int width, int height, int refreshMilliHz,
                             bool* changed);
 
 /// A mode this project added to another VDD's list.
@@ -387,14 +448,14 @@ struct AddedMode
 {
     int width = 0;
     int height = 0;
-    int refresh = 0;
+    int refreshMilliHz = 0;
     bool operator==(const AddedMode& o) const
     {
-        return width == o.width && height == o.height && refresh == o.refresh;
+        return width == o.width && height == o.height && refreshMilliHz == o.refreshMilliHz;
     }
 };
 
-/// The record of those modes, one `1784x1160@240` a line: what the next
+/// The record of those modes, one `1784x1160@240` (or `@239.744`) a line: what the next
 /// activation, or this one's end, takes out of the owner's file. Without it
 /// the list grew by a mode with every new client — on DualRTX, 03/10/2026, a
 /// 1280×720 at 240 Hz left by a TV's stream, after which the driver no longer

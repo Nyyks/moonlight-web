@@ -115,8 +115,12 @@ std::optional<Request> parseRequest(const QByteArray& json, QString* error)
     req.width = obj.value(QLatin1String("width")).toInt(0);
     req.height = obj.value(QLatin1String("height")).toInt(0);
     normaliseMode(req.width, req.height);
-    req.refresh = obj.value(QLatin1String("refresh")).toInt(0);
-    normaliseRate(req.refresh);
+    // The rate in millihertz; an older server's whole hertz otherwise.
+    const QJsonValue milli = obj.value(QLatin1String("refresh_mhz"));
+    req.refreshMilliHz = milli.isUndefined()
+                             ? obj.value(QLatin1String("refresh")).toInt(0) * kMilliHz
+                             : milli.toInt(0);
+    normaliseRate(req.refreshMilliHz);
     return req;
 }
 
@@ -134,8 +138,8 @@ std::optional<Request> fallbackTowardsDefault(const Request& tried, const QStrin
         next.width = next.height = 0;
         return next;
     }
-    if (next.refresh > 0 && next.refresh != kRefreshHz) {
-        next.refresh = 0;
+    if (next.refreshMilliHz > 0 && next.refreshMilliHz != kRefreshHz * kMilliHz) {
+        next.refreshMilliHz = 0;
         return next;
     }
     return std::nullopt;
@@ -150,7 +154,7 @@ QByteArray toJson(const Request& req)
         obj["width"] = req.width;
         obj["height"] = req.height;
     }
-    if (req.refresh > 0) obj["refresh"] = req.refresh;
+    if (req.refreshMilliHz > 0) obj["refresh_mhz"] = req.refreshMilliHz;
     return QJsonDocument(obj).toJson(QJsonDocument::Compact);
 }
 
@@ -166,14 +170,62 @@ bool normaliseMode(int& width, int& height)
     return true;
 }
 
-bool normaliseRate(int& hz)
+bool normaliseRate(int& milliHz)
 {
-    if (hz <= 0) {
-        hz = 0;
+    if (milliHz <= 0) {
+        milliHz = 0;
         return false;
     }
-    hz = std::min(kRateDriverMax, std::max(kRateMin, hz));
+    milliHz = std::min(kRateDriverMax * kMilliHz, std::max(kRateMin * kMilliHz, milliHz));
     return true;
+}
+
+QString rateText(int milliHz)
+{
+    QString text = QString::number(milliHz / kMilliHz);
+    if (const int frac = milliHz % kMilliHz; frac > 0) {
+        QString digits = QStringLiteral("%1").arg(frac, 3, 10, QLatin1Char('0'));
+        while (digits.endsWith(QLatin1Char('0')))
+            digits.chop(1);
+        text += QLatin1Char('.') + digits;
+    }
+    return text;
+}
+
+RateFraction rateFraction(int milliHz)
+{
+    if (milliHz <= 0) return {};
+    unsigned a = unsigned(milliHz), b = unsigned(kMilliHz);
+    while (b != 0) {
+        const unsigned t = a % b;
+        a = b;
+        b = t;
+    }
+    return {unsigned(milliHz) / a, unsigned(kMilliHz) / a};
+}
+
+int matchedRefreshMilliHz(int clientMilliHz, int streamFps, int capHz)
+{
+    if (clientMilliHz < kRateMin * kMilliHz || streamFps <= 0 || capHz <= 0) return 0;
+    capHz = std::min(capHz, kRateDriverMax);
+    // How many of the client's refreshes a frame of the stream spans: the
+    // stream must be the client's rate or a whole divisor of it, to the
+    // gate's tolerance — or no display rate puts its frames on that grid.
+    const qint64 streamMilli = qint64(streamFps) * kMilliHz;
+    const qint64 divisor = (clientMilliHz + streamMilli / 2) / streamMilli;
+    if (divisor < 1) return 0;
+    const qint64 off = qint64(clientMilliHz) - divisor * streamMilli;
+    if ((off < 0 ? -off : off) * 1000 > qint64(clientMilliHz) * 2) return 0;
+    for (qint64 k = qint64(capHz) * kMilliHz / clientMilliHz; k >= 1; --k) {
+        // The display's presents per frame of the stream: 1, or even, so
+        // that "Auto"'s step to twice the rate still divides the display.
+        const qint64 perFrame = k * divisor;
+        if (perFrame != 1 && perFrame % 2 != 0) continue;
+        const qint64 milliHz = k * clientMilliHz;
+        if (milliHz < qint64(kRateMin) * kMilliHz) break;
+        return int(milliHz);
+    }
+    return 0;
 }
 
 int refreshForStream(int streamFps, int benchHz, bool faster)
@@ -240,22 +292,24 @@ bool isOurSettings(const QString& xml)
 /// the one this activation wants, exactly as the file we write ourselves
 /// spells it — the shape the driver was seen to accept on the bench, and the
 /// only one to put in a file belonging to someone else.
-static QString resolutionBlock(int width, int height, int refresh, const QString& indent)
+static QString resolutionBlock(int width, int height, int refreshMilliHz, const QString& indent)
 {
     QString s;
     s += indent + QStringLiteral("<resolution>\n");
     s += indent + QStringLiteral("  <width>%1</width>\n").arg(width);
     s += indent + QStringLiteral("  <height>%1</height>\n").arg(height);
-    s += indent + QStringLiteral("  <refresh_rate>%1</refresh_rate>\n").arg(refresh);
+    s += indent +
+         QStringLiteral("  <refresh_rate>%1</refresh_rate>\n").arg(rateText(refreshMilliHz));
     s += indent + QStringLiteral("</resolution>\n");
     return s;
 }
 
-QString settingsWithMode(const QString& existing, int width, int height, int refresh, bool* changed)
+QString settingsWithMode(const QString& existing, int width, int height, int refreshMilliHz,
+                         bool* changed)
 {
     *changed = false;
     if (!normaliseMode(width, height)) return existing;
-    if (!normaliseRate(refresh)) refresh = kRefreshHz;
+    if (!normaliseRate(refreshMilliHz)) refreshMilliHz = kRefreshHz * kMilliHz;
     // Already offered: the driver lists this size AT this rate, nothing to
     // add. All three tags in the same block is what makes it this mode rather
     // than others that happen to share a number — and a size listed at
@@ -265,7 +319,8 @@ QString settingsWithMode(const QString& existing, int width, int height, int ref
                                           QRegularExpression::DotMatchesEverythingOption);
     const QString w = QStringLiteral("<width>%1</width>").arg(width);
     const QString h = QStringLiteral("<height>%1</height>").arg(height);
-    const QString r = QStringLiteral("<refresh_rate>%1</refresh_rate>").arg(refresh);
+    const QString r =
+        QStringLiteral("<refresh_rate>%1</refresh_rate>").arg(rateText(refreshMilliHz));
     auto it = block.globalMatch(existing);
     while (it.hasNext()) {
         const QString one =
@@ -278,21 +333,21 @@ QString settingsWithMode(const QString& existing, int width, int height, int ref
     // The list is read in order and the first entry is the driver's default:
     // ours goes first, which is the point of adding it at all.
     QString out = existing;
-    out.insert(after,
-               QLatin1Char('\n') + resolutionBlock(width, height, refresh, QStringLiteral("    ")));
+    out.insert(after, QLatin1Char('\n') +
+                          resolutionBlock(width, height, refreshMilliHz, QStringLiteral("    ")));
     *changed = true;
     return out;
 }
 
-QString settingsWithoutMode(const QString& existing, int width, int height, int refresh,
+QString settingsWithoutMode(const QString& existing, int width, int height, int refreshMilliHz,
                             bool* changed)
 {
     *changed = false;
-    if (width <= 0 || height <= 0 || refresh <= 0) return existing;
+    if (width <= 0 || height <= 0 || refreshMilliHz <= 0) return existing;
     // As settingsWithMode() put it in: taking out these very characters gives
     // the owner the file they had.
     const QString inserted =
-        QLatin1Char('\n') + resolutionBlock(width, height, refresh, QStringLiteral("    "));
+        QLatin1Char('\n') + resolutionBlock(width, height, refreshMilliHz, QStringLiteral("    "));
     QString out = existing;
     const int at = out.indexOf(inserted);
     if (at >= 0) {
@@ -307,7 +362,8 @@ QString settingsWithoutMode(const QString& existing, int width, int height, int 
         QRegularExpression::DotMatchesEverythingOption);
     const QString w = QStringLiteral("<width>%1</width>").arg(width);
     const QString h = QStringLiteral("<height>%1</height>").arg(height);
-    const QString r = QStringLiteral("<refresh_rate>%1</refresh_rate>").arg(refresh);
+    const QString r =
+        QStringLiteral("<refresh_rate>%1</refresh_rate>").arg(rateText(refreshMilliHz));
     auto it = block.globalMatch(existing);
     while (it.hasNext()) {
         const QRegularExpressionMatch m = it.next();
@@ -323,13 +379,19 @@ QString settingsWithoutMode(const QString& existing, int width, int height, int 
 
 QList<AddedMode> parseAddedModes(const QString& text)
 {
-    static const QRegularExpression line(QStringLiteral("^\\s*(\\d+)x(\\d+)@(\\d+)\\s*$"));
+    // The rate as rateText() spells it: whole hertz (every record written
+    // before millihertz), or up to three decimals.
+    static const QRegularExpression line(
+        QStringLiteral("^\\s*(\\d+)x(\\d+)@(\\d+)(?:\\.(\\d{1,3}))?\\s*$"));
     QList<AddedMode> out;
     for (const QString& l : text.split(QLatin1Char('\n'))) {
         const QRegularExpressionMatch m = line.match(l);
         if (!m.hasMatch()) continue;
-        AddedMode mode{m.captured(1).toInt(), m.captured(2).toInt(), m.captured(3).toInt()};
-        if (mode.width > 0 && mode.height > 0 && mode.refresh > 0 && !out.contains(mode))
+        const int milli =
+            m.captured(4).isEmpty() ? 0 : m.captured(4).leftJustified(3, QLatin1Char('0')).toInt();
+        AddedMode mode{m.captured(1).toInt(), m.captured(2).toInt(),
+                       m.captured(3).toInt() * kMilliHz + milli};
+        if (mode.width > 0 && mode.height > 0 && mode.refreshMilliHz > 0 && !out.contains(mode))
             out.append(mode);
     }
     return out;
@@ -339,11 +401,12 @@ QString addedModesText(const QList<AddedMode>& modes)
 {
     QString out;
     for (const AddedMode& m : modes)
-        out += QStringLiteral("%1x%2@%3\n").arg(m.width).arg(m.height).arg(m.refresh);
+        out +=
+            QStringLiteral("%1x%2@%3\n").arg(m.width).arg(m.height).arg(rateText(m.refreshMilliHz));
     return out;
 }
 
-QString settingsXml(int width, int height, int refresh)
+QString settingsXml(int width, int height, int refreshMilliHz)
 {
     // The layout the driver ships (its own sample, verified on the bench):
     //   <monitors><count>, <gpu><friendlyname>, <global><g_refresh_rate>*,
@@ -359,9 +422,10 @@ QString settingsXml(int width, int height, int refresh)
         int w, h;
     };
     static const Size sizes[] = {{1280, 720}, {2560, 1440}, {3840, 2160}};
-    static const int rates[] = {60, 90, 144};
+    static const int rates[] = {60 * kMilliHz, 90 * kMilliHz, 144 * kMilliHz};
     const bool custom = normaliseMode(width, height);
-    if (!normaliseRate(refresh)) refresh = kRefreshHz;
+    int refresh = refreshMilliHz;
+    if (!normaliseRate(refresh)) refresh = kRefreshHz * kMilliHz;
 
     QString xml;
     xml += QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -375,11 +439,11 @@ QString settingsXml(int width, int height, int refresh)
     xml += QStringLiteral("  <gpu>\n    <friendlyname>%1</friendlyname>\n  </gpu>\n")
                .arg(qEnvironmentVariable("MW_VDD_GPU", QStringLiteral("default")));
     xml += QStringLiteral("  <global>\n");
-    xml += QStringLiteral("    <g_refresh_rate>%1</g_refresh_rate>\n").arg(refresh);
-    for (const int hz : rates)
-        if (hz != refresh)
-            xml += QStringLiteral("    <g_refresh_rate>%1</g_refresh_rate>\n").arg(hz);
-    if (refresh != kRefreshHz)
+    xml += QStringLiteral("    <g_refresh_rate>%1</g_refresh_rate>\n").arg(rateText(refresh));
+    for (const int milli : rates)
+        if (milli != refresh)
+            xml += QStringLiteral("    <g_refresh_rate>%1</g_refresh_rate>\n").arg(rateText(milli));
+    if (refresh != kRefreshHz * kMilliHz)
         xml += QStringLiteral("    <g_refresh_rate>%1</g_refresh_rate>\n").arg(kRefreshHz);
     xml += QStringLiteral("  </global>\n  <resolutions>\n");
     const auto one = [&xml, refresh](int w, int h) {
@@ -388,7 +452,7 @@ QString settingsXml(int width, int height, int refresh)
                               "    </resolution>\n")
                    .arg(w)
                    .arg(h)
-                   .arg(refresh);
+                   .arg(rateText(refresh));
     };
     if (custom) one(width, height);
     if (!custom || width != kWidth || height != kHeight) one(kWidth, kHeight);

@@ -522,8 +522,9 @@ bool applyInProcess(const Request& req, Result* result)
             w = kWidth;
             h = kHeight;
         }
-        int hz = req.refresh;
-        if (!normaliseRate(hz)) hz = kRefreshHz;
+        // CoreGraphics takes whole hertz; the stream's rate is one on macOS.
+        int milli = req.refreshMilliHz;
+        const int hz = normaliseRate(milli) ? (milli + kMilliHz / 2) / kMilliHz : kRefreshHz;
         spec.width = w;
         spec.height = h;
         spec.refreshHz = hz;

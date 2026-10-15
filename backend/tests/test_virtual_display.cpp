@@ -280,7 +280,7 @@ void run_virtual_display_tests()
                            "    </resolution>\n"
                            "  </resolutions>\n</vdd_settings>\n");
         bool changed = false;
-        const QString grown = settingsWithMode(theirs, 2532, 1170, 120, &changed);
+        const QString grown = settingsWithMode(theirs, 2532, 1170, 120000, &changed);
         CHECK(changed);
         // Ours is there, first — the driver reads the list in order.
         const int mine = grown.indexOf(QStringLiteral("<width>2532</width>"));
@@ -292,20 +292,20 @@ void run_virtual_display_tests()
         CHECK(!isOurSettings(grown));
         // A size the file already lists AT THAT RATE is added again to
         // nobody.
-        settingsWithMode(grown, 2532, 1170, 120, &changed);
+        settingsWithMode(grown, 2532, 1170, 120000, &changed);
         CHECK(!changed);
         // The same size at another rate is another mode: the driver will not
         // offer a rate it does not list, and the next client's screen may
         // well run at 60 where this one ran at 120.
-        const QString slower = settingsWithMode(grown, 2532, 1170, 60, &changed);
+        const QString slower = settingsWithMode(grown, 2532, 1170, 60000, &changed);
         CHECK(changed);
         CHECK(slower.contains(QStringLiteral("<refresh_rate>60</refresh_rate>")));
         CHECK(slower.contains(QStringLiteral("<refresh_rate>244</refresh_rate>")));
         // Nothing to add, or nowhere to add it: the file comes back untouched.
-        CHECK_EQ(settingsWithMode(theirs, 0, 0, 120, &changed), theirs);
+        CHECK_EQ(settingsWithMode(theirs, 0, 0, 120000, &changed), theirs);
         CHECK(!changed);
         const QString noList = QStringLiteral("<vdd_settings><options/></vdd_settings>");
-        CHECK_EQ(settingsWithMode(noList, 2532, 1170, 120, &changed), noList);
+        CHECK_EQ(settingsWithMode(noList, 2532, 1170, 120000, &changed), noList);
         CHECK(!changed);
     }
 
@@ -319,21 +319,21 @@ void run_virtual_display_tests()
                            "    </resolution>\n"
                            "  </resolutions>\n</vdd_settings>\n");
         bool changed = false;
-        const QString grown = settingsWithMode(theirs, 1784, 1160, 240, &changed);
+        const QString grown = settingsWithMode(theirs, 1784, 1160, 240000, &changed);
         CHECK(changed);
         // Out again: the owner's file, byte for byte.
-        CHECK_EQ(settingsWithoutMode(grown, 1784, 1160, 240, &changed), theirs);
+        CHECK_EQ(settingsWithoutMode(grown, 1784, 1160, 240000, &changed), theirs);
         CHECK(changed);
         // Not there, or another rate of the same size: nothing touched.
-        CHECK_EQ(settingsWithoutMode(theirs, 1784, 1160, 240, &changed), theirs);
+        CHECK_EQ(settingsWithoutMode(theirs, 1784, 1160, 240000, &changed), theirs);
         CHECK(!changed);
-        CHECK_EQ(settingsWithoutMode(grown, 1784, 1160, 120, &changed), grown);
+        CHECK_EQ(settingsWithoutMode(grown, 1784, 1160, 120000, &changed), grown);
         CHECK(!changed);
         // Reformatted since: still found by its values, the owner's kept.
         QString tabbed = grown;
         tabbed.replace(QStringLiteral("    <resolution>\n      <width>1784"),
                        QStringLiteral("\t<resolution>\n\t\t<width>1784"));
-        const QString back = settingsWithoutMode(tabbed, 1784, 1160, 240, &changed);
+        const QString back = settingsWithoutMode(tabbed, 1784, 1160, 240000, &changed);
         CHECK(changed);
         CHECK(!back.contains(QStringLiteral("<width>1784</width>")));
         CHECK(back.contains(QStringLiteral("<width>800</width>")));
@@ -342,12 +342,12 @@ void run_virtual_display_tests()
         // DualRTX, 03/10/2026: a TV's 1280×720 at 240 left in the list, then a
         // Mac's 1784×1160 at 240. The next activation takes the first out
         // before it adds the second: one mode of ours at a time.
-        const QString leftover = settingsWithMode(theirs, 1280, 720, 240, &changed);
-        const QString cleaned = settingsWithoutMode(leftover, 1280, 720, 240, &changed);
-        const QString next = settingsWithMode(cleaned, 1784, 1160, 240, &changed);
+        const QString leftover = settingsWithMode(theirs, 1280, 720, 240000, &changed);
+        const QString cleaned = settingsWithoutMode(leftover, 1280, 720, 240000, &changed);
+        const QString next = settingsWithMode(cleaned, 1784, 1160, 240000, &changed);
         CHECK(!next.contains(QStringLiteral("<width>1280</width>")));
         CHECK(next.contains(QStringLiteral("<width>1784</width>")));
-        CHECK_EQ(settingsWithoutMode(next, 1784, 1160, 240, &changed), theirs);
+        CHECK_EQ(settingsWithoutMode(next, 1784, 1160, 240000, &changed), theirs);
     }
 
     SECTION("VirtualDisplay — the record of the modes we added reads back what it wrote");
@@ -355,8 +355,8 @@ void run_virtual_display_tests()
         const QList<AddedMode> modes = parseAddedModes(
             QStringLiteral("1784x1160@240\n1280x720@240\nnot a mode\n1784x1160@240\n0x0@60\n"));
         CHECK_EQ(int(modes.size()), 2);
-        CHECK(modes.value(0) == (AddedMode{1784, 1160, 240}));
-        CHECK(modes.value(1) == (AddedMode{1280, 720, 240}));
+        CHECK(modes.value(0) == (AddedMode{1784, 1160, 240000}));
+        CHECK(modes.value(1) == (AddedMode{1280, 720, 240000}));
         CHECK_EQ(addedModesText(modes), QStringLiteral("1784x1160@240\n1280x720@240\n"));
         CHECK(parseAddedModes(QString()).isEmpty());
         // Beside the driver's own file, which both editions share.
@@ -373,28 +373,28 @@ void run_virtual_display_tests()
         asked.action = Request::Action::Activate;
         asked.width = 1784;
         asked.height = 1160;
-        asked.refresh = 240;
+        asked.refreshMilliHz = 240000;
         asked.restorePrimary = QStringLiteral("kept");
         const auto first = fallbackTowardsDefault(asked, notAppearedError());
         CHECK(first.has_value());
         if (first) {
             CHECK_EQ(first->width, 0);
             CHECK_EQ(first->height, 0);
-            CHECK_EQ(first->refresh, 240);
+            CHECK_EQ(first->refreshMilliHz, 240000);
             CHECK(first->action == Request::Action::Activate);
             CHECK_EQ(first->restorePrimary, QStringLiteral("kept"));
             const auto second = fallbackTowardsDefault(*first, notAppearedError());
             CHECK(second.has_value());
             if (second) {
                 CHECK_EQ(second->width, 0);
-                CHECK_EQ(second->refresh, 0);
+                CHECK_EQ(second->refreshMilliHz, 0);
                 CHECK(!fallbackTowardsDefault(*second, notAppearedError()).has_value());
             }
         }
         // The default rate asked explicitly: dropping it changes nothing.
         Request atDefaultRate;
         atDefaultRate.action = Request::Action::Activate;
-        atDefaultRate.refresh = kRefreshHz;
+        atDefaultRate.refreshMilliHz = kRefreshHz * kMilliHz;
         CHECK(!fallbackTowardsDefault(atDefaultRate, notAppearedError()).has_value());
         // A failure no mode explains is not retried, nor anything but Activate.
         CHECK(!fallbackTowardsDefault(asked, QStringLiteral("this process is not elevated"))
@@ -408,50 +408,54 @@ void run_virtual_display_tests()
     {
         // Pinned into bounds, never refused — a launch must not fail over a
         // rate — and 0 means "the default rate".
-        int hz = 165;
+        int hz = 165000;
         CHECK(normaliseRate(hz));
-        CHECK_EQ(hz, 165);
+        CHECK_EQ(hz, 165000);
         // The request is guarded against what the DRIVER takes: the bench's
         // MW_VDD_REFRESH reaches past the product's ceiling.
-        hz = 500;
+        hz = 500000;
         CHECK(normaliseRate(hz));
-        CHECK_EQ(hz, 500);
+        CHECK_EQ(hz, 500000);
+        hz = 1000000;
+        CHECK(normaliseRate(hz));
+        CHECK_EQ(hz, kRateDriverMax * kMilliHz);
         hz = 1000;
         CHECK(normaliseRate(hz));
-        CHECK_EQ(hz, kRateDriverMax);
-        hz = 1;
-        CHECK(normaliseRate(hz));
-        CHECK_EQ(hz, kRateMin);
+        CHECK_EQ(hz, kRateMin * kMilliHz);
         hz = 0;
         CHECK(!normaliseRate(hz));
         CHECK_EQ(hz, 0);
-        hz = -60;
+        hz = -60000;
         CHECK(!normaliseRate(hz));
         CHECK_EQ(hz, 0);
 
-        // It reaches the elevated helper with the request, junk and absence
-        // both meaning "the default rate".
-        const auto req = parseRequest("{\"action\":\"activate\",\"refresh\":165}", &err);
+        // It reaches the elevated helper with the request, in millihertz,
+        // junk and absence both meaning "the default rate". An older server's
+        // whole hertz is read too.
+        const auto req = parseRequest("{\"action\":\"activate\",\"refresh_mhz\":239744}", &err);
         CHECK(req.has_value());
-        if (req) CHECK_EQ(req->refresh, 165);
+        if (req) CHECK_EQ(req->refreshMilliHz, 239744);
+        const auto old = parseRequest("{\"action\":\"activate\",\"refresh\":165}", &err);
+        CHECK(old.has_value());
+        if (old) CHECK_EQ(old->refreshMilliHz, 165000);
         const auto none = parseRequest("{\"action\":\"activate\"}", &err);
         CHECK(none.has_value());
-        if (none) CHECK_EQ(none->refresh, 0);
-        const auto bad = parseRequest("{\"action\":\"activate\",\"refresh\":\"fast\"}", &err);
+        if (none) CHECK_EQ(none->refreshMilliHz, 0);
+        const auto bad = parseRequest("{\"action\":\"activate\",\"refresh_mhz\":\"fast\"}", &err);
         CHECK(bad.has_value());
-        if (bad) CHECK_EQ(bad->refresh, 0);
+        if (bad) CHECK_EQ(bad->refreshMilliHz, 0);
         Request r;
         r.action = Request::Action::Activate;
-        r.refresh = 60;
+        r.refreshMilliHz = 59940;
         const auto back = parseRequest(toJson(r), &err);
         CHECK(back.has_value());
-        if (back) CHECK_EQ(back->refresh, 60);
+        if (back) CHECK_EQ(back->refreshMilliHz, 59940);
         CHECK(!toJson(Request{}).contains("refresh"));
 
         // Every mode in the file we write carries it — the display exists to
         // show frames at the client's cadence, whatever the size — and the
         // driver's global list leads with it.
-        const QString xml = settingsXml(0, 0, 60);
+        const QString xml = settingsXml(0, 0, 60000);
         CHECK_EQ(xml.count(QStringLiteral("<refresh_rate>120</refresh_rate>")), 0);
         CHECK(xml.count(QStringLiteral("<refresh_rate>60</refresh_rate>")) >= 4);
         CHECK(xml.indexOf(QStringLiteral("<g_refresh_rate>60</g_refresh_rate>")) <
@@ -482,11 +486,101 @@ void run_virtual_display_tests()
         CHECK_EQ(refreshForStream(0, 0, true), kRateMax);
         CHECK_EQ(refreshForStream(60, 500, true), 500);
         // 500 travels to the elevated helper and into the driver's list.
-        const auto req = parseRequest("{\"action\":\"activate\",\"refresh\":500}", &err);
+        const auto req = parseRequest("{\"action\":\"activate\",\"refresh_mhz\":500000}", &err);
         CHECK(req.has_value());
-        if (req) CHECK_EQ(req->refresh, 500);
-        CHECK(settingsXml(0, 0, 500).contains(
-            QStringLiteral("<g_refresh_rate>500</g_refresh_rate>")));
+        if (req) CHECK_EQ(req->refreshMilliHz, 500000);
+        CHECK(settingsXml(0, 0, 500000)
+                  .contains(QStringLiteral("<g_refresh_rate>500</g_refresh_rate>")));
+    }
+
+    SECTION("VirtualDisplay — a rate to the millihertz, as the driver and Windows spell it");
+    {
+        // The driver's file: whole hertz as they always were, decimals as
+        // short as they go.
+        CHECK_EQ(rateText(240000), QStringLiteral("240"));
+        CHECK_EQ(rateText(239744), QStringLiteral("239.744"));
+        CHECK_EQ(rateText(59940), QStringLiteral("59.94"));
+        CHECK_EQ(rateText(119500), QStringLiteral("119.5"));
+        CHECK_EQ(rateText(60001), QStringLiteral("60.001"));
+        // Windows' mode: the fraction in lowest terms. 239.744 Hz is the
+        // 29968/125 V0 saw applied on DualRTX (14/10/2026).
+        CHECK_EQ(rateFraction(239744).numerator, 29968u);
+        CHECK_EQ(rateFraction(239744).denominator, 125u);
+        CHECK_EQ(rateFraction(240000).numerator, 240u);
+        CHECK_EQ(rateFraction(240000).denominator, 1u);
+        CHECK_EQ(rateFraction(59940).numerator, 2997u);
+        CHECK_EQ(rateFraction(59940).denominator, 50u);
+        CHECK_EQ(rateFraction(0).numerator, 0u);
+        // Into the file we write, and into an owner's list: the same spelling,
+        // and the mode comes out again byte for byte.
+        CHECK(settingsXml(0, 0, 239744)
+                  .contains(QStringLiteral("<refresh_rate>239.744</refresh_rate>")));
+        CHECK(settingsXml(0, 0, 239744)
+                  .contains(QStringLiteral("<g_refresh_rate>239.744</g_refresh_rate>")));
+        const QString theirs =
+            QStringLiteral("<vdd_settings>\n  <resolutions>\n"
+                           "    <resolution>\n      <width>1920</width>\n"
+                           "      <height>1080</height>\n      <refresh_rate>240</refresh_rate>\n"
+                           "    </resolution>\n  </resolutions>\n</vdd_settings>\n");
+        bool changed = false;
+        const QString grown = settingsWithMode(theirs, 1920, 1080, 239744, &changed);
+        CHECK(changed);
+        CHECK(grown.indexOf(QStringLiteral("<refresh_rate>239.744</refresh_rate>")) <
+              grown.indexOf(QStringLiteral("<refresh_rate>240</refresh_rate>")));
+        // 240 is listed already: nothing to add.
+        settingsWithMode(theirs, 1920, 1080, 240000, &changed);
+        CHECK(!changed);
+        CHECK_EQ(settingsWithoutMode(grown, 1920, 1080, 239744, &changed), theirs);
+        CHECK(changed);
+        // The record says it the same way, and reads back whole hertz from
+        // before millihertz.
+        const QList<AddedMode> modes = parseAddedModes(
+            QStringLiteral("1920x1080@239.744\n1784x1160@240\n1280x720@59.94\n1x1@2.5555\n"));
+        CHECK_EQ(int(modes.size()), 3);
+        CHECK(modes.value(0) == (AddedMode{1920, 1080, 239744}));
+        CHECK(modes.value(1) == (AddedMode{1784, 1160, 240000}));
+        CHECK(modes.value(2) == (AddedMode{1280, 720, 59940}));
+        CHECK_EQ(addedModesText(modes),
+                 QStringLiteral("1920x1080@239.744\n1784x1160@240\n1280x720@59.94\n"));
+    }
+
+    SECTION("VirtualDisplay — matched to the client's screen: k times its rate, or nothing");
+    {
+        // The UM790Pro's M27Q "120 Hz" runs at 119.872 (plan glissade, P2):
+        // twice it, where 240.000 loses a picture every 7.8 s.
+        CHECK_EQ(matchedRefreshMilliHz(119872, 120, kMatchedRateMaxHz), 239744);
+        // The same screen with a 60 fps stream: a frame spans two refreshes,
+        // and the display at twice the screen keeps both on its grid.
+        CHECK_EQ(matchedRefreshMilliHz(119872, 60, kMatchedRateMaxHz), 239744);
+        // 59.94 and 60 Hz: four times — five would be 299.7, but a frame of
+        // five presents leaves "Auto"'s step to twice the rate between two.
+        CHECK_EQ(matchedRefreshMilliHz(59940, 60, kMatchedRateMaxHz), 239760);
+        CHECK_EQ(matchedRefreshMilliHz(60001, 60, kMatchedRateMaxHz), 240004);
+        // Bruno's rule (14/10/2026): 288 for 144, 330 for 165.
+        CHECK_EQ(matchedRefreshMilliHz(144000, 144, kMatchedRateMaxHz), 288000);
+        CHECK_EQ(matchedRefreshMilliHz(165000, 165, kMatchedRateMaxHz), 330000);
+        CHECK_EQ(matchedRefreshMilliHz(164800, 165, kMatchedRateMaxHz), 329600);
+        // A 240 Hz screen is matched once (×1); a 100 Hz one twice, not
+        // three times (an odd three presents a frame).
+        CHECK_EQ(matchedRefreshMilliHz(239960, 240, kMatchedRateMaxHz), 239960);
+        CHECK_EQ(matchedRefreshMilliHz(100000, 100, kMatchedRateMaxHz), 200000);
+        // A lower ceiling (the bench's vddmatchmax): what fits under it.
+        CHECK_EQ(matchedRefreshMilliHz(144000, 144, 240), 144000);
+        CHECK_EQ(matchedRefreshMilliHz(144000, 144, 500), 288000);
+        CHECK_EQ(matchedRefreshMilliHz(60000, 60, 500), 480000);
+        // Nothing fits: no measurement, a stream that is no divisor of the
+        // screen (Auto's 120 for a 144 Hz panel), a stream faster than the
+        // screen, a screen faster than the ceiling.
+        CHECK_EQ(matchedRefreshMilliHz(0, 120, kMatchedRateMaxHz), 0);
+        CHECK_EQ(matchedRefreshMilliHz(144000, 120, kMatchedRateMaxHz), 0);
+        CHECK_EQ(matchedRefreshMilliHz(60000, 120, kMatchedRateMaxHz), 0);
+        CHECK_EQ(matchedRefreshMilliHz(360000, 360, kMatchedRateMaxHz), 0);
+        CHECK_EQ(matchedRefreshMilliHz(119872, 0, kMatchedRateMaxHz), 0);
+        // The gate's tolerance, 0.2 %: 119.872 against 120 is in (0.107 %),
+        // 119.5 is not (0.42 %).
+        CHECK_EQ(matchedRefreshMilliHz(119500, 120, kMatchedRateMaxHz), 0);
+        // The product leaves it off until the bench (V2).
+        CHECK(!kVddMatchProduct);
     }
 
     SECTION("VirtualDisplay — the bundled driver is pinned file by file");

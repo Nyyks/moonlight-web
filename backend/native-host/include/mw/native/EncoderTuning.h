@@ -476,6 +476,17 @@ struct EncoderTuning
     /// -1, the product: on since the bench (kCadenceLockProduct, gate G2);
     /// 0: off; 1: on. The lattice is kept and logged whatever this says.
     int cadenceLock = -1;
+    /// "MoonlightWeb Virtual Display" at a whole multiple of the client's own
+    /// refresh, measured to the millihertz (plan « glissade », section V,
+    /// 15/10/2026; VirtualDisplay::matchedRefreshMilliHz): 239.744 Hz for a
+    /// 119.872 Hz screen, where 240.000 beats against it and loses a picture
+    /// every 7.8 s. Read by the server when it turns the display on, Windows.
+    /// -1, the product: off until the bench (VirtualDisplay::kVddMatchProduct);
+    /// 0: off; 1: on.
+    int vddMatch = -1;
+    /// The highest rate vddMatch may give the display, Hz (24-500). 0: the
+    /// product's, VirtualDisplay::kMatchedRateMaxHz (330).
+    int vddMatchMaxHz = 0;
     /// ScreenCaptureKit's pool of surfaces (SCStreamConfiguration.queueDepth,
     /// macOS host; plan « attente », AM2). 0, the product: 3.
     int sckQueueDepth = 0;
@@ -592,8 +603,8 @@ struct EncoderTuning
                sctpBufferKb == 0 && linkHoldMs == 0 && sctpMaxBurst < 0 && sctpScheduler < 0 &&
                sctpMtu == 0 && !audioLog && audioFrameMs == 0 && audioGraceUs < 0 && !clickTrace &&
                inputAdmit < 0 && inputAdmitMs == 0 && inputAdmitBurst == 0 && inputAdmitRate == 0 &&
-               inputAdmitMax == 0 && inputAdmitGapUs < 0 && cadenceLock < 0 && sckQueueDepth == 0 &&
-               sckMinIntervalUs < 0;
+               inputAdmitMax == 0 && inputAdmitGapUs < 0 && cadenceLock < 0 && vddMatch < 0 &&
+               vddMatchMaxHz == 0 && sckQueueDepth == 0 && sckMinIntervalUs < 0;
     }
 
     /// One line naming every field that is NOT at its default, for the log and
@@ -728,6 +739,8 @@ struct EncoderTuning
         if (inputAdmitMax > 0) add("inputadmitmax=" + std::to_string(inputAdmitMax));
         if (inputAdmitGapUs >= 0) add("inputadmitgap=" + std::to_string(inputAdmitGapUs) + "us");
         if (cadenceLock >= 0) add("cadencelock=" + std::to_string(cadenceLock));
+        if (vddMatch >= 0) add("vddmatch=" + std::to_string(vddMatch));
+        if (vddMatchMaxHz > 0) add("vddmatchmax=" + std::to_string(vddMatchMaxHz));
         if (sckQueueDepth > 0) add("sckdepth=" + std::to_string(sckQueueDepth));
         if (sckMinIntervalUs >= 0) add("sckinterval=" + std::to_string(sckMinIntervalUs));
         return s;

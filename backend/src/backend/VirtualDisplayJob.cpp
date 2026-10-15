@@ -141,7 +141,7 @@ QJsonObject VirtualDisplayJob::statusJson() const
 
 // ── Entry points ────────────────────────────────────────────────────────────
 
-void VirtualDisplayJob::activate(int width, int height, int refresh, bool hdr, Callback cb)
+void VirtualDisplayJob::activate(int width, int height, int refreshMilliHz, bool hdr, Callback cb)
 {
     m_Release.stop();
     // Linux: the stream's own portal session makes the display, at the
@@ -151,6 +151,7 @@ void VirtualDisplayJob::activate(int width, int height, int refresh, bool hdr, C
         return;
     }
     VirtualDisplay::normaliseMode(width, height);
+    int refresh = refreshMilliHz;
     VirtualDisplay::normaliseRate(refresh);
     // Already on and seen by the engine: nothing to wait for. (A running
     // operation is asked first — its outcome is what the caller wants.)
@@ -180,7 +181,7 @@ void VirtualDisplayJob::activate(int width, int height, int refresh, bool hdr, C
     enqueue(Action::Activate, width, height, refresh, hdr, std::move(cb));
 }
 
-void VirtualDisplayJob::activateIfOff(int width, int height, int refresh, Callback cb)
+void VirtualDisplayJob::activateIfOff(int width, int height, int refreshMilliHz, Callback cb)
 {
     m_Release.stop();
     if (VirtualDisplay::livesInStream()) {
@@ -209,7 +210,7 @@ void VirtualDisplayJob::activateIfOff(int width, int height, int refresh, Callba
         if (cb) cb(true, QString());
         return;
     }
-    activate(width, height, refresh, false, std::move(cb));
+    activate(width, height, refreshMilliHz, false, std::move(cb));
 }
 
 void VirtualDisplayJob::deactivate(Callback cb)
@@ -233,7 +234,7 @@ void VirtualDisplayJob::releaseSoon()
     m_Release.start();
 }
 
-void VirtualDisplayJob::enqueue(Action action, int width, int height, int refresh, bool hdr,
+void VirtualDisplayJob::enqueue(Action action, int width, int height, int refreshMilliHz, bool hdr,
                                 Callback cb)
 {
     // The same verb AND the same mode as the running or last queued
@@ -243,13 +244,13 @@ void VirtualDisplayJob::enqueue(Action action, int width, int height, int refres
     const VirtualDisplay::Request& runningAsked =
         m_AskedBeforeFallback ? *m_AskedBeforeFallback : m_Request;
     if (running() && runningAsked.action == action && runningAsked.width == width &&
-        runningAsked.height == height && runningAsked.refresh == refresh &&
+        runningAsked.height == height && runningAsked.refreshMilliHz == refreshMilliHz &&
         runningAsked.hdr == hdr && m_Queue.isEmpty()) {
         if (cb) m_Callbacks.append(std::move(cb));
         return;
     }
     if (!m_Queue.isEmpty() && m_Queue.last().action == action && m_Queue.last().width == width &&
-        m_Queue.last().height == height && m_Queue.last().refresh == refresh &&
+        m_Queue.last().height == height && m_Queue.last().refreshMilliHz == refreshMilliHz &&
         m_Queue.last().hdr == hdr) {
         if (cb) {
             Callback prev = m_Queue.last().cb;
@@ -260,7 +261,7 @@ void VirtualDisplayJob::enqueue(Action action, int width, int height, int refres
         }
         return;
     }
-    m_Queue.append(Pending{action, width, height, refresh, hdr, std::move(cb)});
+    m_Queue.append(Pending{action, width, height, refreshMilliHz, hdr, std::move(cb)});
     if (!running()) startNext();
 }
 
@@ -272,7 +273,7 @@ void VirtualDisplayJob::startNext()
     m_Request.action = next.action;
     m_Request.width = next.width;
     m_Request.height = next.height;
-    m_Request.refresh = next.refresh;
+    m_Request.refreshMilliHz = next.refreshMilliHz;
     m_Request.hdr = next.hdr;
     m_Callbacks.clear();
     if (next.cb) m_Callbacks.append(std::move(next.cb));
@@ -334,10 +335,10 @@ void VirtualDisplayJob::fail(const QString& error)
         Logger::warning(QStringLiteral("[vdisplay] %1x%2@%3 did not come up — trying %4x%5@%6")
                             .arg(m_Request.width)
                             .arg(m_Request.height)
-                            .arg(m_Request.refresh)
+                            .arg(VirtualDisplay::rateText(m_Request.refreshMilliHz))
                             .arg(next->width)
                             .arg(next->height)
-                            .arg(next->refresh));
+                            .arg(VirtualDisplay::rateText(next->refreshMilliHz)));
         m_Poll.stop();
         m_Deadline.stop();
         m_Request = *next;
@@ -373,7 +374,7 @@ void VirtualDisplayJob::succeed(const VirtualDisplay::Result& res)
             rec["width"] = m_Request.width;
             rec["height"] = m_Request.height;
         }
-        if (m_Request.refresh > 0) rec["refresh"] = m_Request.refresh;
+        if (m_Request.refreshMilliHz > 0) rec["refresh_mhz"] = m_Request.refreshMilliHz;
         settings.setVirtualDisplay(rec);
         // After a fallback, the mode the caller asked for is remembered as
         // answered: the next launch asking it again joins the display as it
@@ -382,7 +383,7 @@ void VirtualDisplayJob::succeed(const VirtualDisplay::Result& res)
             m_AskedBeforeFallback ? *m_AskedBeforeFallback : m_Request;
         m_ActiveWidth = asked.width;
         m_ActiveHeight = asked.height;
-        m_ActiveRefresh = asked.refresh;
+        m_ActiveRefresh = asked.refreshMilliHz;
         m_ActiveHdr = asked.hdr;
     } else if (m_Request.action == Action::Deactivate) {
         settings.clearVirtualDisplay();

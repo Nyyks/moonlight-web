@@ -4194,15 +4194,57 @@ int main(int argc, char* argv[])
             // driver's own 500 Hz. Never set by the product.
             constexpr bool vdFaster = VirtualDisplay::kFasterThanStream;
             const int vdBenchRefresh = qEnvironmentVariableIntValue("MW_VDD_REFRESH");
-            const int vdRefresh =
-                VirtualDisplay::refreshForStream(reqFps, vdBenchRefresh, vdFaster);
+            int vdRefresh = VirtualDisplay::refreshForStream(reqFps, vdBenchRefresh, vdFaster) *
+                            VirtualDisplay::kMilliHz;
             if (host->backendType == NativeHostBackend::typeName() &&
                 appId == NativeHostBackend::virtualDisplayAppId()) {
                 const char* why = vdBenchRefresh > 0 ? "(MW_VDD_REFRESH)"
                                   : vdFaster         ? "(faster than the stream)"
                                                      : "";
-                qInfo() << "[Session] virtual display at" << vdRefresh << "Hz for a" << reqFps
-                        << "fps stream" << why;
+                // Under `vddmatch` (plan glissade, section V), a whole multiple
+                // of the client's screen instead, to the millihertz: 240.000
+                // beats against a "120 Hz" panel that runs at 119.872 and loses
+                // a picture every 7.8 s; 239.744 does not. Windows, where the
+                // display runs faster than the stream; never over the bench's
+                // MW_VDD_REFRESH. A display already on at a rate this process
+                // gave it stays at that rate: another stream may be on it.
+                QString matchWhy;
+                if (vdFaster && vdBenchRefresh <= 0) {
+                    mw::native::EncoderTuning vdTuning;
+                    int vdGpu = -1;
+                    QString vdTuningError;
+                    parseEncoderTuningSpec(effectiveTuningSpec(nativeTuningSpec), vdTuning, vdGpu,
+                                           vdTuningError);
+                    const bool vdMatch = vdTuning.vddMatch < 0 ? VirtualDisplay::kVddMatchProduct
+                                                               : vdTuning.vddMatch == 1;
+                    if (vdMatch) {
+                        const int clientMilliHz = body["client_refresh_mhz"].toInt(0);
+                        const int cap = vdTuning.vddMatchMaxHz > 0
+                                            ? vdTuning.vddMatchMaxHz
+                                            : VirtualDisplay::kMatchedRateMaxHz;
+                        const int matched =
+                            VirtualDisplay::matchedRefreshMilliHz(clientMilliHz, reqFps, cap);
+                        const int active = VirtualDisplayJob::instance().activeRefreshMilliHz();
+                        if (active > 0 && VirtualDisplay::probe().active) {
+                            vdRefresh = active;
+                            matchWhy = QStringLiteral("(vddmatch: already on at that rate)");
+                        } else if (matched > 0) {
+                            vdRefresh = matched;
+                            matchWhy = QStringLiteral("(vddmatch: %1 x the client's %2 Hz)")
+                                           .arg(matched / clientMilliHz)
+                                           .arg(VirtualDisplay::rateText(clientMilliHz));
+                        } else {
+                            matchWhy = QStringLiteral(
+                                           "(vddmatch: nothing fits a %1 Hz client, up to %2 Hz)")
+                                           .arg(VirtualDisplay::rateText(qMax(0, clientMilliHz)))
+                                           .arg(cap);
+                        }
+                    }
+                }
+                qInfo().noquote() << "[Session] virtual display at"
+                                  << VirtualDisplay::rateText(vdRefresh) << "Hz for a" << reqFps
+                                  << "fps stream"
+                                  << (matchWhy.isEmpty() ? QString::fromLatin1(why) : matchWhy);
             }
             // HDR asked (the native host asks it whenever this screen can show
             // it): a Mac makes its display EDR-capable then, and only then.
@@ -5496,11 +5538,13 @@ int main(int argc, char* argv[])
             // As the owner's /start: 240 Hz on Windows whatever the stream's.
             const int vdRefresh =
                 VirtualDisplay::refreshForStream(60, qEnvironmentVariableIntValue("MW_VDD_REFRESH"),
-                                                 VirtualDisplay::kFasterThanStream);
+                                                 VirtualDisplay::kFasterThanStream) *
+                VirtualDisplay::kMilliHz;
             readyThenStart = [claimThenStart, worker, respond, slot, generation, width, height,
                               vdRefresh]() {
                 qInfo() << "[Session] Player slot" << slot << "on the virtual display — on at"
-                        << width << "x" << height << "@" << vdRefresh << "Hz unless it already is";
+                        << width << "x" << height << "@" << VirtualDisplay::rateText(vdRefresh)
+                        << "Hz unless it already is";
                 VirtualDisplayJob::instance().activateIfOff(
                     width, height, vdRefresh,
                     [claimThenStart, worker, respond, slot, generation](bool ok,

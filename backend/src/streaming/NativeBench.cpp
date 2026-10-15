@@ -278,6 +278,10 @@ const char* const kUsage =
     "                    open halfway between two of them, decided on each picture's own\n"
     "                    present; the product's: on (Windows host, Desktop\n"
     "                    Duplication; plan glissade)\n"
+    "  vddmatch=0|1      the virtual display at a whole multiple of the client's measured\n"
+    "                    refresh (239.744 for 119.872 Hz) when the stream divides it; the\n"
+    "                    product's: off (Windows host; plan glissade, section V)\n"
+    "  vddmatchmax=<hz>  the highest rate vddmatch gives the display, 24-500 (330)\n"
     "  sckdepth=<n>     ScreenCaptureKit's pool of surfaces (queueDepth), 1-8; 3 the\n"
     "                    product (macOS host; plan attente, AM2)\n"
     "  sckinterval=<us>  the least time between two ScreenCaptureKit frames, 0-100000;\n"
@@ -642,6 +646,13 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
         tuning.cadenceLock = v;
+    } else if (key == "vddmatch") {
+        const int v = value.toInt(&ok);
+        ok = ok && (v == 0 || v == 1);
+        tuning.vddMatch = v;
+    } else if (key == "vddmatchmax") {
+        tuning.vddMatchMaxHz = value.toInt(&ok);
+        ok = ok && tuning.vddMatchMaxHz >= 24 && tuning.vddMatchMaxHz <= 500;
     } else if (key == "sckdepth") {
         tuning.sckQueueDepth = value.toInt(&ok);
         ok = ok && tuning.sckQueueDepth >= 1 && tuning.sckQueueDepth <= 8;

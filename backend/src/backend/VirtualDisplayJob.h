@@ -70,9 +70,10 @@ public:
     ///
     /// @p width × @p height is the size the client asked the display to have
     /// ("Match my screen"); 0×0 takes whatever mode is there, which is what
-    /// every other resolution choice does. @p refresh is the rate the
-    /// client's own screen runs at, which the display takes whatever the
-    /// resolution choice; 0 is the default rate. A display already on in
+    /// every other resolution choice does. @p refreshMilliHz is the rate the
+    /// stream chose for the display (main.cpp: 240 Hz on Windows, or the
+    /// client's screen matched under `vddmatch`), which the display takes
+    /// whatever the resolution choice; 0 is the default rate. A display already on in
     /// another mode is put through the operation again — the driver's mode
     /// list is rewritten and the node restarted — because a mode that is not
     /// the client's is the one thing this choice cannot live with.
@@ -80,7 +81,7 @@ public:
     /// @p hdr: the viewer asked for HDR. macOS makes its display able to
     /// show it (EDR) only then — an SDR stream off a display declared in
     /// BT.2020 would come out washed. Windows ignores it: its display is SDR.
-    void activate(int width, int height, int refresh, bool hdr, Callback cb);
+    void activate(int width, int height, int refreshMilliHz, bool hdr, Callback cb);
     void activate(Callback cb) { activate(0, 0, 0, false, std::move(cb)); }
 
     /// For an invited guest, who arrives with no owner stream on it: turn the
@@ -89,7 +90,7 @@ public:
     /// there: another guest may be watching it, and a new mode would take it
     /// from them for as long as the driver restarts. SDR (Windows' display
     /// is, and a guest's stream is). Cancels a pending releaseSoon().
-    void activateIfOff(int width, int height, int refresh, Callback cb);
+    void activateIfOff(int width, int height, int refreshMilliHz, Callback cb);
 
     /// Turn it off (previous primary back, disable). @p cb may be null.
     void deactivate(Callback cb);
@@ -105,6 +106,10 @@ public:
 
     bool running() const;
 
+    /// The rate, in millihertz, this process last turned the display on at
+    /// and that it is still on at; 0 when it is off or that rate is unknown.
+    int activeRefreshMilliHz() const { return m_ActiveRefresh; }
+
     /// {state, action, error?, started_at, finished_at?, display?}
     QJsonObject statusJson() const;
 
@@ -116,12 +121,12 @@ private:
         VirtualDisplay::Request::Action action;
         int width = 0;
         int height = 0;
-        int refresh = 0;
+        int refreshMilliHz = 0;
         bool hdr = false;
         Callback cb;
     };
 
-    void enqueue(VirtualDisplay::Request::Action action, int width, int height, int refresh,
+    void enqueue(VirtualDisplay::Request::Action action, int width, int height, int refreshMilliHz,
                  bool hdr, Callback cb);
     void startNext();
     void setState(State s);
@@ -147,7 +152,7 @@ private:
     /// second viewer asking for the same one joins instead of switching it.
     int m_ActiveWidth = 0;
     int m_ActiveHeight = 0;
-    int m_ActiveRefresh = 0;
+    int m_ActiveRefresh = 0; ///< millihertz
     bool m_ActiveHdr = false;
     QDateTime m_StartedAt;
     QDateTime m_FinishedAt;
