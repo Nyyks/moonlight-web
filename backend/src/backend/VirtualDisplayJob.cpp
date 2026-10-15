@@ -32,6 +32,10 @@ namespace {
 
 constexpr int kHelperTimeoutMs = 2 * 60 * 1000;
 constexpr int kPollIntervalMs = 250;
+/// How long a start waits for the elevated task's last run to end, and how
+/// often it looks (VirtualDisplayJob::runTask).
+constexpr int kTaskBusyMs = 10 * 1000;
+constexpr int kTaskBusyPollMs = 50;
 /// How long the OS may take to bring an in-process display online.
 constexpr int kOnlineTimeoutMs = 15 * 1000;
 /// The grace between the last stream's end and the display going off: long
@@ -489,6 +493,29 @@ void VirtualDisplayJob::runTask()
     // The installer's trigger-less elevated task: started by name, it runs our
     // exe with --vdisplay-apply as this user, elevated, hidden. Its result
     // reaches us through the result file — there is no stdout to read.
+    //
+    // The helper writes that file and only then exits, and the task ignores a
+    // start while its last run is still going: a run asked for in that gap —
+    // the next mode of a client whose screen changed twice, a fallback — was
+    // lost, schtasks said it had started it, and the job waited two minutes
+    // for nothing (15/10/2026, a black screen on the client). The last run is
+    // let go first; a run still going after kTaskBusyMs is no longer one
+    // ending, and the start is tried all the same.
+    if (VirtualDisplay::elevatedTaskRunning()) {
+        if (!m_TaskBusySince.isValid()) {
+            m_TaskBusySince.start();
+            Logger::info(QStringLiteral("[vdisplay] the task's last run is still ending — "
+                                        "waiting for it"));
+        }
+        if (m_TaskBusySince.elapsed() < kTaskBusyMs) {
+            QTimer::singleShot(kTaskBusyPollMs, this, [this]() { runTask(); });
+            return;
+        }
+        Logger::warning(QStringLiteral("[vdisplay] the task still runs after %1 ms — started "
+                                       "anyway")
+                            .arg(kTaskBusyMs));
+    }
+    m_TaskBusySince.invalidate();
     QProcess* proc = new QProcess(this);
     connect(proc, &QProcess::finished, this, [this, proc](int code, QProcess::ExitStatus status) {
         proc->deleteLater();

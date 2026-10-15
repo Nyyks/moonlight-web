@@ -20,6 +20,7 @@
 #include "backend/VirtualDisplay.h"
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QJsonObject>
 #include <QList>
 #include <QObject>
@@ -160,6 +161,8 @@ private:
     QTimer m_Poll;
     QTimer m_Deadline;
     QTimer m_Release;
+    /// Since when runTask() waits for the task's previous run to end.
+    QElapsedTimer m_TaskBusySince;
     std::function<bool()> m_InUse;
     QByteArray m_HelperOut;
     // The service path runs the node stage as SYSTEM and the desktop stages

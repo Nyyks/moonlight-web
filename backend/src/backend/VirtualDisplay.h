@@ -513,6 +513,13 @@ bool nodeEnabled();
 /// Windows: is the process token elevated?
 bool processElevated();
 
+/// Windows: is a run of the elevated task still going? Its helper writes its
+/// verdict and only then exits, and the task ignores a start while a run is
+/// going (MultipleInstancesPolicy IgnoreNew): a start in that gap is lost,
+/// with schtasks reporting success all the same. False elsewhere, and when
+/// the Task Scheduler cannot be asked.
+bool elevatedTaskRunning();
+
 // ── The in-process display (macOS) ─────────────────────────────────────────
 //
 // On macOS the display is not a driver but an object this process holds

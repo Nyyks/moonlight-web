@@ -352,6 +352,28 @@ bool processElevated()
     return ok && elevation.TokenIsElevated;
 }
 
+bool elevatedTaskRunning()
+{
+    ComScope com;
+    if (!com.usable()) return false;
+    ComPtr<ITaskService> service;
+    HRESULT hr = CoCreateInstance(CLSID_TaskScheduler, nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_ITaskService, reinterpret_cast<void**>(service.out()));
+    if (FAILED(hr)) return false;
+    VARIANT none;
+    VariantInit(&none);
+    if (FAILED(service->Connect(none, none, none, none))) return false;
+    ComPtr<ITaskFolder> root;
+    Bstr rootPath(QStringLiteral("\\"));
+    if (FAILED(service->GetFolder(rootPath.b, root.out()))) return false;
+    Bstr name(taskName());
+    ComPtr<IRegisteredTask> task;
+    if (FAILED(root->GetTask(name.b, task.out())) || !task) return false;
+    TASK_STATE state = TASK_STATE_UNKNOWN;
+    if (FAILED(task->get_State(&state))) return false;
+    return state == TASK_STATE_RUNNING;
+}
+
 Status probe()
 {
     Status st;
@@ -411,6 +433,11 @@ bool processElevated()
     return false;
 }
 
+bool elevatedTaskRunning()
+{
+    return false;
+}
+
 bool isOurs(const mw::native::DisplayInfo& display)
 {
     return display.key == mw::native::kPortalVirtualDisplayKey;
@@ -453,6 +480,11 @@ bool nodeEnabled()
 }
 
 bool processElevated()
+{
+    return false;
+}
+
+bool elevatedTaskRunning()
 {
     return false;
 }
