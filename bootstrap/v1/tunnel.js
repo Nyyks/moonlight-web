@@ -96,6 +96,18 @@ function noRouteError() {
     return err;
 }
 
+/**
+ * A failure that can pass by itself within a minute, marked `transient` so a
+ * page may keep calling under it. These are what a restart of the introduction
+ * server looks like from here: the server not there, or back while the
+ * machine's own line to it is not yet.
+ */
+function passingError(message) {
+    const err = new Error(message);
+    err.transient = true;
+    return err;
+}
+
 export function encodeFrame(kind, id, payload) {
     const body = payload ?? new Uint8Array(0);
     const out = new Uint8Array(5 + body.length);
@@ -349,7 +361,8 @@ export class Tunnel {
 
             this._ws = new WebSocket(wsUrl);
             this._ws.onmessage = (ev) => this._onRelayFrame(ev.data, settle);
-            this._ws.onerror = () => settle(new Error('Could not reach the introduction server.'));
+            this._ws.onerror = () =>
+                settle(passingError('Could not reach the introduction server.'));
             this._ws.onclose = (ev) => {
                 // The code and reason are the only account of WHY the line went,
                 // and this is the failure a user reports as "it just stops".
@@ -357,7 +370,7 @@ export class Tunnel {
                     `[MW] Signalling line closed: code=${ev.code} reason=${ev.reason || '(none)'}`,
                 );
                 if (!this.connected) {
-                    settle(new Error('The introduction server hung up.'));
+                    settle(passingError('The introduction server hung up.'));
                     return;
                 }
                 this._lineLost();
@@ -444,7 +457,11 @@ export class Tunnel {
                 // does fetch the current ones — unlike most "reload" advice.
                 unsupported_version: 'This page is out of date — reload it.',
             };
-            settle(new Error(said[frame.code] || 'The introduction server refused.'));
+            // A machine not online may only be reconnecting its line; one at
+            // its connection limit, or a page out of date, is a plain answer.
+            const passing = frame.code === 'offline' || frame.code === 'host-gone';
+            const message = said[frame.code] || 'The introduction server refused.';
+            settle(passing ? passingError(message) : new Error(message));
             return;
         }
         if (frame.t === 'ready') {

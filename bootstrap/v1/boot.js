@@ -136,7 +136,7 @@ function raf() {
     requestAnimationFrame(raf);
 }
 requestAnimationFrame(raf);
-const heartbeat = setInterval(render, 250);
+let heartbeat = setInterval(render, 250);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -163,6 +163,17 @@ function fail(message, hint) {
     // most of them the machine in the address is exactly the one that cannot
     // help them. This is the moment the caption becomes a way out.
     paintInstances(true);
+}
+
+/** Back to work after a failure the page had already shown: the bar runs again
+ *  from where it stopped, and leaving is no longer on offer. */
+function resume() {
+    document.body.dataset.state = 'working';
+    if (ui.note) ui.note.textContent = '';
+    paintInstances(false);
+    ticking = true;
+    heartbeat = setInterval(render, 250);
+    requestAnimationFrame(raf);
 }
 
 /* ── The machine, and the way to another one ───────────────────────────────
@@ -551,6 +562,65 @@ async function connectThroughUpdate(hostId) {
     }
 }
 
+/* When the introduction server restarts — a deploy, a reboot of the machine it
+   runs on — every call made in that minute fails: the server is not there, or
+   it is back and the machine's own line to it is not yet. One attempt then said
+   "Not connected" over something that fixes itself, and the person had to know
+   to refresh.
+
+   The page still says it at once — the failure is real while it lasts, and the
+   way to another machine is offered as before — and keeps calling underneath
+   for about a minute, more slowly as it goes: each call counts against the
+   server's limit on attempts per address. The first one through picks the start
+   up where it stopped. Only failures the transport marks `transient` are
+   retried: a machine at its connection limit or a page out of date is a plain
+   answer. */
+const PASSING_WAIT_MS = 60 * 1000;
+const PASSING_PAUSES_MS = [2000, 3000, 5000, 5000, 10000];
+const PASSING_NOTE =
+    'Trying again every few seconds for a minute — this page carries on by itself as soon ' +
+    'as your machine answers.';
+
+/** The explanation under a failure: its own when it has one. */
+function failureHint(e) {
+    return (
+        e.hint ||
+        'If your machine is switched off or has no internet access, nothing here ' +
+            'can reach it. That is by design, not a fault.'
+    );
+}
+
+/**
+ * Show a passing failure, and keep calling under it.
+ * @returns {Promise<Tunnel | null>} the tunnel once a call gets through, or null
+ *   once the page has given up and shows the last failure for good
+ */
+async function connectThroughRestart(hostId, first) {
+    fail(first.message, PASSING_NOTE);
+    const giveUpAt = Date.now() + PASSING_WAIT_MS;
+    let last = first;
+    for (let i = 0; ; i++) {
+        const pause = PASSING_PAUSES_MS[Math.min(i, PASSING_PAUSES_MS.length - 1)];
+        if (Date.now() + pause > giveUpAt) break;
+        await sleep(pause);
+        const tunnel = new Tunnel(hostId);
+        try {
+            await tunnel.connect();
+            return tunnel;
+        } catch (e) {
+            tunnel.close();
+            last = e;
+            if (!e.transient) break;
+            // The words can change underneath — the server back, the machine
+            // not yet. Only the words: fail() again would close a menu the
+            // person may have open.
+            say('Not connected', e.message);
+        }
+    }
+    fail(last.message, failureHint(last));
+    return null;
+}
+
 async function main() {
     const hostId = hostIdFromLocation();
 
@@ -585,13 +655,13 @@ async function main() {
         // The failure names its own explanation when it has a better one than
         // "your machine is off" — a connection that was refused by the network
         // rather than never answered has nothing to do with the machine.
-        fail(
-            e.message,
-            e.hint ||
-                'If your machine is switched off or has no internet access, nothing here ' +
-                    'can reach it. That is by design, not a fault.',
-        );
-        return;
+        if (!e.transient) {
+            fail(e.message, failureHint(e));
+            return;
+        }
+        tunnel = await connectThroughRestart(hostId, e);
+        if (!tunnel) return;
+        resume();
     }
 
     if (tunnel.firstContact) {

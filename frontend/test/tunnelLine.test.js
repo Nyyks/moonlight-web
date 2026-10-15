@@ -183,3 +183,49 @@ describe('the signalling line dropping before the channel opens', () => {
         await expect(connecting).rejects.toThrow('The introduction server hung up.');
     });
 });
+
+/* What a restart of the introduction server looks like to a page that calls
+   during it: the entry page keeps calling under these, and only these. */
+describe('failures that pass by themselves', () => {
+    beforeEach(() => {
+        FakeWebSocket.last = null;
+    });
+
+    /** The error connect() ends with when the server does `act` to its line. */
+    async function failureAfter(act) {
+        const t = new tunnelModule.Tunnel(HOST, 'https://example.test');
+        const connecting = t.connect();
+        await vi.waitFor(() => expect(FakeWebSocket.last).not.toBeNull());
+        act(FakeWebSocket.last);
+        return connecting.then(
+            () => null,
+            (e) => e,
+        );
+    }
+
+    const relayError = (code) => (ws) =>
+        ws.onmessage({ data: JSON.stringify({ t: 'error', code }) });
+
+    it('marks a server that hangs up', async () => {
+        const e = await failureAfter((ws) => ws.drop());
+        expect(e.transient).toBe(true);
+    });
+
+    it('marks a server that cannot be reached', async () => {
+        const e = await failureAfter((ws) => ws.onerror());
+        expect(e.message).toBe('Could not reach the introduction server.');
+        expect(e.transient).toBe(true);
+    });
+
+    it('marks a machine not online, or gone, which may be its line coming back', async () => {
+        expect((await failureAfter(relayError('offline'))).transient).toBe(true);
+        expect((await failureAfter(relayError('host-gone'))).transient).toBe(true);
+    });
+
+    it('leaves a full machine and an outdated page as plain answers', async () => {
+        const busy = await failureAfter(relayError('busy'));
+        expect(busy.message).toMatch(/as many connections/);
+        expect(busy.transient).toBeUndefined();
+        expect((await failureAfter(relayError('unsupported_version'))).transient).toBeUndefined();
+    });
+});
