@@ -481,6 +481,38 @@ Rolling back is the same two blocks with the previous tag. The script refuses
 a dirty tree, refuses to run outside `~/moonlight-web`, and asks nothing
 interactively — a prompt in the middle of a paste would eat the next line.
 
+**When Caddy restarts**, the order is: backup, checkout, build the images
+(everything still serving), stop `mw-rendezvous` (and staging's
+`mw-dev-rendezvous` if it runs), recreate Caddy, start the rendezvous again.
+Caddy closes the `stream.` WebSockets one by one; a browser's closing before
+its host's line would make a running rendezvous tell that host "the browser
+left", and the host would take down a tunnel a stream may still be using —
+on its own LAN too. Stopped first, the rendezvous says nothing. Both runs print
+the host lines online and the browsers connected (`/healthz` and Caddy's
+admin API); the apply counts again 20 s after, once hosts have reconnected.
+Browser pages loaded before `srv-2026-10-14-b1` still lose their tunnel when
+the line drops, so pick a quiet moment.
+
+### Rebooting the VM
+
+Docker stops the containers in no useful order, so the same race applies. Stop
+the rendezvous by hand first — `unless-stopped` then keeps it down across the
+reboot, so start it again after:
+
+```bash
+cd ~/moonlight-web/deploy/powerdns
+docker compose stop mw-rendezvous
+docker stop mw-dev-rendezvous 2>/dev/null
+reboot
+# after the reboot:
+cd ~/moonlight-web/deploy/powerdns
+docker compose start mw-rendezvous
+docker start mw-dev-rendezvous 2>/dev/null
+docker compose ps
+```
+
+The same applies to restarting the Docker daemon by hand.
+
 ### Cold backup and restore
 
 `--apply` (here and in `deploy-packages.sh`) first runs `backup-prod.sh`, and
