@@ -136,7 +136,7 @@ import { shortcutsGridHtml, shortcutsTitle } from '../util/shortcutsHelp.js';
 import { Icons } from './icons.js';
 import { ShareMenu } from './ShareMenu.js';
 import { openSupportPage, showSupportButton } from '../util/supportNudge.js';
-import { BMC_LOGO, BMC_FULL_LOGO } from './bmcLogo.js';
+import { BMC_LOGO } from './bmcLogo.js';
 import { StreamViewKeyboard } from './StreamViewKeyboard.js';
 import { StreamViewTouch } from './StreamViewTouch.js';
 import { StreamViewFullscreen } from './StreamViewFullscreen.js';
@@ -4132,8 +4132,9 @@ export class StreamView {
      * The owner's "Buy me a coffee" button, first of the bar's right-hand
      * controls — the same button as the header's, once this browser has
      * streamed enough for it (util/supportNudge.js decides, and Settings can
-     * hide it for good). CSS drops it from a phone held upright, where the bar
-     * has no room, and keeps only the logo on a phone turned sideways.
+     * hide it for good). The official cup alone, white outline and yellow
+     * coffee, with no button around it: over a game, anything more draws the
+     * eye. CSS drops it from a phone held upright, where the bar has no room.
      *
      * A <button>, not a link: this overlay is a trackpad, and its touch layer
      * lets only buttons through. It opens the page in a new tab, so the stream
@@ -4147,8 +4148,8 @@ export class StreamView {
         if (!brand || !showSupportButton()) return;
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn btn-neutral stream-support-btn';
-        btn.innerHTML = `<span class="stream-support-cup">${BMC_LOGO}</span><span class="stream-support-label">${BMC_FULL_LOGO}</span>`;
+        btn.className = 'stream-support-btn';
+        btn.innerHTML = BMC_LOGO;
         btn.title = t('support.tooltip');
         btn.setAttribute('aria-label', t('support.action'));
         btn.addEventListener('click', (e) => {

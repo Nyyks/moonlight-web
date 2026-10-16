@@ -1118,35 +1118,27 @@ body.streaming-active::after {
     transform: scale(0.95);
 }
 /* The owner's "Buy me a coffee" button (StreamView._mountSupportButton): the
-   header's yellow button, at Stop's size, first of the bar's right-hand
-   controls. A phone held upright has no room for it; turned sideways it keeps
-   the logo alone, and goes first even ahead of the keyboard button, which
-   otherwise heads the bar on a touch screen. */
+   official cup alone — white outline, yellow coffee — with no button around
+   it, first of the bar's right-hand controls; the wordmark or a frame would
+   draw the eye over a game. A phone held upright has no room for it; turned
+   sideways it goes first even ahead of the keyboard button, which otherwise
+   heads the bar on a touch screen. */
 .stream-support-btn {
-    margin-right: 12px;
-    padding: 7px 14px;
-    font-size: 12.5px;
-    text-decoration: none;
-}
-/* The cup and wordmark; the cup alone where the bar is short of room. */
-.stream-support-label {
     display: inline-flex;
+    align-items: center;
+    margin-right: 12px;
+    padding: 2px;
+    border: 0;
+    background: none;
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+    opacity: 0.85;
+    transition: opacity 0.15s ease;
 }
-.stream-support-cup {
-    display: none;
-}
-/* A phone on its side is short as well as narrow-ish: the logo alone, or the
-   right-hand group would reach the fullscreen button centred in the bar. */
-@media (max-width: 767px), (max-height: 500px) {
-    .stream-support-btn {
-        padding: 7px 10px;
-    }
-    .stream-support-label {
-        display: none;
-    }
-    .stream-support-cup {
-        display: inline-flex;
-    }
+.stream-support-btn:hover,
+.stream-support-btn:focus-visible {
+    opacity: 1;
 }
 /* With the mark hidden, put it ahead of the keyboard button too. */
 @media (max-width: 767px) {

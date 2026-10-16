@@ -34,7 +34,13 @@ import { escapeHtml } from '../util/escapeHtml.js';
 import { shortcutsGridHtml, shortcutsTitle } from '../util/shortcutsHelp.js';
 import { noticeDetailsHtml } from './PrivacyNotice.js';
 import { BMC_FULL_LOGO } from './bmcLogo.js';
-import { SUPPORT_URL, isSupportHidden, setSupportHidden } from '../util/supportNudge.js';
+import {
+    SUPPORT_URL,
+    SUPPORT_BUTTON_AT,
+    goodSessionCount,
+    isSupportHidden,
+    setSupportHidden,
+} from '../util/supportNudge.js';
 import {
     GamepadRemapDialog,
     connectedPads,
@@ -272,10 +278,23 @@ export class SettingsView {
      * "Buy me a coffee": what a coffee pays for, the link, and the one switch
      * that hides the button everywhere — the header's and the stream bar's
      * (util/supportNudge.js). The switch is unticked by default and lives in
-     * this browser only, like the count behind the button. "Reset to defaults"
-     * leaves it alone: it is not a streaming setting.
+     * this browser only, like the count behind the button. It shows from the
+     * session the button is earned on, ticked or not: before that there is
+     * nothing to hide. "Reset to defaults" leaves it alone: it is not a
+     * streaming setting.
      */
     _renderSupportSection() {
+        const hideToggle =
+            goodSessionCount() >= SUPPORT_BUTTON_AT
+                ? `
+                    <div class="settings-field">
+                        <label class="settings-checkbox-label">
+                            <input type="checkbox" id="settings-support-hidden"
+                                   ${isSupportHidden() ? 'checked' : ''} />
+                            <span class="settings-checkbox-text">${escapeHtml(t('support.hideToggle'))}</span>
+                        </label>
+                    </div>`
+                : '';
         return `
                 <div class="settings-section" id="settings-section-support">
                     <h3 class="settings-section-title">${escapeHtml(t('support.title'))}</h3>
@@ -284,14 +303,7 @@ export class SettingsView {
                         <a class="btn btn-neutral settings-support-link" href="${SUPPORT_URL}"
                            target="_blank" rel="noopener noreferrer"
                            aria-label="${escapeHtml(t('support.action'))}">${BMC_FULL_LOGO}</a>
-                    </div>
-                    <div class="settings-field">
-                        <label class="settings-checkbox-label">
-                            <input type="checkbox" id="settings-support-hidden"
-                                   ${isSupportHidden() ? 'checked' : ''} />
-                            <span class="settings-checkbox-text">${escapeHtml(t('support.hideToggle'))}</span>
-                        </label>
-                    </div>
+                    </div>${hideToggle}
                 </div>`;
     }
 
