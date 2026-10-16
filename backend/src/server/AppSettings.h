@@ -557,6 +557,21 @@ public:
     QString portalRestoreToken(bool virtualDisplay = false) const;
     void setPortalRestoreToken(const QString& token, bool virtualDisplay = false);
 
+    // ── Display rates the capture did not hold (vddmatch) ────────────────────
+    //
+    // The virtual display rates above 240 Hz this host's capture did not hold
+    // over a stream's dense content (the native engine's CaptureHold, plan
+    // glissade V): `vddmatch` keeps the display under them from the next
+    // stream on (VirtualDisplay::matchCapAfterRefusals) — the client's own
+    // rate where twice it was refused. Never a mode changed under a stream.
+    //
+    // Stored as "vdd_match_refused", an array of {gpu, milli_hz, version},
+    // file-only. One entry per GPU and rate; an entry of another app version
+    // is dropped on the next refusal, and ignored before: an update tries
+    // again.
+    QJsonArray vddMatchRefused() const;
+    void addVddMatchRefusal(const QString& gpu, int milliHz, const QString& version);
+
     // ── Instance name ────────────────────────────────────────────────────────
     //
     // What this install calls itself in the header of every browser that has

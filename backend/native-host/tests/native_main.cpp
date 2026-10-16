@@ -80,6 +80,7 @@ void run_stage_stats_tests();
 void run_frame_cadence_tests();
 void run_cadence_lock_tests();
 void run_input_admit_tests();
+void run_capture_hold_tests();
 void run_resample_cost_tests();
 void run_cadence_align_tests();
 void run_cadence_choice_tests();
@@ -172,6 +173,7 @@ int main(int argc, char** argv)
     RUN(frame_cadence);
     RUN(cadence_lock);
     RUN(input_admit);
+    RUN(capture_hold);
     RUN(resample_cost);
     RUN(cadence_align);
     RUN(cadence_choice);

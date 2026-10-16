@@ -18,9 +18,11 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 #include <array>
 #include <optional>
@@ -248,6 +250,16 @@ int matchedRefreshMilliHz(int clientMilliHz, int streamFps, int capHz);
 /// 165 Hz screen's twice. The bench raises it with `vddmatchmax=`, up to the
 /// driver's 500.
 constexpr int kMatchedRateMaxHz = 330;
+
+/// The ceiling matchedRefreshMilliHz() is given on a host whose capture did
+/// not hold a display rate (the native engine's CaptureHold, kept by
+/// AppSettings::vddMatchRefused as {gpu, milli_hz, version}): 2 % under the
+/// lowest one refused for this @p version on a GPU of @p gpus — all of them
+/// when @p gpus is empty, nothing known yet of the machine's — so that a
+/// 165 Hz screen refused 330 gets 165 (×1), and a 144 Hz one on the same host
+/// still tries 288. @p capHz when nothing applies. An update tries again.
+int matchCapAfterRefusals(int capHz, const QJsonArray& refused, const QString& version,
+                          const QStringList& gpus);
 
 /// What EncoderTuning::vddMatch's -1, the product's, means: off until the
 /// bench (V2 of plan glissade) has measured it.

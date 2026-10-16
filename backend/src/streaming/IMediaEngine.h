@@ -260,6 +260,11 @@ public:
     /// not measure them. Read-and-reset: one consumer only.
     virtual QJsonObject takeStageStats() { return {}; }
 
+    /// Whether the capture held its display over the session (the native
+    /// engine's CaptureHold, for the server's `vddmatch`), once
+    /// stopConnection() returned: an empty object when nothing was judged.
+    virtual QJsonObject captureHoldReport() const { return {}; }
+
     // ── GameStream-only, with truthful defaults ─────────────────────────────
 
     /// One-way latency to the host, in ms. Zero when the host is this process:

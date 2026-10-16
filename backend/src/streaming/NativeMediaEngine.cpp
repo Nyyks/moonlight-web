@@ -825,6 +825,20 @@ void NativeMediaEngine::stopConnection()
     if (!m_Session) return;
     m_Connected.store(false, std::memory_order_release);
     m_Session->stop();
+    const mw::native::Session::CaptureHoldStatus hold = m_Session->captureHold();
+    if (hold.judged && hold.displayMilliHz > 0) {
+        m_CaptureHold = QJsonObject{
+            {QStringLiteral("held"), hold.held},
+            {QStringLiteral("display_mhz"), hold.displayMilliHz},
+            {QStringLiteral("gpu"), QString::fromStdString(hold.gpu)},
+            {QStringLiteral("why"), QString::fromStdString(hold.why)},
+            {QStringLiteral("dense_s"), hold.denseSeconds},
+            {QStringLiteral("locked"), hold.locked},
+            {QStringLiteral("carried"), hold.carried},
+            {QStringLiteral("folded"), hold.folded},
+            {QStringLiteral("busy"), hold.busy},
+        };
+    }
     writeClickTrace();
     m_Session.reset();
     m_Publisher = nullptr;

@@ -573,6 +573,7 @@ if(MW_BUILD_TESTS)
         tests/test_frame_cadence.cpp
         tests/test_cadence_lock.cpp
         tests/test_input_admit.cpp
+        tests/test_capture_hold.cpp
         tests/test_resample_cost.cpp
         tests/test_cadence_align.cpp
         tests/test_cadence_choice.cpp

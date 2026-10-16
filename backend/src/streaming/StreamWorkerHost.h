@@ -122,6 +122,12 @@ signals:
     /// to read the scanout — an AppImage). Persisted by the supervisor: the
     /// worker has no settings file of its own.
     void portalGrantReceived(const QString& token);
+    /// The capture's verdict on the display it held over the session (the
+    /// native engine's CaptureHold: `held`, `display_mhz`, `gpu`, `why` and the
+    /// figures), for `vddmatch`. At most once, just before ended(), and only
+    /// when there was enough dense content to judge. Persisted by the
+    /// supervisor, like the portal's grant.
+    void captureHoldReceived(const QJsonObject& verdict);
     /// The child process fully exited (ports are certainly free) — exactly
     /// once, always after ended(). Serialization barrier for slot reuse.
     void exited();

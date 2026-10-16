@@ -23,6 +23,7 @@
 #include "../../core/CadenceAlign.h"
 #include "../../core/CadenceChoice.h"
 #include "../../core/CadenceStep.h"
+#include "../../core/CaptureHold.h"
 #include "../../core/ClickTrace.h"
 #include "../../core/CursorPositionGate.h"
 #include "../../core/DeadlineCadence.h"
@@ -843,6 +844,10 @@ public:
         status.displayHz = (m_DisplayMilliHzShared.load(std::memory_order_relaxed) + 500) / 1000;
         return status;
     }
+
+    // Written by the capture thread as its loop ends (logCadence), read once
+    // stop() joined it.
+    CaptureHoldStatus captureHold() const override { return m_HoldStatus; }
 
     void setClientDecodeQueue(int depth) override { m_DecodeCredit.note(depth, steadyNowUs()); }
 
@@ -2150,6 +2155,7 @@ private:
         // — through the same setBitrate() the boost and the ladder use, so the
         // three never disagree about what the encoder holds.
         auto countPicture = [&]() {
+            m_Hold.carried();
             if (!effective.noteFrame(steadyNowUs())) return;
             applyBitrate(boosted ? encode::stillBitrateKbps(baseKbps) : baseKbps);
             if (cadenceLogged < 5 || effective.changes % 30 == 0) {
@@ -2233,8 +2239,10 @@ private:
             bool grid = false;
             if (gateNow == &m_Cadence) {
                 m_GateCalls++;
-                if (m_Lattice.engaged() && m_Cadence.lockRatio(m_Lattice.periodNs()) > 0)
-                    m_LockableCalls++;
+                const bool lockable =
+                    m_Lattice.engaged() && m_Cadence.lockRatio(m_Lattice.periodNs()) > 0;
+                if (lockable) m_LockableCalls++;
+                m_Hold.gateCall(lockable);
                 grid = m_LockArmed
                            ? m_Cadence.admit(stamps.convertedUs, stamps.presentUs, m_Lattice.view())
                            : m_Cadence.admit(stamps.convertedUs);
@@ -2306,6 +2314,7 @@ private:
 
         m_LoopStartUs = steadyNowUs();
         m_LoadCap.start(m_LoopStartUs);
+        m_Hold.start(m_LoopStartUs, m_CadenceFps);
         while (m_Running.load()) {
             // Pipelined: what the encode thread delivered since the last turn.
             if (!absorbDelivered()) return;
@@ -2367,6 +2376,7 @@ private:
                 if (chosen.intervalUs() != m_Cadence.intervalUs() || fps != m_CadenceFps) {
                     m_Cadence = chosen;
                     m_CadenceFps = fps;
+                    m_Hold.setFps(fps);
                     m_InputAdmit.setIntervalUs(m_Cadence.intervalUs());
                     m_WindowFramesAtGate = m_InputAdmit.frames();
                     log::info(line + (!stepMoved ? " (client screen changed mid-session)"
@@ -2521,6 +2531,7 @@ private:
                     sleepUntilUs(deadlineTimer.h, aim.captureUs);
                     const int64_t wokeUs = steadyNowUs();
                     m_AcquireWaitUs += wokeUs - sleepStartUs;
+                    m_Hold.waited(wokeUs - sleepStartUs);
                     const int64_t lateUs = wokeUs - aim.captureUs;
                     m_DeadlineLateUs += lateUs > 0 ? lateUs : 0;
                     if (lateUs > m_DeadlineLateMaxUs) m_DeadlineLateMaxUs = lateUs;
@@ -2542,6 +2553,7 @@ private:
                                                       : m_Capture->acquire(acquireTimeoutMs, frame);
             const int64_t acquiredUs = steadyNowUs();
             m_AcquireWaitUs += acquiredUs - acquireStartUs;
+            m_Hold.waited(acquiredUs - acquireStartUs);
             if (m_Config.tuning.clickTrace) traceCapture(status, frame, acquireStartUs, acquiredUs);
             if (aimedNow && status != capture::AcquireStatus::Ok) m_DeadlineNothingNew++;
             if (status == capture::AcquireStatus::PointerOnly)
@@ -3540,9 +3552,11 @@ private:
                 m_FoldedSeen = folded;
             }
             m_PresentRate.note(presents, nowUs);
+            m_Hold.presents(presents, presents - 1);
         } else {
             m_PresentRate.tick(nowUs);
         }
+        m_Hold.tick(nowUs);
         m_PresentsPerSecond.store(m_PresentRate.perSecond(), std::memory_order_relaxed);
     }
 
@@ -3735,6 +3749,37 @@ private:
                       waited + " % of the time waiting in the acquire");
         }
 
+        // Whether the capture held this display over its dense content, for
+        // the server's `vddmatch` (CaptureHold.h), which acts on it only above
+        // 240 Hz.
+        m_Hold.tick(steadyNowUs());
+        const CaptureHold::Verdict hold = m_Hold.verdict();
+        m_HoldStatus.judged = hold.judged;
+        m_HoldStatus.held = hold.held;
+        m_HoldStatus.displayMilliHz = m_DisplayMilliHz;
+        m_HoldStatus.gpu = m_Info.gpuName;
+        m_HoldStatus.denseSeconds = hold.denseSeconds;
+        m_HoldStatus.locked = hold.locked;
+        m_HoldStatus.carried = hold.carried;
+        m_HoldStatus.folded = hold.folded;
+        m_HoldStatus.busy = hold.busy;
+        m_HoldStatus.why = hold.why;
+        if (hold.judged) {
+            char figures[160];
+            std::snprintf(figures, sizeof(figures),
+                          "lattice %.1f %%, carried %.1f %%, folded %.2f %%, busy %.0f %%",
+                          hold.locked >= 0 ? 100.0 * hold.locked : 0.0, 100.0 * hold.carried,
+                          100.0 * hold.folded, 100.0 * hold.busy);
+            log::info("[native] capture hold at " + hzString(m_DisplayMilliHz) + " Hz: " +
+                      (hold.held ? std::string("held") : "not held (" + hold.why + ")") + " over " +
+                      std::to_string(hold.denseSeconds) + " s of dense content — " + figures);
+        } else {
+            log::info("[native] capture hold at " + hzString(m_DisplayMilliHz) +
+                      " Hz: not judged, " + std::to_string(hold.denseSeconds) +
+                      " s of dense content (" + std::to_string(CaptureHold::kMinDenseSeconds) +
+                      " needed)");
+        }
+
         // cadence=deadline: the client's refreshes aimed at, and how on time.
         if (m_Config.tuning.cadence == EncoderTuning::Cadence::Deadline && seconds > 0) {
             const auto perSecond = [seconds](int64_t n) {
@@ -3855,6 +3900,10 @@ private:
     /// the input thread (sendInput), its pictures are the capture thread's.
     bool m_InputAdmitOn = false;
     InputAdmit m_InputAdmit;
+    // Whether the capture held the display (CaptureHold.h); its verdict once
+    // the loop ended, for captureHold().
+    CaptureHold m_Hold;
+    CaptureHoldStatus m_HoldStatus;
     /// The window's pictures when the gate was last replaced: those of the
     /// gate the last cadence line counts.
     int64_t m_WindowFramesAtGate = 0;

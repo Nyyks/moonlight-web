@@ -3863,6 +3863,30 @@ int main(int argc, char* argv[])
                                  qInfo() << "[Session] Desktop portal consent stored — this "
                                             "machine will not ask again";
                              });
+            // The capture's word on the virtual display it held (plan glissade,
+            // V): a rate above the 240 Hz every host runs, not held over the
+            // stream's dense content, is kept — `vddmatch` stays under it from
+            // the next stream on (matchCapAfterRefusals). Only for our own
+            // display: a physical one's rate is no choice of ours.
+            QObject::connect(
+                worker, &StreamWorkerHost::captureHoldReceived, qApp,
+                [&appSettings, portalVirtual](const QJsonObject& verdict) {
+                    const int milliHz = verdict["display_mhz"].toInt();
+                    const bool held = verdict["held"].toBool(true);
+                    qInfo().noquote()
+                        << "[Session] capture" << (held ? "held" : "did not hold")
+                        << "the display at" << VirtualDisplay::rateText(milliHz) << "Hz"
+                        << (held ? QString()
+                                 : QStringLiteral("(%1)").arg(verdict["why"].toString()));
+                    if (held || !portalVirtual ||
+                        milliHz <= VirtualDisplay::kRateMax * VirtualDisplay::kMilliHz)
+                        return;
+                    appSettings.addVddMatchRefusal(verdict["gpu"].toString(), milliHz,
+                                                   QCoreApplication::applicationVersion());
+                    qInfo().noquote() << "[Session] vddmatch keeps the virtual display under"
+                                      << VirtualDisplay::rateText(milliHz)
+                                      << "Hz on this host from the next stream on";
+                });
             QObject::connect(
                 worker, &StreamWorkerHost::responseReady, qApp,
                 [respond, worker, &g_Pool, &g_DualSupport, &g_LiveSunshineUids, &authManager,
@@ -4219,9 +4243,23 @@ int main(int argc, char* argv[])
                                                                : vdTuning.vddMatch == 1;
                     if (vdMatch) {
                         const int clientMilliHz = body["client_refresh_mhz"].toInt(0);
-                        const int cap = vdTuning.vddMatchMaxHz > 0
-                                            ? vdTuning.vddMatchMaxHz
-                                            : VirtualDisplay::kMatchedRateMaxHz;
+                        // Under the rates this host's capture did not hold
+                        // (captureHoldReceived above), on a GPU it still has;
+                        // the bench's vddmatchmax says it all by itself.
+                        int cap = VirtualDisplay::kMatchedRateMaxHz;
+                        if (vdTuning.vddMatchMaxHz > 0) {
+                            cap = vdTuning.vddMatchMaxHz;
+                        } else {
+                            QStringList gpus;
+                            for (const mw::native::GpuInfo& g :
+                                 NativeProbeService::instance().snapshot().gpus)
+                                gpus << QString::fromStdString(g.name);
+                            cap = VirtualDisplay::matchCapAfterRefusals(
+                                cap, appSettings.vddMatchRefused(),
+                                QCoreApplication::applicationVersion(), gpus);
+                        }
+                        const bool capLowered =
+                            vdTuning.vddMatchMaxHz <= 0 && cap < VirtualDisplay::kMatchedRateMaxHz;
                         const int matched =
                             VirtualDisplay::matchedRefreshMilliHz(clientMilliHz, reqFps, cap);
                         const int active = VirtualDisplayJob::instance().activeRefreshMilliHz();
@@ -4230,9 +4268,15 @@ int main(int argc, char* argv[])
                             matchWhy = QStringLiteral("(vddmatch: already on at that rate)");
                         } else if (matched > 0) {
                             vdRefresh = matched;
-                            matchWhy = QStringLiteral("(vddmatch: %1 x the client's %2 Hz)")
-                                           .arg(matched / clientMilliHz)
-                                           .arg(VirtualDisplay::rateText(clientMilliHz));
+                            matchWhy =
+                                QStringLiteral("(vddmatch: %1 x the client's %2 Hz%3)")
+                                    .arg(matched / clientMilliHz)
+                                    .arg(VirtualDisplay::rateText(clientMilliHz))
+                                    .arg(capLowered
+                                             ? QStringLiteral(", under %1 Hz: the capture did not "
+                                                              "hold more on this host")
+                                                   .arg(cap)
+                                             : QString());
                         } else {
                             matchWhy = QStringLiteral(
                                            "(vddmatch: nothing fits a %1 Hz client, up to %2 Hz)")

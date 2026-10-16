@@ -228,6 +228,24 @@ int matchedRefreshMilliHz(int clientMilliHz, int streamFps, int capHz)
     return 0;
 }
 
+int matchCapAfterRefusals(int capHz, const QJsonArray& refused, const QString& version,
+                          const QStringList& gpus)
+{
+    int cap = capHz;
+    for (const QJsonValue& v : refused) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QLatin1String("version")).toString() != version) continue;
+        if (!gpus.isEmpty() && !gpus.contains(o.value(QLatin1String("gpu")).toString())) continue;
+        const qint64 milliHz = o.value(QLatin1String("milli_hz")).toInteger();
+        if (milliHz <= 0) continue;
+        // 2 % under it, whole hertz: a screen a little slower than the one
+        // refused would put the display back at the same load.
+        const int under = static_cast<int>(milliHz * 49 / 50 / kMilliHz);
+        cap = std::min(cap, under);
+    }
+    return cap;
+}
+
 int refreshForStream(int streamFps, int benchHz, bool faster)
 {
     if (benchHz > 0) return std::min(kRateDriverMax, std::max(kRateMin, benchHz));

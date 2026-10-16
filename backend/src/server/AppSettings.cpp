@@ -916,6 +916,36 @@ void AppSettings::setPortalRestoreToken(const QString& token, bool virtualDispla
     writeAll(obj);
 }
 
+// ── Display rates the capture did not hold ───────────────────────────────────
+
+QJsonArray AppSettings::vddMatchRefused() const
+{
+    return readAll().value(QStringLiteral("vdd_match_refused")).toArray();
+}
+
+void AppSettings::addVddMatchRefusal(const QString& gpu, int milliHz, const QString& version)
+{
+    if (milliHz <= 0) return;
+    QJsonObject obj = readAll();
+    QJsonArray kept;
+    for (const QJsonValue& v : obj.value(QStringLiteral("vdd_match_refused")).toArray()) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QLatin1String("version")).toString() != version) continue;
+        if (o.value(QLatin1String("gpu")).toString() == gpu &&
+            o.value(QLatin1String("milli_hz")).toInteger() == milliHz)
+            return; // known already: no file written for nothing
+        kept.append(o);
+    }
+    // A handful at most: one per GPU and rate a client asked of this host.
+    while (kept.size() >= 8)
+        kept.removeFirst();
+    kept.append(QJsonObject{{QStringLiteral("gpu"), gpu},
+                            {QStringLiteral("milli_hz"), milliHz},
+                            {QStringLiteral("version"), version}});
+    obj[QStringLiteral("vdd_match_refused")] = kept;
+    writeAll(obj);
+}
+
 // ── Instance name ────────────────────────────────────────────────────────────
 
 QString AppSettings::instanceName() const

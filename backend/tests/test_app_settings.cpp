@@ -230,6 +230,30 @@ void run_app_settings_tests()
         CHECK_EQ(s.portalRestoreToken(), QString("portal-token-3"));
     }
 
+    // The display rates the capture did not hold (vddmatch): none on a fresh
+    // install; one per GPU and rate; the same refusal again writes nothing;
+    // another app version's entries go with the next refusal.
+    CHECK_EQ(s.vddMatchRefused().size(), 0);
+    s.addVddMatchRefusal("GPU A", 330000, "1.0");
+    s.addVddMatchRefusal("GPU A", 288000, "1.0");
+    s.addVddMatchRefusal("GPU B", 330000, "1.0");
+    s.addVddMatchRefusal("GPU A", 330000, "1.0");
+    CHECK_EQ(s.vddMatchRefused().size(), 3);
+    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("gpu").toString(), QString("GPU A"));
+    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("milli_hz").toInt(), 330000);
+    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("version").toString(), QString("1.0"));
+    s.addVddMatchRefusal("GPU A", 0, "1.0");
+    CHECK_EQ(s.vddMatchRefused().size(), 3);
+    s.addVddMatchRefusal("GPU A", 330000, "1.1");
+    CHECK_EQ(s.vddMatchRefused().size(), 1);
+    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("version").toString(), QString("1.1"));
+    for (int hz = 241; hz < 251; ++hz)
+        s.addVddMatchRefusal("GPU A", hz * 1000, "1.1");
+    CHECK_EQ(s.vddMatchRefused().size(), 8);
+    CHECK_EQ(s.vddMatchRefused().at(7).toObject().value("milli_hz").toInt(), 250000);
+    // The other settings were left alone.
+    CHECK_EQ(s.portalRestoreToken(), QString("portal-token-3"));
+
     s.setPublicIp("1.2.3.4");
     CHECK_EQ(s.publicIp(), QString("1.2.3.4"));
     s.setCertPem("MW_CERT_PEM");

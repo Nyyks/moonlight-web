@@ -583,6 +583,43 @@ void run_virtual_display_tests()
         CHECK(!kVddMatchProduct);
     }
 
+    SECTION("VirtualDisplay — under the rates the capture did not hold");
+    {
+        const auto refusal = [](const char* gpu, int milliHz, const char* version) {
+            return QJsonObject{{QStringLiteral("gpu"), QString::fromLatin1(gpu)},
+                               {QStringLiteral("milli_hz"), milliHz},
+                               {QStringLiteral("version"), QString::fromLatin1(version)}};
+        };
+        const QStringList gpus{QStringLiteral("GPU A"), QStringLiteral("GPU B")};
+        // Nothing refused: the product's ceiling.
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, {}, "1.0", gpus), kMatchedRateMaxHz);
+        // 330 refused: a 165 Hz screen gets its own rate (×1), a 144 Hz one
+        // still tries 288.
+        QJsonArray refused{refusal("GPU A", 330000, "1.0")};
+        int cap = matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", gpus);
+        CHECK_EQ(cap, 323);
+        CHECK_EQ(matchedRefreshMilliHz(165000, 165, cap), 165000);
+        CHECK_EQ(matchedRefreshMilliHz(144000, 144, cap), 288000);
+        CHECK_EQ(matchedRefreshMilliHz(119872, 120, cap), 239744);
+        // 288 refused too: the lowest one rules, and 144 gets 144.
+        refused.append(refusal("GPU A", 287694, "1.0"));
+        cap = matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", gpus);
+        CHECK_EQ(cap, 281);
+        CHECK_EQ(matchedRefreshMilliHz(143847, 144, cap), 143847);
+        CHECK_EQ(matchedRefreshMilliHz(119872, 120, cap), 239744);
+        // Another version's refusals, a GPU this machine no longer has: none.
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.1", gpus), kMatchedRateMaxHz);
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", {"GPU C"}),
+                 kMatchedRateMaxHz);
+        // No GPU known yet: every refusal of this version counts.
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", {}), 281);
+        // Never above the ceiling it was given (the bench's vddmatchmax).
+        CHECK_EQ(matchCapAfterRefusals(240, refused, "1.0", gpus), 240);
+        // A malformed entry is skipped.
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, QJsonArray{QJsonObject{}}, "1.0", gpus),
+                 kMatchedRateMaxHz);
+    }
+
     SECTION("VirtualDisplay — the bundled driver is pinned file by file");
     CHECK_EQ(int(driverFiles().size()), 3);
     bool inf = false, cat = false, dll = false;

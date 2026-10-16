@@ -294,6 +294,7 @@ public:
     int64_t firstFrameArrivalSteadyMs() const override;
     FrameSentSink* frameSentSink() override { return this; }
     QJsonObject takeStageStats() override;
+    QJsonObject captureHoldReport() const override { return m_CaptureHold; }
 
     // ── FrameSentSink ───────────────────────────────────────────────────────
     void frameSent(uint32_t frameNumber, int64_t firstByteUs, int64_t lastByteUs) override;
@@ -491,6 +492,10 @@ private:
     void onCursor(const mw::native::CursorUpdate& cursor);
 
     std::unique_ptr<mw::native::Session> m_Session;
+
+    /// The session's CaptureHold verdict, kept past the session for the
+    /// worker's last word to the server (captureHoldReport).
+    QJsonObject m_CaptureHold;
 
     /// The HID passthrough's devices. Made at the first hidattach, gone with
     /// the session. The mutex guards the pointer only: HidPassthrough is

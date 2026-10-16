@@ -433,6 +433,33 @@ public:
     /// step in force. Zero-filled where nothing steps. Safe from any thread.
     virtual CadenceStatus cadenceStatus() const { return {}; }
 
+    /// Whether the capture held its display over the session's dense content
+    /// (core/CaptureHold.h), for the server's `vddmatch`: a host that did not
+    /// hold a display at twice the client's rate gets the client's own from
+    /// the next stream on.
+    struct CaptureHoldStatus
+    {
+        /// Enough dense content to say anything.
+        bool judged = false;
+        /// Within every threshold; true when not judged.
+        bool held = true;
+        /// The captured display's refresh, mHz; 0 when unknown.
+        int displayMilliHz = 0;
+        /// The GPU that captured and encoded it.
+        std::string gpu;
+        int denseSeconds = 0;
+        /// Of the gate's calls, 0..1; -1 when the gate was never called.
+        double locked = -1;
+        double carried = 0;
+        double folded = 0;
+        double busy = 0;
+        /// The first threshold missed; empty when held.
+        std::string why;
+    };
+    /// Final once stop() returned; before, it says nothing. Only the Windows
+    /// engine judges.
+    virtual CaptureHoldStatus captureHold() const { return {}; }
+
     /// Where to hear that the viewer's input stopped reaching the host, or
     /// started again — see InputGate. Delivered on the thread that injects,
     /// i.e. the caller's own sendInput() thread, at most once per change.

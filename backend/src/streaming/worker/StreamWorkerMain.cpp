@@ -175,6 +175,8 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
     if (!g_State || g_State->exiting) return;
     g_State->exiting = true;
 
+    QJsonObject hold;
+
     if (g_State->relay) {
         DataChannelRelay* r = g_State->relay;
         g_State->relay = nullptr;
@@ -182,7 +184,10 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
         if (notify == 2) r->notifyClientRevoked();
         if (notify == 3) r->notifyClientSessionEnded();
         QObject::disconnect(r, &DataChannelRelay::sessionEnded, nullptr, nullptr);
-        if (r->mediaEngine()) r->mediaEngine()->stopConnection();
+        if (r->mediaEngine()) {
+            r->mediaEngine()->stopConnection();
+            hold = r->mediaEngine()->captureHoldReport();
+        }
         r->stop();
         r->deleteLater();
     }
@@ -193,7 +198,10 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
         if (notify == 2) r->notifyClientRevoked();
         if (notify == 3) r->notifyClientSessionEnded();
         QObject::disconnect(r, &MediaTrackRelay::sessionEnded, nullptr, nullptr);
-        if (r->mediaEngine()) r->mediaEngine()->stopConnection();
+        if (r->mediaEngine()) {
+            r->mediaEngine()->stopConnection();
+            hold = r->mediaEngine()->captureHoldReport();
+        }
         r->stop();
         r->deleteLater();
     }
@@ -204,7 +212,10 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
         if (notify == 2) r->notifyClientRevoked();
         if (notify == 3) r->notifyClientSessionEnded();
         QObject::disconnect(r, &StreamRelay::sessionEnded, nullptr, nullptr);
-        if (r->mediaEngine()) r->mediaEngine()->stopConnection();
+        if (r->mediaEngine()) {
+            r->mediaEngine()->stopConnection();
+            hold = r->mediaEngine()->captureHoldReport();
+        }
         r->stop();
         r->deleteLater();
     }
@@ -226,6 +237,14 @@ void teardownAndExit(int notify /*0=none, 1=takenOver, 2=revoked, 3=sessionEnded
         if (!parked.isEmpty()) emitEvent(parked);
     };
     shipKept();
+
+    // The capture's word on the display it held (CaptureHold.h), for the
+    // server's `vddmatch`: the parent alone keeps a settings file. Before
+    // "ended", which the server tears the slot down on.
+    if (!hold.isEmpty()) {
+        hold.insert(QStringLiteral("event"), QStringLiteral("captureHold"));
+        emitEvent(hold);
+    }
 
     if (!g_State->endedEmitted) {
         g_State->endedEmitted = true;
