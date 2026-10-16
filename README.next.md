@@ -37,7 +37,7 @@ Moonlight‑Web turns your gaming PC into a stream, and **any device with a mode
 - 🖥️ **Its own capture & encode engine** — the machine it runs on is a host straight away: no Sunshine, no pairing, no PIN. One card per display. Windows, Linux and macOS.
 - 🎮 **Low‑latency streaming** up to 4K HDR, 240 FPS, **H.264 / HEVC / AV1**, on **NVENC · AMF · Quick Sync · VA‑API · VideoToolbox** (software fallback).
 - 🌐 **WebRTC transport** (DataChannels + RTP media tracks), automatic WSS fallback.
-- 🔊 **Opus audio**, adaptive jitter buffer, surround.
+- 🔊 **Opus audio**, adaptive jitter buffer, stereo.
 - ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble. On Windows it reaches the lock screen and UAC prompts too, and **Ctrl+Alt+Del** works from the touch keyboard bar (Ctrl, Alt, then Del). A Windows PC with no mouse plugged in shows its pointer in the stream too. **Racing wheels, flight sticks and RC radios** too, as an Xbox pad or sent to the game as themselves, force feedback included ([see below](#controllers)).
 - 🤝 **Pairs with other hosts too** — Sunshine/Apollo, Wolf, MultiSeat: [see below](#other-hosts-it-can-pair-with). mDNS discovery, PIN pairing, multi‑host.
 - 🌍 **Internet access** opt‑in, at a `stream.moonlightweb.top/「id」` address, with nothing published in your name.
@@ -64,7 +64,7 @@ Moonlight‑Web turns your gaming PC into a stream, and **any device with a mode
 4. **Click a display and stream.** Other hosts on the LAN are discovered next to it and can be [paired too](#other-hosts-it-can-pair-with).
 
 **The native engine** hands the captured GPU surface straight to the GPU encoder, in the process that holds the WebRTC connection: `capture → encode (zero‑copy) → SCTP/DTLS → browser`. No loopback hop, RTSP, RTP or FEC. On an RTX 5060 Ti at 1440p: **0.06 ms** to acquire a frame, **3.46 ms** to encode it, **one** memory copy.\
-The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio in an **AudioWorklet**.
+The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio through its own **WebRTC** player (an **AudioWorklet** on the WSS fallback).
 
 **On an Intel GPU, the picture takes a D3D12 chain**: conversion and encoding on queues that stay ahead of a game, and a rate control of its own. On an Arc A380 under a game, the host time falls by half. NVIDIA and AMD keep their D3D11 path, which measured faster there. **On Linux with an AMD GPU**, HEVC and AV1 go through Vulkan Video from end to end, once the driver has proved on real pictures that it encodes correctly: a desktop that barely moves then takes under 1 Mbit/s, where VA-API under Mesa 26 kept close to the full bitrate. VA-API, which still carries H.264, now keeps a quality floor too: a still desktop no longer takes the whole bitrate. Otherwise, and in H.264, the conversion runs in Vulkan in front of VA-API: under a game that saturates the iGPU, 8 ms from the screen to the encoded picture, against 15 to 38 through GL depending on the Mesa version. Any failure falls back to the older path without cutting the stream. **Admin → Advanced → Video pipeline** picks a chain by hand (`native_video_pipeline`: `auto`, `d3d11`, `d3d12`; on Linux `auto`, `vaapi`, `vulkan`).
 
@@ -149,7 +149,7 @@ The native engine streams **the machine MoonlightWeb runs on**. Moonlight‑Web 
 
 | Host | What it is | How it pairs |
 |---|---|---|
-| **[Sunshine](https://github.com/LizardByte/Sunshine)** · **Apollo** | The reference GameStream host, and its fork | mDNS or by IP, with the PIN the host shows. |
+| **[Sunshine](https://github.com/LizardByte/Sunshine)** · **Apollo** | The reference GameStream host, and its fork | mDNS or by IP, with the PIN MoonlightWeb shows, typed into the host's web page. |
 | **[Wolf](https://games-on-whales.github.io/wolf/)** (Games‑on‑Whales) | Containerised host: profiles, Docker catalogue, lobbies and co‑op | Automatic: MoonlightWeb posts the PIN through Wolf's `/api/v1`. One certificate per device, so two players are two clients. |
 | **MultiSeat** | One Windows box split into independent seats, each with its own Apollo | Seats are provisioned through MultiSeat's API, then each is paired on its own. |
 
@@ -323,7 +323,7 @@ Prefer to build it yourself? See [Fork & build](#fork--build).
 
 ## Video Enhancement (bonus)
 
-Browser‑side image enhancement on the GPU (WebGPU): **upscaling (FSR1 & SGSRv1)** + **sharpening**, to gain sharpness when the stream resolution differs from the display resolution.
+Browser‑side image enhancement on the GPU (WebGL2, or WebGPU in HDR): **upscaling (FSR1 & SGSRv1)** + **sharpening**, to gain sharpness when the stream resolution differs from the display resolution.
 
 <div align="center">
 
@@ -379,7 +379,7 @@ The browser loads a few kilobytes of entry page, opens WebRTC straight to your m
  │  Entry page (a few KB)             │ https  │  stream.moonlightweb.top   │
  │  Web App (Vanilla JS)              │◄──────►│  · serves the entry page   │
  │  Video : WebCodecs + WebGPU        │  SDP   │  · passes SDP / ICE along  │
- │  Audio : Opus / AudioWorklet       │  ICE   │  · never sees your video   │
+ │  Audio : Opus / WebRTC track       │  ICE   │  · never sees your video   │
  │  Input : kbd / mouse / gamepad     │        └─────────────┬──────────────┘
  │  Video Enhancement (GPU)           │                      │ ONE outgoing
  └─────────────────┬──────────────────┘                      │ connection,

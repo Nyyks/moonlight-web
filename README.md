@@ -32,7 +32,7 @@ Moonlight‑Web turns your gaming PC into a stream, and **any device with a mode
 - 🖥️ **Its own capture & encode engine** — the machine it runs on is a host straight away: no Sunshine, no pairing, no PIN. One card per display. Windows, Linux and macOS.
 - 🎮 **Low‑latency streaming** up to 4K HDR, 240 FPS, **H.264 / HEVC / AV1**, on **NVENC · AMF · Quick Sync · VA‑API · VideoToolbox** (software fallback).
 - 🌐 **WebRTC transport** (DataChannels + RTP media tracks), automatic WSS fallback.
-- 🔊 **Opus audio**, adaptive jitter buffer, surround.
+- 🔊 **Opus audio**, adaptive jitter buffer, stereo.
 - ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble.
 - 🤝 **Pairs with other hosts too** — Sunshine/Apollo, Wolf, MultiSeat: [see below](#other-hosts-it-can-pair-with). mDNS discovery, PIN pairing, multi‑host.
 - 🌍 **Internet access** opt‑in, at a `stream.moonlightweb.top/「id」` address, with nothing published in your name.
@@ -59,7 +59,7 @@ Moonlight‑Web turns your gaming PC into a stream, and **any device with a mode
 4. **Click a display and stream.** Other hosts on the LAN are discovered next to it and can be [paired too](#other-hosts-it-can-pair-with).
 
 **The native engine** hands the captured GPU surface straight to the GPU encoder, in the process that holds the WebRTC connection: `capture → encode (zero‑copy) → SCTP/DTLS → browser`. No loopback hop, RTSP, RTP or FEC. On an RTX 5060 Ti at 1440p: **0.06 ms** to acquire a frame, **3.46 ms** to encode it, **one** memory copy.\
-The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio in an **AudioWorklet**.
+The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio through its own **WebRTC** player (an **AudioWorklet** on the WSS fallback).
 
 > The engine also runs under the Windows service, in the logged‑on user's session. Where it cannot run (no usable encoder, Windows ARM64), the card is hidden and the app offers a host to pair with. A **headless** PC keeps its card through **"MoonlightWeb Virtual Display"**, a signed virtual monitor offered by the installer (a Mac creates its own). It turns on for a stream at 1080p 120 Hz, and your displays are restored when the stream ends.
 
@@ -112,7 +112,7 @@ The native engine streams **the machine MoonlightWeb runs on**. Moonlight‑Web 
 
 | Host | What it is | How it pairs |
 |---|---|---|
-| **[Sunshine](https://github.com/LizardByte/Sunshine)** · **Apollo** | The reference GameStream host, and its fork | mDNS or by IP, with the PIN the host shows. |
+| **[Sunshine](https://github.com/LizardByte/Sunshine)** · **Apollo** | The reference GameStream host, and its fork | mDNS or by IP, with the PIN MoonlightWeb shows, typed into the host's web page. |
 | **[Wolf](https://games-on-whales.github.io/wolf/)** (Games‑on‑Whales) | Containerised host: profiles, Docker catalogue, lobbies and co‑op | Automatic: MoonlightWeb posts the PIN through Wolf's `/api/v1`. One certificate per device, so two players are two clients. |
 | **MultiSeat** | One Windows box split into independent seats, each with its own Apollo | Seats are provisioned through MultiSeat's API, then each is paired on its own. |
 
@@ -284,7 +284,7 @@ Prefer to build it yourself? See [Fork & build](#fork--build).
 
 ## Video Enhancement (bonus)
 
-Browser‑side image enhancement on the GPU (WebGPU): **upscaling (FSR1 & SGSRv1)** + **sharpening**, to gain sharpness when the stream resolution differs from the display resolution.
+Browser‑side image enhancement on the GPU (WebGL2, or WebGPU in HDR): **upscaling (FSR1 & SGSRv1)** + **sharpening**, to gain sharpness when the stream resolution differs from the display resolution.
 
 <div align="center">
 
@@ -340,7 +340,7 @@ The browser loads a few kilobytes of entry page, opens WebRTC straight to your m
  │  Entry page (a few KB)             │ https  │  stream.moonlightweb.top   │
  │  Web App (Vanilla JS)              │◄──────►│  · serves the entry page   │
  │  Video : WebCodecs + WebGPU        │  SDP   │  · passes SDP / ICE along  │
- │  Audio : Opus / AudioWorklet       │  ICE   │  · never sees your video   │
+ │  Audio : Opus / WebRTC track       │  ICE   │  · never sees your video   │
  │  Input : kbd / mouse / gamepad     │        └─────────────┬──────────────┘
  │  Video Enhancement (GPU)           │                      │ ONE outgoing
  └─────────────────┬──────────────────┘                      │ connection,
