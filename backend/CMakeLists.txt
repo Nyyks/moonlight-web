@@ -208,6 +208,12 @@ else()
         message(STATUS "took libjuice-windows-diffserv.patch out")
     endif()
 endif()
+# macOS refuses IP_TOS on libjuice's dual-stack socket and IPV6_TCLASS marks
+# IPv6 only: a stream to an IPv4 peer left unmarked (bench of 16/10). Each such
+# packet carries the class itself instead.
+if(APPLE)
+    mw_apply_patch("${MW_LIBJUICE_DIR}" libjuice-macos-diffserv.patch)
+endif()
 
 # libdatachannel (WebRTC DataChannel + media). Match the previous .bat flags.
 set(NO_WEBSOCKET ON  CACHE BOOL "" FORCE)

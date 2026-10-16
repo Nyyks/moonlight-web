@@ -30,9 +30,11 @@
 // own values (EF / AF42 / AF11) put the SCTP video, the default, in AF11: the
 // Wi-Fi's background queue.
 //
-// libjuice sets it on the socket: Linux, macOS, and Windows through our patch
+// libjuice sets it on the socket: Linux; Windows through our patch
 // (libjuice-windows-diffserv.patch; an unelevated IP_TOS marks there, under
-// the service too). An installer QoS policy was set aside: Windows leaves it
+// the service too); macOS through another (libjuice-macos-diffserv.patch: its
+// dual-stack socket marks IPv6 only, so each packet to an IPv4 peer carries
+// the class itself). An installer QoS policy was set aside: Windows leaves it
 // out of force after a reboot on a PC outside a domain.
 //
 // `packet_marking: false` in settings.json marks nothing. The bench's
