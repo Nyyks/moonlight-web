@@ -44,15 +44,15 @@ Eight containers (one process each — the idiomatic Docker layout), defined in 
 | Container | Image | Exposure | Role |
 |---|---|---|---|
 | `mw-rendezvous` | custom build: small Go server (stdlib only) | internal only (:8090) | **The introduction server.** One held WebSocket per online instance; copies signalling to the browsers that ask for that instance by identifier. Claim store in `mwrdv_data`. See §10.7. |
-| `coturn` | official `coturn/coturn:4.6-alpine` | public :3478, **host network** | STUN and only STUN (`--stun-only`): no relay, so it never carries a byte of anybody's stream and cannot be turned into an amplifier. Host networking is not incidental — Docker's userland proxy rewrites the source address, and a STUN server behind it would confidently answer every client with the bridge gateway's address. |
-| `pdns` | official `powerdns/pdns-auth-49`, **unmodified** | internal only (DNS :5300, API :8081, fixed IP 172.28.0.10) | Authoritative zone (SQLite in the `pdns_data` volume) + REST API. Runs non-root, `cap_drop: ALL`. |
+| `coturn` | official `coturn/coturn` (alpine) | public :3478, **host network** | STUN and only STUN (`--stun-only`): no relay, so it never carries a byte of anybody's stream and cannot be turned into an amplifier. Host networking is not incidental — Docker's userland proxy rewrites the source address, and a STUN server behind it would confidently answer every client with the bridge gateway's address. |
+| `pdns` | official `powerdns/pdns-auth`, **unmodified** | internal only (DNS and API, a fixed IP on the compose network) | Authoritative zone (SQLite in the `pdns_data` volume) + REST API. Runs non-root, `cap_drop: ALL`. |
 | `mw-proxy` | custom build: small Go gateway (stdlib only) | internal only (:8080) | Least-privilege gateway in front of the pdns API (§10.9); the same process serves the update relay on `/v1/update` (§10.10) and the session census on `/v1/session` (§10.11). Store in `mwproxy_data`. |
-| `dnsdist` | official `powerdns/dnsdist-19` | public :53 UDP+TCP | DNS front: per-client rate limit, ANY→TCP, forwards to pdns. |
+| `dnsdist` | official `powerdns/dnsdist` | public :53 UDP+TCP | DNS front: per-client rate limit, ANY→TCP, forwards to pdns. |
 | `caddy` | custom build: Caddy + `caddy-ratelimit` (xcaddy) | public :80/:443 | Vhosts per §10.4. Bind-mounts `bootstrap/` and `website/` from the repo root. Auto Let's Encrypt. |
 | `umami` | official Umami (postgres flavor) | internal (via caddy) | Cookieless analytics for the landing page and the two censuses. |
-| `umami-db` | postgres 16-alpine | internal | Umami storage (`umami_db` volume). |
+| `umami-db` | postgres (alpine) | internal | Umami storage (`umami_db` volume). |
 
-All containers: `no-new-privileges`, `pids_limit`, `mem_limit`; only dnsdist, caddy and coturn keep `NET_BIND_SERVICE` — for coturn not because of the port (3478 is unprivileged) but because `turnserver` carries that capability as a *file* capability, and the kernel refuses to exec such a binary when the capability is missing from the bounding set. Dropping `ALL` alone kills the container before it prints a line. The compose network uses a **fixed subnet** (172.28.0.0/24) because dnsdist's `newServer` needs a literal backend IP (it does not resolve container names).
+All containers: `no-new-privileges`, `pids_limit`, `mem_limit`; only dnsdist, caddy and coturn keep `NET_BIND_SERVICE` — for coturn not because of the port (3478 is unprivileged) but because `turnserver` carries that capability as a *file* capability, and the kernel refuses to exec such a binary when the capability is missing from the bounding set. Dropping `ALL` alone kills the container before it prints a line. The compose network uses a **fixed subnet** because dnsdist's `newServer` needs a literal backend IP (it does not resolve container names).
 
 ## 10.2 PowerDNS configuration
 
@@ -115,11 +115,11 @@ One idempotent script (`sudo ./install.sh`, re-runnable, keeps an existing `.env
 
 The stack cannot do these for you:
 
-**Cloud/VPS (example: Azure, Standard B2ats v2 + Standard SSD, Ubuntu 24.04):**
+**Cloud/VPS:**
 
 1. Make the public IP **static** (it becomes `MW_PUBLIC_IP` and goes to the registrar).
 2. Disable any auto-shutdown (a DNS server, and a server holding everyone's lines, is 24/7).
-3. Open the **cloud firewall / NSG** (in addition to the host firewall): 53/udp, 53/tcp, 3478/udp, 3478/tcp, 80/tcp, 443/tcp, and SSH restricted to your IP. ⚠️ Azure pitfall: check *Effective security rules* — a rule with *Source port ranges = 53* instead of `*` silently breaks TCP-source-port-random resolvers.
+3. Open the **cloud firewall / NSG** (in addition to the host firewall): 53/udp, 53/tcp, 3478/udp, 3478/tcp, 80/tcp, 443/tcp, and SSH restricted to your IP. ⚠️ Cloud firewall pitfall: check the *effective* rules — a rule with a *source* port range of 53 instead of `*` silently breaks TCP-source-port-random resolvers.
 
 **Registrar (where the domain was bought):**
 
@@ -129,7 +129,7 @@ The stack cannot do these for you:
 
 **After delegation propagates** (`dig +short stream.{MW_DOMAIN} @8.8.8.8` returns the VM's IP): run `./renew-certs.sh`. Certificate failures on first boot are **expected** — Let's Encrypt can't validate until delegation + cloud port 53 are live (symptoms: `DNS problem: SERVFAIL`, browser `ERR_SSL_PROTOCOL_ERROR`).
 
-**Umami one-time setup**: log into `https://stats.{domain}` (`admin`/`umami`), change the password, create the website entry, paste the generated UUID into `website/index.html`'s `data-website-id`, `docker compose restart caddy`.
+**Umami one-time setup**: log into `https://stats.{domain}` with Umami's default account and change its password at once, create the website entry, paste the generated UUID into `website/index.html`'s `data-website-id`, `docker compose restart caddy`.
 
 **MoonlightWeb side**: set `MW_DOMAIN` in the server's `.env` (or CI secrets for release builds) and the instances reach `https://stream.{MW_DOMAIN}` on their own. `MW_RENDEZVOUS_URL` overrides that derivation outright when the introduction server lives somewhere else.
 
@@ -264,8 +264,8 @@ Persistence: zone DB in `pdns_data`, proxy store in `mwproxy_data`, **identifier
 
 Since 0.3.0 every connection — LAN included — goes through `stream.{domain}`, so the box is production the moment the first instance is installed. It is also the only box (a second one was ruled out on cost). Two things follow, and the layout below is what makes them true:
 
-- **Production follows a release tag, never `main`.** `~/moonlight-web` on the box is checked out on a tag (detached HEAD); it moves only with `deploy-prod.sh <tag> [--apply]`, which shows the diff that reaches the containers, then rebuilds — with `--no-deps` — only the services whose directory changed. `git pull` is never run there: with the bootstrap bind-mounted, a pull alone would put unreleased code in front of every installed instance. A server-only correction between releases is tagged `srv-<date>` (does not trigger `release.yml`, does trigger `pages.yml`).
-- **`main` runs on `stream.dev.{domain}`**, a staging rendezvous on the same box: a second clone (`~/moonlight-web-dev`) and a second compose project (`docker-compose.dev.yml`, project `mw-dev`) with exactly two containers — its own `mw-rendezvous` (own claim store, own `MW_RDV_OWNER_SECRET`) and its own Caddy rendering the shared `stream.caddy` from that checkout, on plain HTTP, no port published. Production's Caddy fronts it with one fixed `reverse_proxy` block over the `mw-edge` network and lends it the certificate. STUN needs nothing: `stream.dev.` resolves to the same address and coturn listens on the host.
+- **Production follows a release tag, never `main`.** The production checkout on the box is on a tag (detached HEAD); it moves only with `deploy-prod.sh <tag> [--apply]`, which shows the diff that reaches the containers, then rebuilds — with `--no-deps` — only the services whose directory changed. `git pull` is never run there: with the bootstrap bind-mounted, a pull alone would put unreleased code in front of every installed instance. A server-only correction between releases is tagged `srv-<date>` (does not trigger `release.yml`, does trigger `pages.yml`).
+- **`main` runs on `stream.dev.{domain}`**, a staging rendezvous on the same box: a second clone and a second compose project (`docker-compose.dev.yml`, project `mw-dev`) with exactly two containers — its own `mw-rendezvous` (own claim store, own `MW_RDV_OWNER_SECRET`) and its own Caddy rendering the shared `stream.caddy` from that checkout, on plain HTTP, no port published. Production's Caddy fronts it with one fixed `reverse_proxy` block over the `mw-edge` network and lends it the certificate. STUN needs nothing: `stream.dev.` resolves to the same address and coturn listens on the host.
 
 What that buys: a change to the rendezvous, the bootstrap **or the Caddy site body** is tested by rebuilding the *dev* project alone. Production's containers do not restart, its held lines are not dropped, its entry page does not change. The one exception is a change to the fixed `stream.dev.` block itself, which is deliberately tiny.
 
@@ -273,9 +273,9 @@ What that buys: a change to the rendezvous, the bootstrap **or the Caddy site bo
 
 **Not indexed — anything but the presentation website**: `stream.`, `stream.dev.`, `api.`, `dnsapi.`, `updates.`, `metrics.`, `packages.` and `stats.` all import `(no_index)`, which adds `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex` to every response and answers `robots.txt` with `Disallow: /` for everyone, naming the AI crawlers explicitly. The `robots.txt` is answered inside a `handle /robots.txt`: a bare `respond` runs after every `handle`, so on `stream.` the entry page's catch-all would have answered it with the bootstrap page. The bootstrap page and the application's own `index.html` also carry `<meta name="robots" content="noindex, nofollow">` — the former covers its GitHub Pages copy, where no header can be set; the latter a host reached on its LAN address or a legacy public name. Only the apex (and `www.`, which redirects to it) is indexable. Be precise about the limit: the names are not secrets — they are in public DNS and in the Certificate Transparency logs from the moment their certificates are issued — they are merely kept out of search results and training sets by robots that obey.
 
-**Guards against deploying the wrong tree.** The dev clone contains the production compose file too, in a directory also named `powerdns`; a bare `docker compose up` there would start *production's* project with `main`'s code. Three things prevent it: the dev clone's `.env` carries `COMPOSE_FILE=docker-compose.dev.yml` and `COMPOSE_PROJECT_NAME=mw-dev` (so the reflex command is safe there), the dev compose file names its project, containers and images distinctly, and `deploy-prod.sh` refuses to run outside `~/moonlight-web`.
+**Guards against deploying the wrong tree.** The dev clone contains the production compose file too, in a directory also named `powerdns`; a bare `docker compose up` there would start *production's* project with `main`'s code. Three things prevent it: the dev clone's `.env` carries `COMPOSE_FILE=docker-compose.dev.yml` and `COMPOSE_PROJECT_NAME=mw-dev` (so the reflex command is safe there), the dev compose file names its project, containers and images distinctly, and `deploy-prod.sh` refuses to run outside the production checkout.
 
-**Procedures** — from `root@powerdns:~` (see `deploy/powerdns/README.md` for the copy-paste blocks): dev = `cd ~/moonlight-web-dev && git pull --ff-only && cd deploy/powerdns && docker compose up -d --build`; prod = `cd ~/moonlight-web/deploy/powerdns && ./deploy-prod.sh vX.Y.Z` (read), then `--apply`.
+**Procedures** — on the box, as its administrator (see `deploy/powerdns/README.md` for the copy-paste blocks): dev = in the staging clone, `git pull --ff-only`, then `docker compose up -d --build` in `deploy/powerdns`; prod = in the production checkout's `deploy/powerdns`, `./deploy-prod.sh vX.Y.Z` (read), then `--apply`.
 
 ---
 
