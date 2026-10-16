@@ -3403,7 +3403,7 @@ La suite du §8n.27, sur les deux autres clients choisis par Bruno.
 
 **Relevé en montant le banc.**
 - **Le premier chemin ICE passe en épingle par le routeur** (paire
-  `prflx 82.67.150.202:48550` → `prflx 192.168.1.254`), avant de basculer sur le
+  `prflx 203.0.113.10:48550` → `prflx 192.168.1.254`), avant de basculer sur le
   chemin direct. L'adresse du routeur est donc bridée aussi. Le brideur compte à
   part tout paquet d'une autre adresse : 0 dans toutes les passes.
 - **Le démarrage du stream abîme des images sur le N95** : toutes, pendant ~4 s,

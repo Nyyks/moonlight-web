@@ -1552,12 +1552,12 @@ nine passes, 19:29-19:49. Log:
 `bench-out/content-age/u14ux-um-smoke-hevc-sctp-hs-r1-v240-client-r0.server.log`.
 
 - **Eight passes chose the direct IPv6 pair; one chose the hairpin.** Selected
-  pair (line 582): local `prflx 82.67.150.202:46102` → remote
+  pair (line 582): local `prflx 203.0.113.10:46102` → remote
   `prflx 192.168.1.254:62318`, i.e. through the Freebox's NAT and back.
 - **Why it can win.** With UPnP, the host relays a copy of each IPv4 host
-  candidate as `82.67.150.202 46102 typ host` (the media slot's router hole),
+  candidate as `203.0.113.10 46102 typ host` (the media slot's router hole),
   **at the same priority as the LAN candidate it copies** (e.g. candidate 6:
-  `192.168.1.66 48550` and `82.67.150.202 46102`, both 2114976511). Copies
+  `192.168.1.66 48550` and `203.0.113.10 46102`, both 2114976511). Copies
   are also made for the virtual adapters (192.168.56.1, 172.20.240.1,
   172.29.128.1). ICE then has equal-priority pairs and takes whichever check
   succeeds first: a race.

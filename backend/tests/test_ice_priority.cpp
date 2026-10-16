@@ -40,22 +40,22 @@ void testSrflxPriorityRanksBelowHost()
 
 void testWithPriorityRewritesOnlyThePriority()
 {
-    const std::string line = "candidate:6 1 UDP 2114976511 82.67.150.202 46102 typ host";
+    const std::string line = "candidate:6 1 UDP 2114976511 203.0.113.10 46102 typ host";
     CHECK_EQ(mw::ice::withPriority(line, 1678768895u),
-             std::string("candidate:6 1 UDP 1678768895 82.67.150.202 46102 typ host"));
+             std::string("candidate:6 1 UDP 1678768895 203.0.113.10 46102 typ host"));
 
     // A tail (TCP type, generation) is kept as it is.
     const std::string tcp =
-        "candidate:2 1 TCP 2105524479 82.67.150.202 46102 typ host tcptype passive";
+        "candidate:2 1 TCP 2105524479 203.0.113.10 46102 typ host tcptype passive";
     CHECK_EQ(mw::ice::withPriority(tcp, 7u),
-             std::string("candidate:2 1 TCP 7 82.67.150.202 46102 typ host tcptype passive"));
+             std::string("candidate:2 1 TCP 7 203.0.113.10 46102 typ host tcptype passive"));
 }
 
 void testWithPriorityLeavesAMalformedLineAlone()
 {
     CHECK_EQ(mw::ice::withPriority("", 1u), std::string());
     CHECK_EQ(mw::ice::withPriority("candidate:6 1 UDP", 1u), std::string("candidate:6 1 UDP"));
-    const std::string notANumber = "candidate:6 1 UDP high 82.67.150.202 46102 typ host";
+    const std::string notANumber = "candidate:6 1 UDP high 203.0.113.10 46102 typ host";
     CHECK_EQ(mw::ice::withPriority(notANumber, 1u), notANumber);
 }
 

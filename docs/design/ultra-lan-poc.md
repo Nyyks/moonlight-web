@@ -1881,7 +1881,7 @@ Le banc de référence de « Capture et Attente » (`click-waits.md` §6.1) :
 - **Sonde :** corrigée (`652fc726`, `5c96775d`), 60 clics par passe, deux passes
   par bras en ABBA, soit 120 clics par bras.
 - **Une passe écartée.** La première passe HEVC SCTP a pris le chemin par la
-  Freebox : paire « prflx 82.67.150.202 ← prflx 192.168.1.254 », RTT de la
+  Freebox : paire « prflx 203.0.113.10 ← prflx 192.168.1.254 », RTT de la
   synchro 4,7 ms au lieu de 0,5, +2 ms par image. Elle a été refaite (r3).
   Constat transmis au réseau (`network-latency-findings.md`).
 - **Outils :** `clicksplit.py` (le clic coupé à la capture, sur l'horloge du

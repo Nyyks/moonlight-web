@@ -86,7 +86,7 @@ describe('candidates that arrive before the offer has been applied', () => {
     it('passes a later one straight through', async () => {
         const { t, added } = tunnelWithFakePc({ type: 'offer' });
 
-        await t._onRemoteCandidate(ice('82.67.150.202'));
+        await t._onRemoteCandidate(ice('203.0.113.10'));
 
         expect(added).toHaveLength(1);
         expect(t._earlyCandidates).toHaveLength(0);
