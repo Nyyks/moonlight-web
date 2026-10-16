@@ -115,22 +115,23 @@
 
 <script>
 /* A host's code is the rendezvous id its link ends with: 26 Crockford base32
-   characters, 128 random bits (deploy/powerdns/mw-rendezvous/store.go). Read
-   the way the rendezvous reads it (normaliseID there): case, hyphens and
-   spaces fold away, and the letters a person mistakes for digits (i, l, o)
-   become them, u becomes v. Opened by navigating, not by a form action: the
-   site's CSP has form-action 'self', and the host's page lives on
-   stream.moonlightweb.top.
+   characters, 128 random bits. Read the way the rendezvous reads it: case,
+   hyphens and spaces fold away, and the letters a person mistakes for digits
+   (i, l, o) become them, u becomes v. Opened by navigating, not by a form
+   action: the site's CSP has form-action 'self', and the host's page lives on
+   the rendezvous host.
 
    Guessing codes is not a threat this page has to answer: the page asks no
-   server anything, the rendezvous answers an unknown code exactly as an
-   offline one and limits each address to 30 attempts a minute, and a code
-   only locates a machine — opening it still takes the host's PIN. */
+   server anything, the rendezvous limits how fast an address may try, and a
+   code only locates a machine — opening it still takes the host's PIN. */
 (function () {
   var ID_SHAPE = /^[0-9abcdefghjkmnpqrstvwxyz]{26}$/;
   var LAST_KEY = 'mw_server_access_last';
   var PROD = 'https://stream.moonlightweb.top/';
-  var DEV = 'https://stream.dev.moonlightweb.top/';
+  /* A pasted link keeps the rendezvous host it names (another
+     stream.<name>.moonlightweb.top is a test rendezvous). */
+  var HOST = /(?:^|[^a-z0-9.-])(stream\.(?:[a-z0-9-]+\.)?moonlightweb\.top)(?![a-z0-9.-])/;
+  var BASE = /^https:\/\/stream\.(?:[a-z0-9-]+\.)?moonlightweb\.top\/$/;
 
   var form = document.getElementById('access-form');
   var input = document.getElementById('host-code');
@@ -148,7 +149,8 @@
   function parse(raw) {
     var s = String(raw || '').trim().toLowerCase();
     if (!s) return null;
-    var base = s.indexOf('stream.dev.moonlightweb.top') >= 0 ? DEV : PROD;
+    var host = HOST.exec(s);
+    var base = host ? 'https://' + host[1] + '/' : PROD;
     var whole = normalise(s);
     if (ID_SHAPE.test(whole)) return { base: base, id: whole };
     var parts = s.replace(/\s+/g, '').split(/[\/#?]+/);
@@ -170,7 +172,7 @@
 
   function showLast() {
     var t = readLast();
-    if (!t || !ID_SHAPE.test(t.id || '') || (t.base !== PROD && t.base !== DEV)) {
+    if (!t || !ID_SHAPE.test(t.id || '') || !BASE.test(t.base || '')) {
       last.hidden = true;
       return;
     }
