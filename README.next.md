@@ -78,6 +78,8 @@ The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio in an **A
 
 **A click shows sooner.** When a Windows host streams slower than its display (60 or 120 fps on the 240 Hz virtual display), the frames right after a key, a click or a pad button go out at once, instead of waiting for the stream's next slot. At 60 fps in our tests, a click's picture came 5.8 ms sooner in median, and 72 % of clicks showed within 20 ms instead of 18 %. It costs about three frames per press, and steps aside on a busy link. It is on for Chrome and Edge on Windows with **Allow tearing** ticked, their default; a screen that paints on vsync keeps the stream's own rhythm.
 
+**Against v0.3.1, on the same machines** (a Windows host on an RTX 5060 Ti, a Windows client on Ethernet, 1080p in H.264, HEVC and AV1 at 60, 120 and 240 fps): what you see is 2 to 5 ms younger at 120 fps, and the slowest frames 6 to 13 ms younger at 60 and 120 fps. A click shows 3 ms sooner over all clicks, 8 ms at 120 fps. Encoding and decoding take the same time; the bitrate is 5 to 10 % higher.
+
 **On Wi-Fi, the picture waits less on its way out.** A host running MoonlightWeb (Windows, Linux or macOS) no longer holds frames back in its own network stack between two acknowledgements: from a click to its picture, about 8 ms less on a Mac on Wi-Fi; behind a cable, the picture arrives 4 to 6 ms younger. A Windows host also lowers the bitrate the moment the Wi-Fi starts resending, before the delay shows.
 
 **The sound comes sooner.** The browser no longer holds every sound back by a fixed 60 ms: it keeps only what the link needs. In Chrome on a Mac on Wi-Fi, each sound plays 15 to 35 ms earlier and sits closer to its picture, and a blind listening heard no crackle more. **A Windows host no longer crackles:** its capture used to put a few milliseconds of silence in place of sound that came a little late, one to four times a second under music; it now waits for it, and the sound leaves the PC 1 to 2 ms sooner as well.
@@ -260,7 +262,7 @@ Or install a package directly. All are **self‑contained** (Qt + OpenSSL bundle
 > ⚠️ **To stream *this* machine, use the `.deb`, `.rpm` or AUR package.** Screen capture needs a file
 > capability that an AppImage cannot keep; the AppImage only streams paired hosts.
 
-**Nothing else to install.** Capture uses **KMS** (zero‑copy DMA‑BUF → VA‑API), or the **ScreenCast portal** where the compositor requires it. Audio comes from PipeWire and input goes through `uinput`. The first launch opens `https://localhost/setup`.
+**Nothing else to install.** Capture uses **KMS** (zero‑copy DMA‑BUF → VA‑API or Vulkan Video), or the **ScreenCast portal** where the compositor requires it. Audio comes from PipeWire and input goes through `uinput`. The first launch opens `https://localhost/setup`.
 
 **Autostart** uses an XDG autostart entry; for a headless server use the systemd unit in
 [`backend/packaging/systemd/`](backend/packaging/systemd/).
@@ -294,7 +296,7 @@ caveats).
 
 | | |
 |---|---|
-| **Tags** | `latest` · `0.2.4` · `0.2` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
+| **Tags** | `latest` · `0.4.0` · `0.4` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
 | **Ports to open** | **443/tcp** (web UI + signalling) and **80/tcp** (HTTP→HTTPS redirect). WebRTC media takes **48550‑48573/udp**, one port per stream slot, with or without UPnP. A GameStream host is reached *outbound* on 47989/47984/47990 tcp, 47998‑48000 udp, 48010 tcp/udp. |
 | **Volume** | `/data` — settings, TLS material, paired hosts and the **client identity**. Losing it un‑pairs every host. |
 | **Env** | `MW_HTTPS_PORT` · `MW_HTTP_PORT` · `MW_UPNP` · `TZ` |
@@ -333,8 +335,8 @@ Browser‑side image enhancement on the GPU (WebGPU): **upscaling (FSR1 & SGSRv1
 
 ## Admin page
 
-The **Admin** page configures the server itself and is reachable **only from the local machine** (`https://localhost/admin`, or tray icon → *Server Settings*).\
-All `/api/admin/*` routes return **403** for non‑localhost requests.
+The **Admin** page configures the server itself. It opens on the local machine (`https://localhost/admin`, or tray icon → *Server Settings*), and on another device only once you set a **Remote administration** password: from your LAN, or through your entry link if you tick that too.\
+Any other request to `/api/admin/*` gets **403**.
 
 It controls: admin **PIN**, active **sessions**, HTTP/HTTPS **ports**, **transport** (WebRTC/WSS), **Internet access**, and the **certificate token**.
 
