@@ -100,6 +100,8 @@
 #include "backend/VirtualDisplay.h"
 #include "backend/VirtualDisplayApply.h"
 #include "backend/VirtualHidApply.h"
+#include "common/InheritedEnvironment.h"
+#include "network/UpdateApply.h"
 #include "backend/VirtualDisplayJob.h"
 #include "backend/streambackend/NativeHostBackend.h"
 #include "Limelight.h" // SCM_* codec-support masks
@@ -1430,6 +1432,11 @@ static int concurrentSessionCap(const QString& backendType)
 
 int main(int argc, char* argv[])
 {
+    // Before anything reads the environment: a mode an installer task runs
+    // elevated carries the user's own HKCU\Environment, and Qt and OpenSSL
+    // would load code from where it points (InheritedEnvironment.h).
+    if (mw::inheritedenv::isElevatedHelper(argc, argv)) mw::inheritedenv::scrub();
+
     // First, while this is still the only thread: if the Linux launcher handed
     // us CAP_SYS_ADMIN (KMS capture) and CAP_SYS_NICE (GPU priority), keep them
     // permitted, run without them effective, and hand them to nothing we spawn
@@ -1516,6 +1523,7 @@ int main(int argc, char* argv[])
                                                    "--native-probe",
                                                    "--vdisplay-apply",
                                                    "--vhid-apply",
+                                                   "--update-apply",
                                                    "--status",
                                                    "--new-pin",
                                                    "--enable-internet",
@@ -1586,9 +1594,11 @@ int main(int argc, char* argv[])
                 // Commands that print and exit. Both spellings again: --status
                 // and --native-bench=<spec>. Matching the bare prefix would also
                 // swallow a future --status-something, so require the boundary.
+                // --update-apply too: it opens its own log once the directory
+                // only administrators can write exists (UpdateApply.h).
                 for (const char* flag :
                      {"--native-bench", "--status", "--new-pin", "--set-admin-password",
-                      "--clear-admin-password", "--enable-internet"}) {
+                      "--clear-admin-password", "--enable-internet", "--update-apply"}) {
                     const size_t n = qstrlen(flag);
                     if (qstrncmp(argv[i], flag, int(n)) == 0 &&
                         (argv[i][n] == '\0' || argv[i][n] == '='))
@@ -1815,6 +1825,13 @@ int main(int argc, char* argv[])
                                      "With --vhid-apply: the driver package's directory", "dir");
     parser.addOption(vhidDirOption);
 
+    // The elevated half of the Update button on Windows: the action of the
+    // installer's "MoonlightWeb Update" task (UpdateApply.h).
+    QCommandLineOption updateApplyOption(
+        "update-apply", "Verify and run the staged update installer (internal: started by the "
+                        "elevated scheduled task).");
+    parser.addOption(updateApplyOption);
+
     // Development instance: isolated state (see the applicationName switch at
     // startup), no single-instance lock, and alternate default ports — so it can
     // run alongside an installed service without touching it. Never for production.
@@ -1902,6 +1919,7 @@ int main(int argc, char* argv[])
                                         parser.value(vdisplayDirOption));
     if (parser.isSet(vhidApplyOption))
         return VirtualHidApply::run(parser.value(vhidApplyOption), parser.value(vhidDirOption));
+    if (parser.isSet(updateApplyOption)) return UpdateApply::run();
 
     // ── The stream-worker launcher service ──────────────────────────────────
     // Before the lock too: the service is a second process of this binary, and

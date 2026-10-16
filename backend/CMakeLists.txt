@@ -293,6 +293,7 @@ add_executable(mw-server
     src/common/Edition.cpp
     src/common/LinuxCapabilities.cpp
     src/common/RendezvousId.cpp
+    src/common/InheritedEnvironment.cpp
     src/network/RendezvousClient.cpp
     src/network/UPNPClient.cpp
     src/network/RouterPortCore.cpp
@@ -303,6 +304,8 @@ add_executable(mw-server
     src/network/SessionMetrics.cpp
     src/network/UpdateChecker.cpp
     src/network/SelfUpdater.cpp
+    src/network/UpdateApply.cpp
+    src/network/UpdateApplyRules.cpp
     src/network/MdnsAdvertiser.cpp
     src/TrayManager.cpp
     src/Autostart.cpp
@@ -548,9 +551,10 @@ if(WIN32)
     # helpers (VirtualDisplayApply.cpp, VirtualHidApply.cpp).
     # advapi32 + shell32: the LocalSystem launcher service — the SCM, the pipe
     # DACLs and the console user's AppData (WorkerService.cpp).
+    # wintrust: the update installer's Authenticode check (UpdateApply.cpp).
     target_link_libraries(mw-server PRIVATE ws2_32 winmm Bcrypt Crypt32 iphlpapi Dbghelp avrt
                                             wtsapi32 userenv taskschd ole32 oleaut32
-                                            setupapi newdev cfgmgr32 advapi32 shell32)
+                                            setupapi newdev cfgmgr32 advapi32 shell32 wintrust)
     # OpenSSL is linked dynamically (import libs) — ship the DLLs next to the exe.
     file(GLOB _mw_ssl_dlls "${_mw_ssl}/lib/${_mw_ssl_arch}/*-3-${_mw_ssl_arch}.dll")
     foreach(_dll ${_mw_ssl_dlls})
@@ -640,6 +644,12 @@ if(MW_BUILD_TESTS)
         # The pinned-hash gate in front of SetupAPI, and the HID driver's pins.
         tests/test_driver_package.cpp
         src/backend/DriverPackage.cpp
+        # What the elevated update helper accepts to run, and the environment
+        # variables every elevated helper drops before Qt reads them.
+        tests/test_update_apply.cpp
+        src/network/UpdateApplyRules.cpp
+        src/network/UpdateChecker.cpp
+        src/common/InheritedEnvironment.cpp
         src/common/Edition.cpp
         src/server/ConnectionGuard.cpp
         src/server/HttpParser.cpp

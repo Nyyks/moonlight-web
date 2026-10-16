@@ -265,11 +265,10 @@ const
   UninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppId}_is1';
   // Trigger-less, elevated task the running (unprivileged) app starts with
   // `schtasks /Run` to apply an update without a UAC prompt nobody could answer
-  // from a remote browser. Its action is the fixed staging path SelfUpdater
-  // downloads to — the two MUST agree or the task runs nothing.
+  // from a remote browser. Its action is our exe under {app} with
+  // --update-apply, which verifies what SelfUpdater staged before running it.
   UpdateTaskName = '{#MyAppName} Update';
-  UpdateStagedExe = '%LocalAppData%\{#MyAppName}\update\MoonlightWeb-update.exe';
-  UpdateSilentArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-';
+  UpdateApplyArgs = '--update-apply';
   // Trigger-less, elevated task the running (unprivileged) app starts to add
   // or remove a virtual display on a headless machine — a driver install that
   // would otherwise raise a UAC prompt on a desktop with no monitor. Its
@@ -982,16 +981,20 @@ end;
 // installer runs elevated, so it registers a trigger-less task with
 // RunLevel=HighestAvailable: `schtasks /Run` on it later elevates silently.
 //
-// The task's action is a FIXED path under %LocalAppData% (expanded by Task
-// Scheduler in the user's own context) that SelfUpdater downloads the new
-// installer to. Per-user on purpose: a machine-wide staging directory would let
-// any local account drop an executable that we then run elevated.
+// The task's action is our exe under {app} (admin-writable only), never the
+// installer SelfUpdater downloads: that one sits under %LocalAppData%, which
+// the user's own unelevated programs can write — any of them could drop an
+// executable there and start the task. --update-apply copies the download to
+// {app}\update-staging (Administrators and SYSTEM only), checks it against
+// GitHub's sha256 for the latest release (and against our signer, when this
+// build is signed) and only then runs it (src/network/UpdateApply.h).
 procedure RegisterUpdateTask();
 var
-  user, xml, xmlPath: String;
+  user, xml, xmlPath, exePath: String;
   rc: Integer;
 begin
   user := TaskPrincipal();
+  exePath := TaskXmlEscape(ExpandConstant('{app}\{#MyAppExe}'));
   // No <?xml?> declaration and pure ASCII, for the same reason as the logon task.
   xml :=
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + #13#10 +
@@ -1010,8 +1013,8 @@ begin
     '</Settings>' + #13#10 +
     // No <Triggers>: the task exists purely to be started on demand.
     '  <Actions Context="Author"><Exec>' +
-    '<Command>' + UpdateStagedExe + '</Command>' +
-    '<Arguments>' + UpdateSilentArgs + '</Arguments>' +
+    '<Command>"' + exePath + '"</Command>' +
+    '<Arguments>' + UpdateApplyArgs + '</Arguments>' +
     '</Exec></Actions>' + #13#10 +
     '</Task>' + #13#10;
   xmlPath := ExpandConstant('{tmp}\mw-update-task.xml');
@@ -1773,10 +1776,12 @@ begin
     Exec('schtasks.exe', '/Delete /TN "{#MyAppName}" /F', '', SW_HIDE,
          ewWaitUntilTerminated, rc);
     // The elevated on-demand update launcher goes too — leaving it behind would
-    // keep an elevated task pointing at a path the user can still write to.
+    // keep an elevated task pointing at an exe that is no longer there.
     Exec('schtasks.exe', '/Delete /TN "' + UpdateTaskName + '" /F', '', SW_HIDE,
          ewWaitUntilTerminated, rc);
     DelTree(ExpandConstant('{localappdata}\{#MyAppName}\update'), True, True, True);
+    // Where --update-apply verified and ran the last installer (~60 MB).
+    DelTree(ExpandConstant('{app}\update-staging'), True, True, True);
     // "MoonlightWeb Virtual Display" goes with the app — this is the one
     // place it is ever removed from (the app offers no such button). Run
     // while the exe and the driver files are still under {app}.

@@ -116,6 +116,11 @@ UpdateChecker::UpdateChecker(QString currentVersion, bool relayEnabled, QObject*
         Logger::info(QStringLiteral("[Update] checking via the MoonlightWeb update relay"));
 }
 
+QString UpdateChecker::releasesApiUrl()
+{
+    return QString::fromLatin1(kReleasesApi);
+}
+
 bool UpdateChecker::relayAvailable()
 {
     // Any version does: the question is whether the endpoint can be built at

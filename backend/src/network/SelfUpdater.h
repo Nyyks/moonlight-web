@@ -42,9 +42,10 @@ class UpdateChecker;
  *
  *   Windows  scheduled task "MoonlightWeb Update" (registered elevated by the
  *            installer, RunLevel=HighestAvailable, no trigger) → `schtasks /Run`
- *            elevates with NO UAC prompt. Its action points at a fixed staging
- *            path under %LocalAppData% (per-user, so no other local account can
- *            plant an executable that we would then run elevated).
+ *            elevates with NO UAC prompt. Its action is our own exe under
+ *            {app} with --update-apply (UpdateApply.h): it copies what we
+ *            staged under %LocalAppData% somewhere the user cannot write and
+ *            runs it only once it matches GitHub's digest (and our signer).
  *            Fallback: launch the installer directly → UAC on the host desktop.
  *   Linux    AppImage → replace the file in place, no root at all. Running as
  *            root (systemd system unit) → dpkg/rpm directly. A .deb/.rpm of
@@ -87,6 +88,12 @@ public:
     // Download + apply the update UpdateChecker resolved. Returns an empty
     // string once the download is under way, or a human-readable error.
     QString start();
+
+    // Where the downloaded installer is staged. On Windows the elevated
+    // --update-apply helper (UpdateApply.h) picks it up from this same path,
+    // copies it somewhere the user cannot write and verifies the copy.
+    static QString stagingDir();
+    static QString stagedFileName(const QString& assetName);
 
 private:
     enum class State
@@ -138,12 +145,6 @@ private:
     // `dropStaged` false keeps the downloaded installer on disk — used when it
     // may still be picked up by a prompt waiting on the host desktop.
     void fail(const QString& message, bool dropStaged = true);
-
-    // Where the downloaded installer is staged. On Windows this MUST match the
-    // path baked into the elevated scheduled task's action (see moonlightweb.iss
-    // RegisterUpdateTask) or the task runs nothing.
-    static QString stagingDir();
-    static QString stagedFileName(const QString& assetName);
 
     // Preferred elevation path for this machine ("scheduled-task", "service",
     // "appimage", "bundle", "repo", "root", "direct", "pkexec", "osascript"). Empty when the
