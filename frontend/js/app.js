@@ -210,7 +210,7 @@ function selfStreamWarnMuted() {
     }
 }
 
-const MoonlightApp = {
+export const MoonlightApp = {
     // ── View instances persisted across overlays ─────────────────────────────
     state: 'loading',
     hostListView: null,
@@ -2732,23 +2732,7 @@ const MoonlightApp = {
         // chain / codec fallback) so it doesn't re-pop on every degrade step.
         this.streamView._suppressShortcutsSlide = suppressShortcuts;
 
-        // ── Callbacks ──────────────────────────────────────────────────────
-        // onQuit: normal end (Stop button / mid-stream disconnect).
-        this.streamView.onQuit = () => this._onStreamingQuit();
-        // onConnectionFailed: transport never connected → try the next entry
-        // in the priority chain (or give up if the chain is exhausted).
-        this.streamView.onConnectionFailed = (reason) => this._onTransportFailed(reason);
-        // onCongestion: sustained congestion detected mid-stream → relaunch with
-        // a degraded session-only profile (bitrate −30% steps, resolution rungs,
-        // media transport, 60 fps cap). See _onStreamCongested().
-        this.streamView.onCongestion = () => this._onStreamCongested();
-        // onCongestionSignal: every individual congestion hint (IDR/PLI/drops).
-        // Tracks quiet time for the automatic quality upgrade.
-        this.streamView.onCongestionSignal = () => {
-            this._lastCongSignal = performance.now();
-        };
-        this.streamView.onHostDisplayFormat = (msg) => this._onHostDisplayFormat(msg);
-        this.streamView.onClientScreenChanged = (device) => this._onClientScreenChanged(device);
+        this._wireLiveView(this.streamView);
         this._armUpgradeTimer();
         this._adoptNativeFormat(result);
         this._startAspectProbe();
@@ -3233,6 +3217,31 @@ const MoonlightApp = {
         // reads the user's settings again (and the memory above).
         settings.stream_aspect = aspect;
         this._qualityRelaunch(this._transportIndex || 0);
+    },
+
+    /**
+     * The callbacks of the view on screen — the first one of a launch, and
+     * the standby a seamless relaunch swaps in. One list for both: the
+     * swapped-in view once missed onClientScreenChanged, and a second screen
+     * change after a relaunch relaunched nothing (N95 bench, 16/10/2026).
+     */
+    _wireLiveView(sv) {
+        // onQuit: normal end (Stop button / mid-stream disconnect).
+        sv.onQuit = () => this._onStreamingQuit();
+        // onConnectionFailed: transport never connected → try the next entry
+        // in the priority chain (or give up if the chain is exhausted).
+        sv.onConnectionFailed = (reason) => this._onTransportFailed(reason);
+        // onCongestion: sustained congestion detected mid-stream → relaunch with
+        // a degraded session-only profile (bitrate −30% steps, resolution rungs,
+        // media transport, 60 fps cap). See _onStreamCongested().
+        sv.onCongestion = () => this._onStreamCongested();
+        // onCongestionSignal: every individual congestion hint (IDR/PLI/drops).
+        // Tracks quiet time for the automatic quality upgrade.
+        sv.onCongestionSignal = () => {
+            this._lastCongSignal = performance.now();
+        };
+        sv.onHostDisplayFormat = (msg) => this._onHostDisplayFormat(msg);
+        sv.onClientScreenChanged = (device) => this._onClientScreenChanged(device);
     },
 
     /**
@@ -4086,13 +4095,7 @@ const MoonlightApp = {
 
         this.streamView = sv;
         sv.onFirstFrame = null;
-        sv.onQuit = () => this._onStreamingQuit();
-        sv.onConnectionFailed = (reason) => this._onTransportFailed(reason);
-        sv.onCongestion = () => this._onStreamCongested();
-        sv.onCongestionSignal = () => {
-            this._lastCongSignal = performance.now();
-        };
-        sv.onHostDisplayFormat = (msg) => this._onHostDisplayFormat(msg);
+        this._wireLiveView(sv);
         sv.activate();
         // Before the retirement below: the successor's capture element takes the
         // focus over while the outgoing one still holds it, so the OS keyboard
