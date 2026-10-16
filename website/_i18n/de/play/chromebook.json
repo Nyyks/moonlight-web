@@ -6,7 +6,7 @@
   "h1": "Spiel deine PC-Spiele auf dem Chromebook",
   "lead": "Die meisten PC-Spiele laufen nicht auf einem Chromebook — auf deinem Gaming-PC aber schon, und MoonlightWeb streamt ihn in Chrome. <strong>Kein Linux-Container, keine Android-App, nichts auf dem Chromebook zu installieren: nur eine URL.</strong>",
   "why.h": "Warum es auf dem Chromebook so gut läuft",
-  "why.1": "<strong>Es ist genau der Browser, für den es gebaut wurde.</strong> Der Client von MoonlightWeb ist eine Webseite und sonst nichts: WebRTC transportiert den Stream, WebCodecs dekodiert ihn mit dem Hardware-Videodecoder des Chromebooks, WebGPU zeichnet ihn. Chrome unter ChromeOS bringt all das mit.",
+  "why.1": "<strong>Es ist genau der Browser, für den es gebaut wurde.</strong> Der Client von MoonlightWeb ist eine Webseite und sonst nichts: WebRTC transportiert den Stream, WebCodecs dekodiert ihn mit dem Hardware-Videodecoder des Chromebooks, ein Canvas zeichnet ihn. Chrome unter ChromeOS bringt all das mit.",
   "why.2": "<strong>Nichts zu installieren, nichts zu aktualisieren.</strong> Der Client ist bei jedem Öffnen auf dem neuesten Stand. Installiert wird nur der Server, auf dem Gaming-PC.",
   "why.3": "<strong>Tastatur, Maus, Touch und Gamepads.</strong> Eine Maus mit Pointer-Lock für Shooter, das Touchpad, der Touchscreen eines Convertibles als Trackpad und Xbox- oder PlayStation-Controller per USB oder Bluetooth — Vibration inklusive.",
   "why.4": "<strong>Schont den Akku.</strong> Das Spiel läuft auf deinem PC; das Chromebook dekodiert nur einen Videostream.",

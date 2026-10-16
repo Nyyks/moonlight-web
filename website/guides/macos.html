@@ -114,8 +114,7 @@
     <div class="gstep cyb" id="step-pair">
       <h3 data-i18n="step4.h">Your Mac is already there</h3>
       <p data-i18n="step4.p">This Mac is listed straight away, with one card per screen — nothing to pair, no PIN.
-         Other hosts on your network (Sunshine, Wolf, MultiSeat) are discovered by mDNS next to it: those pair once
-         with the PIN they display, and the pairing is remembered forever.</p>
+         Other hosts on your network (Sunshine, Wolf, MultiSeat) are discovered by mDNS next to it: those pair once — for Sunshine, by typing the PIN MoonlightWeb shows into Sunshine's web page — and the pairing is remembered forever.</p>
     </div>
     <div class="gstep cyb" id="step-play">
       <h3 data-i18n="step5.h">Press play</h3>
@@ -183,11 +182,10 @@ tccutil reset Accessibility com.moonlightweb.server</code></pre>
      through the macOS firewall itself, but a third-party firewall or a guest Wi-Fi that isolates its clients will not.
      You can also add a host manually by IP.</p>
   <h3 data-i18n="tr2.h">Playing on iPhone or iPad</h3>
-  <p data-i18n="tr2.p">Open the same URL in Safari — no App Store download needed. You get a multi-touch trackpad,
-     a native virtual keyboard with modifier keys, and full game-controller support with rumble.</p>
+  <p data-i18n="tr2.p">Open the same URL in Safari — no App Store download needed. You get a multi-touch trackpad and a native virtual keyboard with modifier keys; a Mac host receives no game controller (macOS allows no virtual gamepad).</p>
   <h3 data-i18n="tr3.h">Stream feels choppy on a weak connection</h3>
   <p data-i18n-html="tr3.p">Lower the streamed resolution and enable <strong>Video Enhancement</strong>: the stream is upscaled and
-     sharpened on the client's GPU (WebGPU running SGSRv1 + FSR1), so a 720p stream looks close to 1440p.</p>
+     sharpened on the client's GPU (WebGL2 or WebGPU running SGSRv1 + FSR1), so a 720p stream looks close to 1440p.</p>
 
   <div class="note" data-i18n-html="note"><strong>Restrictive network?</strong> MoonlightWeb falls back automatically
     (UDP → TCP), so it keeps working through strict firewalls and hostile hotel Wi-Fi.</div>

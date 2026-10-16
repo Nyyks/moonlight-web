@@ -107,7 +107,7 @@
     </div>
     <div class="gstep cyb" id="step-pair">
       <h3 data-i18n="step4.h">你的 Mac 已经在那里</h3>
-      <p data-i18n="step4.p">这台 Mac 一开始就列在那里，每块屏幕一张卡片——无需配对，也没有 PIN 码。你网络上的其他主机（Sunshine、Wolf、MultiSeat）会通过 mDNS 出现在旁边：那些只需用它们显示的 PIN 码配对一次，之后永久记住。</p>
+      <p data-i18n="step4.p">这台 Mac 一开始就列在那里，每块屏幕一张卡片——无需配对，也没有 PIN 码。你网络上的其他主机（Sunshine、Wolf、MultiSeat）会通过 mDNS 出现在旁边：那些只需配对一次——对于 Sunshine，在其网页中输入 MoonlightWeb 显示的 PIN 码——之后永久记住。</p>
     </div>
     <div class="gstep cyb" id="step-play">
       <h3 data-i18n="step5.h">按下开始</h3>
@@ -145,9 +145,9 @@ tccutil reset Accessibility com.moonlightweb.server</code></pre>
   <h3 data-i18n="tr1.h">主机没有出现在浏览器里</h3>
   <p data-i18n="tr1.p">请确保客户端设备与这台 Mac 处于同一网络。安装程序已在 macOS 防火墙中放行 MoonlightWeb，但第三方防火墙、或者会隔离客户端的访客 Wi-Fi 不会。你也可以通过 IP 手动添加主机。</p>
   <h3 data-i18n="tr2.h">在 iPhone 或 iPad 上游玩</h3>
-  <p data-i18n="tr2.p">在 Safari 里打开同一个网址——无需从 App Store 下载。你将获得多点触控触控板、带修饰键的原生虚拟键盘，以及带振动的完整游戏手柄支持。</p>
+  <p data-i18n="tr2.p">在 Safari 里打开同一个网址——无需从 App Store 下载。你将获得多点触控触控板和带修饰键的原生虚拟键盘；Mac 主机不接收游戏手柄（macOS 不允许虚拟手柄）。</p>
   <h3 data-i18n="tr3.h">弱网络下串流卡顿</h3>
-  <p data-i18n-html="tr3.p">降低串流分辨率并启用 <strong>Video Enhancement（视频增强）</strong>：串流会在客户端 GPU 上放大并锐化（WebGPU 运行 SGSRv1 + FSR1），于是 720p 串流看起来接近 1440p。</p>
+  <p data-i18n-html="tr3.p">降低串流分辨率并启用 <strong>Video Enhancement（视频增强）</strong>：串流会在客户端 GPU 上放大并锐化（WebGL2 或 WebGPU 运行 SGSRv1 + FSR1），于是 720p 串流看起来接近 1440p。</p>
 
   <div class="note" data-i18n-html="note"><strong>网络受限？</strong>MoonlightWeb 会自动回退（UDP → TCP），因此在严格防火墙和恶劣的酒店 Wi-Fi 下也能继续工作。</div>
 

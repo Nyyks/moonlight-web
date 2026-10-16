@@ -6,7 +6,7 @@
   "h1": "Game-Streaming, gebaut für den Browser",
   "lead": "Parsec, Steam Remote Play und Moonlight sind alles gute Wege, deinen PC von woanders aus zu spielen. MoonlightWeb geht einen eigenen Weg: <strong>Es ist für den Webbrowser konzipiert, und nur für ihn</strong> — auf jedem Gerät, von dem aus du spielst, ist der Client eine Webseite.",
   "diff.h": "Was MoonlightWeb mitbringt",
-  "diff.1": "<strong>100 % Web, und genau darauf abgestimmt.</strong> Jeder Teil des Clients baut auf dem auf, was Browser am besten können, und ist dort optimiert: WebRTC-Transport mit adaptiver Überlastregelung, Hardware-Dekodierung über WebCodecs, Rendering und Upscaling in WebGPU, Opus-Audio in einem AudioWorklet. Unter 20 ms über WLAN zu Hause.",
+  "diff.1": "<strong>100 % Web, und genau darauf abgestimmt.</strong> Jeder Teil des Clients baut auf dem auf, was Browser am besten können, und ist dort optimiert: WebRTC-Transport mit adaptiver Überlastregelung, Hardware-Dekodierung über WebCodecs, Rendering und Upscaling in WebGL2 oder WebGPU, Opus-Audio über WebRTC. Unter 20 ms über WLAN zu Hause.",
   "diff.2": "<strong>Nichts zu installieren, wo du spielst.</strong> Keine App, kein Plugin, kein Update, auf das du warten musst: URL öffnen und spielen. Praktisch auf einem geliehenen Laptop, einem Chromebook, einem iPad oder einem Fernseher.",
   "diff.3": "<strong>Dieselbe Seite auf jedem Gerät.</strong> Windows, macOS, Linux, ChromeOS, Android, iPhone, iPad, TV-Browser — ein Client, ein Look, dieselben Einstellungen.",
   "diff.4": "<strong>Selbst gehostet und Open Source.</strong> GPL-3.0, kein Konto, kein Abo. Der Stream ist eine direkte Peer-to-Peer-Verbindung zwischen deinem Browser und deinem PC.",

@@ -7,7 +7,7 @@
   "lead": "Si votre TV ou votre boîtier TV dispose d’un navigateur web moderne, il peut servir de client MoonlightWeb : votre PC gamer streame vers le grand écran. <strong>Aucune application à installer — juste une URL.</strong>",
   "best.h": "Ce qui fonctionne le mieux",
   "best.1": "<strong>Un navigateur récent avec décodage vidéo matériel.</strong> L’expérience dépend du navigateur de la TV ou du boîtier TV : plus il est récent, meilleur est le stream.",
-  "best.2": "<strong>Une manette.</strong> Branchée en USB ou appairée en Bluetooth, elle complète l’installation canapé.",
+  "best.2": "<strong>Une manette.</strong> Branchée en USB ou appairée en Bluetooth, elle complète l’installation canapé. Ou simplement la télécommande : sur un boîtier Android TV, en navigation directe de TV Bro, ses flèches et OK parcourent les pages et jouent, et un appui long sur OK ouvre le menu du stream.",
   "best.3": "<strong>Une bonne liaison jusqu’à la TV.</strong> L’Ethernet ou le Wi-Fi 5 GHz garde l’image nette et la latence faible.",
   "code.h": "Pas de barre d’adresse ? Tapez plutôt un code",
   "code.p": "Sur certains navigateurs de TV, taper un long lien à la télécommande est pénible. Une fois l’accès Internet activé, votre hôte a un code — la fin de son lien. Recherchez MoonlightWeb, ouvrez <a href=\"/server-access/\">Se connecter</a>, tapez le code, et le navigateur ouvre votre hôte. Il retient le dernier pour la prochaine fois.",

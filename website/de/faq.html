@@ -110,7 +110,7 @@
         {
           "@type": "Question",
           "name": "What is Video Enhancement?",
-          "acceptedAnswer": {"@type": "Answer", "text": "GPU upscaling and sharpening running in the browser via WebGPU (SGSRv1 + FSR1 shaders). You can stream at 720p over 4G or hotel Wi-Fi and display near-1440p quality — with zero extra load on the gaming PC, since it runs client-side."}
+          "acceptedAnswer": {"@type": "Answer", "text": "GPU upscaling and sharpening running in the browser via WebGL2 or WebGPU (SGSRv1 + FSR1 shaders). You can stream at 720p over 4G or hotel Wi-Fi and display near-1440p quality — with zero extra load on the gaming PC, since it runs client-side."}
         },
         {
           "@type": "Question",
@@ -125,7 +125,7 @@
         {
           "@type": "Question",
           "name": "How does MoonlightWeb work under the hood?",
-          "acceptedAnswer": {"@type": "Answer", "text": "A small C++/Qt server runs on the gaming PC. It captures a GPU surface and hands it straight to the GPU encoder in the same process that holds the WebRTC connection — no loopback hop, no RTP, no FEC — then sends video, audio and input to browsers over WebRTC. For a host you pair with instead, it embeds moonlight-common-c and speaks the GameStream protocol (RTSP/RTP/ENet) to it. In the browser: WebCodecs decodes, WebGPU renders, and an AudioWorklet plays Opus audio."}
+          "acceptedAnswer": {"@type": "Answer", "text": "A small C++/Qt server runs on the gaming PC. It captures a GPU surface and hands it straight to the GPU encoder in the same process that holds the WebRTC connection — no loopback hop, no RTP, no FEC — then sends video, audio and input to browsers over WebRTC. For a host you pair with instead, it embeds moonlight-common-c and speaks the GameStream protocol (RTSP/RTP/ENet) to it. In the browser: WebCodecs decodes, WebGL2 or WebGPU renders, and the browser's WebRTC player plays the Opus audio."}
         },
         {
           "@type": "Question",
@@ -202,7 +202,7 @@
   </details>
   <details>
     <summary data-i18n="q10.s">Was ist Video Enhancement?</summary>
-    <div class="a" data-i18n-html="q10.a"><p>GPU-Upscaling und -Schärfung, die über WebGPU im Browser laufen (SGSRv1- + FSR1-Shader). Streame in 720p über 4G oder Hotel-WLAN und genieße fast 1440p-Qualität — ganz ohne Zusatzlast auf dem Gaming-PC, weil alles auf dem Client läuft.</p></div>
+    <div class="a" data-i18n-html="q10.a"><p>GPU-Upscaling und -Schärfung, die über WebGL2 oder WebGPU im Browser laufen (SGSRv1- + FSR1-Shader). Streame in 720p über 4G oder Hotel-WLAN und genieße fast 1440p-Qualität — ganz ohne Zusatzlast auf dem Gaming-PC, weil alles auf dem Client läuft.</p></div>
   </details>
   <details>
     <summary data-i18n="q11.s">Was passiert bei strengen Firewalls oder Hotel-WLAN?</summary>
@@ -220,7 +220,7 @@
   </details>
   <details>
     <summary data-i18n="q14.s">Wie funktioniert MoonlightWeb unter der Haube?</summary>
-    <div class="a" data-i18n-html="q14.a"><p>Auf dem Gaming-PC läuft ein kleiner C++/Qt-Server. Er nimmt eine GPU-Oberfläche auf und reicht sie direkt an den GPU-Encoder weiter, im selben Prozess, der auch die WebRTC-Verbindung hält — kein Umweg über das Loopback-Netzwerk, kein RTP, kein FEC — und schickt dann Video, Audio und Eingaben per WebRTC an die Browser. Im Browser dekodiert WebCodecs, WebGPU rendert, und ein AudioWorklet spielt Opus-Audio ab.</p><p>Für einen Host, mit dem du dich stattdessen koppelst, bindet derselbe Server <code>moonlight-common-c</code> ein, spricht mit ihm das GameStream-Protokoll (RTSP/RTP/ENet) und leitet diesen Stream dann auf dieselbe Weise weiter.</p></div>
+    <div class="a" data-i18n-html="q14.a"><p>Auf dem Gaming-PC läuft ein kleiner C++/Qt-Server. Er nimmt eine GPU-Oberfläche auf und reicht sie direkt an den GPU-Encoder weiter, im selben Prozess, der auch die WebRTC-Verbindung hält — kein Umweg über das Loopback-Netzwerk, kein RTP, kein FEC — und schickt dann Video, Audio und Eingaben per WebRTC an die Browser. Im Browser dekodiert WebCodecs, WebGL2 oder WebGPU rendert, und der WebRTC-Player des Browsers spielt das Opus-Audio ab.</p><p>Für einen Host, mit dem du dich stattdessen koppelst, bindet derselbe Server <code>moonlight-common-c</code> ein, spricht mit ihm das GameStream-Protokoll (RTSP/RTP/ENet) und leitet diesen Stream dann auf dieselbe Weise weiter.</p></div>
   </details>
   <details>
     <summary data-i18n="q15.s">Warum warnt mein System vor dem Installer?</summary>

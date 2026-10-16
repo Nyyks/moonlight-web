@@ -107,7 +107,7 @@
     </div>
     <div class="gstep cyb" id="step-pair">
       <h3 data-i18n="step4.h">Dein Mac ist schon da</h3>
-      <p data-i18n="step4.p">Dieser Mac steht sofort in der Liste, mit einer Karte pro Bildschirm — nichts zu koppeln, keine PIN. Andere Hosts in deinem Netzwerk (Sunshine, Wolf, MultiSeat) werden daneben per mDNS gefunden: Die koppelst du einmal mit der PIN, die sie anzeigen, und die Kopplung bleibt für immer gespeichert.</p>
+      <p data-i18n="step4.p">Dieser Mac steht sofort in der Liste, mit einer Karte pro Bildschirm — nichts zu koppeln, keine PIN. Andere Hosts in deinem Netzwerk (Sunshine, Wolf, MultiSeat) werden daneben per mDNS gefunden: Die koppelst du einmal — bei Sunshine, indem du die PIN, die MoonlightWeb anzeigt, auf der Weboberfläche von Sunshine eingibst — und die Kopplung bleibt für immer gespeichert.</p>
     </div>
     <div class="gstep cyb" id="step-play">
       <h3 data-i18n="step5.h">Drück auf Play</h3>
@@ -145,9 +145,9 @@ tccutil reset Accessibility com.moonlightweb.server</code></pre>
   <h3 data-i18n="tr1.h">Der Host erscheint nicht im Browser</h3>
   <p data-i18n="tr1.p">Stell sicher, dass das Client-Gerät im selben Netzwerk ist wie der Mac. Der Installer lässt MoonlightWeb selbst durch die macOS-Firewall, eine Firewall eines Drittanbieters oder ein Gast-WLAN, das seine Clients voneinander isoliert, tut das aber nicht. Du kannst einen Host auch manuell per IP hinzufügen.</p>
   <h3 data-i18n="tr2.h">Spielen auf iPhone oder iPad</h3>
-  <p data-i18n="tr2.p">Öffne dieselbe URL in Safari — kein Download aus dem App Store nötig. Du bekommst ein Multitouch-Trackpad, eine native virtuelle Tastatur mit Sondertasten und volle Controller-Unterstützung mit Vibration.</p>
+  <p data-i18n="tr2.p">Öffne dieselbe URL in Safari — kein Download aus dem App Store nötig. Du bekommst ein Multitouch-Trackpad und eine native virtuelle Tastatur mit Sondertasten; ein Mac als Host empfängt keinen Controller (macOS erlaubt keinen virtuellen Controller).</p>
   <h3 data-i18n="tr3.h">Der Stream ruckelt bei schwacher Verbindung</h3>
-  <p data-i18n-html="tr3.p">Senk die Stream-Auflösung und aktiviere <strong>Video Enhancement</strong>: Der Stream wird auf der GPU des Clients hochskaliert und nachgeschärft (WebGPU mit SGSRv1 + FSR1), sodass ein 720p-Stream fast wie 1440p aussieht.</p>
+  <p data-i18n-html="tr3.p">Senk die Stream-Auflösung und aktiviere <strong>Video Enhancement</strong>: Der Stream wird auf der GPU des Clients hochskaliert und nachgeschärft (WebGL2 oder WebGPU mit SGSRv1 + FSR1), sodass ein 720p-Stream fast wie 1440p aussieht.</p>
 
   <div class="note" data-i18n-html="note"><strong>Restriktives Netzwerk?</strong> MoonlightWeb weicht automatisch aus (UDP → TCP) und funktioniert so auch hinter strengen Firewalls und in feindseligem Hotel-WLAN.</div>
 

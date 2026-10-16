@@ -107,7 +107,7 @@
     </div>
     <div class="gstep cyb" id="step-pair">
       <h3 data-i18n="step4.h">Votre Mac est déjà là</h3>
-      <p data-i18n="step4.p">Ce Mac est listé d’emblée, une carte par écran — rien à appairer, aucun code PIN. Les autres hôtes de votre réseau (Sunshine, Wolf, MultiSeat) sont découverts à côté via mDNS : ceux-là s’appairent une fois avec le PIN qu’ils affichent, et c’est mémorisé pour toujours.</p>
+      <p data-i18n="step4.p">Ce Mac est listé d’emblée, une carte par écran — rien à appairer, aucun code PIN. Les autres hôtes de votre réseau (Sunshine, Wolf, MultiSeat) sont découverts à côté via mDNS : ceux-là s’appairent une fois — pour Sunshine, en saisissant dans sa page web le PIN qu’affiche MoonlightWeb — et c’est mémorisé pour toujours.</p>
     </div>
     <div class="gstep cyb" id="step-play">
       <h3 data-i18n="step5.h">Appuyez sur play</h3>
@@ -145,9 +145,9 @@ tccutil reset Accessibility com.moonlightweb.server</code></pre>
   <h3 data-i18n="tr1.h">L’hôte n’apparaît pas dans le navigateur</h3>
   <p data-i18n="tr1.p">Assurez-vous que l’appareil client est sur le même réseau que le Mac. L’installateur autorise lui-même MoonlightWeb dans le pare-feu macOS, mais un pare-feu tiers — ou un Wi-Fi invité qui isole ses clients — ne le fera pas. Vous pouvez aussi ajouter un hôte manuellement par son IP.</p>
   <h3 data-i18n="tr2.h">Jouer sur iPhone ou iPad</h3>
-  <p data-i18n="tr2.p">Ouvrez la même URL dans Safari — aucun téléchargement depuis l’App Store nécessaire. Vous obtenez un trackpad multitouch, un clavier virtuel natif avec touches de modification, et la prise en charge complète des manettes avec vibrations.</p>
+  <p data-i18n="tr2.p">Ouvrez la même URL dans Safari — aucun téléchargement depuis l’App Store nécessaire. Vous obtenez un trackpad multitouch et un clavier virtuel natif avec touches de modification ; un Mac hôte ne reçoit aucune manette (macOS n’autorise aucune manette virtuelle).</p>
   <h3 data-i18n="tr3.h">Le stream saccade sur une connexion faible</h3>
-  <p data-i18n-html="tr3.p">Baissez la résolution streamée et activez le <strong>Video Enhancement</strong> : le stream est upscalé et accentué sur le GPU du client (WebGPU avec SGSRv1 + FSR1), si bien qu’un stream 720p paraît proche du 1440p.</p>
+  <p data-i18n-html="tr3.p">Baissez la résolution streamée et activez le <strong>Video Enhancement</strong> : le stream est upscalé et accentué sur le GPU du client (WebGL2 ou WebGPU avec SGSRv1 + FSR1), si bien qu’un stream 720p paraît proche du 1440p.</p>
 
   <div class="note" data-i18n-html="note"><strong>Réseau restrictif ?</strong> MoonlightWeb bascule automatiquement (UDP → TCP), et continue donc de fonctionner à travers les pare-feu stricts et le Wi-Fi d’hôtel hostile.</div>
 

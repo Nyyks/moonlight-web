@@ -6,7 +6,7 @@
   "h1": "为浏览器打造的游戏串流",
   "lead": "Parsec、Steam Remote Play 和 Moonlight 都是在别处畅玩自己 PC 的好方法。MoonlightWeb 走的是自己的路：<strong>它为网页浏览器而设计，也只为它而设计</strong>——在你用来游玩的每一台设备上，客户端都是一个网页。",
   "diff.h": "MoonlightWeb 带来了什么",
-  "diff.1": "<strong>100% 网页，并为此调优。</strong>客户端的每个部分都建立在浏览器最擅长的能力之上，并在其中做了优化：带自适应拥塞控制的 WebRTC 传输、通过 WebCodecs 硬件解码、在 WebGPU 中渲染和放大、在 AudioWorklet 中播放 Opus 音频。在家中 Wi-Fi 下低于 20 毫秒。",
+  "diff.1": "<strong>100% 网页，并为此调优。</strong>客户端的每个部分都建立在浏览器最擅长的能力之上，并在其中做了优化：带自适应拥塞控制的 WebRTC 传输、通过 WebCodecs 硬件解码、在 WebGL2 或 WebGPU 中渲染和放大、通过 WebRTC 播放 Opus 音频。在家中 Wi-Fi 下低于 20 毫秒。",
   "diff.2": "<strong>游玩的设备上无需安装任何东西。</strong>无需应用、无需插件、无需等待更新：打开一个网址即可开玩。在借来的笔记本、Chromebook、iPad 或电视上都很方便。",
   "diff.3": "<strong>每台设备上都是同一个页面。</strong>Windows、macOS、Linux、ChromeOS、Android、iPhone、iPad、电视浏览器——一个客户端、一种外观、一套设置。",
   "diff.4": "<strong>自托管且开源。</strong>GPL-3.0，无需账户、无需订阅。串流是你的浏览器与你的 PC 之间点对点的直接连接。",

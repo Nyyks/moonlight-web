@@ -18,7 +18,7 @@
   "host.h": "Auf dem Gaming-PC",
   "host.1": "<strong>Windows</strong> (x64) — der Installer richtet den Treiber MoonlightWeb Virtual HID ein; Secure Boot bleibt an. Ein laufendes Spiel behält sein Lenkrad und Force Feedback zwischen zwei Streams 10 Minuten lang.",
   "host.2": "<strong>Linux</strong> — mit dem MoonlightWeb-Paket ist nichts weiter zu installieren.",
-  "host.3": "<strong>macOS</strong> — Geräte kommen als Xbox-Controller im Spiel an.",
+  "host.3": "<strong>macOS</strong> — kein Controller erreicht einen Mac als Host: macOS lässt keine App einen virtuellen Controller anlegen.",
   "note": "Ein Gerät als echtes Gerät zu senden braucht den MoonlightWeb-Host; ein Sunshine-, Apollo- oder Wolf-Host erhält einen Xbox-Controller.",
   "tm": "Logitech, Radiomaster, Moza, Simucube, Fanatec, EdgeTX und die genannten Spiele gehören ihren jeweiligen Inhabern.",
   "read.h": "Weiterlesen",

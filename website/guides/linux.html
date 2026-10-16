@@ -58,7 +58,7 @@
       "supply": [{"@type": "HowToSupply", "name": "Linux gaming PC (x64) with a GPU capable of hardware encoding"}],
       "tool": [{"@type": "HowToTool", "name": "A modern browser on any client device (Chrome, Edge, Safari, Firefox)"}],
       "step": [
-        {"@type": "HowToStep", "name": "Download a package", "text": "Download the .deb (Debian, Ubuntu, Mint, Pop!_OS), the .rpm (Fedora, RHEL, Rocky, Alma, openSUSE) or the portable AppImage (Arch, SteamOS and the rest) from the MoonlightWeb releases page.", "url": "https://moonlightweb.top/guides/linux.html#step-download"},
+        {"@type": "HowToStep", "name": "Download a package", "text": "Download the .deb (Debian, Ubuntu, Mint, Pop!_OS), the .rpm (Fedora, RHEL, Rocky, Alma, openSUSE) or the portable AppImage (SteamOS and the rest; Arch uses the AUR package) from the MoonlightWeb releases page.", "url": "https://moonlightweb.top/guides/linux.html#step-download"},
         {"@type": "HowToStep", "name": "Install and launch the server", "text": "Install the package with your package manager, or make the AppImage executable and run it, on the gaming PC.", "url": "https://moonlightweb.top/guides/linux.html#step-install"},
         {"@type": "HowToStep", "name": "Answer the setup wizard", "text": "On first launch the setup wizard at https://localhost/setup asks about the optional Internet link. Nothing else is installed: the app captures and encodes this desktop itself.", "url": "https://moonlightweb.top/guides/linux.html#step-setup"},
         {"@type": "HowToStep", "name": "Open a browser on any device", "text": "Go to https://localhost on the PC itself, or your LAN IP from another device on your network.", "url": "https://moonlightweb.top/guides/linux.html#step-open"},
@@ -87,7 +87,7 @@
   <h2 data-i18n="need.h">What you need</h2>
   <ul>
     <li data-i18n="need.1">A Linux gaming PC (x64) with a GPU capable of hardware encoding — the machine that runs your games.</li>
-    <li data-i18n-html="need.2"><strong>Nothing else to install</strong> — MoonlightWeb captures the desktop itself (KMS, or the ScreenCast portal on Wayland) and encodes it through VA-API. It needs <strong>PipeWire</strong> for sound: on a machine still running pure PulseAudio the stream is silent, and says so in the log. Already running Sunshine, Wolf or MultiSeat somewhere? Those machines are paired from the same page.</li>
+    <li data-i18n-html="need.2"><strong>Nothing else to install</strong> — MoonlightWeb captures the desktop itself (KMS, or the compositor's screen cast on Wayland) and encodes it through VA-API or Vulkan Video. It needs <strong>PipeWire</strong> for sound: on a machine still running pure PulseAudio the stream is silent, and says so in the log. Already running Sunshine, Wolf or MultiSeat somewhere? Those machines are paired from the same page.</li>
     <li data-i18n="need.3">Any device with a modern browser as the client: Chrome, Edge, Safari or Firefox. No app, no account.</li>
     <li data-i18n-html="need.4">A distribution no older than <strong>Ubuntu 22.04</strong>, <strong>Debian 12</strong> or <strong>Fedora 36</strong> (glibc 2.34+). Qt and OpenSSL are bundled, but the system C runtime never can be — on an older distro the package installs and the app then refuses to start.</li>
   </ul>
@@ -105,9 +105,13 @@ sudo curl -fsSL -o /etc/apt/keyrings/moonlightweb.gpg https://packages.moonlight
 sudo curl -fsSL -o /etc/apt/sources.list.d/moonlightweb.sources https://packages.moonlightweb.top/moonlightweb.sources
 sudo apt update &amp;&amp; sudo apt install moonlightweb
 
-# Fedora / RHEL / Rocky / Alma / Nobara / openSUSE
+# Fedora / RHEL / Rocky / Alma / Nobara
 sudo curl -fsSL -o /etc/yum.repos.d/moonlightweb.repo https://packages.moonlightweb.top/moonlightweb.repo
 sudo dnf install moonlightweb
+
+# openSUSE
+sudo curl -fsSL -o /etc/zypp/repos.d/moonlightweb.repo https://packages.moonlightweb.top/moonlightweb.repo
+sudo zypper install moonlightweb
 
 # Arch / Manjaro / EndeavourOS
 paru -S moonlightweb-bin</code></pre>
@@ -136,7 +140,7 @@ paru -S moonlightweb-bin</code></pre>
       <p data-i18n-html="step1.p">From the <a href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener">releases page</a>, pick the one for your distro family:
          <code>.deb</code> for <strong>Debian, Ubuntu, Mint, Pop!_OS, elementary, Zorin</strong>;
          <code>.rpm</code> for <strong>Fedora, RHEL, CentOS Stream, Rocky, Alma, Nobara, openSUSE</strong>;
-         a portable <code>.AppImage</code> for <strong>Arch, Manjaro, SteamOS, Bazzite</strong> and everything else.
+         a portable <code>.AppImage</code> for <strong>SteamOS, Bazzite</strong> and everything else (on <strong>Arch and Manjaro</strong>, the AUR package <code>moonlightweb-bin</code>).
          Every package is self-contained (Qt and OpenSSL bundled — no dependencies to install).</p>
     </div>
     <div class="gstep cyb" id="step-install">
@@ -163,8 +167,7 @@ chmod +x moonlightweb-*.AppImage
       <h3 data-i18n="stepS.h">Answer the setup wizard</h3>
       <p data-i18n-html="stepS.p">On its first launch MoonlightWeb opens <code>https://localhost/setup</code>, which asks the one
          question that is left: whether to allow the Internet link (remote streaming sessions, off by default).
-         Nothing else is installed — this desktop is captured by the app itself. On a Wayland session the first
-         stream raises the compositor's screen-sharing dialog once; the grant is remembered afterwards.</p>
+         Nothing else is installed — this desktop is captured by the app itself. On a Wayland session other than GNOME, the first stream may raise the compositor's screen-sharing dialog once; the grant is remembered afterwards.</p>
     </div>
     <div class="gstep cyb" id="step-open">
       <h3 data-i18n="step3.h">Open a browser on any device</h3>
@@ -174,8 +177,7 @@ chmod +x moonlightweb-*.AppImage
     <div class="gstep cyb" id="step-pair">
       <h3 data-i18n="step4.h">Your PC is already there</h3>
       <p data-i18n="step4.p">This machine is listed straight away, with one card per screen — nothing to pair, no PIN.
-         Other hosts on your network (Sunshine, Wolf, MultiSeat) are discovered by mDNS next to it: those pair once
-         with the PIN they display, and the pairing is remembered forever.</p>
+         Other hosts on your network (Sunshine, Wolf, MultiSeat) are discovered by mDNS next to it: those pair once — for Sunshine, by typing the PIN MoonlightWeb shows into Sunshine's web page — and the pairing is remembered forever.</p>
     </div>
     <div class="gstep cyb" id="step-play">
       <h3 data-i18n="step5.h">Press play</h3>
@@ -209,7 +211,7 @@ chmod +x moonlightweb-*.AppImage
      H264 works everywhere; HEVC and AV1 availability depends on the client device's browser and GPU.</p>
   <h3 data-i18n="tr3.h">Stream feels choppy on a weak connection</h3>
   <p data-i18n-html="tr3.p">Lower the streamed resolution and enable <strong>Video Enhancement</strong>: the stream is upscaled and
-     sharpened on the client's GPU (WebGPU running SGSRv1 + FSR1), so a 720p stream looks close to 1440p.</p>
+     sharpened on the client's GPU (WebGL2 or WebGPU running SGSRv1 + FSR1), so a 720p stream looks close to 1440p.</p>
 
   <div class="note" data-i18n-html="note"><strong>Restrictive network?</strong> MoonlightWeb falls back automatically
     (UDP → TCP), so it keeps working through strict firewalls and hostile hotel Wi-Fi.</div>

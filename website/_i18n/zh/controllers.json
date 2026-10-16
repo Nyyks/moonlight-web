@@ -18,7 +18,7 @@
   "host.h": "在游戏 PC 上",
   "host.1": "<strong>Windows</strong>（x64）——安装程序会装好 MoonlightWeb Virtual HID 驱动；安全启动保持开启。两次串流之间，仍在运行的游戏会在 10 分钟内保留方向盘及其力反馈。",
   "host.2": "<strong>Linux</strong>——使用 MoonlightWeb 的软件包，无需额外安装。",
-  "host.3": "<strong>macOS</strong>——设备以 Xbox 手柄的形式进入游戏。",
+  "host.3": "<strong>macOS</strong>——任何手柄都无法到达 Mac 主机：macOS 不允许应用创建虚拟手柄。",
   "note": "原样发送设备需要 MoonlightWeb 自己的主机；Sunshine、Apollo 或 Wolf 主机收到的是 Xbox 手柄。",
   "tm": "Logitech、Radiomaster、Moza、Simucube、Fanatec、EdgeTX 以及文中提到的游戏归其各自所有者所有。",
   "read.h": "继续阅读",

@@ -59,7 +59,7 @@
       "supply": [{"@type": "HowToSupply", "name": "Linux gaming PC (x64) with a GPU capable of hardware encoding"}],
       "tool": [{"@type": "HowToTool", "name": "A modern browser on any client device (Chrome, Edge, Safari, Firefox)"}],
       "step": [
-        {"@type": "HowToStep", "name": "Download a package", "text": "Download the .deb (Debian, Ubuntu, Mint, Pop!_OS), the .rpm (Fedora, RHEL, Rocky, Alma, openSUSE) or the portable AppImage (Arch, SteamOS and the rest) from the MoonlightWeb releases page.", "url": "https://moonlightweb.top/zh/guides/linux.html#step-download"},
+        {"@type": "HowToStep", "name": "Download a package", "text": "Download the .deb (Debian, Ubuntu, Mint, Pop!_OS), the .rpm (Fedora, RHEL, Rocky, Alma, openSUSE) or the portable AppImage (SteamOS and the rest; Arch uses the AUR package) from the MoonlightWeb releases page.", "url": "https://moonlightweb.top/zh/guides/linux.html#step-download"},
         {"@type": "HowToStep", "name": "Install and launch the server", "text": "Install the package with your package manager, or make the AppImage executable and run it, on the gaming PC.", "url": "https://moonlightweb.top/zh/guides/linux.html#step-install"},
         {"@type": "HowToStep", "name": "Answer the setup wizard", "text": "On first launch the setup wizard at https://localhost/setup asks about the optional Internet link. Nothing else is installed: the app captures and encodes this desktop itself.", "url": "https://moonlightweb.top/zh/guides/linux.html#step-setup"},
         {"@type": "HowToStep", "name": "Open a browser on any device", "text": "Go to https://localhost on the PC itself, or your LAN IP from another device on your network.", "url": "https://moonlightweb.top/zh/guides/linux.html#step-open"},
@@ -86,7 +86,7 @@
   <h2 data-i18n="need.h">你需要什么</h2>
   <ul>
     <li data-i18n="need.1">一台 Linux 游戏 PC（x64），配备支持硬件编码的 GPU——也就是运行你游戏的那台机器。</li>
-    <li data-i18n-html="need.2"><strong>不需要安装别的</strong>——MoonlightWeb 自己捕获桌面（KMS，或 Wayland 下的 ScreenCast 门户）并通过 VA-API 编码。声音需要 <strong>PipeWire</strong>：在仍然使用纯 PulseAudio 的机器上，串流会没有声音，日志中会说明。已经在别处跑着 Sunshine、Wolf 或 MultiSeat？那些机器可以在同一个页面里配对。</li>
+    <li data-i18n-html="need.2"><strong>不需要安装别的</strong>——MoonlightWeb 自己捕获桌面（KMS，或 Wayland 下合成器自己的屏幕录制）并通过 VA-API 或 Vulkan Video 编码。声音需要 <strong>PipeWire</strong>：在仍然使用纯 PulseAudio 的机器上，串流会没有声音，日志中会说明。已经在别处跑着 Sunshine、Wolf 或 MultiSeat？那些机器可以在同一个页面里配对。</li>
     <li data-i18n="need.3">任何带现代浏览器的设备都可作客户端：Chrome、Edge、Safari 或 Firefox。无需应用、无需账户。</li>
     <li data-i18n-html="need.4">发行版不低于 <strong>Ubuntu 22.04</strong>、<strong>Debian 12</strong> 或 <strong>Fedora 36</strong>（glibc 2.34+）。Qt 和 OpenSSL 已内置，但系统的 C 运行库永远无法内置：在更旧的发行版上，软件包能装上，应用却拒绝启动。</li>
   </ul>
@@ -101,9 +101,13 @@ sudo curl -fsSL -o /etc/apt/keyrings/moonlightweb.gpg https://packages.moonlight
 sudo curl -fsSL -o /etc/apt/sources.list.d/moonlightweb.sources https://packages.moonlightweb.top/moonlightweb.sources
 sudo apt update &amp;&amp; sudo apt install moonlightweb
 
-# Fedora / RHEL / Rocky / Alma / Nobara / openSUSE
+# Fedora / RHEL / Rocky / Alma / Nobara
 sudo curl -fsSL -o /etc/yum.repos.d/moonlightweb.repo https://packages.moonlightweb.top/moonlightweb.repo
 sudo dnf install moonlightweb
+
+# openSUSE
+sudo curl -fsSL -o /etc/zypp/repos.d/moonlightweb.repo https://packages.moonlightweb.top/moonlightweb.repo
+sudo zypper install moonlightweb
 
 # Arch / Manjaro / EndeavourOS
 paru -S moonlightweb-bin</code></pre>
@@ -122,7 +126,7 @@ paru -S moonlightweb-bin</code></pre>
   <div class="gsteps">
     <div class="gstep cyb" id="step-download">
       <h3 data-i18n="step1.h">下载一个软件包</h3>
-      <p data-i18n-html="step1.p">从<a href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener">发布页面</a>按你的发行版系列选择：<strong>Debian、Ubuntu、Mint、Pop!_OS、elementary、Zorin</strong> 用 <code>.deb</code>；<strong>Fedora、RHEL、CentOS Stream、Rocky、Alma、Nobara、openSUSE</strong> 用 <code>.rpm</code>；<strong>Arch、Manjaro、SteamOS、Bazzite</strong> 及其他一切用便携的 <code>.AppImage</code>。每个软件包都是自包含的（内置 Qt 和 OpenSSL——无需安装任何依赖）。</p>
+      <p data-i18n-html="step1.p">从<a href="https://github.com/linckosz/moonlight-web/releases" target="_blank" rel="noopener">发布页面</a>按你的发行版系列选择：<strong>Debian、Ubuntu、Mint、Pop!_OS、elementary、Zorin</strong> 用 <code>.deb</code>；<strong>Fedora、RHEL、CentOS Stream、Rocky、Alma、Nobara、openSUSE</strong> 用 <code>.rpm</code>；<strong>SteamOS、Bazzite</strong> 及其他一切用便携的 <code>.AppImage</code>（<strong>Arch 和 Manjaro</strong> 用 AUR 软件包 <code>moonlightweb-bin</code>）。每个软件包都是自包含的（内置 Qt 和 OpenSSL——无需安装任何依赖）。</p>
     </div>
     <div class="gstep cyb" id="step-install">
       <h3 data-i18n="step2.h">安装并启动——在游戏 PC 上</h3>
@@ -143,7 +147,7 @@ chmod +x moonlightweb-*.AppImage
     </div>
     <div class="gstep cyb" id="step-setup">
       <h3 data-i18n="stepS.h">回答设置向导</h3>
-      <p data-i18n-html="stepS.p">首次启动时，MoonlightWeb 会打开 <code>https://localhost/setup</code>，它只问剩下的这一个问题：是否允许互联网连接（远程串流会话，默认关闭）。别的什么都不装——这个桌面由应用自己捕获。在 Wayland 会话中，第一次串流会弹出一次合成器的屏幕共享对话框；之后授权会被记住。</p>
+      <p data-i18n-html="stepS.p">首次启动时，MoonlightWeb 会打开 <code>https://localhost/setup</code>，它只问剩下的这一个问题：是否允许互联网连接（远程串流会话，默认关闭）。别的什么都不装——这个桌面由应用自己捕获。在 GNOME 以外的 Wayland 会话中，第一次串流可能会弹出一次合成器的屏幕共享对话框；之后授权会被记住。</p>
     </div>
     <div class="gstep cyb" id="step-open">
       <h3 data-i18n="step3.h">在任何设备上打开浏览器</h3>
@@ -151,7 +155,7 @@ chmod +x moonlightweb-*.AppImage
     </div>
     <div class="gstep cyb" id="step-pair">
       <h3 data-i18n="step4.h">你的 PC 已经在那里</h3>
-      <p data-i18n="step4.p">这台机器一开始就列在那里，每块屏幕一张卡片——无需配对，也没有 PIN 码。你网络上的其他主机（Sunshine、Wolf、MultiSeat）会通过 mDNS 出现在旁边：那些只需用它们显示的 PIN 码配对一次，之后永久记住。</p>
+      <p data-i18n="step4.p">这台机器一开始就列在那里，每块屏幕一张卡片——无需配对，也没有 PIN 码。你网络上的其他主机（Sunshine、Wolf、MultiSeat）会通过 mDNS 出现在旁边：那些只需配对一次——对于 Sunshine，在其网页中输入 MoonlightWeb 显示的 PIN 码——之后永久记住。</p>
     </div>
     <div class="gstep cyb" id="step-play">
       <h3 data-i18n="step5.h">按下开始</h3>
@@ -171,7 +175,7 @@ chmod +x moonlightweb-*.AppImage
   <h3 data-i18n="tr2.h">HEVC 或 AV1 被置灰</h3>
   <p data-i18n="tr2.p">你的浏览器无法硬件解码的编解码器选项会被自动禁用——这是正常的。H264 到处都能用；HEVC 和 AV1 是否可用取决于客户端设备的浏览器和 GPU。</p>
   <h3 data-i18n="tr3.h">弱网络下串流卡顿</h3>
-  <p data-i18n-html="tr3.p">降低串流分辨率并启用 <strong>Video Enhancement（视频增强）</strong>：串流会在客户端 GPU 上放大并锐化（WebGPU 运行 SGSRv1 + FSR1），于是 720p 串流看起来接近 1440p。</p>
+  <p data-i18n-html="tr3.p">降低串流分辨率并启用 <strong>Video Enhancement（视频增强）</strong>：串流会在客户端 GPU 上放大并锐化（WebGL2 或 WebGPU 运行 SGSRv1 + FSR1），于是 720p 串流看起来接近 1440p。</p>
 
   <div class="note" data-i18n-html="note"><strong>网络受限？</strong>MoonlightWeb 会自动回退（UDP → TCP），因此在严格防火墙和恶劣的酒店 Wi-Fi 下也能继续工作。</div>
 

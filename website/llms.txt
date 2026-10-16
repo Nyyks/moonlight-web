@@ -16,7 +16,7 @@
   via WebCodecs).
 - Under 20 ms latency over Wi-Fi using a WebRTC UDP transport with automatic
   fallback (UDP → TCP).
-- GPU Video Enhancement in the browser (WebGPU running SGSRv1 + FSR1): stream at
+- GPU Video Enhancement in the browser (WebGL2 or WebGPU running SGSRv1 + FSR1): stream at
   720p, display near-1440p quality.
 - Full input support: keyboard, pointer-lock mouse, multi-touch trackpad, virtual
   keyboard, Xbox and PlayStation controllers with rumble. Racing wheels, flight
@@ -38,8 +38,7 @@ straight to the GPU encoder inside the process that holds the WebRTC connection 
 no loopback network hop, no RTP, no FEC — then sends video, audio and input to
 browsers over WebRTC. For a host you pair with instead, the same server embeds
 moonlight-common-c and speaks the GameStream protocol (RTSP/RTP/ENet) to it. The
-client is 100% web: WebCodecs for decoding, WebGPU for rendering, AudioWorklet for
-Opus audio.
+client is 100% web: WebCodecs for decoding, WebGL2 or WebGPU for rendering, the browser's WebRTC stack for Opus audio.
 
 ## Platforms (server)
 

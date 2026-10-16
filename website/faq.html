@@ -109,7 +109,7 @@
         {
           "@type": "Question",
           "name": "What is Video Enhancement?",
-          "acceptedAnswer": {"@type": "Answer", "text": "GPU upscaling and sharpening running in the browser via WebGPU (SGSRv1 + FSR1 shaders). You can stream at 720p over 4G or hotel Wi-Fi and display near-1440p quality — with zero extra load on the gaming PC, since it runs client-side."}
+          "acceptedAnswer": {"@type": "Answer", "text": "GPU upscaling and sharpening running in the browser via WebGL2 or WebGPU (SGSRv1 + FSR1 shaders). You can stream at 720p over 4G or hotel Wi-Fi and display near-1440p quality — with zero extra load on the gaming PC, since it runs client-side."}
         },
         {
           "@type": "Question",
@@ -124,7 +124,7 @@
         {
           "@type": "Question",
           "name": "How does MoonlightWeb work under the hood?",
-          "acceptedAnswer": {"@type": "Answer", "text": "A small C++/Qt server runs on the gaming PC. It captures a GPU surface and hands it straight to the GPU encoder in the same process that holds the WebRTC connection — no loopback hop, no RTP, no FEC — then sends video, audio and input to browsers over WebRTC. For a host you pair with instead, it embeds moonlight-common-c and speaks the GameStream protocol (RTSP/RTP/ENet) to it. In the browser: WebCodecs decodes, WebGPU renders, and an AudioWorklet plays Opus audio."}
+          "acceptedAnswer": {"@type": "Answer", "text": "A small C++/Qt server runs on the gaming PC. It captures a GPU surface and hands it straight to the GPU encoder in the same process that holds the WebRTC connection — no loopback hop, no RTP, no FEC — then sends video, audio and input to browsers over WebRTC. For a host you pair with instead, it embeds moonlight-common-c and speaks the GameStream protocol (RTSP/RTP/ENet) to it. In the browser: WebCodecs decodes, WebGL2 or WebGPU renders, and the browser's WebRTC player plays the Opus audio."}
         },
         {
           "@type": "Question",
@@ -230,7 +230,7 @@
   </details>
   <details>
     <summary data-i18n="q10.s">What is Video Enhancement?</summary>
-    <div class="a" data-i18n-html="q10.a"><p>GPU upscaling and sharpening running in the browser via WebGPU (SGSRv1 + FSR1 shaders).
+    <div class="a" data-i18n-html="q10.a"><p>GPU upscaling and sharpening running in the browser via WebGL2 or WebGPU (SGSRv1 + FSR1 shaders).
       Stream at 720p over 4G or hotel Wi-Fi and display near-1440p quality — with zero extra load on the
       gaming PC, since it runs client-side.</p></div>
   </details>
@@ -259,7 +259,7 @@
     <div class="a" data-i18n-html="q14.a"><p>A small C++/Qt server runs on the gaming PC. It captures a GPU surface and
       hands it straight to the GPU encoder in the same process that holds the WebRTC connection — no loopback
       network hop, no RTP, no FEC — then sends video, audio and input to browsers over WebRTC. In the browser:
-      WebCodecs decodes, WebGPU renders, and an AudioWorklet plays Opus audio.</p>
+      WebCodecs decodes, WebGL2 or WebGPU renders, and the browser's WebRTC player plays the Opus audio.</p>
       <p>For a host you pair with instead, the same server embeds <code>moonlight-common-c</code> and speaks the
       GameStream protocol (RTSP/RTP/ENet) to it, then relays that stream the same way.</p></div>
   </details>
