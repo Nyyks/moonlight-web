@@ -725,6 +725,8 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         // the settings file, and in a worker that is another process entirely.
         connect(native, &NativeMediaEngine::portalGrantReceived, this,
                 &StreamSession::portalGrantReceived);
+        connect(native, &NativeMediaEngine::mouseKeysChanged, this,
+                &StreamSession::mouseKeysChanged);
 
         startEngine = [native, nativeParams]() { native->startCapture(nativeParams); };
     } else {

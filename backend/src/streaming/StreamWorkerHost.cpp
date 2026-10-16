@@ -22,6 +22,7 @@
 #include "common/Edition.h"
 #include "common/LinuxCapabilities.h"
 #include "common/RunFlags.h"
+#include "mw/native/MouseKeys.h"
 #include "server/AppSettings.h"
 
 #include <QCoreApplication>
@@ -258,6 +259,32 @@ qint64 StreamWorkerHost::childPid() const
     return m_Proc ? m_Proc->processId() : 0;
 }
 
+void StreamWorkerHost::restoreMouseKeysAfterWorker()
+{
+    m_MouseKeysHeld = false;
+#ifdef Q_OS_WIN
+    // The setting belongs to the console session: a server running as a
+    // service sits in session 0 and would change that one's instead.
+    if (ConsoleSession::launchesElsewhere()) {
+        qWarning() << "[StreamWorkerHost] The worker died holding Mouse Keys, and this process is "
+                      "not in the console session — they stay on until sign-out";
+        return;
+    }
+    auto field = [this](const char* name) {
+        const qint64 v = m_MouseKeysSaved[QLatin1String(name)].toInteger(-1);
+        return v >= 0 && v <= 0xFFFFFFFFLL ? static_cast<uint32_t>(v) : 0u;
+    };
+    mw::native::MouseKeysState saved;
+    saved.flags = field("flags");
+    saved.maxSpeed = field("maxSpeed");
+    saved.timeToMaxSpeed = field("timeToMaxSpeed");
+    saved.ctrlSpeed = field("ctrlSpeed");
+    std::string how;
+    mw::native::restoreMouseKeys(saved, how);
+    qInfo() << "[StreamWorkerHost] The worker died holding Mouse Keys:" << how.c_str();
+#endif
+}
+
 void StreamWorkerHost::sendCommand(const char* cmd)
 {
     writeLine(QByteArray("{\"cmd\":\"") + cmd + "\"}\n");
@@ -377,6 +404,9 @@ void StreamWorkerHost::onStdoutData(const QByteArray& data)
         } else if (type == QLatin1String("hidParked")) {
             // The stream is over, its wheels stay: their handles are ours now.
             HidParkingTransfer::takeIn(event);
+        } else if (type == QLatin1String("mouseKeys")) {
+            m_MouseKeysHeld = event["on"].toBool();
+            m_MouseKeysSaved = m_MouseKeysHeld ? event["saved"].toObject() : QJsonObject();
         } else if (!line.trimmed().isEmpty()) {
             qWarning() << "[StreamWorkerHost] Unknown worker event:" << line.constData();
         }
@@ -389,6 +419,8 @@ void StreamWorkerHost::onFinished(int exitCode, QProcess::ExitStatus status)
     // Gone without taking the kept devices: they answer the game here again.
     if (m_HidBatch) HidParkingTransfer::settle(m_HidBatch, false);
     m_HidBatch = 0;
+    // Gone holding Mouse Keys (killed, crashed): they are put back here.
+    if (m_MouseKeysHeld) restoreMouseKeysAfterWorker();
     // A worker that dies without answering still owes the browser a reply, and
     // its session is over either way.
     if (!m_ResponseEmitted) {

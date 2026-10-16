@@ -45,6 +45,7 @@
 #include "../../input/windows/Win32Input.h"
 #include "InputDesktop.h"
 #include "StreamPriority.h"
+#include "Win32PointerSystem.h"
 #include "video/D3d11VideoPipeline.h"
 #include "video/D3d12VideoPipeline.h"
 
@@ -491,6 +492,10 @@ public:
         // Awake for the stream's life (the process-wide part was taken before
         // the build): see StreamPriority.
         m_Priority.engage();
+        // A host with no pointing device shows no pointer; Mouse Keys make it
+        // show one, which takes a second or two — asked now rather than at the
+        // loop's first look. Then every second from the loop.
+        keepPointerShown();
         m_Running.store(true);
         m_Thread = std::thread([this] { run(); });
         return true;
@@ -614,6 +619,8 @@ public:
         // process die first).
         restoreDisplayMode();
         m_Priority.release();
+        // After the join: the loop polls the same object.
+        releasePointerKeys();
 
         if (!wasRunning && !(m_Pipeline && m_Pipeline->hasEncoder()) && !m_Capture) return;
 
@@ -651,6 +658,13 @@ public:
         std::lock_guard<std::mutex> lock(m_InputMutex);
         m_OnInputGate = std::move(callback);
         if (m_Input) m_Input->setGateCallback(m_OnInputGate);
+    }
+
+    void setMouseKeysCallback(MouseKeysCallback callback) override
+    {
+        // Before start(), by contract: read without a lock by start(), the
+        // loop and stop(), one after the other.
+        m_OnMouseKeys = std::move(callback);
     }
 
     void setDisplayFormatCallback(DisplayFormatCallback callback) override
@@ -2579,6 +2593,7 @@ private:
             reportCursor();
             reportCursorPosition();
             recentrePointerIfAway();
+            keepPointerShown();
 
             if (status == capture::AcquireStatus::Timeout && creditHeld && !creditMissing()) {
                 // The client's decoder caught up, or the link took what was
@@ -3374,6 +3389,54 @@ private:
         }
     }
 
+    /// Mouse Keys on while this host has no pointing device, so that Windows
+    /// draws the pointer at all — see PointerPresence. Every loop wake-up; it
+    /// looks once a second, and on a host with a mouse it never does more than
+    /// look.
+    void keepPointerShown()
+    {
+        PointerPresence::Step step = m_PointerPresence.poll(steadyNowUs());
+        if (step == PointerPresence::Step::Lost) {
+            log::info(
+                "[native] pointer: Mouse Keys turned off elsewhere during the stream (another "
+                "stream ended, or the user)");
+            if (m_OnMouseKeys) m_OnMouseKeys(false, MouseKeysState{});
+            step = m_PointerPresence.poll(steadyNowUs());
+        }
+        if (step == PointerPresence::Step::TurnedOn) {
+            log::info("[native] pointer: no pointing device on this host — Mouse Keys turned on "
+                      "for the stream, so Windows draws the pointer (put back at the end)");
+            if (m_OnMouseKeys) m_OnMouseKeys(true, m_PointerPresence.saved());
+        } else if (step == PointerPresence::Step::Failed) {
+            log::warning("[native] pointer: no pointing device on this host, and Mouse Keys could "
+                         "not be turned on (error " +
+                         std::to_string(::GetLastError()) +
+                         ") — Windows shows no pointer (once per session)");
+        }
+    }
+
+    /// Mouse Keys put back as they were, if this session turned them on and
+    /// they are still as it left them.
+    void releasePointerKeys()
+    {
+        switch (m_PointerPresence.release()) {
+        case PointerPresence::Step::Restored:
+            log::info("[native] pointer: Mouse Keys put back as they were");
+            break;
+        case PointerPresence::Step::LeftAlone:
+            log::info("[native] pointer: Mouse Keys changed during the stream — left as they are");
+            break;
+        case PointerPresence::Step::Failed:
+            // Not reported as let go: the parent tries again once this
+            // process is gone, and either way they go at sign-out.
+            log::warning("[native] pointer: Mouse Keys could not be put back (error " +
+                         std::to_string(::GetLastError()) + ")");
+            return;
+        default: return;
+        }
+        if (m_OnMouseKeys) m_OnMouseKeys(false, MouseKeysState{});
+    }
+
     /// How much the converter shrinks (or stretches) the desktop on its way into
     /// the frame — which is exactly what the pointer bitmap must be multiplied
     /// by. See CursorUpdate::scale.
@@ -4089,6 +4152,11 @@ private:
     int m_RecentreTries = 0;
     static constexpr int kMaxRecentreTries = 5;
     bool m_LoggedRecentre = false;
+    /// See keepPointerShown(): start(), then the capture thread, then stop(),
+    /// one after the other — never two at once.
+    Win32PointerSystem m_PointerSystem;
+    PointerPresence m_PointerPresence{m_PointerSystem};
+    MouseKeysCallback m_OnMouseKeys;
     std::string m_ReportedKind;
     /// Deliberately not 1: the first report must go out whatever the scale is,
     /// and a sentinel that no ratio can equal is what guarantees it.

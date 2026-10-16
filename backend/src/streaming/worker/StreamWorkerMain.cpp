@@ -671,6 +671,16 @@ int runStreamWorker(QCoreApplication& app)
                          emitEvent({{QStringLiteral("event"), QStringLiteral("portalGrant")},
                                     {QStringLiteral("token"), token}});
                      });
+    // Mouse Keys this worker turned on, and what to put back: as it happens,
+    // for the same reason — a worker that is killed holding them cannot put
+    // them back, the parent can.
+    QObject::connect(session, &StreamSession::mouseKeysChanged, session,
+                     [](bool on, const QJsonObject& saved) {
+                         QJsonObject event{{QStringLiteral("event"), QStringLiteral("mouseKeys")},
+                                           {QStringLiteral("on"), on}};
+                         if (on) event.insert(QStringLiteral("saved"), saved);
+                         emitEvent(event);
+                     });
 
     session->setGamepadOffset(cfg["gamepadOffset"].toInt(0));
     if (!cfg["explicitWsUrl"].toString().isEmpty())

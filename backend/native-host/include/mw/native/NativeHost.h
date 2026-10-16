@@ -23,6 +23,7 @@
 #include "FpsStep.h"
 #include "InputEvent.h"
 #include "LinkFeedback.h"
+#include "MouseKeys.h"
 #include "SessionConfig.h"
 
 #include <functional>
@@ -490,6 +491,18 @@ public:
     /// Optional, and today only the Linux engine on the portal route ever
     /// calls it. Everywhere else this is accepted and ignored.
     virtual void setPortalGrantCallback(PortalGrantCallback callback) { (void)callback; }
+
+    /// Where to hear that the session turned Windows' Mouse Keys on, so that
+    /// the host draws its pointer although it has no pointing device, and
+    /// what it found before (MouseKeys.h) — or that it no longer holds them.
+    /// For whoever outlives the session's process: a process that dies
+    /// holding them cannot put them back, its parent can (restoreMouseKeys).
+    ///
+    /// Must be set before start(), which may already turn them on. Called on
+    /// the thread that called start(), then the capture thread, then the one
+    /// that calls stop(). Only the Windows engine calls it; elsewhere it is
+    /// accepted and ignored.
+    virtual void setMouseKeysCallback(MouseKeysCallback callback) { (void)callback; }
 
     /// A session whose pictures come from elsewhere (SessionConfig::
     /// videoSource External): the display now sits at this rectangle of the

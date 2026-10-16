@@ -149,6 +149,9 @@ private:
     void writeLine(const QByteArray& line);
     void killChild();
     qint64 childPid() const;
+    /// Puts back the Mouse Keys a worker died holding, from this process when
+    /// it sits in the console session — see m_MouseKeysHeld.
+    void restoreMouseKeysAfterWorker();
 
     QProcess* m_Proc = nullptr;
     ConsoleProcess* m_Console = nullptr;
@@ -159,4 +162,8 @@ private:
     /// The kept wheels handed to this worker (HidParkingTransfer), until it
     /// says it took them; 0 when none are out.
     uint64_t m_HidBatch = 0;
+    /// Mouse Keys the worker turned on and has not let go of yet, with what to
+    /// put back if it dies holding them (a `mouseKeys` event; Windows only).
+    bool m_MouseKeysHeld = false;
+    QJsonObject m_MouseKeysSaved;
 };

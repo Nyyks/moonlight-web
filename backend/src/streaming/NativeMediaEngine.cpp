@@ -366,6 +366,19 @@ void NativeMediaEngine::startCapture(const StartParams& params)
     m_Session->setPortalGrantCallback([this](const std::string& token) {
         emit portalGrantReceived(QString::fromStdString(token));
     });
+    // Before start() as well: that is where a host with no pointing device
+    // has Mouse Keys turned on. From the capture and stopping threads after.
+    m_Session->setMouseKeysCallback([this](bool on, const mw::native::MouseKeysState& saved) {
+        QJsonObject state;
+        if (on) {
+            state = QJsonObject{
+                {QStringLiteral("flags"), static_cast<qint64>(saved.flags)},
+                {QStringLiteral("maxSpeed"), static_cast<qint64>(saved.maxSpeed)},
+                {QStringLiteral("timeToMaxSpeed"), static_cast<qint64>(saved.timeToMaxSpeed)},
+                {QStringLiteral("ctrlSpeed"), static_cast<qint64>(saved.ctrlSpeed)}};
+        }
+        emit mouseKeysChanged(on, state);
+    });
     // The relay's send queue, for linkhold=: its video channel may well be
     // made before the session.
     {

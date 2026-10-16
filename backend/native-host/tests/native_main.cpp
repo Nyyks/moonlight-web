@@ -100,6 +100,7 @@ void run_cursor_blend_tests();
 void run_frame_fit_tests();
 void run_painted_pointer_tests();
 void run_cursor_position_gate_tests();
+void run_pointer_presence_tests();
 void run_feed_header_tests();
 void run_feed_arbiter_tests();
 
@@ -193,6 +194,7 @@ int main(int argc, char** argv)
     RUN(frame_fit);
     RUN(painted_pointer);
     RUN(cursor_position_gate);
+    RUN(pointer_presence);
     RUN(feed_header);
     RUN(feed_arbiter);
     RUN(capture);

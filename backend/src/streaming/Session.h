@@ -18,6 +18,7 @@
 #pragma once
 
 #include <QElapsedTimer>
+#include <QJsonObject>
 #include <QObject>
 #include <QNetworkReply>
 #include <QUrl>
@@ -341,6 +342,11 @@ signals:
     // process owns settings — but unlike the TTL this one IS persisted: it is
     // what makes the AppImage ask once per installation instead of per session.
     void portalGrantReceived(const QString& token);
+    // Mouse Keys turned on by the native engine on a host with no pointing
+    // device, with what was there before — or let go. Same road again: the
+    // parent outlives the worker, and puts them back if the worker dies
+    // holding them.
+    void mouseKeysChanged(bool on, const QJsonObject& saved);
 
 private slots:
     void onShimConnectionStarted();

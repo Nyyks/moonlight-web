@@ -459,6 +459,13 @@ signals:
     /// one dialog per session, it does not break the stream.
     void portalGrantReceived(const QString& token);
 
+    /// The session turned Windows' Mouse Keys on (@p on, @p saved being what
+    /// it found before: flags, maxSpeed, timeToMaxSpeed, ctrlSpeed), or no
+    /// longer holds them. For the server, which puts them back after a worker
+    /// that died holding them (mw::native::restoreMouseKeys). From the capture
+    /// thread, or the one stopping the session.
+    void mouseKeysChanged(bool on, const QJsonObject& saved);
+
 private:
     void onEncodedFrame(const mw::native::EncodedFrame& frame);
 

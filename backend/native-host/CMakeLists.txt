@@ -55,6 +55,7 @@ if(WIN32)
         src/platform/windows/InputDesktop.cpp
         src/platform/windows/CrossGpuBridge.cpp
         src/platform/windows/StreamPriority.cpp
+        src/platform/windows/Win32PointerSystem.cpp
         src/platform/windows/video/D3d11VideoPipeline.cpp
         src/platform/windows/video/D3d12VideoPipeline.cpp
         src/platform/windows/d3d12/D3d12Device.cpp
@@ -605,6 +606,7 @@ if(MW_BUILD_TESTS)
         tests/test_frame_fit.cpp
         tests/test_painted_pointer.cpp
         tests/test_cursor_position_gate.cpp
+        tests/test_pointer_presence.cpp
         tests/test_feed_header.cpp
         tests/test_feed_arbiter.cpp
     )
