@@ -63,8 +63,15 @@ struct ResolvedTarget
 {
     int displayId = -1;
     /// The output's index WITHIN its own adapter, which is what DXGI wants and
-    /// is not the global display id on a multi-GPU machine.
+    /// is not the global display id on a multi-GPU machine. As the probe saw
+    /// it: Windows moves it when another display becomes primary, so the
+    /// Windows session looks it up again by displayKey at each capture open.
     unsigned outputIndex = 0;
+    /// The display itself, which outputIndex is only the place of:
+    /// DisplayInfo::key (the monitor device path on Windows) and
+    /// DisplayInfo::osName (the GDI name, the stand-in where there is no path).
+    std::string displayKey;
+    std::string displayOsName;
 
     /// How the picture will be obtained — the probe's answer, carried rather
     /// than re-derived. It matters on Linux, where a machine that may not read

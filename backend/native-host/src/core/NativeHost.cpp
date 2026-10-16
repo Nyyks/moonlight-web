@@ -271,6 +271,8 @@ std::unique_ptr<Session> NativeHost::createSession(const SessionConfig& config,
         if (display.gpuId == selection.display->gpuId) ++outputIndex;
     }
     target.outputIndex = outputIndex;
+    target.displayKey = selection.display->key;
+    target.displayOsName = selection.display->osName;
 
     SessionCallbacks callbacks;
     callbacks.onVideo = std::move(onVideo);

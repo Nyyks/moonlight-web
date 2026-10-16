@@ -43,6 +43,7 @@
 #include "../../encode/windows/AmfApi.h"
 #include "../../encode/windows/NvencApi.h"
 #include "../../input/windows/Win32Input.h"
+#include "DisplayOutputs.h"
 #include "InputDesktop.h"
 #include "StreamPriority.h"
 #include "Win32PointerSystem.h"
@@ -274,10 +275,13 @@ public:
         // GPU encodes: the Selector already worked that out, and re-deriving it
         // from the display is exactly the bug that made an AMD-driven monitor
         // try to open NVENC.
+        // By the display's key where there is one: the id is its place in
+        // the probe's list, which another display becoming primary moves.
         const Capabilities caps = probe();
         const DisplayInfo* display = nullptr;
         for (const DisplayInfo& d : caps.displays) {
-            if (d.id == m_Target.displayId) {
+            if (m_Target.displayKey.empty() ? d.id == m_Target.displayId
+                                            : d.key == m_Target.displayKey) {
                 display = &d;
                 break;
             }
@@ -1069,6 +1073,10 @@ private:
         // startCapture() takes it from there.
         const bool attached = platform::attachThread();
 
+        // Which output the display is now — before either backend is asked
+        // for it by index. See locateOutput().
+        if (!locateOutput(error)) return false;
+
         // MW_CAPTURE=wgc takes the fallback on a machine where Desktop
         // Duplication works perfectly well. Without it the WGC path is only
         // reachable on hardware nobody here has, which is how a fallback rots:
@@ -1164,6 +1172,9 @@ private:
             (!platform::runningAsSystem() && platform::inputDesktopName() != "Default"))
             return false;
 
+        // Gone or moved meanwhile: the index is looked up again first, and a
+        // display that is not there is not one to look for a duplication of.
+        if (!locateOutput(why)) return false;
         capture::DxgiDuplication probe(m_Target.captureAdapterHandle, m_Target.outputIndex);
         if (probe.start(why)) {
             probe.stop();
@@ -1712,6 +1723,50 @@ private:
         return Restart::Restarted;
     }
 
+    /// Where the display this session streams is among its adapter's outputs
+    /// NOW, into m_Target.outputIndex — before every open of the capture,
+    /// because Windows moves that index when another display becomes primary
+    /// (OutputMatch.h: a Mac's stream of Display 1 that jumped to the virtual
+    /// display an iPhone had just started on, N95, 16/10/2026). False with
+    /// @p error when the display is not there: the open fails, and a restart
+    /// waits for it as it waits out a locked screen.
+    bool locateOutput(std::string& error)
+    {
+        // Nothing to go by (a target built without the probe's display): the
+        // probe's index, as before there was anything else.
+        if (m_Target.displayKey.empty() && m_Target.displayOsName.empty()) return true;
+
+        std::vector<capture::OutputIdentity> outputs;
+        if (!platform::adapterOutputs(m_Target.captureAdapterHandle, outputs, error)) return false;
+        const int index =
+            capture::outputIndexOf(outputs, m_Target.displayKey, m_Target.displayOsName);
+        if (index < 0) {
+            error =
+                "the display this stream shows is not connected (" +
+                (m_Target.displayOsName.empty() ? m_Target.displayKey : m_Target.displayOsName) +
+                ")";
+            return false;
+        }
+
+        const unsigned now = static_cast<unsigned>(index);
+        const std::string& name = outputs[now].gdiName;
+        if (!m_OutputLocated) {
+            log::info("[native] capture: " + name + ", output " + std::to_string(now) +
+                      " of its adapter (" + m_Target.displayKey + ")");
+        } else if (now != m_Target.outputIndex || name != m_Target.displayOsName) {
+            log::info("[native] the display moved among its adapter's outputs: " +
+                      m_Target.displayOsName + " at " + std::to_string(m_Target.outputIndex) +
+                      " -> " + name + " at " + std::to_string(now) + " — the capture stays on it");
+        }
+        m_OutputLocated = true;
+        m_Target.outputIndex = now;
+        // The name as it stands, for findOutput() and as the stand-in should
+        // the paths go missing. Matched by name, it is the same one; matched
+        // by path, the path stays the key.
+        if (!name.empty()) m_Target.displayOsName = name;
+        return true;
+    }
+
     /// The output this session captures, as DXGI enumerates it — for what the
     /// frames do not say about the display. Null when it cannot be found,
     /// which a display that just went away is allowed to be.
@@ -1729,11 +1784,28 @@ private:
                 (static_cast<uint64_t>(static_cast<uint32_t>(desc.AdapterLuid.HighPart)) << 32) |
                 static_cast<uint64_t>(desc.AdapterLuid.LowPart);
             if (luid != m_Target.captureAdapterHandle) continue;
+            // By the GDI name rather than the index: between Windows moving
+            // the outputs and the restart that follows (locateOutput), the
+            // index is another display's.
+            const std::wstring name(m_Target.displayOsName.begin(),
+                                    m_Target.displayOsName.end()); // ASCII, "\\.\DISPLAYn"
             Microsoft::WRL::ComPtr<IDXGIOutput> output;
-            if (FAILED(adapter->EnumOutputs(m_Target.outputIndex, &output))) return nullptr;
-            Microsoft::WRL::ComPtr<IDXGIOutput6> output6;
-            if (FAILED(output.As(&output6))) return nullptr;
-            return output6;
+            for (UINT j = 0;
+                 adapter->EnumOutputs(j, output.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND;
+                 ++j) {
+                if (name.empty()) {
+                    if (j != m_Target.outputIndex) continue;
+                } else {
+                    DXGI_OUTPUT_DESC outputDesc = {};
+                    if (FAILED(output->GetDesc(&outputDesc)) ||
+                        ::_wcsicmp(outputDesc.DeviceName, name.c_str()) != 0)
+                        continue;
+                }
+                Microsoft::WRL::ComPtr<IDXGIOutput6> output6;
+                if (FAILED(output.As(&output6))) return nullptr;
+                return output6;
+            }
+            return nullptr;
         }
         return nullptr;
     }
@@ -4049,6 +4121,9 @@ private:
     /// Desktop Duplication was found to paint the pointer into the picture on
     /// this display: every (re)open goes straight to WGC. Capture thread only.
     bool m_DuplicationPaintsPointer = false;
+    /// locateOutput() has run once: from then on it says when the display
+    /// moved, rather than where it is. Capture thread only, after start().
+    bool m_OutputLocated = false;
     /// Windows.Graphics.Capture stands in for a duplication refused for a
     /// reason that may pass (DxgiDuplication::refusalMayPass): the loop looks
     /// for it to come back — duplicationBack(), when to look next, and how
