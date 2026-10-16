@@ -53,7 +53,7 @@ WebSocket upgrades are screened the same way on `Origin` (they bypass CORS entir
 | `GET /api/auth/sessions` | 🏠 | Sessions table (opaque token hash ids, IP, geo, machine name, streaming flag, `ephemeral`), newest first. `current` marks the caller's own session. |
 | `POST /api/auth/sessions/revoke` | 🏠 | Revoke by opaque id; a streaming session's relay is torn down immediately. Refuses the caller's own session (409 `cannot_revoke_self`). |
 | `GET /api/admin/certificate/download` / `POST /api/admin/certificate/regenerate` | 🏠 | Certificate-file auth token. |
-| `POST /api/auth/host-key` | 🌐 | Redeem `?mwk=` host key → host session; rotates the key and rewrites entry points. |
+| `POST /api/auth/host-key` | 🌐 | Redeem the host key (`#k=` from the owner's entry link, or `?mwk=` on a local address) → host session; rotates the key. |
 
 ## 8.3 Hosts & streaming (`HostRoutes.cpp` + `main.cpp`)
 
