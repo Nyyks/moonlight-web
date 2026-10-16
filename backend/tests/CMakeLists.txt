@@ -70,6 +70,7 @@ add_executable(run_tests
     test_port_fallback.cpp
     test_host_persistence.cpp
     test_rendezvous_id.cpp
+    test_rendezvous_line.cpp
     test_backend_probe.cpp
     test_host_os_probe.cpp
     test_send_backlog.cpp
@@ -139,6 +140,9 @@ add_executable(run_tests
     # The single-tab control channel: the port it lands on when its own is taken.
     ${_src}/src/server/ControlChannel.cpp
     ${_src}/src/common/RendezvousId.cpp
+    # The host's line to the introduction server, against a local stand-in:
+    # how fast it comes back when the line fails under it.
+    ${_src}/src/network/RendezvousClient.cpp
     # Host persistence: the restart path for a paired host (issue #9).
     ${_src}/src/backend/NvComputer.cpp
     ${_src}/src/backend/NvHTTP.cpp

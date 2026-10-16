@@ -406,6 +406,27 @@ void RendezvousClient::onSocketError(QAbstractSocket::SocketError error)
 {
     Q_UNUSED(error)
     qWarning() << "[RDV] line error:" << m_Socket.errorString();
+
+    // An error on a line that is still open means the line is gone, whatever Qt
+    // says next — and sometimes it says nothing. Behind production's Caddy, a
+    // restart of the introduction server reaches us as a TLS close_notify on a
+    // TCP connection that stays open: Qt reports "The TLS/SSL connection has
+    // been closed" and never emits disconnected. The line then looked up until
+    // the next ping and its missing pong, 45 + 20 s at worst — 31 s and 63 s
+    // on the staging bench of 16/10/2026, where every machine on it was
+    // unreachable for new visitors the whole time.
+    //
+    // Aborted on the next turn of the loop rather than here, inside the
+    // socket's own error emission. Only a CONNECTED socket is touched: one
+    // still connecting may not emit disconnected on abort, and then no retry
+    // would ever be scheduled. Where Qt does emit disconnected after the error
+    // (a plain FIN, a reset), it has done so by then and this does nothing.
+    if (m_Socket.state() != QAbstractSocket::ConnectedState) return;
+    QTimer::singleShot(0, this, [this]() {
+        if (m_Socket.state() != QAbstractSocket::ConnectedState) return;
+        qInfo() << "[RDV] the line failed but is still open — closing it to rebuild it now";
+        m_Socket.abort();
+    });
 }
 
 void RendezvousClient::onKeepAlive()
