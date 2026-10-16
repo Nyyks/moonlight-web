@@ -207,5 +207,29 @@ void run_update_apply_tests()
         // argv[0] is a path, never a mode.
         char* asExe[] = {update};
         CHECK(!mw::inheritedenv::isElevatedHelper(1, asExe));
+
+        // The other elevated modes, in both spellings, wherever they sit.
+        char vdisplay[] = "--vdisplay-apply";
+        char stage[] = "--stage=driver";
+        char vhid[] = "--vhid-apply";
+        char vhidEq[] = "--vhid-apply=install";
+        char verb[] = "install";
+        char worker[] = "--stream-worker";
+        char pipe[] = "--worker-pipe";
+        char* vd[] = {exe, stage, vdisplay};
+        char* vh[] = {exe, vhid, verb};
+        char* vhe[] = {exe, vhidEq};
+        char* sw[] = {exe, worker, pipe};
+        CHECK(mw::inheritedenv::isElevatedHelper(3, vd));
+        CHECK(mw::inheritedenv::isElevatedHelper(3, vh));
+        CHECK(mw::inheritedenv::isElevatedHelper(2, vhe));
+        CHECK(mw::inheritedenv::isElevatedHelper(3, sw));
+        // A longer flag that merely starts like one is not that mode.
+        char lookalike[] = "--stream-worker-x";
+        char serviceFlag[] = "--worker-service";
+        char* la[] = {exe, lookalike};
+        char* ws[] = {exe, serviceFlag};
+        CHECK(!mw::inheritedenv::isElevatedHelper(2, la));
+        CHECK(!mw::inheritedenv::isElevatedHelper(2, ws));
     }
 }

@@ -41,7 +41,8 @@ namespace mw::inheritedenv {
 /// Case-insensitive, like Windows environment names.
 bool isCodeLoading(const QString& name);
 
-/// Whether this command line starts one of the modes an elevated task runs.
+/// Whether this command line starts one of the modes that run elevated:
+/// --update-apply, --vdisplay-apply, --vhid-apply, --stream-worker.
 bool isElevatedHelper(int argc, char** argv);
 
 /// Drop every isCodeLoading() variable from this process and take the current

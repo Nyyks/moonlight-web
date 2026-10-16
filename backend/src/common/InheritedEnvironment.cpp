@@ -50,11 +50,19 @@ bool isCodeLoading(const QString& name)
 
 bool isElevatedHelper(int argc, char** argv)
 {
-    // The modes an installer task starts with RunLevel=HighestAvailable.
-    static const char* const kModes[] = {"--update-apply"};
-    for (int i = 1; i < argc; ++i)
-        for (const char* mode : kModes)
-            if (std::strcmp(argv[i], mode) == 0) return true;
+    // The modes an installer task (RunLevel=HighestAvailable), the installer
+    // itself or the SYSTEM launcher service start elevated: the update and the
+    // two driver helpers, and the stream worker that injects input. Both
+    // spellings, "--vhid-apply install" and "--vhid-apply=install".
+    static const char* const kModes[] = {"--update-apply", "--vdisplay-apply", "--vhid-apply",
+                                         "--stream-worker"};
+    for (int i = 1; i < argc; ++i) {
+        for (const char* mode : kModes) {
+            const std::size_t n = std::strlen(mode);
+            if (std::strncmp(argv[i], mode, n) == 0 && (argv[i][n] == '\0' || argv[i][n] == '='))
+                return true;
+        }
+    }
     return false;
 }
 
