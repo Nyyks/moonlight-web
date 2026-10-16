@@ -22,7 +22,7 @@
 pkgname=moonlightweb-bin
 pkgver=@MW_VERSION@
 pkgrel=1
-pkgdesc="Stream your Sunshine games to any device with a browser"
+pkgdesc="Stream your gaming PC to any device with a browser"
 arch=('x86_64')
 url="https://moonlightweb.top/"
 license=('GPL-3.0-only')

@@ -110,7 +110,7 @@ cat > "$PKG/usr/share/applications/$APPID.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$APP
-Comment=Sunshine streaming client for the browser
+Comment=Stream your gaming PC to any browser
 Exec=$PREFIX/bin/moonlightweb-launch
 Icon=$NAME
 Categories=Network;Game;
@@ -565,7 +565,7 @@ common=(
     -s dir -n "$NAME" -v "$VERSION"
     --license GPL-3.0 --vendor MoonlightWeb
     --url "https://moonlightweb.top/"
-    --description "Sunshine streaming client for the browser (self-contained, bundled Qt runtime)"
+    --description "Stream your gaming PC to any device with a browser (self-contained, bundled Qt runtime)"
     --maintainer "MoonlightWeb"
     --after-install "$ROOT/postinst.sh"
     --before-remove "$ROOT/prerm.sh"

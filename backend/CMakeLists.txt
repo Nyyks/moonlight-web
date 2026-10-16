@@ -721,7 +721,7 @@ endif()
 
 set(CPACK_PACKAGE_NAME "moonlightweb")
 set(CPACK_PACKAGE_VENDOR "moonlightweb")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Sunshine streaming client for the browser")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Stream your gaming PC to any device with a browser")
 # rpm forbids '-' in a version field, and the untagged fallback is the only
 # string that can carry one. Same treatment as the git-describe branch above:
 # dashes become dots.

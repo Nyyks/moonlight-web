@@ -249,7 +249,7 @@ QString entryText()
     return QStringLiteral("[Desktop Entry]\n"
                           "Type=Application\n"
                           "Name=%2\n"
-                          "Comment=Sunshine streaming client for the browser\n"
+                          "Comment=Stream your gaming PC to any browser\n"
                           "Exec=\"%1\" %4\n"
                           "Icon=%3\n"
                           "Terminal=false\n"
