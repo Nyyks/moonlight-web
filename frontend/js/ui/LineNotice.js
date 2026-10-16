@@ -29,10 +29,28 @@ import { t } from '../i18n/i18n.js';
 
 /** @type {HTMLElement | null} */
 let pill = null;
+/** @type {ResizeObserver | null} */
+let barWatch = null;
+
+/**
+ * Just under the stream's bar while the bar is on screen. At the top of the
+ * window, as before, the pill sat on the bar itself — on the version, the sound
+ * and the centred Fullscreen button. Where there is no bar (fullscreen hides it,
+ * other pages have none) it keeps the top.
+ */
+function place() {
+    if (!pill) return;
+    const bar = document.querySelector('.stream-header');
+    const bottom = bar ? bar.getBoundingClientRect().bottom : 0;
+    pill.style.top = bottom > 0 ? `calc(${Math.round(bottom)}px + var(--space-3))` : '';
+}
 
 /** @param {'reconnecting' | 'out-of-reach' | null} state null takes it away */
 export function showLineNotice(state) {
     if (!state) {
+        barWatch?.disconnect();
+        barWatch = null;
+        window.removeEventListener('resize', place);
         pill?.remove();
         pill = null;
         return;
@@ -42,8 +60,16 @@ export function showLineNotice(state) {
         pill.className = 'line-notice';
         pill.setAttribute('role', 'status');
         document.body.appendChild(pill);
+        // The bar goes with fullscreen and changes height with the window.
+        const bar = document.querySelector('.stream-header');
+        if (bar) {
+            barWatch = new ResizeObserver(place);
+            barWatch.observe(bar);
+        }
+        window.addEventListener('resize', place);
     }
     pill.textContent = t(
         state === 'reconnecting' ? 'stream.lineReconnecting' : 'stream.lineOutOfReach',
     );
+    place();
 }
