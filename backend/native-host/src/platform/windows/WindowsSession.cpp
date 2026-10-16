@@ -43,6 +43,7 @@
 #include "../../encode/windows/AmfApi.h"
 #include "../../encode/windows/NvencApi.h"
 #include "../../input/windows/Win32Input.h"
+#include "DisplayModeHold.h"
 #include "DisplayOutputs.h"
 #include "InputDesktop.h"
 #include "StreamPriority.h"
@@ -943,6 +944,13 @@ private:
     // inside it; otherwise nothing changes and the frame follows the box
     // rule as usual (the host upscales). CDS_FULLSCREEN: the change is the
     // session's — undone at stop(), and by Windows if the process dies.
+    //
+    // A client that relaunches starts its new session before the old one has
+    // ended: the display is in the client's mode already, and the old
+    // session's end would put the display's own back under the new stream.
+    // So the mode has a holder (DisplayModeHold.h): the new session sets that
+    // mode again and holds it, and an old one that no longer holds it leaves
+    // it at its end.
 
     /// @returns true when the display's mode was changed for this session.
     bool applyClientMode(const DisplayInfo& display)
@@ -950,9 +958,24 @@ private:
         if (!m_Config.matchClientDisplay || !m_Config.fitRequestedBox) return false;
         const int wantW = m_Config.requestedWidth, wantH = m_Config.requestedHeight;
         if (wantW <= 0 || wantH <= 0 || display.osName.empty()) return false;
-        if (display.width == wantW && display.height == wantH) return false;
 
         std::wstring name(display.osName.begin(), display.osName.end()); // ASCII, "\\.\DISPLAYn"
+        auto hold = std::make_unique<platform::DisplayModeHold>(display.key.empty() ? display.osName
+                                                                                    : display.key);
+        const platform::DisplayModeHold::Turn turn(hold.get());
+        // The display as it is now, not as the probe saw it: a session ending
+        // meanwhile may have put its own mode back.
+        DEVMODEW now{};
+        now.dmSize = sizeof(now);
+        const bool nowKnown =
+            ::EnumDisplaySettingsExW(name.c_str(), ENUM_CURRENT_SETTINGS, &now, 0) != FALSE;
+        const int nowW = nowKnown ? static_cast<int>(now.dmPelsWidth) : display.width;
+        const int nowH = nowKnown ? static_cast<int>(now.dmPelsHeight) : display.height;
+        if (nowW == wantW && nowH == wantH) {
+            if (nowKnown && hold->heldByAnother()) takeOverClientMode(display, now, hold);
+            return false;
+        }
+
         const int currentHz = (display.refreshMilliHz + 500) / 1000;
         const double wantAspect = static_cast<double>(wantW) / wantH;
 
@@ -1007,6 +1030,8 @@ private:
                          std::to_string(rc) + ") — the display keeps its mode");
             return false;
         }
+        hold->claim();
+        m_ModeHold = std::move(hold);
         m_ModeChangedDevice = name;
         m_ModeChangedHz = static_cast<int>(wanted.dmDisplayFrequency);
         log::info("[native] " + display.osName + " put in " + std::to_string(wanted.dmPelsWidth) +
@@ -1018,18 +1043,66 @@ private:
         return true;
     }
 
-    /// The mode the session changed, put back. Idempotent.
+    /// The client's mode, which another session set on @p display and holds
+    /// for the moment — the old session of a client that relaunched — set
+    /// again from this one (@p now, as the display runs it), which holds it
+    /// from then on: Windows no longer undoes it with that session's process,
+    /// and that session's end leaves it. Not a change of this session's: the
+    /// display's rate stays the probe's, to the millihertz.
+    void takeOverClientMode(const DisplayInfo& display, const DEVMODEW& now,
+                            std::unique_ptr<platform::DisplayModeHold>& hold)
+    {
+        DEVMODEW again{};
+        again.dmSize = sizeof(again);
+        again.dmPelsWidth = now.dmPelsWidth;
+        again.dmPelsHeight = now.dmPelsHeight;
+        again.dmDisplayFrequency = now.dmDisplayFrequency;
+        again.dmBitsPerPel = now.dmBitsPerPel;
+        again.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_BITSPERPEL;
+        const std::wstring name(display.osName.begin(), display.osName.end());
+        const LONG rc =
+            ::ChangeDisplaySettingsExW(name.c_str(), &again, nullptr, CDS_FULLSCREEN, nullptr);
+        if (rc != DISP_CHANGE_SUCCESSFUL) {
+            log::warning("[native] " + display.osName + " is in " +
+                         std::to_string(now.dmPelsWidth) + "x" + std::to_string(now.dmPelsHeight) +
+                         " for another session, and could not be taken over "
+                         "(ChangeDisplaySettingsEx " +
+                         std::to_string(rc) + ") — that session's end may put its own mode back");
+            return;
+        }
+        hold->claim();
+        m_ModeHold = std::move(hold);
+        m_ModeChangedDevice = name;
+        m_ModeChangedHz = 0;
+        log::info("[native] " + display.osName + " is in " + std::to_string(now.dmPelsWidth) + "x" +
+                  std::to_string(now.dmPelsHeight) + " @ " +
+                  std::to_string(now.dmDisplayFrequency) +
+                  " Hz for another session that is ending — taken over, so its end leaves it");
+    }
+
+    /// The mode the session changed, put back — unless another session has
+    /// taken it over since (takeOverClientMode). Idempotent.
     void restoreDisplayMode()
     {
         if (m_ModeChangedDevice.empty()) return;
-        const LONG rc =
-            ::ChangeDisplaySettingsExW(m_ModeChangedDevice.c_str(), nullptr, nullptr, 0, nullptr);
-        if (rc == DISP_CHANGE_SUCCESSFUL)
-            log::info("[native] the display's own mode is back");
-        else
-            log::warning("[native] the display's own mode could not be put back "
-                         "(ChangeDisplaySettingsEx " +
-                         std::to_string(rc) + ")");
+        {
+            const platform::DisplayModeHold::Turn turn(m_ModeHold.get());
+            if (m_ModeHold && m_ModeHold->valid() && !m_ModeHold->held()) {
+                log::info("[native] the display's mode belongs to the session that took it over "
+                          "— left as it is");
+            } else {
+                const LONG rc = ::ChangeDisplaySettingsExW(m_ModeChangedDevice.c_str(), nullptr,
+                                                           nullptr, 0, nullptr);
+                if (rc == DISP_CHANGE_SUCCESSFUL)
+                    log::info("[native] the display's own mode is back");
+                else
+                    log::warning("[native] the display's own mode could not be put back "
+                                 "(ChangeDisplaySettingsEx " +
+                                 std::to_string(rc) + ")");
+                if (m_ModeHold) m_ModeHold->release();
+            }
+        }
+        m_ModeHold.reset();
         m_ModeChangedDevice.clear();
         m_ModeChangedHz = 0;
     }
@@ -4282,6 +4355,8 @@ private:
     /// Empty / 0 when none was.
     std::wstring m_ModeChangedDevice;
     int m_ModeChangedHz = 0;
+    /// Whether that mode is still this session's to put back (DisplayModeHold.h).
+    std::unique_ptr<platform::DisplayModeHold> m_ModeHold;
     encode::EncodeLoadCap m_LoadCap;
     std::atomic<bool> m_PendingResize{false};
     /// The resample guard (noteScalerLoad): GPU time of the frames seen so far

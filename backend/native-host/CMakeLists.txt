@@ -51,6 +51,7 @@ if(WIN32)
         src/platform/windows/WindowsProbe.cpp
         src/platform/windows/WindowsEncoderProbe.cpp
         src/platform/windows/IndirectDisplay.cpp
+        src/platform/windows/DisplayModeHold.cpp
         src/platform/windows/DisplayOutputs.cpp
         src/platform/windows/WindowsSession.cpp
         src/platform/windows/InputDesktop.cpp
@@ -607,6 +608,7 @@ if(MW_BUILD_TESTS)
         tests/test_frame_fit.cpp
         tests/test_painted_pointer.cpp
         tests/test_output_match.cpp
+        tests/test_display_mode_hold.cpp
         tests/test_cursor_position_gate.cpp
         tests/test_pointer_presence.cpp
         tests/test_feed_header.cpp
