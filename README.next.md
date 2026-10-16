@@ -349,9 +349,9 @@ It controls: admin **PIN**, active **sessions**, HTTP/HTTPS **ports**, **transpo
 **Internet Access is opt‑in, off by default.** While it is on, the server:
 
 1. **Detects your public IP** over STUN (ours first, `stream.moonlightweb.top:3478`, then Google/Cloudflare) and reports CGNAT or double NAT. A LAN stream uses no STUN at all.
-2. **Opens a streaming port via UPnP for each session**, and closes it at the end. The two peers see each other's public IP.
+2. **Opens ports on the router via UPnP**: one per stream slot, kept from one stream to the next (an invited player's closes when they leave), and up to four for the entry link's tunnel. The two peers see each other's public IP.
 
-Nothing else is opened or published: **no DNS record, no certificate, ports 80/443 stay closed**. Turning it off closes the mappings at once.
+Nothing is published: **no DNS record, no certificate, ports 80/443 stay closed**. Turning it off closes the entry link at once, and the next streams announce no public address; the router ports already opened stay mapped until MoonlightWeb quits.
 
 **Remote access.** Your PC keeps one outgoing connection to an introduction server and is reached at `https://stream.moonlightweb.top/「id」` (shown on the admin page and in the tray). Visitors still need the access PIN.
 

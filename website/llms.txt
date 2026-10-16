@@ -25,8 +25,8 @@
 - Zero-config: the machine it runs on needs no pairing at all (one card per
   display); other hosts — Sunshine/Apollo, Wolf (Games-on-Whales), MultiSeat — are
   auto-discovered on the LAN via mDNS and paired with a PIN.
-- Internet access (opt-in): direct peer-to-peer WebRTC streams; per-session
-  UPnP port mapping; no public DNS record or certificate. The host holds one
+- Internet access (opt-in): direct peer-to-peer WebRTC streams; UPnP port
+  mapping for the streams; no public DNS record or certificate. The host holds one
   outgoing connection to an introduction server and is reached at a link of its
   own; both ends ask a self-hosted STUN server for their public address.
   Pre-existing sub-domains keep working until February 2027.

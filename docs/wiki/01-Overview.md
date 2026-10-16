@@ -77,7 +77,7 @@ The admin page controls:
 **Internet Access** is an explicit, versioned, logged consent — the master switch for being reachable from the internet. While it is on, the server:
 
 1. **Detects the public IP** (STUN — our own server at `stream.{MW_DOMAIN}:3478` first, public ones behind it; HTTPS fallback via ipify/icanhazip), and reports CGNAT/double-NAT when it sees one.
-2. **Asks the router (UPnP) to open the streaming port during each session**, and removes the mapping when the session — or the consent — ends. Peers connect directly, so each side of a WebRTC connection sees the other's public IP.
+2. **Asks the router (UPnP) for a streaming port per stream slot**, kept from one stream to the next (an invited player's is removed when they leave); every mapping is removed when MoonlightWeb quits. Withdrawing the consent keeps the next streams from announcing a public address; the ports already mapped stay until that exit. Peers connect directly, so each side of a WebRTC connection sees the other's public IP.
 
 3. **Holds one outgoing connection to the introduction server** — the **remote entry link** — which makes the instance reachable at `https://stream.{MW_DOMAIN}/{id}` while the line is up. That server learns the host's public address and when it is online, and nothing else: the signalling it copies is signed with a key it has never seen ([Infrastructure §10.7](10-Infrastructure-Stack.md#107-the-introduction-server-mw-rendezvous)).
 

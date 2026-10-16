@@ -65,11 +65,11 @@ Two pieces, one switch. `InternetAccessManager` decides what may be opened; `Ren
 
 ### `InternetAccessManager`
 
-Runs the reachability consent as a state machine with a `phase` field driving the UI loader. **The consent is enforced end to end**: `internet_access_enabled` gates the per-session media-port mapping in the stream launch path (read live, so toggling applies to the next stream without a restart), and `stop()` removes every router mapping the manager owns the moment the consent is withdrawn.
+Runs the reachability consent as a state machine with a `phase` field driving the UI loader. **The consent is enforced end to end**: `internet_access_enabled` gates the per-session media-port mapping in the stream launch path (read live, so toggling applies to the next stream without a restart), and withdrawing it stops the rendezvous line at once. The router holes already held (`RouterPortAllocator`) stay mapped and renewed until the process exits, which removes them all.
 
 1. `ensureIdentifiers()` — generates the 8-hex-char `unique_id`. It is **internal only**: shown on the admin page and used to recognise the sub-domain a pre-0.3 install registered; it is a public name for nothing.
 2. Public IP detection: STUN first (the project's own server at `stream.{MW_DOMAIN}:3478`, public ones behind it), HTTP fallback (ipify/icanhazip); can be manual (`auto_ip_detection: false`). Feeds CGNAT detection and the NAT-hairpin test.
-3. **Per-session UPnP media mapping** only — one port for the duration of a stream, removed when it ends. Ports 80 and 443 are never mapped: nothing needs them, since the interface arrives through the tunnel.
+3. **UPnP media mapping per stream slot** — opened at the slot's first stream and kept for the next (an invited player's is released when they leave), removed at exit. Ports 80 and 443 are never mapped: nothing needs them, since the interface arrives through the tunnel.
 4. **Consent versioning**: a stored consent record carries the `mechanism` its wording described. A record predating the current wording parks the manager in phase `consent_required`, and nothing is opened until the user agrees again under the text they are actually shown.
 
 **Bring-your-own-domain**: when `domain` in `settings.json` holds a valid FQDN, the manager keeps it verbatim and runs in a **network-only mode** — the zone, the certificate and the 443 forward on the router are the user's own. See [Settings Reference §7.5](07-Settings-Reference.md#75-bring-your-own-domain--certificate).

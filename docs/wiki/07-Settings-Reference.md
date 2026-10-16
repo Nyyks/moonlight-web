@@ -75,7 +75,7 @@ The consent is the master switch: `internet_access_enabled` gates the per-sessio
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `internet_access_enabled` | bool | `false` | The user's consent to be reachable from the internet. Gates the per-session UPnP media mapping and the rendezvous line, and auto-starts `InternetAccessManager` at boot. |
+| `internet_access_enabled` | bool | `false` | The user's consent to be reachable from the internet. Gates the UPnP media mapping of the next streams and the rendezvous line, and auto-starts `InternetAccessManager` at boot. |
 | `rendezvous_id` | string | generated | **The machine's address.** 26 Crockford base32 characters — the `{id}` in `https://stream.{MW_DOMAIN}/{id}`. A locator, not a secret: holding it grants nothing. Drawn once and never rotated, because an address that changes cannot be bookmarked. |
 | `rendezvous_token` | string | generated | Ownership credential for the identifier above, presented as `X-MW-Owner`; the introduction server stores only its HMAC. **Secret.** Deliberately its own value, so it can be rotated or retired without touching anything else. |
 | `rendezvous_claimed` | bool | `false` | Whether the introduction server has accepted the identifier. Until it has, the instance holds an id nothing knows about, and every entry point reports *no address* rather than one that answers to nobody. |
