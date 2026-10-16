@@ -777,6 +777,9 @@ void StreamRelay::onWsTextMessage(const QString& message)
         // stayed plugged into the native host until the session ended.
         m_Shim->sendControllerRemoval(static_cast<uint8_t>(msg["index"].toInt(0)),
                                       static_cast<uint16_t>(msg["mask"].toInt(0)));
+    } else if (type == "linkstats") {
+        // The page reports its link on every transport; only the WebRTC
+        // relay has a governor to feed, so here it is simply not news.
     } else {
         qWarning() << "[StreamRelay] Unknown input type:" << type;
     }
