@@ -1083,6 +1083,118 @@ int pruneToTopology(const Topology& t, const QString& devicePath, QString* error
     return ok ? pruned : -1;
 }
 
+/// The monitor device path of @p p's target, empty when Windows does not say.
+QString targetDevicePath(const DISPLAYCONFIG_PATH_INFO& p)
+{
+    DISPLAYCONFIG_TARGET_DEVICE_NAME tn{};
+    tn.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+    tn.header.size = sizeof(tn);
+    tn.header.adapterId = p.targetInfo.adapterId;
+    tn.header.id = p.targetInfo.id;
+    if (DisplayConfigGetDeviceInfo(&tn.header) != ERROR_SUCCESS) return QString();
+    return QString::fromWCharArray(tn.monitorDevicePath);
+}
+
+/// @p p appended to @p out, with the modes it names copied from @p modes and
+/// its indices made to point at the copies; @p copied maps an index of
+/// @p modes to its copy's, so a mode two paths share is copied once.
+void addPath(Topology& out, DISPLAYCONFIG_PATH_INFO p,
+             const std::vector<DISPLAYCONFIG_MODE_INFO>& modes, std::vector<UINT32>& copied)
+{
+    copied.resize(modes.size(), DISPLAYCONFIG_PATH_MODE_IDX_INVALID);
+    for (UINT32* idx : {&p.sourceInfo.modeInfoIdx, &p.targetInfo.modeInfoIdx}) {
+        if (*idx == DISPLAYCONFIG_PATH_MODE_IDX_INVALID) continue;
+        if (*idx >= modes.size()) {
+            *idx = DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
+            continue;
+        }
+        if (copied[*idx] == DISPLAYCONFIG_PATH_MODE_IDX_INVALID) {
+            copied[*idx] = UINT32(out.modes.size());
+            out.modes.push_back(modes[*idx]);
+        }
+        *idx = copied[*idx];
+    }
+    out.paths.push_back(p);
+}
+
+/// The layout from before ours, @p t, imposed again now that ours at
+/// @p devicePath is up: every other display in the mode and at the place it
+/// had, ours on their right (placeBeside), nothing else on — and saved to
+/// Windows' database as this set of displays' layout. Windows brings a set up
+/// from that database, with the modes each display had the last time it was
+/// on: an owner's own VDD on the same driver came back at 800×600 at 30 Hz,
+/// the first mode of its list, every time ours came on, and every change of
+/// ours saved it again at that (N95, 16/10/2026). Saved this way, the next
+/// activation brings it up as the owner left it. Switches off, as
+/// pruneToTopology() does, whatever Windows lit up beside ours.
+bool imposeTopology(const Topology& t, const QString& devicePath, QString* error)
+{
+    UINT32 nPaths = 0, nModes = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPaths, &nModes) != ERROR_SUCCESS) {
+        *error = QStringLiteral("GetDisplayConfigBufferSizes failed");
+        return false;
+    }
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(nPaths);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(nModes);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPaths, paths.data(), &nModes, modes.data(),
+                           nullptr) != ERROR_SUCCESS) {
+        *error = QStringLiteral("QueryDisplayConfig failed");
+        return false;
+    }
+    paths.resize(nPaths);
+    modes.resize(nModes);
+    const int i = pathIndexFor(paths, devicePath);
+    if (i < 0) {
+        *error = QStringLiteral("the display is not in the active configuration");
+        return false;
+    }
+    const DISPLAYCONFIG_PATH_INFO& ours = paths[size_t(i)];
+    const UINT32 ourSource = ours.sourceInfo.modeInfoIdx;
+    if (ourSource == DISPLAYCONFIG_PATH_MODE_IDX_INVALID || ourSource >= modes.size() ||
+        modes[ourSource].infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) {
+        *error = QStringLiteral("the display has no source mode");
+        return false;
+    }
+
+    Topology out;
+    std::vector<UINT32> copied;
+    QList<VirtualDisplay::DesktopRect> others;
+    for (const DISPLAYCONFIG_PATH_INFO& p : t.paths) {
+        // Ours as an earlier stream left it on: it comes as it is now.
+        if (sameTarget(p, ours) ||
+            targetDevicePath(p).compare(devicePath, Qt::CaseInsensitive) == 0)
+            continue;
+        if (p.sourceInfo.adapterId.LowPart == ours.sourceInfo.adapterId.LowPart &&
+            p.sourceInfo.adapterId.HighPart == ours.sourceInfo.adapterId.HighPart &&
+            p.sourceInfo.id == ours.sourceInfo.id) {
+            *error = QStringLiteral("the display's source drives another display already");
+            return false;
+        }
+        addPath(out, p, t.modes, copied);
+        const UINT32 src = p.sourceInfo.modeInfoIdx;
+        if (src != DISPLAYCONFIG_PATH_MODE_IDX_INVALID && src < t.modes.size() &&
+            t.modes[src].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) {
+            const DISPLAYCONFIG_SOURCE_MODE& m = t.modes[src].sourceMode;
+            others.append({int(m.position.x), int(m.position.y), int(m.width), int(m.height)});
+        }
+    }
+    std::vector<DISPLAYCONFIG_MODE_INFO> ourModes = modes;
+    const QPoint at = VirtualDisplay::placeBeside(others);
+    ourModes[ourSource].sourceMode.position.x = at.x();
+    ourModes[ourSource].sourceMode.position.y = at.y();
+    std::vector<UINT32> ourCopied;
+    addPath(out, ours, ourModes, ourCopied);
+
+    const LONG rc = SetDisplayConfig(
+        UINT32(out.paths.size()), out.paths.data(), UINT32(out.modes.size()), out.modes.data(),
+        SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES | SDC_SAVE_TO_DATABASE);
+    if (rc != ERROR_SUCCESS) {
+        *error = QStringLiteral("SetDisplayConfig: %1").arg(lastErrorText(DWORD(rc)));
+        return false;
+    }
+    return true;
+}
+
 /// Make the display at @p devicePath the primary one: every desktop origin
 /// shifted so that one lands on (0,0), in one configuration change.
 bool makePrimary(const QString& devicePath, QString* error)
@@ -1238,9 +1350,24 @@ int stageMode(Context& ctx)
         if (p.primary && p.devicePath.compare(target->devicePath, Qt::CaseInsensitive) != 0)
             ctx.result.previousPrimary = p.devicePath;
 
-    // Only what was on before, plus ours: Windows may have switched on a
-    // display the owner keeps disconnected.
-    if (const auto saved = loadTopology(ctx)) {
+    // Only what was on before, as it was, plus ours: Windows may have switched
+    // on a display the owner keeps disconnected, and brought the others up in
+    // the modes its database remembers for this set (imposeTopology). When
+    // that layout cannot be imposed, the extra displays go off all the same.
+    bool imposed = false;
+    if (const auto saved = loadTopology(ctx); saved && topologyStillAttached(*saved)) {
+        imposed = imposeTopology(*saved, target->devicePath, &error);
+        if (imposed)
+            Logger::info(QStringLiteral("[vdisplay-apply] the other displays as they were, ours "
+                                        "on their right — saved as this set's layout"));
+        else
+            Logger::warning(
+                QStringLiteral("[vdisplay-apply] the layout from before not imposed: %1")
+                    .arg(error));
+        error.clear();
+        if (auto again = findOurTarget()) target = again;
+    }
+    if (const auto saved = loadTopology(ctx); saved && !imposed) {
         const int pruned = pruneToTopology(*saved, target->devicePath, &error);
         if (pruned < 0)
             Logger::warning(

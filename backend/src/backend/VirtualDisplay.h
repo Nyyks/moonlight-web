@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
+#include <QPoint>
 #include <QString>
 #include <QStringList>
 
@@ -491,6 +492,29 @@ inline QString addedModesPath()
 {
     return QStringLiteral("C:/VirtualDisplayDriver/moonlightweb-added-modes.txt");
 }
+
+// ── The other displays' layout ──────────────────────────────────────────────
+
+/// A display's desktop rectangle, as Windows places it.
+struct DesktopRect
+{
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
+/// Where our display goes beside @p others, the layout from before it: on the
+/// right of the one that reaches furthest right, top edges aligned, so the two
+/// share an edge (the topmost of them on a tie). (0, 0) when there is none.
+///
+/// Windows, left to itself, brings a new set of displays up from its database,
+/// and keeps there the modes each one had the last time that set was on: an
+/// owner's own VDD on the same driver came back at 800×600 at 30 Hz, the first
+/// mode of its list, for every stream on ours (N95, 16/10/2026). So the
+/// activation applies the layout from before — every other display in its mode
+/// and at its place, ours here — and saves that one as the set's.
+QPoint placeBeside(const QList<DesktopRect>& others);
 
 // ── Paths ───────────────────────────────────────────────────────────────────
 

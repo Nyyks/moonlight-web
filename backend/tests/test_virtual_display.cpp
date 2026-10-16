@@ -625,6 +625,24 @@ void run_virtual_display_tests()
                  kMatchedRateMaxHz);
     }
 
+    SECTION("VirtualDisplay — ours goes on the right of the others' layout, edge to edge");
+    {
+        // The N95 of 16/10/2026: Display 1 primary, the owner's VDD on its
+        // right and higher up. Ours goes on the VDD's right, top edges aligned.
+        const QList<DesktopRect> n95{{0, 0, 1920, 1080}, {1920, -360, 2560, 1440}};
+        CHECK_EQ(placeBeside(n95), QPoint(4480, -360));
+        // Listed the other way round: the same place.
+        CHECK_EQ(placeBeside({n95[1], n95[0]}), QPoint(4480, -360));
+        // A display on the LEFT of the primary (negative x): the rightmost
+        // still wins.
+        CHECK_EQ(placeBeside({{-2560, 0, 2560, 1440}, {0, 0, 1920, 1080}}), QPoint(1920, 0));
+        // Two right edges level (a stack): beside the topmost.
+        CHECK_EQ(placeBeside({{0, 1080, 1920, 1080}, {0, 0, 1920, 1080}}), QPoint(1920, 0));
+        // Nothing else on, or nothing usable: the origin.
+        CHECK_EQ(placeBeside({}), QPoint(0, 0));
+        CHECK_EQ(placeBeside({{500, 500, 0, 0}}), QPoint(0, 0));
+    }
+
     SECTION("VirtualDisplay — the bundled driver is pinned file by file");
     CHECK_EQ(int(driverFiles().size()), 3);
     bool inf = false, cat = false, dll = false;

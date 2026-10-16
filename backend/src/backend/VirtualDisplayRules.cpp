@@ -487,4 +487,16 @@ QString settingsXml(int width, int height, int refreshMilliHz)
     return xml;
 }
 
+QPoint placeBeside(const QList<DesktopRect>& others)
+{
+    const DesktopRect* edge = nullptr;
+    for (const DesktopRect& r : others) {
+        if (r.width <= 0 || r.height <= 0) continue;
+        const int right = r.x + r.width;
+        const int edgeRight = edge ? edge->x + edge->width : 0;
+        if (!edge || right > edgeRight || (right == edgeRight && r.y < edge->y)) edge = &r;
+    }
+    return edge ? QPoint(edge->x + edge->width, edge->y) : QPoint(0, 0);
+}
+
 } // namespace VirtualDisplay
