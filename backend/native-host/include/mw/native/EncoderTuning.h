@@ -481,8 +481,8 @@ struct EncoderTuning
     /// 15/10/2026; VirtualDisplay::matchedRefreshMilliHz): 239.744 Hz for a
     /// 119.872 Hz screen, where 240.000 beats against it and loses a picture
     /// every 7.8 s. Read by the server when it turns the display on, Windows.
-    /// -1, the product: off until the bench (VirtualDisplay::kVddMatchProduct);
-    /// 0: off; 1: on.
+    /// -1, the product: on under Windows since V2 and the eye test of
+    /// 16/10/2026 (VirtualDisplay::kVddMatchProduct); 0: off; 1: on.
     int vddMatch = -1;
     /// The highest rate vddMatch may give the display, Hz (24-500). 0: the
     /// product's, VirtualDisplay::kMatchedRateMaxHz (330).

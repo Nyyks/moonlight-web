@@ -129,8 +129,8 @@ struct DisplayInfo;
  * intervals. On macOS the display runs at the stream's rate; no measurement
  * — an old client, a hidden tab at launch — keeps the 120 Hz default.
  *
- * Under `vddmatch` (Windows, off until the bench; plan glissade, section V)
- * the rate is a whole multiple of the client's own instead, to the
+ * Under `vddmatch` (Windows, on since V2 of plan glissade and the eye test of
+ * 16/10/2026) the rate is a whole multiple of the client's own instead, to the
  * millihertz (matchedRefreshMilliHz): 239.744 Hz for a "120 Hz" panel that
  * runs at 119.872, where 240.000 beats against it. Every rate from here to
  * the driver is therefore in millihertz: the request file, the driver's list
@@ -186,9 +186,10 @@ constexpr int kModeMax = 4096;
 /// What a requested refresh rate may be. The floor is a cadence a desktop is
 /// still usable at, the ceiling is the product's own: the rate its display
 /// runs at on Windows whatever the client's (refreshForStream), and never
-/// past. The driver itself goes to 500 Hz, which only the bench reaches
-/// (MW_VDD_REFRESH, plan framerate-hote): a request is guarded against the
-/// driver's ceiling, the product's is applied where the rate is chosen.
+/// past but for vddmatch's whole multiple of the client's (up to
+/// kMatchedRateMaxHz). The driver itself goes to 500 Hz, which only the bench
+/// reaches (MW_VDD_REFRESH, plan framerate-hote): a request is guarded against
+/// the driver's ceiling, the product's is applied where the rate is chosen.
 constexpr int kRateMin = 24;
 constexpr int kRateMax = 240;
 constexpr int kRateDriverMax = 500;
@@ -245,9 +246,10 @@ RateFraction rateFraction(int milliHz);
 /// the cap: the caller keeps the display at its usual rate.
 int matchedRefreshMilliHz(int clientMilliHz, int streamFps, int capHz);
 
-/// The ceiling matchedRefreshMilliHz() is given by the product, until the
-/// bench has measured a capture above it (V2 of plan glissade): 330 Hz, a
-/// 165 Hz screen's twice. The bench raises it with `vddmatchmax=`, up to the
+/// The ceiling matchedRefreshMilliHz() is given by the product: 330 Hz, a
+/// 165 Hz screen's twice, which DualRTX's RTX held with a wide margin (V2 of
+/// plan glissade, 15/10/2026; a host that does not gets less,
+/// matchCapAfterRefusals). The bench raises it with `vddmatchmax=`, up to the
 /// driver's 500.
 constexpr int kMatchedRateMaxHz = 330;
 
@@ -261,9 +263,16 @@ constexpr int kMatchedRateMaxHz = 330;
 int matchCapAfterRefusals(int capHz, const QJsonArray& refused, const QString& version,
                           const QStringList& gpus);
 
-/// What EncoderTuning::vddMatch's -1, the product's, means: off until the
-/// bench (V2 of plan glissade) has measured it.
+/// What EncoderTuning::vddMatch's -1, the product's, means: on under Windows
+/// since V2 of plan glissade (15/10/2026: no picture lost to the beat, an age
+/// without its saw-tooth, the capture held up to 330 Hz) and a blind eye test
+/// (16/10, preferred twice out of two). Off elsewhere: Linux's portal
+/// monitor takes the stream's rule (refreshForStream), macOS is unmeasured.
+#if defined(Q_OS_WIN)
+constexpr bool kVddMatchProduct = true;
+#else
 constexpr bool kVddMatchProduct = false;
+#endif
 
 /// The refresh rate a stream asks of the display.
 ///   - @p faster (the product on Windows, decision A of plan framerate-hote,

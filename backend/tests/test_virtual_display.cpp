@@ -579,8 +579,13 @@ void run_virtual_display_tests()
         // The gate's tolerance, 0.2 %: 119.872 against 120 is in (0.107 %),
         // 119.5 is not (0.42 %).
         CHECK_EQ(matchedRefreshMilliHz(119500, 120, kMatchedRateMaxHz), 0);
-        // The product leaves it off until the bench (V2).
+        // The product's: on under Windows since V2 and the eye test, off
+        // elsewhere.
+#if defined(Q_OS_WIN)
+        CHECK(kVddMatchProduct);
+#else
         CHECK(!kVddMatchProduct);
+#endif
     }
 
     SECTION("VirtualDisplay — under the rates the capture did not hold");

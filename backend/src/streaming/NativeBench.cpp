@@ -280,7 +280,7 @@ const char* const kUsage =
     "                    Duplication; plan glissade)\n"
     "  vddmatch=0|1      the virtual display at a whole multiple of the client's measured\n"
     "                    refresh (239.744 for 119.872 Hz) when the stream divides it; the\n"
-    "                    product's: off (Windows host; plan glissade, section V)\n"
+    "                    product's: on (Windows host; plan glissade, section V)\n"
     "  vddmatchmax=<hz>  the highest rate vddmatch gives the display, 24-500 (330)\n"
     "  sckdepth=<n>     ScreenCaptureKit's pool of surfaces (queueDepth), 1-8; 3 the\n"
     "                    product (macOS host; plan attente, AM2)\n"

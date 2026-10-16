@@ -4200,14 +4200,15 @@ int main(int argc, char* argv[])
             const int vdWidth = reqMatchDisplay ? reqWidth : 0;
             const int vdHeight = reqMatchDisplay ? reqHeight : 0;
             // Its refresh rate, on Windows, is 240 Hz whatever the stream's
-            // (decision A of plan framerate-hote, 30/09/2026). A picture the
-            // host renders waits for the compositor's next refresh before the
-            // capture sees it: up to a whole frame of a 60 Hz display, 4.2 ms
-            // at 240. The stream keeps its own cadence — the client's screen
-            // rate under "Auto" — and takes the first present of each of its
-            // intervals, so nothing more is encoded or sent. Measured: 6 to
-            // 17 ms off the age of what the client shows behind an Arc or an
-            // iGPU, neutral behind an RTX (bench §8p.4 sexies).
+            // (decision A of plan framerate-hote, 30/09/2026), or a whole
+            // multiple of the client's screen under vddmatch (below). A
+            // picture the host renders waits for the compositor's next refresh
+            // before the capture sees it: up to a whole frame of a 60 Hz
+            // display, 4.2 ms at 240. The stream keeps its own cadence — the
+            // client's screen rate under "Auto" — and takes the first present
+            // of each of its intervals, so nothing more is encoded or sent.
+            // Measured: 6 to 17 ms off the age of what the client shows behind
+            // an Arc or an iGPU, neutral behind an RTX (bench §8p.4 sexies).
             // Linux too, where the stream makes the portal's monitor itself and
             // the engine applies the same rule (SessionConfig::virtualRefreshHz).
             // Elsewhere (macOS), the stream's own rate: a display nobody looks
@@ -4225,10 +4226,11 @@ int main(int argc, char* argv[])
                 const char* why = vdBenchRefresh > 0 ? "(MW_VDD_REFRESH)"
                                   : vdFaster         ? "(faster than the stream)"
                                                      : "";
-                // Under `vddmatch` (plan glissade, section V), a whole multiple
-                // of the client's screen instead, to the millihertz: 240.000
-                // beats against a "120 Hz" panel that runs at 119.872 and loses
-                // a picture every 7.8 s; 239.744 does not. Windows, where the
+                // Under `vddmatch` (plan glissade, section V; the product's on
+                // Windows since 16/10/2026), a whole multiple of the client's
+                // screen instead, to the millihertz: 240.000 beats against a
+                // "120 Hz" panel that runs at 119.872 and loses a picture
+                // every 7.8 s; 239.744 does not. Windows, where the
                 // display runs faster than the stream; never over the bench's
                 // MW_VDD_REFRESH. A display already on at a rate this process
                 // gave it stays at that rate: another stream may be on it.
