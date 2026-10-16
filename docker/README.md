@@ -115,8 +115,8 @@ for platforms with no host networking — read the caveats in it first.
 | Tag | What it is |
 |---|---|
 | `latest` | The newest release. What you want. |
-| `0.2.4` | That exact release, forever. |
-| `0.2` | The newest `0.2.x` — minor updates, no major jump. |
+| `0.4.0` | That exact release, forever. |
+| `0.4` | The newest `0.4.x` — minor updates, no major jump. |
 | `sha-<commit>` | One commit, pinned forever. |
 
 **Every tag here is a release.** There is no `edge` and no nightly: an image is
@@ -363,7 +363,7 @@ runtime, no VA-API packages.
 MoonlightWeb never decodes or re-encodes the stream. Sunshine encodes on the
 gaming PC's GPU; this server re-packetises the encrypted RTP into WebRTC and
 the **browser** decodes it on the viewer's device. The upscaling and sharpening
-(FSR1 / SGSRv1) run in the browser on WebGPU, on the viewer's GPU. The
+(FSR1 / SGSRv1) run in the browser on WebGL2 (WebGPU in HDR), on the viewer's GPU. The
 container's job is packet plumbing and TLS, and it is comfortable on a
 Raspberry Pi 4 or an N100 mini PC.
 
