@@ -167,6 +167,28 @@ void applyPolicyToLiveGraph(const InputMsg::Policy& policy)
     push(g_State->streamRelay.data());
 }
 
+/// Mouse Keys the native engine turned on, and what to put back — or let go —
+/// sent to the server as it happens: a worker that is killed holding them
+/// cannot put them back, the parent can. Straight from the engine, which lives
+/// as long as the stream: the StreamSession goes once the stream is up, and
+/// with it anything relayed through it (bench of 16/10: the end of every
+/// stream went unsaid). Direct, from the capture thread or whichever stops the
+/// engine: one line per write, under the stream's own lock.
+void relayMouseKeys(IMediaEngine* engine)
+{
+    auto* native = qobject_cast<NativeMediaEngine*>(engine);
+    if (!native) return;
+    QObject::connect(
+        native, &NativeMediaEngine::mouseKeysChanged, qApp,
+        [](bool on, const QJsonObject& saved) {
+            QJsonObject event{{QStringLiteral("event"), QStringLiteral("mouseKeys")},
+                              {QStringLiteral("on"), on}};
+            if (on) event.insert(QStringLiteral("saved"), saved);
+            emitEvent(event);
+        },
+        Qt::DirectConnection);
+}
+
 /// Mirror of the /quit teardown in main.cpp: stop the shim FIRST (so moonlight
 /// stops calling back into a relay about to be destroyed), then stop + delete
 /// the relay. Exits the process once done (short grace for the relay thread).
@@ -671,16 +693,6 @@ int runStreamWorker(QCoreApplication& app)
                          emitEvent({{QStringLiteral("event"), QStringLiteral("portalGrant")},
                                     {QStringLiteral("token"), token}});
                      });
-    // Mouse Keys this worker turned on, and what to put back: as it happens,
-    // for the same reason — a worker that is killed holding them cannot put
-    // them back, the parent can.
-    QObject::connect(session, &StreamSession::mouseKeysChanged, session,
-                     [](bool on, const QJsonObject& saved) {
-                         QJsonObject event{{QStringLiteral("event"), QStringLiteral("mouseKeys")},
-                                           {QStringLiteral("on"), on}};
-                         if (on) event.insert(QStringLiteral("saved"), saved);
-                         emitEvent(event);
-                     });
 
     session->setGamepadOffset(cfg["gamepadOffset"].toInt(0));
     if (!cfg["explicitWsUrl"].toString().isEmpty())
@@ -723,15 +735,18 @@ int runStreamWorker(QCoreApplication& app)
     QObject::connect(session, &StreamSession::relayCreated, qApp, [&state](DataChannelRelay* r) {
         state.relay = r;
         QObject::connect(r, &DataChannelRelay::sessionEnded, qApp, []() { teardownAndExit(0); });
+        relayMouseKeys(r->mediaEngine());
     });
     QObject::connect(
         session, &StreamSession::mediaTrackRelayCreated, qApp, [&state](MediaTrackRelay* r) {
             state.mediaRelay = r;
             QObject::connect(r, &MediaTrackRelay::sessionEnded, qApp, []() { teardownAndExit(0); });
+            relayMouseKeys(r->mediaEngine());
         });
     QObject::connect(session, &StreamSession::streamRelayCreated, qApp, [&state](StreamRelay* r) {
         state.streamRelay = r;
         QObject::connect(r, &StreamRelay::sessionEnded, qApp, []() { teardownAndExit(0); });
+        relayMouseKeys(r->mediaEngine());
     });
     // Session failed before any relay existed (Sunshine rejection, bind failure):
     // the response event already carried the error — just exit.

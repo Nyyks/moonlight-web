@@ -462,8 +462,9 @@ signals:
     /// The session turned Windows' Mouse Keys on (@p on, @p saved being what
     /// it found before: flags, maxSpeed, timeToMaxSpeed, ctrlSpeed), or no
     /// longer holds them. For the server, which puts them back after a worker
-    /// that died holding them (mw::native::restoreMouseKeys). From the capture
-    /// thread, or the one stopping the session.
+    /// that died holding them (mw::native::restoreMouseKeys). From the thread
+    /// starting or stopping the session, or the capture thread: a receiver
+    /// that must hear the last word connects directly.
     void mouseKeysChanged(bool on, const QJsonObject& saved);
 
 private:
