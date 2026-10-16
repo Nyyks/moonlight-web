@@ -681,14 +681,11 @@ sur RE9), le clic non plus (p50 9,6 à 12,4 ms avant, 10,0 à 11,4 après ; p90
 a été refaite. Le contenu à ~77 i/s n'a pas été reproduit au banc (RE9 à ~62
 ce jour) ; il est couvert par le rejeu et les tests.
 
-**Limite vue le 14/10 (banc §8w.8).** L'intervalle est arrondi à la
-microseconde : 16 666 µs à 60 i/s. Sur l'écran virtuel à 240 Hz, la grille
-glisse donc d'environ 36 µs par seconde le long des présentations. À 60 i/s sur
-240 Hz, le bord d'une fenêtre, un quart d'intervalle avant son tic, tombe à une
-période d'écran exacte du tic. Toutes les ~2 min, ce bord croise une
-présentation ; pendant ~30 s, la grille alterne alors des écarts de 12,5 et
-20,8 ms. Une grille neuve s'ancre sur une présentation, donc sur ce bord. Piste,
-à part : une hystérésis sur la phase.
+**La limite vue le 14/10** (banc §8w.8) : la grille glisse le long des
+présentations, et ses bords en croisent une toutes les ~2 min. Sous Windows,
+quand le flux tient un nombre entier de rafraîchissements de l'écran, la porte
+se cale maintenant sur l'écran (§9.6.3). Ailleurs, la règle ci-dessus reste
+entière.
 
 ### 9.6.2 Une fenêtre d'admission après chaque appui (13/10/2026, clé de banc)
 
@@ -785,6 +782,177 @@ Aucune perte, aucune image clé, et la grille n'est pas touchée.
   3 images par clic.
 
 Le défaut, décidé par Bruno sur ces chiffres, est ci-dessus.
+
+**Sous la porte calée** (§9.6.3), la fenêtre ne change pas : elle ajoute des
+« oui » par-dessus la grille, et lit l'intervalle réglé du flux, jamais N
+périodes de l'écran.
+
+### 9.6.3 La porte calée sur l'écran, et l'écran virtuel au multiple du client (14-16/10/2026)
+
+**Le défaut** (banc §8w.8). `FrameCadence` arrondit son intervalle à la
+microseconde : 16 666 µs à 60 i/s. Sur l'écran virtuel à 240 Hz, la grille
+glisse donc d'environ 36 µs par seconde le long des présentations.
+- Toutes les ~2 min, pendant ~30 s, le bord d'une fenêtre tombe sur une
+  présentation. La porte alterne alors des écarts de 12,5 et 20,8 ms au lieu de
+  16,7. Une grille neuve s'ancre sur ce bord : chaque flux commence par 10 à
+  30 s d'écarts irréguliers.
+- Un client en vsync le voit : 6,8 % des rafraîchissements à 60 Hz, 7,4 % à
+  120 Hz pour un flux à 120.
+- La cadence alignée sur un client en vsync (§9.11) prend son intervalle exact.
+  Elle glisse plus lentement, mais une grille posée sur un bord peut y rester
+  des minutes.
+
+**Le treillis des présentations** (`core/PresentLattice.h`, pur, fil de
+capture).
+- **Sa période T** vient du mode que lit la duplication à chaque ouverture
+  (`ModeDesc.RefreshRate`, un rationnel, en ns, `IWindowsCapture::refreshPeriodNs()`),
+  à défaut de `m_DisplayMilliHz`. La ligne « duplication started » dit le mode
+  (« mode at 239.744 Hz »).
+- **Il se nourrit** de l'heure DXGI de chaque vraie présentation, sautée ou non,
+  avant que la porte décide. Jamais d'un pointeur seul, d'une attente vide ni
+  d'un renvoi.
+- **Une boucle de phase du premier ordre** : la phase suit 1/32 de chaque écart,
+  borné à ±T/4. Les divisions arrondissent vers le bas, comme dans la copie
+  Python.
+- **La netteté**, moyenne de |écart|/T : simple sur les 64 premières
+  présentations, puis glissante (1/64). Le treillis s'engage sous 0,10 et se
+  relâche au-dessus de 0,20. Mesuré : 0,045 à 0,06 sur l'écran virtuel en
+  contenu dense, 0,16 sous le portail de Mutter et sous ScreenCaptureKit, 0,25
+  sans grille.
+- **La phase repart** sur la présentation après une pause de plus de 10 s, ou de
+  plus d'1 s quand l'écart dépasse T/4.
+- **Il est neuf** à chaque reprise de la capture (mode, HDR, perte de D3D12,
+  bascule DDA/WGC), et survit aux changements de porte (écran du client, palier
+  de « Auto »).
+
+**La porte calée** (`FrameCadence::admit(now, present, view)`). Elle s'applique
+quand toutes ces conditions tiennent :
+- la capture est Desktop Duplication (WGC n'a pas été rejoué) ;
+- la cadence est celle du produit, ni `host`, ni `host-guarded`, ni `deadline` ;
+- la porte n'est pas un plafond ;
+- l'intervalle vaut N périodes de l'écran à 0,2 % près, N entier ≥ 2
+  (`lockRatio()`) : 60, 80 ou 120 i/s sur 240 Hz. Une cadence alignée sur un
+  client en vsync qui tombe sur N périodes cède alors à N·T ;
+- le treillis est engagé.
+
+Sa règle :
+- toute décision se prend sur l'heure de présentation (`stamps.presentUs`) :
+  une seule échelle de temps ;
+- l'intervalle vaut exactement N périodes, et chaque fenêtre commence à
+  mi-chemin entre deux présentations du treillis ;
+- après une fenêtre servie, la suivante s'ouvre au milieu le plus proche, un
+  intervalle plus loin. C'est là que la boucle corrige ;
+- après une fenêtre vide, la suivante s'ouvre une demi-période après la place
+  de la présentation sur le treillis ;
+- après une pause, elle s'ouvre un intervalle moins une demi-période après la
+  présentation : l'image d'après vient un intervalle juste après.
+
+Sinon, la porte est celle du §9.6.1, à l'image près. `intervalUs()`,
+`nextDueUs()` et `skipped()` gardent leur sens.
+
+**Inerte** sous Linux et macOS, sous un plafond, aux rapports non entiers (50,
+72, 75, 90, 145 i/s sur 240 Hz), sous une cadence de banc, sous WGC, et quand
+le treillis n'est pas net (écran VRR, jeu qui présente hors grille).
+
+**La clé** `cadencelock` : −1 le produit (`kCadenceLockProduct`, allumé depuis
+la porte G2 du 14/10, `5b74d41d`), 0 éteint, 1 allumé. Le treillis est tenu et
+journalisé même à 0.
+- Au départ, à chaque nouvelle porte et à chaque nouvelle capture : `[native]
+  cadence lock: on — 4 periods of 4166666 ns a picture, …`, ou pourquoi pas.
+- Les engagements, relâches et recalages : les 5 premiers, puis un sur 20.
+- En fin de session : `[native] cadence lock: period <ns> ns, interval <ns> ns,
+  N periods a picture; …`, avec la part des appels calés, le premier engagement
+  et la netteté. `gatesim.py --lock` relit cette ligne.
+- `clicktrace=1` ajoute les colonnes `locked` et `latticeUs` aux lignes `admit`.
+- Tests : `test_cadence_lock.cpp`, groupe `cadence_lock`, avec un train d'or
+  porté ligne pour ligne de `gatesim.py --selftest`.
+
+**Mesuré** (banc §8x.3-8x.4). Les sauts que fait la porte elle-même tombent de
+6 à 7 % à 0,00-0,05 % en contenu dense, et de 4,3 à 0,2 % sous RE9. Un client
+en vsync voit ~1 % de pas hors du rythme au lieu de 4 à 6 %. Débit, attente et
+clic ne bougent pas.
+
+**L'écran virtuel au multiple du client** (`vddmatch`, 15-16/10/2026). Le
+calage laisse un battement quand l'écran du client ne tourne pas à sa fréquence
+ronde.
+- Le M27Q « à 120 Hz » de l'UM790Pro tourne à 119,872 Hz. À 240,000 Hz, la
+  porte calée sort 120,000 i/s, et le client perd une image toutes les 7,8 s.
+- L'âge de l'image suit une dent de scie : il croît d'environ 1 ms par seconde,
+  puis retombe d'un rafraîchissement.
+
+Ce que fait `vddmatch` :
+- **La règle** (`VirtualDisplay::matchedRefreshMilliHz`). L'écran virtuel
+  tourne à k fois la fréquence mesurée du client, au milli-hertz, pour le plus
+  grand k entier qui tient sous le plafond : 239,744 Hz pour 119,872 ; 287,694
+  pour 143,847 ; 330 pour 165.
+  - Il faut que le flux tourne au rythme du client ou à un diviseur entier, à
+    0,2 % près (la tolérance de la porte).
+  - Il faut aussi que k fois ce diviseur vaille 1 ou soit pair, pour que le pas
+    ×2 d'Auto (`CadenceStepper.js`) divise encore l'écran : 59,94 Hz donne
+    239,76, pas 299,7.
+  - Sinon, l'écran reste à 240 Hz : un flux Auto à 120 pour un écran à 144 Hz,
+    un client pas encore mesuré.
+- **Le plafond** est de 330 Hz (`kMatchedRateMaxHz`), deux fois un écran à
+  165 Hz. `vddmatchmax=` le change au banc, jusqu'aux 500 Hz du pilote.
+- **La mesure du client** (`util/RefreshRate.js`).
+  - Une fois la page visible, le rAF est suivi 12 s de plus. La période est la
+    pente de ses heures contre l'indice du rafraîchissement, si bien qu'une
+    image sautée ne saute qu'un indice.
+  - Cette mesure remplace la mesure rapide quand les deux s'accordent. Elle
+    reste dans ce navigateur (`localStorage`) pour la page suivante.
+  - Rien ne s'en voit, et une TV garde sa première mesure.
+- **Le taux reste au milli-hertz jusqu'au pilote**.
+  - Il est écrit en décimal dans `vdd_settings.xml` (« 239.744 »), et passe à
+    Windows en rationnel exact (29968/125, `rateFraction`).
+  - Windows n'applique aucun mode que le pilote ne liste pas : une demande à
+    240/1 d'un écran qui liste 239,744 échoue en silence.
+  - L'hôte ajoute donc le mode à la liste du pilote, puis redémarre son nœud,
+    par la tâche élevée.
+- **Un écran déjà allumé** à un taux donné par ce processus le garde : un autre
+  flux peut y être.
+- **Le repli ×1** (`core/CaptureHold.h`).
+  - Chaque session juge si la capture a tenu, sur ses seules secondes de
+    contenu dense : au moins 1,5 présentation par image du flux, et 20 s au
+    moins.
+  - Le verdict échoue dans quatre cas : plus de 1 % des présentations repliées
+    entre deux acquisitions, une boucle occupée plus de 70 % du temps, moins de
+    97 % des images du flux portées, ou un treillis calé sur moins de 90 % des
+    appels.
+  - Le worker envoie ce verdict (`captureHold`) juste avant `ended`.
+  - Le serveur garde un refus au-dessus de 240 Hz, sur l'écran virtuel du
+    propriétaire, dans `settings.json` (`vdd_match_refused` : GPU, taux,
+    version, 8 au plus).
+  - Au /start suivant, le plafond passe 2 % sous le plus bas refus de cette
+    version, sur un GPU que la machine a encore (`matchCapAfterRefusals`). Un
+    écran à 165 Hz refusé à 330 reçoit alors 165 (×1), et un écran à 144 Hz
+    sur le même hôte essaie encore 288.
+  - Le mode ne change jamais sous un flux qui tourne, et une mise à jour
+    réessaie.
+- **Le défaut** (décision de Bruno, 16/10/2026, `b3451a38`) : allumé sous
+  Windows (`kVddMatchProduct`). Il reste éteint sous Linux, dont le moniteur du
+  portail suit la règle du flux, et sous macOS, qui n'est pas mesuré.
+  `vddmatch=0` et `vddmatch=1` passent outre, pour le banc.
+- **Le journal**.
+  - Au /start : « [Session] virtual display at 239.744 Hz for a 120 fps stream
+    (vddmatch: 2 x the client's 119.872 Hz) », ou pourquoi rien ne tient. Après
+    un refus, le motif gagne « , under N Hz: the capture did not hold more on
+    this host ».
+  - En fin de session, le worker écrit « capture hold at X Hz: held / not held
+    (why) over N s of dense content », et le serveur « [Session] capture held /
+    did not hold … ».
+- **Mesuré** (banc §8x.7-8x.9).
+  - À 120 i/s en vsync, la dent de scie de l'âge disparaît, et les images
+    envoyées jamais montrées passent de 6,9 à 1,7 par minute. À 144 Hz, elles
+    passent de 20,7 à 0.
+  - La RTX de DualRTX tient 330 Hz avec une large marge.
+  - À l'aveugle, vddmatch est préféré 2 fois sur 2.
+- **Pas mesuré** : un hôte modeste, dont les seuils du repli sont les marges de
+  la RTX, à revoir ; RE9 à 288 et 330 Hz.
+- **Piste : choisir la phase.** Pour N périodes par image, la porte calée a N
+  phases possibles : 2 à 120 i/s sur 239,744 Hz, 4 à 60 i/s. La phase reste fixe
+  tout le flux. Dans une passe de V2, elle tombait près de l'échéance du client,
+  et l'âge sautait d'un rafraîchissement (12,5 ↔ 20 ms) sur 1,6 % des
+  rafraîchissements. La choisir d'après l'arrivée chez le client l'éviterait.
 
 ### 9.7 Écran verrouillé : la session attend, le stream reste vivant (02/09/2026)
 
@@ -7263,6 +7431,9 @@ la composition 4,2 ms au plus, au lieu d'une période du flux.
   le journal de session dit la fréquence et pourquoi.
 - Reste : les i/s d'un vrai jeu à 240 Hz (RE9 n'a pas pu être piloté ce
   soir-là) et le ressenti de Bruno.
+- Depuis le 16/10/2026, sous Windows, l'écran tourne à un multiple entier de la
+  fréquence réelle du client, jusqu'à 330 Hz, et à 240 Hz seulement quand aucun
+  ne tient (`vddmatch`, §9.6.3).
 
 ### 33.10 « Auto » avec détection (01/10/2026, POC Ultra, Phase UA)
 

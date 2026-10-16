@@ -6926,6 +6926,8 @@ sans la fenêtre.
     fenêtre, loin des clics, 6,8 % des rafraîchissements montrent un tel pas.
 - Piste : une hystérésis sur la phase, qui garde la même voisine tant que les
   deux restent dans l'irrégularité du bord. À rejouer avec `gatesim.py`.
+- Corrigé depuis autrement : la porte se cale sur les présentations de l'écran
+  (§8x).
 
 ### 8w.9 Le client en vsync (F4, 14/10/2026, 02:45-03:36)
 
@@ -7057,6 +7059,300 @@ affiche en vsync (Mac, iPhone, iPad, ou un PC réglé ainsi), la règle n'apport
 rien de mesurable et peut faire sauter une image juste après un clic : elle y
 reste éteinte. Elle est allumée par défaut pour Chrome et Edge sous Windows,
 avec « Autoriser le tearing » coché, ce qui est leur réglage d'origine.
+
+## 8x. La porte calée sur l'écran, puis l'écran virtuel au multiple du client (14-16/10/2026)
+
+Suite du §8w.8, plan « glissade ». Deux règles, mesurées sur l'hôte Windows
+derrière leurs clés de banc, puis allumées par défaut :
+- la porte calée sur les présentations de l'écran (`cadencelock`), depuis le
+  14/10 ;
+- l'écran virtuel à un multiple entier de la fréquence réelle du client
+  (`vddmatch`), depuis le 16/10.
+
+Leur code et leurs gardes sont au §9.6.3 du design.
+
+### 8x.1 Le rejeu, avant le code
+
+Les traces de l'hôte (`clicktrace=1`) sont rejouées avec des copies Python de
+la porte, `clickpath/gatesim.py --lock` et `clickpath/locksim.py`. Un saut est
+un écart entre deux images admises qui s'éloigne du rythme du flux de plus de
+3/4 de période d'écran : 12,5 ou 20,8 ms au lieu de 16,7 à 60 i/s.
+
+| Famille de passes | Porte d'avant | Porte calée |
+|---|---|---|
+| Contenu dense (bande de CoD, 37 passes, 60 et 120 i/s) | 8,34 % | **1,77 %** |
+| `mw-click-target` à 240 i/s, flux à 120 | 8,78 % | **2,67 %** |
+| RE9 (62 à 154 présentations/s) | 35,5 % | 32,9 % (le rythme du jeu) |
+| Horloge de test à 60 i/s | 3,25 % | 3,06 % |
+| Client en vsync (14 passes, intervalle exact, 0 ou ±15 ppm) | 1,2 à 34,6 % | 1,0 à 2,4 % |
+| Linux, portail ScreenCast (hors chapitre) | 14,2 % | 13,2 % |
+| Mac, ScreenCaptureKit (hors chapitre) | 47,1 % | 46,9 % |
+
+- **Rien ne se perd.** Les images portées restent à 0,15 % près. L'attente
+  d'une image neuve ne bouge pas, ou baisse : 6,01 → 5,99 ms à 60 i/s, 2,09 →
+  1,86 ms à 120.
+- **L'intervalle exact seul est pire** : 18 à 24 % de sauts. Sans glissade, une
+  grille posée sur un bord y reste toute la passe.
+- **Les présentations de l'écran virtuel** tombent à 75-90 % à ±0,5 ms du
+  treillis suivi. Au milieu entre deux, il n'y en a presque pas (0,04 à 0,2 %
+  par tranche de 250 µs) : un bord à mi-période est presque optimal.
+- **La phase de l'écran erre** de ±50 à 100 µs/s par tranche de 10 s. Une
+  boucle du premier ordre la suit, et tout gain de 1/8 à 1/128 donne le même
+  résultat.
+- **Décider sur l'heure de présentation** plutôt que sur la fin de conversion
+  fait 4,29 % de sauts au lieu de 4,49 sur les passes denses et de jeu.
+- **Sous Linux** (Mutter), il n'y a pas de grille : la garde de netteté y laisse
+  la porte d'avant.
+- **Le treillis s'engage** 0 à 0,93 s après le début du contenu dense, puis
+  prend 97,8 à 100 % des décisions de chaque passe.
+
+### 8x.2 Le banc de la porte calée (14/10/2026, 08:41-10:24 ; Mac le 15/10)
+
+- **Hôte** : DualRTX en `--dev`, build de `3336f390`. Écran virtuel du produit
+  à 240 Hz, rendu par la RTX ; HEVC NVENC en 1080p ; SCTP ; `MW_LAN_ONLY=1`.
+- **Bras** : A (`cadencelock=0`, la porte d'avant) et A' (`cadencelock=1`), en
+  alternance. Le treillis est journalisé dans les deux. `clicktrace=1` et
+  `relaylog=1` ne sont armés que pendant les passes.
+- **Clients** :
+  - l'UM790Pro sous Windows, Chrome sur le M27Q à 120 Hz, en Ethernet (18
+    passes) puis en Wi-Fi (6 passes) ;
+  - le Mac M1 (`mw-mac`) en Wi-Fi, en vsync à 60 i/s, le 15/10 (4 passes).
+- **Séries** :
+  - contenu dense : bande de CoD à 60 i/s, client qui déchire, 3 passes de
+    3 min par bras ;
+  - client en vsync à 120 Hz, flux à 120 et à 60 i/s, 2 passes par bras
+    chacun ;
+  - RE9 (la copie, son coupé) à 60 i/s, 2 passes par bras ;
+  - 60 clics par passe, la fenêtre après un appui à son défaut.
+- **Piège** : le Chrome de contenu de DualRTX prend 1 à 2 rafraîchissements de
+  retard après ~30 s, à un moment différent dans chaque passe. L'âge se juge
+  donc par tranches de temps, sur l'âge de la capture.
+- **Outils** : `gatesim.py --lock` (parité) et `content-age/fluid.py`. Le
+  lanceur et les tableaux (`gl_series.py`, `gl_report.py`, `step_kinds.py`)
+  sont des scripts de session, hors dépôt. Passes `gl-um-*`, `gl-umw-*` et
+  `gl-mac-*`.
+
+### 8x.3 Les sauts de la porte, par cause
+
+Un saut « du contenu » est un rafraîchissement voulu qui n'avait pas de
+présentation. Son « rattrapage » est l'écart court qui ramène l'image suivante
+sur son point. Les autres sont ceux de la porte elle-même. Le compte se fait sur
+la fenêtre de la sonde d'âge, ou sur la scène de RE9.
+
+| Famille (passes A + A') | A : contenu / rattrapage / porte | A' : contenu / rattrapage / porte |
+|---|---|---|
+| Dense, client qui déchire (3+3) | 0,67 / 0,67 / **6,08 %** | 0,73 / 0,72 / **0,05 %** |
+| Vsync, 120 i/s (2+2) | 0,33 / 0,31 / **6,82 %** | 0,56 / 0,56 / **0,00 %** |
+| Vsync, 60 i/s (2+2) | 0,29 / 0,29 / **7,22 %** | 0,54 / 0,54 / **0,00 %** |
+| RE9 (2+2) | 15,28 / 10,42 / **4,33 %** | 12,95 / 9,03 / **0,16 %** |
+| Wi-Fi, client qui déchire (2+2) | 0,74 / 0,74 / **7,03 %** | 0,75 / 0,75 / **0,02 %** |
+| Wi-Fi, vsync à 60 i/s (1+1) | 0,25 / 0,25 / **7,26 %** | 0,75 / 0,75 / **0,00 %** |
+
+- Sous A', ce qui reste vient des trous du contenu. Le Chrome de contenu de
+  DualRTX rate ~0,7 % des rafraîchissements à 240 Hz, et chaque trou a son
+  rattrapage.
+- Le Mac M1 (Wi-Fi, vsync à 60 i/s, 4 passes de 60 clics) : sauts de 6,16 à
+  1,42 % sur la fenêtre d'âge, toutes causes. Débit et attente égaux, aucun
+  trou.
+- Client qui déchire, en Ethernet : écarts d'arrivée p1 / p99 de 12,1 / 21,1 à
+  13,2 / 19,1 ms. En Wi-Fi, les images jamais montrées passent de 66 à 42 par
+  minute.
+
+### 8x.4 Les critères du plan
+
+| Critère | Verdict | A → A' |
+|---|---|---|
+| R1 : sauts ≤ 2 % par passe dense | ✓ | 5,5-7,8 % → 0,54-1,18 %, dont 0,05 % de la porte |
+| R2 : client en vsync, pas hors du rythme ≤ 2,5 % | ✓ | 120 i/s 5,79 → 0,95 % ; 60 i/s 4,04 → 1,31 % ; Wi-Fi 4,87 → 0,48 % |
+| R3 : le flux (images/s, octets, âge) | ✓, une réserve | âge de la capture 5,51 → 5,59 ms ; en vsync, la moyenne suit la phase |
+| R4 : clic → drapeau à ±1 ms | ✓, bruité | dense +1,3 ms (IC −9,9 à +5,1) ; vsync 120 −0,6 ; vsync 60 −0,3 |
+| R5 : RE9 | ✓ | 59,77 → 59,83 i/s portées ; attente 4,11 → 4,04 ms ; 0 trou > 50 ms |
+| R6 : treillis engagé vite et tenu | ✓ | ≤ 0,28 s après le contenu dense ; 99,3-99,9 % des appels calés |
+| R7 : parité du rejeu ≥ 98 % | ✓ | ≥ 99,7 % partout |
+| R8 : tests | ✓ | 11 275 vérifications natives |
+
+- **R3 en vsync.** La moyenne de l'âge sort de ±0,5 ms sur deux séries (120 i/s
+  14,9 → 16,6 ms ; 60 i/s 8,8 → 9,4), et rentre dans l'autre sens sur la
+  troisième (Wi-Fi 11,4 → 11,3). C'est la phase entre l'image et le vsync du
+  client. Elle est fixe dans une passe A, tirée au hasard (13,4 à 16,5 ms selon
+  la passe), et balayée en dent de scie sous A' (§8x.5). Les p99 tiennent.
+- **R4.** Avec 55 à 60 clics par bras et la dérive du contenu, l'écart n'est que
+  du bruit. La jambe `present` baisse de 1,3 à 1,8 ms.
+- **Les parités basses du bras A** (71 à 97 %) viennent du rejeu de la porte
+  d'avant. Il décide au réveil, et l'hôte à la fin de la conversion, 0,1 à
+  0,4 ms plus tard. Les statistiques restent justes : 7,57 contre 6,74 % de
+  sauts sur la pire passe. A' décide sur l'heure de présentation elle-même, sans
+  ambiguïté.
+
+**Porte G2 (Bruno, 14/10)** : la porte calée par défaut (`5b74d41d`).
+
+### 8x.5 Le battement avec un écran à 119,872 Hz
+
+- Le M27Q de l'UM790Pro, « à 120 Hz », tourne à 119,872 Hz (rAF : 8,34223 ms,
+  identique dans les 12 passes). Le client le mesure à 0,05 % près.
+- A' cale alors sa cadence alignée sur 2 ou 4 périodes de l'hôte à 240,000 Hz :
+  120,000 ou 60,000 i/s.
+- **À 120 i/s**, une image de trop part toutes les 7,8 s, et n'est jamais
+  montrée : un double pas régulier, 7 en 52 s dans une passe.
+- **À 60 i/s**, rien n'est perdu, mais toutes les 7,8 s une image est tenue un
+  rafraîchissement au lieu de deux.
+- **L'âge** suit la même dent de scie : il monte d'environ 1 ms par seconde,
+  puis lâche un rafraîchissement du client.
+- **Sous A**, la porte glisse d'une période de l'écran toutes les 2,8 à 4,4 s :
+  5,8 % (120 i/s) et 4,0 % (60 i/s) des rafraîchissements montrent un pas de
+  3/4 ou 5/4 d'image. Le calage reste le moindre mal.
+- Un MacBook Air M3 (Chrome, Wi-Fi d'entreprise par Internet, 14/10) tourne à
+  60,001 Hz : pas de battement, et la porte s'y cale en 0,3 à 0,6 s.
+
+D'où la règle suivante : l'écran virtuel à un multiple de la fréquence réelle
+du client.
+
+### 8x.6 L'écran virtuel au multiple du client : V0 et V1 (14-15/10)
+
+- **V0** (DualRTX seul). Avec « 239.744 » dans `vdd_settings.xml`, Windows
+  applique 29968/125 exactement, et DDA lit 239,74 Hz. 288 et 330 Hz sont
+  acceptés. Une demande à 240/1 absente de la liste du pilote échoue en
+  silence : le mode doit passer en rationnel exact.
+- **V1** (`07e24486`, `c26bc94a`, `83f78bda`) : le taux en milli-hertz jusqu'au
+  pilote, la règle `matchedRefreshMilliHz`, la clé `vddmatch`, et la mesure
+  précise du client (pente des rAF sur 12 s).
+- **Vu en route, le 15/10 à 21:08 : 2 min d'écran noir.**
+  - La tâche élevée qui applique le mode ignore un second lancement tant que le
+    premier tourne. Le second partait 0,5 s après le premier.
+  - Le client croyait son écran à 2564x1440 (sa fenêtre était passée sur
+    l'écran voisin, à 2562x1440), et relançait deux fois.
+  - Corrigé : l'hôte attend la fin de la tâche (`39a88eb4`), et le client
+    tolère 1 % sur la taille de l'écran, avec un relancement à la fois
+    (`010ec199`).
+- **Un premier test à l'œil**, le 15/10 au soir, était nul : les deux bras
+  tournaient à 240,000 Hz. Le pilote ne relit son fichier qu'au redémarrage de
+  son nœud, et la `--dev` d'avant V1 ne le redémarrait que pour un fichier
+  qu'elle avait écrit elle-même.
+
+### 8x.7 V2, le banc (15/10/2026, 22:15-22:50)
+
+- **Hôte** : DualRTX en `--dev`, build de `010ec199`. Écran virtuel du produit
+  rendu par la RTX ; HEVC NVENC en 1080p ; `MW_LAN_ONLY=1`.
+- **Bras** : A (`vddmatch=0`, 240,000 Hz) et B (`vddmatch=1`), en alternance,
+  avec la porte calée dans les deux.
+- **Client** : l'UM790Pro sous Windows en Ethernet, Chrome sur le M27Q, en
+  vsync. Pour la série à 144 Hz, le M27Q est passé à 144 Hz (143,847 réels)
+  pour ce banc seulement, avec l'accord de Bruno, puis il est revenu à 120 Hz.
+- **Contenu** : la bande de CoD. Chaque passe fait 20 s d'âge puis 60 clics, et
+  relève les rAF (`fluid.py`).
+- **Outils** : `v2_series.py`, `cap_fluid.py` et `age_ramp.py`, des scripts de
+  session hors dépôt. Passes `v2-um-*`.
+
+B marche de bout en bout : « virtual display at 239.744 Hz (vddmatch: 2 x the
+client's 119.872 Hz) ». DDA y lit 239,744 Hz, soit une période de
+4 171 115 ns, et l'intervalle de la porte, 8 342 231 ns, fait 2 périodes
+exactement.
+
+| Série | Mesure | A (240,000 Hz) | B (`vddmatch`) |
+|---|---|---|---|
+| 120 i/s, vsync à 119,872 Hz (2+2) | images envoyées jamais montrées | 12 (6,9/min) | 3 (1,7/min) |
+| | pente de l'âge | +0,8 à +1,0 ms/s, puis une image lâchée toutes les ~8 s | −0,07 à +0,19 ms/s |
+| | pas hors du rythme | 0,48 % | 1,12 % (B1 0,65, B2 1,59) |
+| 60 i/s, vsync à 119,872 Hz (2+2) | doubles pas | 0,13 % | 0,00 % |
+| | pas hors du rythme | 1,40 % | 0,93 % |
+| | écarts d'arrivée > 25 ms | 29 | 6 |
+| | images/s | 59,59 | 59,96 |
+| 144 i/s, vsync à 143,847 Hz (1+1) | écran virtuel | 240 Hz, porte jamais calée | 287,694 Hz, porte calée sur 97,7 % |
+| | images jamais montrées | 20,7/min | 0 |
+| | répétitions hors clics | 0,26 % | 0,03 % |
+| | doubles pas | 0,33 % | 0,00 % |
+
+- **La dent de scie de l'âge disparaît** : sous A, elle est là à 120 comme à
+  60 i/s ; sous B, l'âge reste plat. C'était le critère V2.1.
+- **Les pas hors du rythme de B à 120 i/s** viennent d'une seule passe, B2. Sa
+  phase, fixe tout le flux, tombe près de l'échéance du client, et l'âge saute
+  d'un rafraîchissement (12,5 ↔ 20 ms). Ce n'est pas le contenu : ses doubles
+  pas ne font que 0,1 %. Piste : choisir la phase (§8x.10).
+- **Le clic → drapeau ne bouge pas** : médianes de 31,0 à 35,5 ms dans les deux
+  bras. L'âge moyen à l'écran suit la phase : 22 à 26 ms dans les deux bras.
+- **À 144 Hz**, la porte ne peut pas se caler sous A : 144 i/s sur 240 Hz n'est
+  pas un rapport entier. Sous B, la capture à 288 Hz prend 257 présentations
+  par seconde, avec une acquisition p99 de 0,35 ms, un encodage p99 de 2,56 ms
+  et un total p99 de 5,12 ms.
+
+### 8x.8 La tenue de la capture, et les seuils du repli ×1
+
+`MW_VDD_REFRESH` à 240, 288 et 330 Hz, flux à 120, 144 et 165 i/s, client à
+120 Hz qui déchire, bande de CoD dense.
+
+| Taux | Dessinées/s | Présentations/s | Non portées/s | Grille calée | Repliées (passe) | Boucle occupée | Acquisition + conversion p99 | Total p99 |
+|---|---|---|---|---|---|---|---|---|
+| 240 Hz | 119,95 | 214 | 103 | 98,0 % | 6 | 23 % | 0,62 ms | 5,63 ms |
+| 288 Hz | 143,88 | 258 | 124 | 97,7 % | 17 | 26 % | 0,41 ms | 4,61 ms |
+| 330 Hz | 164,89 | 296 | 142 | 97,0 % | 15 | 29 % | 0,46 ms | 4,61 ms |
+
+- Aucune perte, aucune éviction, aucune image envoyée et jamais dessinée.
+- Les présentations suivent ~90 % du taux de l'écran, à tout taux : c'est le
+  rythme du contenu, pas celui de la capture.
+- La boucle est occupée surtout par l'encodage, qui est synchrone. Le double du
+  taux n'y ajoute que des acquisitions, ~1 % de la boucle.
+- Les seuils du repli ×1 (`CaptureHold`, `f3d25c8c`) reprennent ces marges :
+
+  | Seuil du repli | Mesuré à 330 Hz |
+  |---|---|
+  | treillis calé ≥ 90 % des appels | 97 % |
+  | images du flux portées ≥ 97 % | 99,9 % |
+  | présentations repliées ≤ 1 % | 0,06 % |
+  | boucle occupée ≤ 70 % | 29 % |
+
+### 8x.9 Le test à l'œil (16/10/2026, 07:49-08:00)
+
+- **Le cadre** : Bruno devant l'UM790Pro, Chrome en vsync sur le M27Q à
+  119,872 Hz, flux 1080p à 120 i/s. Deux paires X/Y, tirées en secret. Chaque
+  bras est vérifié au journal de la `--dev` avant le verdict, et révélé
+  après.
+- **Le tirage** : X = `vddmatch=0` (« mode at 240.000 Hz ») et Y = `vddmatch=1`
+  (« mode at 239.744 Hz ») dans les deux paires. La grille est calée sur 97,4 à
+  98,8 % des appels.
+- **Paire 1 : Y préféré.** X montre des micro-saccades toutes les 2 à 3 s ; Y
+  en garde, mais moins fréquentes.
+- **Paire 2 : Y préféré.** X montre des micro-saccades peu fréquentes, toutes
+  les 5 à 8 s ; Y est « très fluide dans sa globalité, peu de saccades ».
+- **La réserve** : pendant Y2, le client est passé de Canvas2D à WebGL. La
+  bascule de rendu (`RendererFallback.js`) voyait Canvas2D à 13,2 ms par image
+  sur le 780M, pour 8,3 ms entre deux images. Le moment de la bascule n'est pas
+  connu, et la paire 2 peut en être faussée. La paire 1 est nette : Canvas2D
+  dans les deux bras.
+
+**Décision D3 (Bruno, 16/10)** : `vddmatch` par défaut sous Windows, avec le
+repli ×1 et le plafond de 330 Hz (`b3451a38`).
+
+### 8x.10 Ce qui reste
+
+- **Choisir la phase** (§8x.7). Pour N périodes par image, la porte calée a N
+  phases possibles. Il faudrait prendre celle qui tombe loin de l'échéance du
+  client, d'après les arrivées qu'il rapporte.
+- **Un hôte modeste** à 288 et 330 Hz (V2.3) : les seuils du repli sont les
+  marges de la RTX.
+- **RE9** à 288 et 330 Hz.
+- **Linux** : la porte calée sous KMS (vblank exacts, netteté 0,004). Le
+  portail de Mutter n'a pas de grille.
+- **Les rapports non entiers** (72, 75, 90, 145 i/s sur 240 Hz). Un client en
+  vsync à 59,94 Hz devant un hôte à 240,000 Hz n'a eu aucun banc, mais
+  `vddmatch` lui donne 239,76 Hz sous Windows.
+- **Le décompte « not carried »**, qui repart de zéro à chaque changement de
+  porte.
+- **Canvas2D à 13,2 ms par image** sur le 780M en 1080p120, vu au test à l'œil.
+
+**Concrètement, pour l'utilisateur** : sur un hôte Windows, les images
+partent maintenant à un rythme régulier. Sur un écran qui affiche au vsync
+(Mac, iPhone, iPad, TV, Firefox, ou Chrome réglé ainsi), les petites saccades
+qui revenaient par épisodes de quelques dizaines de secondes, une image un peu
+en avance puis une un peu en retard, ont presque toutes disparu. Ce qui reste
+vient du jeu ou du réseau. Quand on streame l'écran virtuel « MoonlightWeb
+Virtual Display », celui-ci suit maintenant la vraie fréquence de l'écran du
+client, qui tourne rarement à sa valeur ronde (119,87 Hz pour un « 120 Hz ») :
+plus d'image perdue toutes les huit secondes, ni de mouvement qui accroche à ce
+rythme. Un PC qui ne tient pas ce rythme revient de lui-même à la fréquence du
+client au stream suivant. La latence et le débit ne changent pas. Sur un PC
+qui déchire (Chrome sous Windows, par défaut), la différence se voit peu : les
+images arrivent seulement plus régulièrement. Les hôtes Linux et macOS gardent
+leur règle d'avant.
 
 ## 9. Pour l'A/B
 
