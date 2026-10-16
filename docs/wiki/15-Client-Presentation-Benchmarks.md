@@ -78,7 +78,7 @@ Downscaling quality was checked separately (1440p and 2160p streams into a 2018�
 
 ## 15.4 Decision 3 — one checkbox, "auto" picks the algorithm
 
-In production the Enhancer is a single checkbox; the algorithm is always `auto`. The dropdown (Auto · Canvas2D · Video · Smooth2D · SGSR1 · NIS · FSR1, each in its WebGL2 and WebGPU flavour) exists **only in debug builds**; a Release build honours a value planted in `localStorage['mw-streaming-settings'].video_enhancement_algo`, nothing more.
+In production the Enhancer is a single checkbox; the algorithm is always `auto`. The dropdown (Auto · Canvas2D · Video · Smooth2D · SGSR1 · NIS · FSR1, each in its WebGL2 and WebGPU flavour) exists **only in debug builds or debug mode**; a Release build honours a value planted in `localStorage['mw-streaming-settings'].video_enhancement_algo`, nothing more.
 
 `auto` resolves (`pickAutoEnhancer` in `BrowserDetect.js`):
 
@@ -137,7 +137,7 @@ Verdicts:
 3. **FSR1 does not tone-map** and does not need to: in `linear` mode it runs on scene-referred floats and the picture is right; ACES is required only when the display is SDR.
 4. Canvas2D Off measured **slower** than FSR1 WebGL2 in this windowed SDR series (54 vs 36 ms), stable across two runs. It contradicts the earlier windowed series in 15.3 (Canvas2D fastest) and was not pursued: the perimeter was closed by the author after these runs. Anyone reopening it should measure fullscreen first.
 
-Seen in passing: Sunshine streams an HDR desktop **washed out** when the session is SDR; the native host does not encode HDR yet (planned: FP16 capture → P010 → HEVC Main10 / AV1 10-bit), so the "HDR host, SDR client" case is real only on Sunshine.
+Seen in passing: Sunshine streams an HDR desktop **washed out** when the session is SDR; at the time the native host did not encode HDR (it does since, from FP16 capture to P010 and HEVC Main10 / AV1 10-bit, on Windows and macOS 15, never on Linux).
 
 ## 15.6 Decision 5 — 4:4:4 chroma
 
@@ -159,7 +159,7 @@ Decision: **4:4:4 is SDR-only.** HDR stays 4:2:0. Text legibility is the whole p
 
 | Setting | Default | Chosen because |
 |---|---|---|
-| Renderer, SDR, Enhancer off | Canvas2D, main thread | 15.2: fastest first impression on Mac and Windows; no WebGPU device created. |
+| Renderer, SDR, Enhancer off | Canvas2D, main thread (WebGL2 in Firefox, `<video>` on a TV) | 15.2: fastest first impression on Mac and Windows; no WebGPU device created. |
 | Video worker `auto` | off | 15.2: no gain; WebGPU-in-worker is the macOS pathology. |
 | Enhancer | off | 15.2; opt-in, one checkbox in production. |
 | Enhancer `auto`, desktop | FSR1 on WebGL2 | 15.3–15.4: cheapest WebGL2 upscaler at the median, best text. |

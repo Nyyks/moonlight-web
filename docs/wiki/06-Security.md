@@ -8,7 +8,7 @@ MoonlightWeb exposes a streaming server to the LAN and, optionally, to the publi
 
 ## 6.1 Threat model in one paragraph
 
-An instance opened to the Internet publishes no name, takes no certificate in its own name and opens no web port; what it exposes is a **held outbound line** and, during a stream, one media port. So there is no address to scan and no hostname in Certificate Transparency: a stranger's way in is to arrive at a known entry identifier and then get past the PIN. Attackers can: guess an identifier (128 bits, quota-bounded — [Infrastructure §10.12](10-Infrastructure-Stack.md#1012-hardening--limits)), scan/guess the PIN, flood connections, or replay stolen artifacts. Trusted parties: the local machine (localhost is always admin), LAN clients (exempt from bans, still need a PIN when remote-auth applies). The introduction server is **partially** trusted — it knows which identifiers are online and sees residential addresses on its sockets, and it is deliberately kept out of the signalling's meaning by [§6.6](#66-the-entry-identifier-and-mw-bind-v1). Out of scope: volumetric DDoS, a compromised host OS.
+An instance opened to the Internet publishes no name, takes no certificate in its own name and opens no web port; what it exposes is a **held outbound line** and, during a stream, one media port. So there is no address to scan and no hostname in Certificate Transparency: a stranger's way in is to arrive at a known entry identifier and then get past the PIN. Attackers can: guess an identifier (128 bits, quota-bounded — [Infrastructure §10.12](10-Infrastructure-Stack.md#1012-hardening--limits)), scan/guess the PIN, flood connections, or replay stolen artifacts. Trusted parties: the local machine (localhost is admin, except under `--noadmin`), LAN clients (exempt from bans, still need a PIN when remote-auth applies). The introduction server is **partially** trusted — it knows which identifiers are online and sees residential addresses on its sockets, and it is deliberately kept out of the signalling's meaning by [§6.6](#66-the-entry-identifier-and-mw-bind-v1). Out of scope: volumetric DDoS, a compromised host OS.
 
 ## 6.2 Authentication
 
@@ -16,7 +16,7 @@ Three ways to obtain a session, all implemented in `AuthManager` + `AuthRoutes`:
 
 | Method | Flow | Properties |
 |---|---|---|
-| **PIN** | Admin generates an 8-char PIN on the admin page → remote user enters it once (`POST /api/auth/validate`) | Single-use in practice: a consumed PIN **auto-regenerates** and the admin UI shows `--------` until a new one is explicitly generated. Rate-limited per IP. |
+| **PIN** | Admin generates a 6-digit PIN on the admin page → remote user enters it once (`POST /api/auth/validate`) | Single-use in practice: a consumed PIN **auto-regenerates** and the admin UI shows `------` until a new one is explicitly generated. Rate-limited per IP. |
 | **Certificate file** | Admin downloads a token file (`/api/admin/certificate/download`, 64+ random bytes Base64) → remote user uploads it instead of typing a PIN | Optional (`cert_auth_enabled`), revocable by regeneration. Compared in constant time. |
 | **Host key** (`?mwk=`) | The host machine's own entry points (tray, Desktop shortcut, startup open) embed a long random key in the URL. Redeeming it (`POST /api/auth/host-key`) proves the browser runs *on the host* even when reached via the public domain (peer address is the router, not loopback) | Grants a **host session** (localhost-equivalent, admin-capable). **Single-use**: each redemption rotates the key and rewrites every entry point, so a leaked URL cannot be replayed. |
 
@@ -61,11 +61,11 @@ A pre-configured machine left to visitors: they stream the hosts already set up 
 ## 6.3 Sessions
 
 - A successful auth issues a random token in the `mw_session` cookie. **Only its SHA-256 (base64url) is stored** — in memory and in `sessions.json` — so a stolen sessions file cannot be replayed.
-- **Sliding expiration**: 90 days of inactivity (`SESSION_TTL_SECS`); any authenticated request bumps `lastSeen`. Expired sessions are purged periodically; persisted sessions older than 24 h without a live process are discarded on load.
+- **Sliding expiration**: 90 days of inactivity (`SESSION_TTL_SECS`); any authenticated request bumps `lastSeen`. Expired sessions are purged periodically; persisted sessions already expired by inactivity are discarded on load.
 - **"Remember me" declined** (`remember: false` on `/api/auth/validate`, the checkbox on the login page, on by default): the session is marked `ephemeral` and differs in three ways. Its cookie carries **no `Max-Age`**, so it dies with the browser process; its inactivity budget is **8 hours** (`EPHEMERAL_SESSION_TTL_SECS`) instead of 90 days; and it is **never written to `sessions.json`**, so a restart ends it too. The cookie refresh in `/api/auth/status` re-checks the flag — adding a `Max-Age` there would silently promote a temporary login to 90 days. A session cookie alone would not be enough: the browser on a public machine is rarely closed, and the short server-side TTL is what actually ends an abandoned session there.
 - Sessions carry IP, machine name (renameable), geolocation (async `GeoIpService` lookup, refreshed when the IP changes), a `streaming` flag (single active stream), `is_host`, and `is_admin` (unlocked with the remote admin password — see §6.2.1).
 - **Revocation is immediate**: destroying a session that is actively streaming emits `streamingSessionRevoked`, which tears the live relay down and cancels the browser's Sunshine session (kill-switch in `main.cpp`).
-- Regenerating the PIN invalidates **all** sessions.
+- `POST /api/auth/regenerate` (a new PIN that revokes) invalidates **all** sessions; a new PIN from the admin page or `--new-pin` leaves them alone.
 - HMAC signing key: generated once, persisted (`hmac_key` in settings) so sessions survive restarts.
 
 ## 6.4 Brute-force & flood mitigation
@@ -74,7 +74,7 @@ Two cooperating layers:
 
 1. **`AuthManager` secret rate limiting** — per rate-limit bucket (raw IPv4, or /64 prefix for IPv6 — a client trivially owns a whole /64): 3 failures → escalating lockouts (30 s → 2 min → 10 min), remaining attempts surfaced to the UI. Constant-time comparisons throughout. The PIN and the remote admin password each get their own bucket per address.
 2. **`ConnectionGuard`** — in-process fail2ban equivalent (fail2ban itself is Linux-only), checked at `accept()` time so banned IPs cost no TLS handshake:
-   - Connection flood: > 200 new TCP connections / 10 s / IP (generous because the server is `Connection: close` — one page load bursts dozens of connections).
+   - Connection flood: > 200 new TCP connections / 10 s / IP (generous because a client that asks for `Connection: close` gets a socket per response — one page load can burst dozens of connections).
    - Auth-failure flood: > 10 rejected (401) requests / 60 s / IP.
    - Both arm a **10-minute temporary ban**; entries idle 5 min are purged.
    - **Loopback and private addresses (RFC 1918 / ULA / link-local) are fully exempt** — LAN clients are trusted.
@@ -127,7 +127,7 @@ A consent only covers the mechanism its wording described. When the wording chan
 
 ## 6.8 Other hardening
 
-- `/api/admin/*` → 403 unless localhost/host-session; the internet/setup/system/local routes re-check the same `req.isLocal` predicate inside their handlers.
+- `/api/admin/*` → 403 unless localhost, a host session or a session unlocked with the admin password (nobody under `--noadmin`); the internet/setup/system/local routes re-check the same `req.isLocal` predicate inside their handlers.
 - Input to Sunshine is encrypted (AES-128-GCM, per-session key) as per GameStream.
 - Private LAN ICE candidates are advertised **only to clients detected as local** — internet peers never learn the LAN IP.
 - Per-browser `client_uniqueid` values are sanitized to hex (max 32 chars) before reaching launch URLs.
