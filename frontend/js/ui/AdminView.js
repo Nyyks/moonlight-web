@@ -154,13 +154,16 @@ export class AdminView {
         this._videoPipeline = 'auto';
         this._videoPipelineSupported = false;
         this._videoPipelineValues = ['auto', 'd3d11', 'd3d12'];
-        // The owner's apps in gamescope (a Linux native host): [{name, command}],
-        // and whether this machine can run them — the section is hidden where
-        // it cannot.
-        /** @type {{name: string, command: string}[]} */
-        this._gamescopeApps = [];
-        this._gamescopeAppsSupported = false;
-        this._gamescopeAppsMax = 16;
+        // Apps on this PC (the native host's apps): the list the server keeps,
+        // where they open, the launchers found on this PC, and whether this
+        // machine streams at all — the section is hidden where it does not.
+        /** @type {{id: string, app_id: number, name: string, command: string, source?: string, image?: string}[]} */
+        this._hostApps = [];
+        this._hostAppsSupported = false;
+        this._hostAppsMax = 16;
+        this._hostAppsScreen = 'primary';
+        /** @type {{source: string, name: string, listed: boolean, dismissed: boolean}[]} */
+        this._hostAppsDetected = [];
         // Diagnostics (Advanced): the two modes in force, and whether the
         // command line holds each on for this run — its box then cannot
         // turn it off. The logs archive, while it is being built.
@@ -197,6 +200,7 @@ export class AdminView {
         }
         await this._loadState();
         await this._loadStreamingState();
+        await this._loadHostApps();
         await this._loadInternetState();
         await this._loadSessions();
         this.render();
@@ -271,13 +275,17 @@ export class AdminView {
             if (Array.isArray(settings.native_video_pipeline_options)) {
                 this._videoPipelineValues = settings.native_video_pipeline_options;
             }
-            this._gamescopeAppsSupported = settings.gamescope_apps_supported === true;
-            if (Array.isArray(settings.gamescope_apps))
-                this._gamescopeApps = settings.gamescope_apps;
-            if (settings.gamescope_apps_max > 0)
-                this._gamescopeAppsMax = settings.gamescope_apps_max;
         } catch (err) {
             console.warn('[Admin] Failed to load streaming settings:', err);
+        }
+    }
+
+    async _loadHostApps() {
+        try {
+            this._applyHostAppsState(await BackendClient.getHostApps());
+        } catch (err) {
+            // An older server has no such route: the section stays hidden.
+            console.warn('[Admin] Failed to load the apps on this PC:', err);
         }
     }
 
@@ -1132,7 +1140,7 @@ export class AdminView {
                         </div>
                     </div>
                 </div>
-                ${this._gamescopeAppsSupported ? this._renderGamescopeApps() : ''}
+                ${this._hostAppsSupported ? this._renderHostApps() : ''}
                 ${this._renderAdvanced()}
             </div>
         `;
@@ -1468,8 +1476,8 @@ export class AdminView {
             });
         }
 
-        // Games outside Steam (the owner's apps in gamescope): each change saved at once.
-        this._bindGamescopeApps();
+        // Apps on this PC: each change saved at once.
+        this._bindHostApps();
 
         // Diagnostics (Advanced): both modes saved at once, the archive on click.
         for (const id of ['#chk-debug-mode', '#chk-verbose-logs']) {
@@ -2451,63 +2459,125 @@ export class AdminView {
         }
     }
 
-    // --- The owner's apps in gamescope (Linux native host) ---
+    // --- Apps on this PC (the native host's apps) ---
 
-    // A card each on this host, beside the displays and Steam's: the name the
-    // card shows, the command the host runs in the app's own gamescope. A
-    // section of its own, named for what it does ("games outside Steam"), not
-    // for the compositor that runs them: folded under Advanced, it read as a
+    // A card each on this host, beside the displays: the name the card shows,
+    // the command or link that opens it, and its image. Where it opens is the
+    // same for every app of this machine (screen): in its own gamescope, on
+    // the virtual display, or on the primary display. A section named for what
+    // it does, not for what runs it: folded under Advanced, it read as a
     // diagnostic and explained nothing (Bruno, 13/10/2026).
-    _renderGamescopeApps() {
-        const full = this._gamescopeApps.length >= this._gamescopeAppsMax;
-        const rows = this._gamescopeApps
+    _renderHostApps() {
+        const full = this._hostApps.length >= this._hostAppsMax;
+        const screen = this._hostAppsScreen;
+        const desc =
+            screen === 'virtual'
+                ? t('admin.hostAppsDescVirtual')
+                : screen === 'gamescope'
+                  ? t('admin.hostAppsDescGamescope')
+                  : t('admin.hostAppsDescPrimary');
+        const rows = this._hostApps
+            .map((app, i) => {
+                const thumb = app.image
+                    ? `<img src="${this.esc(this._hostAppImageUrl(app))}" alt="" loading="lazy">`
+                    : '';
+                const auto =
+                    app.source && app.source !== 'user'
+                        ? `<span class="host-app-badge">${t('admin.hostAppAuto')}</span>`
+                        : '';
+                return `
+                        <li class="host-app-row">
+                            <div class="host-app-thumb">${thumb}</div>
+                            <div class="host-app-text">
+                                <div class="host-app-title">
+                                    <span class="host-app-name">${this.esc(app.name)}</span>${auto}
+                                </div>
+                                <code class="host-app-command">${this.esc(app.command)}</code>
+                                <div class="host-app-actions">
+                                    <button class="btn btn-secondary btn-small" data-host-app-image="${i}">
+                                        ${t('admin.hostAppChangeImage')}
+                                    </button>
+                                    ${
+                                        app.image
+                                            ? `<button class="btn btn-secondary btn-small" data-host-app-image-remove="${i}">
+                                        ${t('admin.hostAppRemoveImage')}
+                                    </button>`
+                                            : ''
+                                    }
+                                    <button class="btn btn-secondary btn-small" data-host-app-remove="${i}">
+                                        ${t('admin.hostAppRemove')}
+                                    </button>
+                                </div>
+                            </div>
+                        </li>`;
+            })
+            .join('');
+        // A launcher found on this PC whose card the owner removed: offered back.
+        const restorable = this._hostAppsDetected
+            .filter((d) => d.dismissed && !d.listed)
             .map(
-                (app, i) => `
-                        <li class="gamescope-app-row">
-                            <span class="gamescope-app-name">${this.esc(app.name)}</span>
-                            <code class="gamescope-app-command">${this.esc(app.command)}</code>
-                            <button class="btn btn-secondary btn-small" data-gamescope-remove="${i}">
-                                ${t('admin.gamescopeAppRemove')}
-                            </button>
-                        </li>`,
+                (d) => `
+                    <p class="settings-hint host-apps-detected">
+                        ${t('admin.hostAppsDetected', { name: this.esc(d.name) })}
+                        <button class="btn btn-link" data-host-app-restore="${this.esc(d.source)}" ${full ? 'disabled' : ''}>
+                            ${t('admin.hostAppRestore')}
+                        </button>
+                    </p>`,
             )
             .join('');
         return `
-                <div class="settings-section gamescope-apps" id="admin-section-gamescope">
-                    <h3 class="settings-section-title">${t('admin.gamescopeApps')}</h3>
-                    <p class="settings-section-desc">${t('admin.gamescopeAppsDesc')}</p>
+                <div class="settings-section host-apps" id="admin-section-host-apps">
+                    <h3 class="settings-section-title">${t('admin.hostApps')}</h3>
+                    <p class="settings-section-desc">${desc}</p>
                     ${
                         rows
-                            ? `<ul class="gamescope-app-list">${rows}</ul>`
-                            : `<p class="settings-hint gamescope-apps-empty">${t('admin.gamescopeAppsEmpty')}</p>`
+                            ? `<ul class="host-app-list">${rows}</ul>`
+                            : `<p class="settings-hint host-apps-empty">${t('admin.hostAppsEmpty')}</p>`
                     }
-                    <div class="gamescope-app-add">
-                        <input type="text" id="gamescope-app-name" class="settings-input gamescope-app-name-input"
-                               maxlength="40" placeholder="${this.esc(t('admin.gamescopeAppName'))}"
-                               aria-label="${this.esc(t('admin.gamescopeAppName'))}" ${full ? 'disabled' : ''} />
-                        <input type="text" id="gamescope-app-command" class="settings-input gamescope-app-command-input"
-                               maxlength="1000" placeholder="${this.esc(t('admin.gamescopeAppCommand'))}"
-                               aria-label="${this.esc(t('admin.gamescopeAppCommand'))}" ${full ? 'disabled' : ''} />
-                        <button class="btn btn-save u-shrink-0" id="btn-gamescope-add" disabled>
-                            ${t('admin.gamescopeAppAdd')}
+                    <div class="host-app-add">
+                        <input type="text" id="host-app-name" class="settings-input host-app-name-input"
+                               maxlength="40" placeholder="${this.esc(t('admin.hostAppName'))}"
+                               aria-label="${this.esc(t('admin.hostAppName'))}" ${full ? 'disabled' : ''} />
+                        <input type="text" id="host-app-command" class="settings-input host-app-command-input"
+                               maxlength="1000" placeholder="${this.esc(t('admin.hostAppCommand'))}"
+                               aria-label="${this.esc(t('admin.hostAppCommand'))}" ${full ? 'disabled' : ''} />
+                        <label class="btn btn-secondary host-app-file-label${full ? ' is-disabled' : ''}">
+                            <span id="host-app-file-name">${t('admin.hostAppImage')}</span>
+                            <input type="file" id="host-app-file" class="u-hidden"
+                                   accept="image/png,image/jpeg,image/webp" ${full ? 'disabled' : ''} />
+                        </label>
+                        <button class="btn btn-save u-shrink-0" id="btn-host-app-add" disabled>
+                            ${t('admin.hostAppAdd')}
                         </button>
                     </div>
-                    <p class="settings-hint gamescope-apps-hint">${t('admin.gamescopeAppsHint')}</p>
-                    ${full ? `<p class="settings-hint">${t('admin.gamescopeAppsFull', { max: this._gamescopeAppsMax })}</p>` : ''}
+                    <p class="settings-hint host-apps-hint">${t('admin.hostAppsHint')}</p>
+                    ${restorable}
+                    ${full ? `<p class="settings-hint">${t('admin.hostAppsFull', { max: this._hostAppsMax })}</p>` : ''}
+                    <input type="file" id="host-app-image-file" class="u-hidden"
+                           accept="image/png,image/jpeg,image/webp" tabindex="-1" aria-hidden="true" />
                 </div>`;
     }
 
-    _bindGamescopeApps() {
-        const section = this.container.querySelector('#admin-section-gamescope');
+    /**
+     * The card's own image URL, as the host's grid asks for it — the hash in
+     * it makes each version a URL of its own.
+     * @param {{app_id: number, image?: string}} app
+     */
+    _hostAppImageUrl(app) {
+        return `/api/hosts/moonlightweb-native-host/appasset?appid=${app.app_id}&v=${encodeURIComponent(app.image ?? '')}`;
+    }
+
+    _bindHostApps() {
+        const section = this.container.querySelector('#admin-section-host-apps');
         if (!section) return;
-        const name = /** @type {HTMLInputElement|null} */ (
-            section.querySelector('#gamescope-app-name')
-        );
+        const name = /** @type {HTMLInputElement|null} */ (section.querySelector('#host-app-name'));
         const command = /** @type {HTMLInputElement|null} */ (
-            section.querySelector('#gamescope-app-command')
+            section.querySelector('#host-app-command')
         );
+        const file = /** @type {HTMLInputElement|null} */ (section.querySelector('#host-app-file'));
+        const fileName = section.querySelector('#host-app-file-name');
         const add = /** @type {HTMLButtonElement|null} */ (
-            section.querySelector('#btn-gamescope-add')
+            section.querySelector('#btn-host-app-add')
         );
         const ready = () => {
             if (add && name && command) {
@@ -2521,49 +2591,172 @@ export class AdminView {
                 if (e.key === 'Enter' && add && !add.disabled) add.click();
             });
         }
+        if (file && fileName) {
+            file.addEventListener('change', () => {
+                fileName.textContent = file.files?.[0]?.name || t('admin.hostAppImage');
+            });
+        }
         if (add && name && command) {
             add.addEventListener('click', () => {
                 const app = { name: name.value.trim(), command: command.value.trim() };
-                void this._saveGamescopeApps(
-                    [...this._gamescopeApps, app],
-                    t('admin.gamescopeAppAdded', { name: app.name }),
+                void this._addHostApp(app, file?.files?.[0] ?? null);
+            });
+        }
+        section.querySelectorAll('[data-host-app-remove]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const index = Number(/** @type {HTMLElement} */ (btn).dataset.hostAppRemove);
+                const removed = this._hostApps[index];
+                void this._saveHostApps(
+                    () =>
+                        BackendClient.saveHostApps(
+                            this._hostApps
+                                .filter((_, i) => i !== index)
+                                .map((a) => ({ id: a.id, name: a.name, command: a.command })),
+                        ),
+                    t('admin.hostAppRemoved', { name: removed?.name ?? '' }),
+                );
+            });
+        });
+        // One hidden file input serves every row's "Change the image".
+        const picker = /** @type {HTMLInputElement|null} */ (
+            section.querySelector('#host-app-image-file')
+        );
+        let pickedFor = -1;
+        section.querySelectorAll('[data-host-app-image]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                pickedFor = Number(/** @type {HTMLElement} */ (btn).dataset.hostAppImage);
+                if (picker) {
+                    picker.value = '';
+                    picker.click();
+                }
+            });
+        });
+        if (picker) {
+            picker.addEventListener('change', () => {
+                const app = this._hostApps[pickedFor];
+                const picked = picker.files?.[0];
+                if (!app || !picked) return;
+                void this._saveHostApps(
+                    async () =>
+                        BackendClient.setHostAppImage(app.id, await this._hostAppPng(picked)),
+                    t('admin.hostAppImageChanged', { name: app.name }),
                 );
             });
         }
-        section.querySelectorAll('[data-gamescope-remove]').forEach((btn) => {
+        section.querySelectorAll('[data-host-app-image-remove]').forEach((btn) => {
             btn.addEventListener('click', () => {
-                const index = Number(/** @type {HTMLElement} */ (btn).dataset.gamescopeRemove);
-                void this._saveGamescopeApps(
-                    this._gamescopeApps.filter((_, i) => i !== index),
-                    t('admin.gamescopeAppRemoved', {
-                        name: this._gamescopeApps[index]?.name ?? '',
-                    }),
+                const app =
+                    this._hostApps[
+                        Number(/** @type {HTMLElement} */ (btn).dataset.hostAppImageRemove)
+                    ];
+                if (!app) return;
+                void this._saveHostApps(
+                    () => BackendClient.removeHostAppImage(app.id),
+                    t('admin.hostAppImageRemoved', { name: app.name }),
+                );
+            });
+        });
+        section.querySelectorAll('[data-host-app-restore]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const source = /** @type {HTMLElement} */ (btn).dataset.hostAppRestore ?? '';
+                const found = this._hostAppsDetected.find((d) => d.source === source);
+                void this._saveHostApps(
+                    () => BackendClient.restoreHostApp(source),
+                    t('admin.hostAppRestored', { name: found?.name ?? source }),
                 );
             });
         });
     }
 
     /**
-     * Save the whole list, then show what the server kept.
-     * @param {{name: string, command: string}[]} apps
+     * Add one app, then its image when one was picked: the server gives the
+     * new entry its id first.
+     * @param {{name: string, command: string}} app
+     * @param {File|null} image
+     */
+    async _addHostApp(app, image) {
+        const before = new Set(this._hostApps.map((a) => a.id));
+        await this._saveHostApps(
+            async () => {
+                let state = await BackendClient.saveHostApps([
+                    ...this._hostApps.map((a) => ({ id: a.id, name: a.name, command: a.command })),
+                    app,
+                ]);
+                const added = Array.isArray(state.apps)
+                    ? state.apps.find((/** @type {{id: string}} */ a) => !before.has(a.id))
+                    : null;
+                if (image && added) {
+                    state = await BackendClient.setHostAppImage(
+                        added.id,
+                        await this._hostAppPng(image),
+                    );
+                }
+                return state;
+            },
+            t('admin.hostAppAdded', { name: app.name }),
+        );
+    }
+
+    /**
+     * The picked image as the card shows it: cropped to cover 3:4 and drawn
+     * at the card's size, as a PNG in base64 — whatever the file was (JPEG,
+     * WebP), the server reads PNG only.
+     * @param {Blob} file
+     * @returns {Promise<string>}
+     */
+    async _hostAppPng(file) {
+        /** @type {ImageBitmap} */
+        let bitmap;
+        try {
+            bitmap = await createImageBitmap(file);
+        } catch {
+            throw new Error(t('admin.hostAppImageUnreadable'));
+        }
+        const width = 600;
+        const height = 800;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error(t('admin.hostAppImageUnreadable'));
+        const scale = Math.max(width / bitmap.width, height / bitmap.height);
+        const w = bitmap.width * scale;
+        const h = bitmap.height * scale;
+        ctx.drawImage(bitmap, (width - w) / 2, (height - h) / 2, w, h);
+        bitmap.close?.();
+        return canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
+    }
+
+    /**
+     * Run one change, then show what the server kept.
+     * @param {() => Promise<any>} change resolves to the section's new state
      * @param {string} done what the change did, once the server took it
      */
-    async _saveGamescopeApps(apps, done) {
+    async _saveHostApps(change, done) {
         try {
-            const resp = await BackendClient.saveStreamingSettings({ gamescope_apps: apps });
-            this._gamescopeApps = Array.isArray(resp.gamescope_apps) ? resp.gamescope_apps : apps;
+            this._applyHostAppsState(await change());
             Toast.success(done);
         } catch (err) {
-            console.warn('[Admin] Failed to save the gamescope apps:', err);
+            console.warn('[Admin] Failed to save the apps on this PC:', err);
             Toast.error(
-                t('admin.gamescopeAppsSaveFailed', { message: /** @type {Error} */ (err).message }),
+                t('admin.hostAppsSaveFailed', { message: /** @type {Error} */ (err).message }),
             );
         }
-        const section = this.container.querySelector('#admin-section-gamescope');
+        const section = this.container.querySelector('#admin-section-host-apps');
         if (section) {
-            section.outerHTML = this._renderGamescopeApps();
-            this._bindGamescopeApps();
+            section.outerHTML = this._renderHostApps();
+            this._bindHostApps();
         }
+    }
+
+    /** @param {any} state {supported, max, screen, apps, detected} */
+    _applyHostAppsState(state) {
+        if (!state || typeof state !== 'object') return;
+        this._hostAppsSupported = state.supported === true;
+        if (state.max > 0) this._hostAppsMax = state.max;
+        if (typeof state.screen === 'string') this._hostAppsScreen = state.screen;
+        if (Array.isArray(state.apps)) this._hostApps = state.apps;
+        if (Array.isArray(state.detected)) this._hostAppsDetected = state.detected;
     }
 
     // Saved at once, like the transport mode. It applies to the next stream: a

@@ -1666,15 +1666,17 @@ export class HostListView {
         // The whole card is the launch action. role/tabindex keep it
         // keyboard-accessible (Enter/Space handled by the keydown delegate).
         //
-        // A native host's app is a display, and the host says what it is: the
-        // card draws that machine, on no frame. Every other host keeps its
-        // cover art, and its own stand-in when there is none.
-        const image = app.device
+        // A native host's display card draws the machine the host says it
+        // is, on no frame. Its apps show the image the owner gave them, else
+        // the stand-in every other host's app gets when it has no cover art.
+        const cover = `<img src="${this.esc(app.boxArtUrl ?? '')}"
+                               alt="${this.esc(app.displayName)}"
+                               loading="lazy">`;
+        const drawsMachine = app.device && !app.isHostApp;
+        const image = drawsMachine
             ? hostArtHtml(app.device, devices)
             : app.boxArtUrl
-              ? `<img src="${this.esc(app.boxArtUrl)}"
-                               alt="${this.esc(app.displayName)}"
-                               loading="lazy">`
+              ? cover
               : appPlaceholderHtml(app.id, t);
         // The app a stopped stream left running (issue #24): the card resumes
         // it, and says so; a small Quit closes it on the host.
@@ -1686,7 +1688,7 @@ export class HostListView {
             <div class="app-card${running ? ' app-card--running' : ''}" data-app-id="${app.id}"
                  role="button" tabindex="0"
                  aria-label="${this.esc(aria)}">
-                <div class="app-card-image${app.device ? ' app-card-image--host' : ''}">
+                <div class="app-card-image${drawsMachine ? ' app-card-image--host' : ''}">
                     ${image}
                     ${running ? `<span class="app-card-badge">${this.esc(t('apps.running'))}</span>` : ''}
                 </div>

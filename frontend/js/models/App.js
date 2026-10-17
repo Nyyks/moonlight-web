@@ -63,17 +63,36 @@ export class App {
     }
 
     /**
-     * Is the screen behind this card made for the stream — the virtual display
-     * or a gamescope app? The resolution choice then names an exact size, a
-     * phone held upright included, instead of a box the host's shape is fitted
-     * into (see util/StreamResolution.js).
+     * Where one of the native host's apps opens (the owner's, or a launcher
+     * found on the PC): "gamescope", "virtual" (MoonlightWeb Virtual Display)
+     * or "primary". Null on a display's card, and on every other host.
+     */
+    get screen() {
+        const screen = this.device?.screen;
+        return typeof screen === 'string' ? screen : null;
+    }
+
+    /** Is this card one of the native host's apps rather than a display? */
+    get isHostApp() {
+        return this.screen !== null;
+    }
+
+    /**
+     * Is the screen behind this card made for the stream — the virtual display,
+     * an app opened on it, or a gamescope app? The resolution choice then names
+     * an exact size, a phone held upright included, instead of a box the host's
+     * shape is fitted into (see util/StreamResolution.js).
      */
     get isMadeForStream() {
-        return this.isVirtualDisplay || this.isGamescope;
+        return this.isVirtualDisplay || this.isGamescope || this.screen === 'virtual';
     }
 
     get boxArtUrl() {
         if (!this.hostUuid || !this.id || !this.hasBoxArt) return null;
-        return `/api/hosts/${encodeURIComponent(this.hostUuid)}/appasset?appid=${this.id}`;
+        const url = `/api/hosts/${encodeURIComponent(this.hostUuid)}/appasset?appid=${this.id}`;
+        // A native host's app image changes under the same id: its hash makes
+        // each version a URL of its own, which the browser may keep for good.
+        const art = this.device?.art;
+        return typeof art === 'string' && art ? `${url}&v=${encodeURIComponent(art)}` : url;
     }
 }

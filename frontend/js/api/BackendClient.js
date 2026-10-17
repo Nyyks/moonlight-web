@@ -937,6 +937,33 @@ export class BackendClient {
         return this.post('/api/settings/streaming', settings);
     }
 
+    // ── The native host's apps (host administrator only) ─────────────────────
+    // Each answer is the whole section's state: {supported, max, screen, apps,
+    // detected}.
+
+    static async getHostApps() {
+        return this.get('/api/host-apps');
+    }
+    /** @param {{id?: string, name: string, command: string}[]} apps the whole list */
+    static async saveHostApps(apps) {
+        return this.post('/api/host-apps', { apps });
+    }
+    /** @param {string} source a launcher found on this PC whose card was removed */
+    static async restoreHostApp(source) {
+        return this.post('/api/host-apps/restore', { source });
+    }
+    /**
+     * @param {string} id
+     * @param {string} png the image, a PNG in base64
+     */
+    static async setHostAppImage(id, png) {
+        return this.post(`/api/host-apps/${encodeURIComponent(id)}/image`, { png });
+    }
+    /** @param {string} id */
+    static async removeHostAppImage(id) {
+        return this.del(`/api/host-apps/${encodeURIComponent(id)}/image`);
+    }
+
     // ── First-run setup wizard (localhost only) ──────────────────────────────
 
     static async getSetupStatus() {

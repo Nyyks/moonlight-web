@@ -34,6 +34,31 @@ describe('App model', () => {
         expect(card('HDMI-A-1').isMadeForStream).toBe(false);
         expect(new App({ id: 3 }).isMadeForStream).toBe(false);
     });
+
+    it("knows the native host's apps, and the screen each opens on", () => {
+        const app = (device) => new App({ id: 2001, device }, 'moonlightweb-native-host');
+        const onVirtual = app({ key: 'host-app-x', screen: 'virtual' });
+        expect(onVirtual.isHostApp).toBe(true);
+        expect(onVirtual.screen).toBe('virtual');
+        expect(onVirtual.isMadeForStream).toBe(true);
+        const onPrimary = app({ key: 'host-app-y', screen: 'primary' });
+        expect(onPrimary.isMadeForStream).toBe(false);
+        expect(app({ key: 'gamescope-app-z', screen: 'gamescope' }).isGamescope).toBe(true);
+        expect(app({ key: 'HDMI-A-1' }).isHostApp).toBe(false);
+        expect(app({ key: 'HDMI-A-1' }).screen).toBeNull();
+    });
+
+    it("puts an app image's hash in its URL, so each version is a URL of its own", () => {
+        const withArt = new App(
+            { id: 2001, boxArt: true, device: { screen: 'virtual', art: 'ab12' } },
+            'moonlightweb-native-host',
+        );
+        expect(withArt.boxArtUrl).toBe(
+            '/api/hosts/moonlightweb-native-host/appasset?appid=2001&v=ab12',
+        );
+        const without = new App({ id: 2002, boxArt: false, device: { screen: 'virtual' } }, 'n');
+        expect(without.boxArtUrl).toBeNull();
+    });
 });
 
 describe('Host model', () => {
