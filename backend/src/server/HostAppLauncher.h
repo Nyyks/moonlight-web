@@ -87,7 +87,8 @@ bool open(const QString& command, QString* error);
 
 /// open() for an app shown on "MoonlightWeb Virtual Display", which is the
 /// main display by then. macOS: the windows the app opens in the next few
-/// seconds are moved onto it, those it had before left where they are.
+/// seconds are moved onto it, those it had before left where they are; one
+/// in full screen (Big Picture) leaves it, moves, and goes back to it there.
 /// Elsewhere the same as open(): Windows puts a new window on the primary
 /// display, and Linux opens it in the stream's own session.
 bool openOnVirtualDisplay(const QString& command, QString* error);

@@ -103,21 +103,49 @@ QList<SeenWindow> windowsOf(const QSet<pid_t>& pids, QHash<int, pid_t>* owners)
     return out;
 }
 
-/// Moves the window of @p pid that sits at @p from onto @p to, by the
-/// Accessibility API — the one way to move another app's window. The window
-/// server's id is not exposed there, so the window is the one at that place.
-bool moveWindow(pid_t pid, const QRect& from, const QRect& to)
+// Leaving full screen is animated: the window reports a settable position
+// at once, yet a move sent before the animation is over is lost (seen on
+// the Mac bench with Big Picture). This long after asking, it lands.
+constexpr qint64 kLeaveFullScreenMs = 1200;
+
+enum class Step
+{
+    Moved,
+    LeavingFullScreen, ///< asked to leave full screen: moved on a later tick
+    NotYet,            ///< not found where the window server shows it, or animating
+    Failed,
+};
+
+bool fullScreen(AXUIElementRef window)
+{
+    CFTypeRef value = nullptr;
+    if (AXUIElementCopyAttributeValue(window, CFSTR("AXFullScreen"), &value) != kAXErrorSuccess ||
+        !value)
+        return false;
+    const bool on = CFGetTypeID(value) == CFBooleanGetTypeID() &&
+                    CFBooleanGetValue(static_cast<CFBooleanRef>(value));
+    CFRelease(value);
+    return on;
+}
+
+/// One step of moving the window of @p pid that sits at @p from onto @p to,
+/// by the Accessibility API — the one way to move another app's window. The
+/// window server's id is not exposed there, so the window is the one at that
+/// place. A window in full screen (Steam's Big Picture is, in its own Space)
+/// cannot be moved: it is taken out of it first, moved once the animation is
+/// over, and put back in full screen there (@p wasFullScreen).
+Step stepWindow(pid_t pid, const QRect& from, const QRect& to, bool wasFullScreen)
 {
     AXUIElementRef app = AXUIElementCreateApplication(pid);
-    if (!app) return false;
+    if (!app) return Step::Failed;
     // An app busy starting up must not hold the server's event loop.
     AXUIElementSetMessagingTimeout(app, 0.5f);
-    bool done = false;
+    Step step = Step::NotYet;
     CFArrayRef windows = nullptr;
     if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute,
                                       reinterpret_cast<CFTypeRef*>(&windows)) == kAXErrorSuccess &&
         windows) {
-        for (CFIndex i = 0; i < CFArrayGetCount(windows) && !done; ++i) {
+        for (CFIndex i = 0; i < CFArrayGetCount(windows) && step == Step::NotYet; ++i) {
             auto window = static_cast<AXUIElementRef>(CFArrayGetValueAtIndex(windows, i));
             CGPoint at{};
             CGSize size{};
@@ -139,6 +167,13 @@ bool moveWindow(pid_t pid, const QRect& from, const QRect& to)
                 qAbs(int(size.width) - from.width()) > 2 ||
                 qAbs(int(size.height) - from.height()) > 2)
                 continue;
+            if (fullScreen(window)) {
+                step = AXUIElementSetAttributeValue(window, CFSTR("AXFullScreen"),
+                                                    kCFBooleanFalse) == kAXErrorSuccess
+                           ? Step::LeavingFullScreen
+                           : Step::Failed;
+                continue;
+            }
             // Onto the display first, then its size: a window the size of
             // the built-in screen does not fit the smaller virtual one, and
             // macOS keeps a window's top-left on a display when it resizes.
@@ -146,17 +181,22 @@ bool moveWindow(pid_t pid, const QRect& from, const QRect& to)
             CGSize fit = CGSizeMake(to.width(), to.height());
             AXValueRef pos = AXValueCreate(kAXValueTypeCGPoint, &origin);
             AXValueRef dim = AXValueCreate(kAXValueTypeCGSize, &fit);
-            done =
-                AXUIElementSetAttributeValue(window, kAXPositionAttribute, pos) == kAXErrorSuccess;
+            step =
+                AXUIElementSetAttributeValue(window, kAXPositionAttribute, pos) == kAXErrorSuccess
+                    ? Step::Moved
+                    : Step::Failed;
             AXUIElementSetAttributeValue(window, kAXSizeAttribute, dim);
             AXUIElementSetAttributeValue(window, kAXPositionAttribute, pos);
             CFRelease(pos);
             CFRelease(dim);
+            // Full screen again, on the display it now sits on.
+            if (wasFullScreen)
+                AXUIElementSetAttributeValue(window, CFSTR("AXFullScreen"), kCFBooleanTrue);
         }
         CFRelease(windows);
     }
     CFRelease(app);
-    return done;
+    return step;
 }
 
 struct Watch
@@ -164,6 +204,7 @@ struct Watch
     QString bundleId;
     QSet<int> before; ///< its windows when it was opened: left where they are
     QSet<int> moved;
+    QHash<int, qint64> leavingFullScreen; ///< window → when it was asked to (age)
     QElapsedTimer age;
 };
 
@@ -175,13 +216,36 @@ void pullOnce(Watch& watch)
     const CGRect main = CGDisplayBounds(CGMainDisplayID());
     const QRect target(int(main.origin.x), int(main.origin.y), int(main.size.width),
                        int(main.size.height));
-    for (const SeenWindow& w : windowsToMove(watch.before, watch.moved, now, target)) {
+    // The windows on their way out of full screen, where they are now,
+    // then the new ones.
+    QSet<int> handled = watch.moved;
+    QList<SeenWindow> todo;
+    for (const SeenWindow& w : now) {
+        if (!watch.leavingFullScreen.contains(w.number)) continue;
+        handled.insert(w.number);
+        if (watch.age.elapsed() - watch.leavingFullScreen.value(w.number) >= kLeaveFullScreenMs)
+            todo.append(w);
+    }
+    for (auto it = watch.leavingFullScreen.cbegin(); it != watch.leavingFullScreen.cend(); ++it)
+        handled.insert(it.key());
+    todo += windowsToMove(watch.before, handled, now, target);
+    for (const SeenWindow& w : todo) {
+        const bool wasFullScreen = watch.leavingFullScreen.contains(w.number);
+        const Step step = stepWindow(owners.value(w.number), w.bounds, target, wasFullScreen);
+        if (step == Step::NotYet) continue;
+        if (step == Step::LeavingFullScreen) {
+            watch.leavingFullScreen.insert(w.number, watch.age.elapsed());
+            continue;
+        }
+        watch.leavingFullScreen.remove(w.number);
         watch.moved.insert(w.number);
-        const bool ok = moveWindow(owners.value(w.number), w.bounds, target);
-        Logger::info(QStringLiteral("[HostApp] %1 window %2 of %3 onto the virtual display")
-                         .arg(ok ? QStringLiteral("moved") : QStringLiteral("could not move"))
-                         .arg(w.number)
-                         .arg(watch.bundleId));
+        Logger::info(
+            QStringLiteral("[HostApp] %1 window %2 of %3 onto the virtual display%4")
+                .arg(step == Step::Moved ? QStringLiteral("moved")
+                                         : QStringLiteral("could not move"))
+                .arg(w.number)
+                .arg(watch.bundleId)
+                .arg(wasFullScreen ? QStringLiteral(", in full screen again") : QString()));
     }
 }
 
@@ -208,7 +272,15 @@ bool openOnVirtualDisplay(const QString& command, QString* error)
     auto* timer = new QTimer(QCoreApplication::instance());
     timer->setInterval(kTickMs);
     QObject::connect(timer, &QTimer::timeout, timer, [timer, watch]() {
+        // A window still out of full screen when the watch ends stays where
+        // it is, windowed: logged, the owner puts it back with one click.
         if (watch->age.elapsed() > kWatchMs) {
+            for (auto it = watch->leavingFullScreen.cbegin(); it != watch->leavingFullScreen.cend();
+                 ++it)
+                Logger::warning(QStringLiteral("[HostApp] window %1 of %2 left full screen but "
+                                               "could not be moved")
+                                    .arg(it.key())
+                                    .arg(watch->bundleId));
             timer->deleteLater();
             return;
         }
