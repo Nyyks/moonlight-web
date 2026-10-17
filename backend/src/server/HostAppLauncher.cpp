@@ -264,4 +264,12 @@ bool open(const QString& command, QString* error)
 
 #endif
 
+#if !defined(Q_OS_MACOS)
+// macOS: HostAppLauncherMac.mm.
+bool openOnVirtualDisplay(const QString& command, QString* error)
+{
+    return open(command, error);
+}
+#endif
+
 } // namespace HostAppLauncher

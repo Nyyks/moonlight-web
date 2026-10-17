@@ -409,7 +409,9 @@ if(APPLE)
     target_sources(mw-server PRIVATE src/common/MacActivity.mm)
     # The icon of a launcher found on this Mac, for its card (HostAppImage).
     target_sources(mw-server PRIVATE src/server/HostAppImageMac.mm)
-    target_link_libraries(mw-server PRIVATE "-framework AppKit")
+    # A card's new windows onto the virtual display (HostAppLauncher).
+    target_sources(mw-server PRIVATE src/server/HostAppLauncherMac.mm)
+    target_link_libraries(mw-server PRIVATE "-framework AppKit" "-framework ApplicationServices")
 endif()
 
 # ── Click-to-photon flag: the per-platform backends ────────────────────────

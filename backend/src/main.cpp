@@ -3954,15 +3954,17 @@ int main(int argc, char* argv[])
                                                ? NativeHostBackend::desktopCommandFor(appId)
                                                : QString();
             // ... and closed again when that display goes off.
+            const bool hostAppOnVirtual =
+                !hostAppCommand.isEmpty() && NativeHostBackend::usesVirtualDisplay(appId);
             const QString hostAppCloseCommand =
-                !hostAppCommand.isEmpty() && NativeHostBackend::usesVirtualDisplay(appId)
+                hostAppOnVirtual
                     ? NativeHostBackend::hostAppFor(appId).value("quit_command").toString()
                     : QString();
             QObject::connect(
                 worker, &StreamWorkerHost::responseReady, qApp,
                 [respond, worker, &g_Pool, &g_DualSupport, &g_LiveSunshineUids, &authManager,
                  &sessionMetrics, sessionFacts, sessionStartedAt, reqSlot, standby, hostUuidCopy,
-                 uid, sessionToken, hostAppCommand,
+                 uid, sessionToken, hostAppCommand, hostAppOnVirtual,
                  hostAppCloseCommand](int code, QJsonObject bodyObj) {
                     const bool ok =
                         code == 200 && bodyObj["status"].toString() == QLatin1String("streaming");
@@ -3989,7 +3991,11 @@ int main(int argc, char* argv[])
                         if (standby) g_DualSupport[hostUuidCopy] = true;
                         if (!standby && !hostAppCommand.isEmpty()) {
                             QString why;
-                            if (!HostAppLauncher::open(hostAppCommand, &why))
+                            const bool opened =
+                                hostAppOnVirtual
+                                    ? HostAppLauncher::openOnVirtualDisplay(hostAppCommand, &why)
+                                    : HostAppLauncher::open(hostAppCommand, &why);
+                            if (!opened)
                                 qWarning().noquote()
                                     << "[Session] the app could not be opened:" << why;
                             else if (!hostAppCloseCommand.isEmpty() &&

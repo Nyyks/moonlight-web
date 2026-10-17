@@ -145,4 +145,27 @@ void run_launcher_detect_tests()
         CHECK_EQ(program, QString("C:\\Games\\Shortcut.lnk"));
         CHECK(args.isEmpty());
     }
+
+    // macOS: which of the app's windows go onto the virtual display. Steam
+    // already running: its own window stays on the built-in screen, Big
+    // Picture, opened next to it, is moved.
+    {
+        const QRect virtualDisplay(0, 0, 800, 600);
+        const QRect builtIn(-1512, 0, 1512, 982);
+        const HostAppLauncher::SeenWindow client{11, QRect(-1400, 60, 1000, 700)};
+        const HostAppLauncher::SeenWindow bigPicture{42, builtIn};
+        const HostAppLauncher::SeenWindow tooltip{43, QRect(-900, 300, 80, 20)};
+        const HostAppLauncher::SeenWindow alreadyThere{44, QRect(0, 0, 800, 600)};
+        const auto move = HostAppLauncher::windowsToMove(
+            {11}, {}, {client, bigPicture, tooltip, alreadyThere}, virtualDisplay);
+        CHECK_EQ(move.size(), qsizetype(1));
+        CHECK_EQ(move.value(0).number, 42);
+        // Moved once: never again, should its owner drag it back.
+        CHECK(HostAppLauncher::windowsToMove({11}, {42}, {client, bigPicture}, virtualDisplay)
+                  .isEmpty());
+        // A cold start: every window is new, the client's too.
+        CHECK_EQ(
+            HostAppLauncher::windowsToMove({}, {}, {client, bigPicture}, virtualDisplay).size(),
+            qsizetype(2));
+    }
 }

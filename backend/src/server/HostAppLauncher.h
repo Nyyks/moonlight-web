@@ -17,7 +17,10 @@
 
 #pragma once
 
+#include <QList>
+#include <QRect>
 #include <QRegularExpression>
+#include <QSet>
 #include <QString>
 
 /**
@@ -41,7 +44,11 @@
  *    From the session-0 service of older installs, this executable is
  *    started on the console desktop as its user (--open-on-desktop) and does
  *    the same from there.
- *  - macOS: /usr/bin/open for a URL or an .app, /bin/sh -c otherwise.
+ *  - macOS: /usr/bin/open for a URL or an .app, /bin/sh -c otherwise. An app
+ *    already running opens its new window on the screen of its old ones —
+ *    Steam puts Big Picture next to its own window, not on the main display
+ *    — so for the virtual display the windows it opens next are moved there
+ *    (openOnVirtualDisplay).
  *  - Linux: xdg-open for a URL, /bin/sh -c otherwise, each in a transient
  *    systemd user unit when there is one, out of the server's own cgroup.
  */
@@ -77,6 +84,36 @@ inline void splitWindowsCommand(const QString& command, QString* program, QStrin
 /// Opens @p command on the desktop, without waiting for it. False with
 /// @p error when it could not be handed over.
 bool open(const QString& command, QString* error);
+
+/// open() for an app shown on "MoonlightWeb Virtual Display", which is the
+/// main display by then. macOS: the windows the app opens in the next few
+/// seconds are moved onto it, those it had before left where they are.
+/// Elsewhere the same as open(): Windows puts a new window on the primary
+/// display, and Linux opens it in the stream's own session.
+bool openOnVirtualDisplay(const QString& command, QString* error);
+
+/// One window of the app being opened, as the window server lists it.
+struct SeenWindow
+{
+    int number = 0; ///< the window server's id, stable for the window's life
+    QRect bounds;   ///< global coordinates, top-left origin
+};
+
+/// Which of @p now to move onto @p target: windows the app opened since
+/// @p before was taken, not moved already, not on @p target yet, and big
+/// enough to be a window rather than a tooltip or a menu's shadow.
+inline QList<SeenWindow> windowsToMove(const QSet<int>& before, const QSet<int>& moved,
+                                       const QList<SeenWindow>& now, const QRect& target)
+{
+    QList<SeenWindow> out;
+    for (const SeenWindow& w : now) {
+        if (before.contains(w.number) || moved.contains(w.number)) continue;
+        if (w.bounds.width() < 100 || w.bounds.height() < 100) continue;
+        if (target.contains(w.bounds.center())) continue;
+        out.append(w);
+    }
+    return out;
+}
 
 #ifdef Q_OS_WIN
 /// --open-on-desktop <base64url>: the console-session half of open() for the
