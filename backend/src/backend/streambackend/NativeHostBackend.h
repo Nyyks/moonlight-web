@@ -19,6 +19,7 @@
 
 #include "IStreamBackend.h"
 
+#include <QJsonObject>
 #include <QString>
 
 /**
@@ -122,9 +123,38 @@ public:
     /// guests' shared feed, which shows the owner's display.
     static int displayForApp(int appId, QString* error);
 
-    /// Whether @p appId is one of the owner's apps in gamescope (a Linux native
-    /// host, AppSettings::gamescopeApps), and which: its name and command, as
-    /// the session runs them.
+    /// Where the owner's apps (AppSettings::hostApps) open, the same for all
+    /// of them on a given machine: in a gamescope of their own (Linux, when
+    /// it is usable), else on "MoonlightWeb Virtual Display" (turned on at
+    /// the client's size and made primary, as its own card does), else on
+    /// this PC's primary display.
+    enum class HostAppScreen
+    {
+        Gamescope,
+        Virtual,
+        Primary
+    };
+    static HostAppScreen hostAppScreen();
+    /// "gamescope", "virtual" or "primary", for the card and the admin page.
+    static QString toString(HostAppScreen screen);
+
+    /// The owner's app whose card is @p appId (AppSettings::hostApp), or an
+    /// empty object for a display's card.
+    static QJsonObject hostAppFor(int appId);
+
+    /// The command the server opens on the desktop once a stream of @p appId
+    /// is up (HostAppLauncher), or empty: a display's card, or an app that
+    /// runs in its own gamescope, which the session starts itself.
+    static QString desktopCommandFor(int appId);
+
+    /// Whether a stream of @p appId streams "MoonlightWeb Virtual Display":
+    /// its own card, or an app's card when apps open there. Such a stream
+    /// turns the display on at its /start and lets it go at its end.
+    static bool usesVirtualDisplay(int appId);
+
+    /// Whether @p appId is one of the owner's apps that runs in gamescope (a
+    /// Linux native host where gamescope is usable), and which: its name and
+    /// command, as the session runs them.
     static bool gamescopeAppFor(int appId, QString* name, QString* command);
 
     NativeHostBackend() = default;

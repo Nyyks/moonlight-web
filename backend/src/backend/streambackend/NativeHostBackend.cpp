@@ -69,10 +69,10 @@ int appIdToDisplayId(int appId)
 /// of monitors, never a thousand.
 constexpr int kVirtualDisplayAppId = 1000;
 
-/// The owner's apps in gamescope, numbered from here in the settings' order:
-/// one engine entry (kGamescopeAppDisplayKey) streams them all, the name and
-/// command travelling with the session.
-constexpr int kGamescopeAppIdBase = 1100;
+/// The owner's apps that ran in gamescope in 0.4.0's betas kept their card
+/// ids, 1100 + their rank; every app since is numbered from
+/// AppSettings::kHostAppIdFirst. Below 1100: displays and the virtual display.
+constexpr int kHostAppIdFloor = 1100;
 
 /// The engine's entry for the owner's apps in gamescope, or nullptr.
 const mw::native::DisplayInfo* gamescopeAppsDisplay(const mw::native::Capabilities& caps)
@@ -82,26 +82,61 @@ const mw::native::DisplayInfo* gamescopeAppsDisplay(const mw::native::Capabiliti
     return nullptr;
 }
 
+/// Whether gamescope's own Steam Big Picture card is listed (Linux): a Steam
+/// card seeded from the settings would then be a second one.
+bool gamescopeSteamListed(const mw::native::Capabilities& caps)
+{
+    for (const mw::native::DisplayInfo& display : caps.displays)
+        if (display.key == mw::native::kGamescopeSteamDisplayKey) return true;
+    return false;
+}
+
+NativeHostBackend::HostAppScreen screenOf(const mw::native::Capabilities& caps)
+{
+    if (gamescopeAppsDisplay(caps)) return NativeHostBackend::HostAppScreen::Gamescope;
+    if (VirtualDisplay::probe().installed) return NativeHostBackend::HostAppScreen::Virtual;
+    return NativeHostBackend::HostAppScreen::Primary;
+}
+
+/// The display a program opened on "this PC's screen" lands on: the primary
+/// one, else the first real one, or nullptr.
+const mw::native::DisplayInfo* primaryDisplay(const mw::native::Capabilities& caps)
+{
+    const mw::native::DisplayInfo* first = nullptr;
+    for (const mw::native::DisplayInfo& display : caps.displays) {
+        if (mw::native::isMadeForStreamKey(display.key) || VirtualDisplay::isOurs(display))
+            continue;
+        if (display.primary) return &display;
+        if (!first) first = &display;
+    }
+    return first;
+}
+
 /// The display @p appId stands for among @p caps, or -1 with @p why.
 int displayOf(const mw::native::Capabilities& caps, int appId, QString* why)
 {
-    if (appId == kVirtualDisplayAppId) {
+    const auto virtualDisplay = [&caps, why]() {
         // Our virtual display, turned on by the server before this launch
         // (main.cpp's /start): whichever display index it came up under.
         for (const mw::native::DisplayInfo& display : caps.displays)
             if (VirtualDisplay::isOurs(display)) return display.id;
         if (why) *why = QStringLiteral("The virtual display is not on");
         return -1;
-    }
-    if (appId >= kGamescopeAppIdBase &&
-        appId < kGamescopeAppIdBase + AppSettings::kGamescopeAppsMax) {
-        const mw::native::DisplayInfo* apps = gamescopeAppsDisplay(caps);
-        if (apps && appId - kGamescopeAppIdBase < AppSettings().gamescopeApps().size())
-            return apps->id;
-        if (why)
-            *why = apps ? QStringLiteral("That app is no longer in the host's settings")
-                        : QStringLiteral("gamescope is no longer usable on the host");
-        return -1;
+    };
+    if (appId == kVirtualDisplayAppId) return virtualDisplay();
+    if (appId >= kHostAppIdFloor) {
+        if (AppSettings().hostApp(appId).isEmpty()) {
+            if (why) *why = QStringLiteral("That app is no longer in the host's settings");
+            return -1;
+        }
+        switch (screenOf(caps)) {
+        case NativeHostBackend::HostAppScreen::Gamescope: return gamescopeAppsDisplay(caps)->id;
+        case NativeHostBackend::HostAppScreen::Virtual: return virtualDisplay();
+        case NativeHostBackend::HostAppScreen::Primary:
+            if (const mw::native::DisplayInfo* primary = primaryDisplay(caps)) return primary->id;
+            if (why) *why = QStringLiteral("This PC has no screen to open the app on");
+            return -1;
+        }
     }
     const int displayId = appIdToDisplayId(appId);
     for (const mw::native::DisplayInfo& display : caps.displays)
@@ -160,6 +195,44 @@ NvApp virtualDisplayApp(const mw::native::Capabilities& caps)
     return app;
 }
 
+/// One card per app of the owner's (AppSettings::hostApps), in the settings'
+/// order, after @p apps' displays. The card says where its program opens
+/// (device.screen) and, when the owner gave it one, its image's hash
+/// (device.art), which changes the card's signature when the image does.
+void appendHostApps(const mw::native::Capabilities& caps, QVector<NvApp>& apps)
+{
+    const NativeHostBackend::HostAppScreen screen = screenOf(caps);
+    const mw::native::DisplayInfo* primary =
+        screen == NativeHostBackend::HostAppScreen::Primary ? primaryDisplay(caps) : nullptr;
+    if (screen == NativeHostBackend::HostAppScreen::Primary && !primary) return;
+    const bool hideSteam = gamescopeSteamListed(caps);
+    for (const QJsonValue& v : AppSettings().hostApps()) {
+        const QJsonObject entry = v.toObject();
+        if (hideSteam && entry.value("source").toString() == QLatin1String("steam")) continue;
+        const QString name = entry.value("name").toString();
+        const QString id = entry.value("id").toString();
+        const QString image = entry.value("image").toString();
+        NvApp app(entry.value("app_id").toInt(), name, /*hdr=*/false);
+        app.setHasBoxArt(!image.isEmpty());
+        QJsonObject device{
+            {QStringLiteral("os"), HostOsProbe::toString(HostOsProbe::thisMachine())},
+            {QStringLiteral("display"),
+             primary ? QString::fromLatin1(mw::native::toString(primary->kind))
+                     : QStringLiteral("virtual")},
+            {QStringLiteral("model"), name},
+            {QStringLiteral("key"), (screen == NativeHostBackend::HostAppScreen::Gamescope
+                                         ? QStringLiteral("gamescope-app-")
+                                         : QStringLiteral("host-app-")) +
+                                        id},
+            {QStringLiteral("battery"), caps.hasBattery},
+            {QStringLiteral("screen"), NativeHostBackend::toString(screen)},
+        };
+        if (!image.isEmpty()) device[QStringLiteral("art")] = image;
+        app.setDevice(device);
+        apps.append(app);
+    }
+}
+
 } // namespace
 
 int NativeHostBackend::virtualDisplayAppId()
@@ -169,14 +242,48 @@ int NativeHostBackend::virtualDisplayAppId()
 
 bool NativeHostBackend::gamescopeAppFor(int appId, QString* name, QString* command)
 {
-    const int index = appId - kGamescopeAppIdBase;
-    if (index < 0 || index >= AppSettings::kGamescopeAppsMax) return false;
-    const QJsonArray apps = AppSettings().gamescopeApps();
-    if (index >= apps.size()) return false;
-    const QJsonObject app = apps.at(index).toObject();
+    if (appId < kHostAppIdFloor || hostAppScreen() != HostAppScreen::Gamescope) return false;
+    const QJsonObject app = AppSettings().hostApp(appId);
+    if (app.isEmpty()) return false;
     if (name) *name = app.value("name").toString();
     if (command) *command = app.value("command").toString();
     return true;
+}
+
+QJsonObject NativeHostBackend::hostAppFor(int appId)
+{
+    if (appId < kHostAppIdFloor) return {};
+    return AppSettings().hostApp(appId);
+}
+
+QString NativeHostBackend::desktopCommandFor(int appId)
+{
+    const QJsonObject app = hostAppFor(appId);
+    if (app.isEmpty() || hostAppScreen() == HostAppScreen::Gamescope) return QString();
+    return app.value("command").toString();
+}
+
+NativeHostBackend::HostAppScreen NativeHostBackend::hostAppScreen()
+{
+    return screenOf(probeEngine());
+}
+
+bool NativeHostBackend::usesVirtualDisplay(int appId)
+{
+    if (appId == kVirtualDisplayAppId) return true;
+    // Whether the app is still in the settings does not matter: one removed
+    // while it streams must still let the display go at the stream's end.
+    return appId >= kHostAppIdFloor && hostAppScreen() == HostAppScreen::Virtual;
+}
+
+QString NativeHostBackend::toString(HostAppScreen screen)
+{
+    switch (screen) {
+    case HostAppScreen::Gamescope: return QStringLiteral("gamescope");
+    case HostAppScreen::Virtual: return QStringLiteral("virtual");
+    case HostAppScreen::Primary: return QStringLiteral("primary");
+    }
+    return QString();
 }
 
 int NativeHostBackend::displayForApp(int appId, QString* error)
@@ -362,7 +469,11 @@ void NativeHostBackend::getAppList(const QString& seatId, BackendAppListCallback
         // A machine with nothing attached and our display to offer has one
         // card; any other reason to be unavailable has none.
         if (virtualInstalled && caps.reason == mw::native::Unavailability::NoDisplay) {
-            cb(true, BackendError{}, QVector<NvApp>{virtualDisplayApp(caps)});
+            // The owner's apps open on that same display.
+            QVector<NvApp> apps;
+            appendHostApps(caps, apps);
+            apps.append(virtualDisplayApp(caps));
+            cb(true, BackendError{}, apps);
             return;
         }
         cb(false,
@@ -431,24 +542,8 @@ void NativeHostBackend::getAppList(const QString& seatId, BackendAppListCallback
         });
         apps.append(app);
     }
-    // The owner's apps in gamescope (Linux, AppSettings::gamescopeApps), in the
-    // settings' order, when the engine can run them at all.
-    if (gamescopeAppsDisplay(caps)) {
-        const QJsonArray owned = AppSettings().gamescopeApps();
-        for (int i = 0; i < owned.size(); ++i) {
-            const QString name = owned.at(i).toObject().value("name").toString();
-            NvApp app(kGamescopeAppIdBase + i, name, /*hdr=*/false);
-            app.setHasBoxArt(false);
-            app.setDevice(QJsonObject{
-                {QStringLiteral("os"), HostOsProbe::toString(HostOsProbe::thisMachine())},
-                {QStringLiteral("display"), QStringLiteral("virtual")},
-                {QStringLiteral("model"), name},
-                {QStringLiteral("key"), QStringLiteral("gamescope-app-") + name},
-                {QStringLiteral("battery"), caps.hasBattery},
-            });
-            apps.append(app);
-        }
-    }
+    // The owner's apps (AppSettings::hostApps), in the settings' order.
+    appendHostApps(caps, apps);
     if (virtualInstalled && !virtualListed) apps.append(virtualDisplayApp(caps));
     cb(true, BackendError{}, apps);
 }
@@ -488,7 +583,7 @@ void NativeHostBackend::launch(const QString& seatId, const LaunchRequest& req,
     media.nativeHost.rideOutLoss = req.rideOutLoss;
     media.nativeHost.refInvalidation = req.refInvalidation;
     media.nativeHost.cropsToFrame = req.cropsToFrame;
-    if (req.appId == kVirtualDisplayAppId) {
+    if (usesVirtualDisplay(req.appId)) {
         gpusApart(caps, displayId, &media.nativeHost.virtualDisplayGpu,
                   &media.nativeHost.previousPrimaryGpu);
         if (!media.nativeHost.virtualDisplayGpu.isEmpty())

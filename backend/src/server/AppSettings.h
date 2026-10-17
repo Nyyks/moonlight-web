@@ -19,6 +19,7 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 #include <QJsonArray>
 #include <QJsonObject>
 
@@ -640,20 +641,62 @@ public:
     /// as it was, for anything else.
     bool setNativeVideoPipeline(const QString& pipeline);
 
-    /// The apps a Linux native host runs each in its own gamescope, a card
-    /// apiece beside the displays (plan Idées Punktfunk, chapter G, G5):
-    /// [{"name", "command"}], in the owner's order. A command is run by
-    /// /bin/sh as the host's user — the host owner's to write, never a
-    /// viewer's. An entry the file holds that is not valid is left out.
-    QJsonArray gamescopeApps() const;
-    /// Stores @p apps: 16 at most, each a name of 1 to 40 characters and a
-    /// command of 1 to 1000, on one line. False with @p error, the file left
-    /// as it was, for anything else.
-    bool setGamescopeApps(const QJsonArray& apps, QString* error);
-    /// The limits setGamescopeApps holds to, for the page that edits them.
-    static constexpr int kGamescopeAppsMax = 16;
-    static constexpr int kGamescopeAppNameMax = 40;
-    static constexpr int kGamescopeCommandMax = 1000;
+    // ── The native host's apps ──────────────────────────────────────────────
+    //
+    // A card apiece beside the displays, each opening a program on this
+    // machine (Linux: in its own gamescope when it can, plan Idées Punktfunk,
+    // G5; elsewhere on the virtual display, or the primary one). Key
+    // "host_apps": [{"id", "app_id", "name", "command", "quit_command"?,
+    // "source", "image"?}], in the owner's order.
+    //  - id: a uuid, the entry's name for the page and its image file.
+    //  - app_id: the card's id, never reused (host_apps_next_id): a stale grid
+    //    can never open another program than the one it shows.
+    //  - source: "user", or the launcher found on this PC that seeded it
+    //    ("steam", "playnite"); a seeded entry the owner removes goes to
+    //    "host_apps_dismissed" and never comes back on its own.
+    //  - image: the hash of host-app-images/<id>.png, set by the server only.
+    // A command is the host owner's to write, never a viewer's: it runs as the
+    // user of this desktop.
+
+    /// The valid entries, in the owner's order. One the file holds that is
+    /// not valid is left out.
+    QJsonArray hostApps() const;
+    /// The entry whose card is @p appId, or an empty object.
+    QJsonObject hostApp(int appId) const;
+    /// Stores the list the admin page sends: name and command from @p apps,
+    /// an entry with a known "id" keeping its card id, source and image, one
+    /// without getting new ones. False with @p error, the file left as it was,
+    /// for anything not valid (16 entries at most, a name of 1 to 40
+    /// characters, a command of 1 to 1000 on one line). The ids of the entries
+    /// it dropped go to @p removed, so their images can go too; a seeded one
+    /// dropped is dismissed.
+    bool setHostApps(const QJsonArray& apps, QString* error, QStringList* removed = nullptr);
+    /// Records the image of entry @p id (the hash of its file), or none when
+    /// @p hash is empty. False when there is no such entry.
+    bool setHostAppImage(const QString& id, const QString& hash);
+    /// The sources the owner removed (host_apps_dismissed).
+    QStringList hostAppsDismissed() const;
+    /// Adds the launcher @p detected ({source, name, command, quit_command?})
+    /// found on this PC, at the owner's request: it leaves the dismissed list.
+    /// The new entry, or an empty object with @p error (already there, full).
+    QJsonObject restoreHostApp(const QJsonObject& detected, QString* error);
+    /// Adds each launcher of @p detected not listed yet nor dismissed, once
+    /// per version of this app (host_apps_seeded_version): the first start
+    /// after an install or an update. The entries it added go to @p added.
+    /// False, the file untouched, when this version has already seeded.
+    bool seedHostApps(const QJsonArray& detected, const QString& version, QJsonArray* added);
+    /// Moves the apps of 0.4.0's betas ("gamescope_apps", Linux) into
+    /// host_apps, each keeping its card id (1100 + its rank), and gives an id
+    /// to an entry edited in by hand without one. Idempotent; at startup.
+    void migrateHostApps();
+    /// Where the entries' images live: host-app-images/ beside this file.
+    QString hostAppImagesDir() const;
+    /// The limits setHostApps holds to, for the page that edits them.
+    static constexpr int kHostAppsMax = 16;
+    static constexpr int kHostAppNameMax = 40;
+    static constexpr int kHostAppCommandMax = 1000;
+    /// The first card id handed out; the betas' gamescope apps kept 1100-1115.
+    static constexpr int kHostAppIdFirst = 2000;
 
     // ── HMAC key for session tokens ──────────────────────────────────────────
 

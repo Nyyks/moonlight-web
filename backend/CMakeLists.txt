@@ -280,6 +280,10 @@ add_executable(mw-server
     src/server/SessionPool.cpp
     src/server/routes/AuthRoutes.cpp
     src/server/routes/HostRoutes.cpp
+    src/server/routes/HostAppRoutes.cpp
+    src/server/HostAppImage.cpp
+    src/server/HostAppLauncher.cpp
+    src/server/LauncherDetect.cpp
     src/server/routes/ShareRoutes.cpp
     src/server/routes/SystemRoutes.cpp
     src/server/routes/LogRoutes.cpp
@@ -403,6 +407,9 @@ set_target_properties(mw-server PROPERTIES OUTPUT_NAME ${MW_APP_NAME})
 # App Nap suppression during streaming (Objective-C++, macOS only).
 if(APPLE)
     target_sources(mw-server PRIVATE src/common/MacActivity.mm)
+    # The icon of a launcher found on this Mac, for its card (HostAppImage).
+    target_sources(mw-server PRIVATE src/server/HostAppImageMac.mm)
+    target_link_libraries(mw-server PRIVATE "-framework AppKit")
 endif()
 
 # ── Click-to-photon flag: the per-platform backends ────────────────────────

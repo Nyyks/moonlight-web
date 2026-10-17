@@ -33,6 +33,8 @@
 #include "IdentityManager.h"
 #include "SunshineInstaller.h"
 #include "common/Logger.h"
+#include "server/AppSettings.h"
+#include "server/HostAppImage.h"
 
 #include <qmdnsengine/server.h>
 #include <qmdnsengine/browser.h>
@@ -2060,11 +2062,34 @@ void ComputerManager::handleGetBoxArt(const QString& uuid, int appId, const QStr
     // Validate host
     NvComputer* host = findHostByUuid(uuid);
     if (host && host->isNativeEngine()) {
-        // The native host's "apps" are displays, which have no box art to
-        // fetch. Answered accurately rather than falling into the pairing
-        // check below, whose "not paired" would be a puzzling thing to read
-        // about a host that cannot be paired at all.
-        respond(HttpResponse::error(404, "This host has no box art"));
+        // The native host's displays have no box art; its apps have the image
+        // the owner gave them (HostAppImage), read from disk each time rather
+        // than kept here — it changes under the same app id. Its URL carries
+        // the image's hash (the card's device.art), so the browser may keep
+        // it for good. Anything else is answered accurately rather than
+        // falling into the pairing check below, whose "not paired" would be a
+        // puzzling thing to read about a host that cannot be paired at all.
+        const QJsonObject app = NativeHostBackend::hostAppFor(appId);
+        const QString hash = app.value("image").toString();
+        const QByteArray png = hash.isEmpty() ? QByteArray()
+                                              : HostAppImage::read(AppSettings().hostAppImagesDir(),
+                                                                   app.value("id").toString());
+        if (png.isEmpty()) {
+            respond(HttpResponse::error(404, "This host has no box art"));
+            return;
+        }
+        const QString etag = QStringLiteral("\"%1\"").arg(hash);
+        HttpResponse resp;
+        resp.headers["ETag"] = etag;
+        resp.headers["Cache-Control"] = "private, max-age=31536000, immutable";
+        if (!ifNoneMatch.isEmpty() && ifNoneMatch.contains(etag)) {
+            resp.statusCode = 304;
+        } else {
+            resp.statusCode = 200;
+            resp.contentType = "image/png";
+            resp.body = png;
+        }
+        respond(resp);
         return;
     }
     if (!host || host->pairState != NvComputer::PS_PAIRED || host->serverCertPem.isEmpty()) {

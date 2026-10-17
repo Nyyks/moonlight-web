@@ -118,6 +118,13 @@ QString elevatedWorkerTaskName();
 /// the user's ordinary level.
 bool elevatedWorkerAvailable();
 
+/// Starts @p program on the console desktop as the user logged on there, with
+/// their ordinary (filtered) token and their environment, and lets it go: the
+/// way a session-0 service opens something the user would have opened
+/// themselves (HostAppLauncher). Needs SeTcbPrivilege, as every launch from
+/// the service does. Windows only.
+bool startAsConsoleUser(const QString& program, const QStringList& args, QString* error);
+
 /// Full image path of the process @p pid, or empty when Windows will not say.
 /// PROCESS_QUERY_LIMITED_INFORMATION is granted across integrity levels, so
 /// this reads an elevated — or SYSTEM — process of ours too.

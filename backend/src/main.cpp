@@ -81,6 +81,7 @@
 #include "server/StreamActivity.h"
 #include "server/routes/AuthRoutes.h"
 #include "server/routes/HostRoutes.h"
+#include "server/routes/HostAppRoutes.h"
 #include "server/routes/ShareRoutes.h"
 #include "server/routes/SystemRoutes.h"
 #include "common/Logger.h"
@@ -114,6 +115,9 @@
 #include "streaming/StreamWorkerHost.h"
 #include "streaming/WorkerService.h"
 #include "streaming/worker/StreamWorkerMain.h"
+#include "server/HostAppImage.h"
+#include "server/HostAppLauncher.h"
+#include "server/LauncherDetect.h"
 #include "network/InternetAccessManager.h"
 #include "network/MdnsAdvertiser.h"
 #include "network/RendezvousClient.h"
@@ -1524,6 +1528,7 @@ int main(int argc, char* argv[])
                                                    "--vdisplay-apply",
                                                    "--vhid-apply",
                                                    "--update-apply",
+                                                   "--open-on-desktop",
                                                    "--status",
                                                    "--new-pin",
                                                    "--enable-internet",
@@ -1598,7 +1603,8 @@ int main(int argc, char* argv[])
                 // only administrators can write exists (UpdateApply.h).
                 for (const char* flag :
                      {"--native-bench", "--status", "--new-pin", "--set-admin-password",
-                      "--clear-admin-password", "--enable-internet", "--update-apply"}) {
+                      "--clear-admin-password", "--enable-internet", "--update-apply",
+                      "--open-on-desktop"}) {
                     const size_t n = qstrlen(flag);
                     if (qstrncmp(argv[i], flag, int(n)) == 0 &&
                         (argv[i][n] == '\0' || argv[i][n] == '='))
@@ -1832,6 +1838,16 @@ int main(int argc, char* argv[])
                         "elevated scheduled task).");
     parser.addOption(updateApplyOption);
 
+    // The console-session half of opening one of the native host's apps from
+    // the session-0 service of older installs (HostAppLauncher).
+    QCommandLineOption openOnDesktopOption(
+        "open-on-desktop",
+        "Open a native host app's command on this desktop (internal: started "
+        "by the service as the console user).",
+        "command");
+    openOnDesktopOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    parser.addOption(openOnDesktopOption);
+
     // Development instance: isolated state (see the applicationName switch at
     // startup), no single-instance lock, and alternate default ports — so it can
     // run alongside an installed service without touching it. Never for production.
@@ -1920,6 +1936,10 @@ int main(int argc, char* argv[])
     if (parser.isSet(vhidApplyOption))
         return VirtualHidApply::run(parser.value(vhidApplyOption), parser.value(vhidDirOption));
     if (parser.isSet(updateApplyOption)) return UpdateApply::run();
+#ifdef Q_OS_WIN
+    if (parser.isSet(openOnDesktopOption))
+        return HostAppLauncher::runOpenOnDesktop(parser.value(openOnDesktopOption));
+#endif
 
     // ── The stream-worker launcher service ──────────────────────────────────
     // Before the lock too: the service is a second process of this binary, and
@@ -2000,6 +2020,7 @@ int main(int argc, char* argv[])
                                         parser.isSet(yesOption));
 
     appSettings.seedDocumentedDefaults(); // write documented file-only keys if absent
+    appSettings.migrateHostApps();        // the betas' gamescope_apps → host_apps
 
     // The admin page's diagnostic boxes, on top of this run's flags.
     mw::run::setDebugSetting(appSettings.debugMode());
@@ -2267,7 +2288,7 @@ int main(int argc, char* argv[])
     VirtualDisplayJob::instance().setInUse([&g_Pool]() {
         for (const SessionPool::Slot& sl : g_Pool) {
             if (!sl.worker.isNull() && sl.hostUuid == NativeHostBackend::hostUuid() &&
-                sl.appId == NativeHostBackend::virtualDisplayAppId())
+                NativeHostBackend::usesVirtualDisplay(sl.appId))
                 return true;
         }
         return false;
@@ -2347,7 +2368,7 @@ int main(int argc, char* argv[])
         // on another app of this host does not keep it: nothing would turn
         // it off once that one ends.
         const bool onVirtualDisplay = hostUuid == NativeHostBackend::hostUuid() &&
-                                      sl.appId == NativeHostBackend::virtualDisplayAppId();
+                                      NativeHostBackend::usesVirtualDisplay(sl.appId);
         sl.worker = nullptr;
         sl.clientUniqueId.clear();
         sl.hostUuid.clear();
@@ -2828,6 +2849,10 @@ int main(int argc, char* argv[])
     });
 
     registerHostRoutes(server, computerManager);
+    registerHostAppRoutes(server, appSettings);
+    // The game launchers installed on this PC get a card each, the first start
+    // after an install or an update (as Sunshine's installer gives Steam one).
+    seedDetectedLaunchers(appSettings);
 
     // Phase 5: Start streaming — launch app + RTSP handshake
     server.router()->postAsync("/api/hosts/:id/start", [&computerManager, signalingPort,
@@ -3637,7 +3662,7 @@ int main(int argc, char* argv[])
             // here; the worker path does the same trip through a JSON event.
             // The virtual display card holds a consent of its own (Linux).
             const bool portalVirtual = host->backendType == NativeHostBackend::typeName() &&
-                                       appId == NativeHostBackend::virtualDisplayAppId();
+                                       NativeHostBackend::usesVirtualDisplay(appId);
             s->setPortalRestoreToken(appSettings.portalRestoreToken(portalVirtual));
             // The owner's virtual display is the desktop's primary while it
             // streams, as the server makes it on Windows and macOS.
@@ -3799,7 +3824,7 @@ int main(int argc, char* argv[])
             // of them but a Linux host with no capability (an AppImage).
             // The virtual display card holds a consent of its own (Linux).
             const bool portalVirtual = host->backendType == NativeHostBackend::typeName() &&
-                                       appId == NativeHostBackend::virtualDisplayAppId();
+                                       NativeHostBackend::usesVirtualDisplay(appId);
             cfg["portalRestoreToken"] = appSettings.portalRestoreToken(portalVirtual);
             // The owner's virtual display is the desktop's primary while it
             // streams (Linux, where the session makes it; a guest never asks).
@@ -3905,11 +3930,18 @@ int main(int argc, char* argv[])
                                       << VirtualDisplay::rateText(milliHz)
                                       << "Hz on this host from the next stream on";
                 });
+            // One of the owner's apps (AppSettings::hostApps): opened on the
+            // desktop once this stream shows it — the virtual display is on and
+            // primary by then, so the program lands where the viewer looks.
+            // Never by a standby leg: the stream it doubles already opened it.
+            const QString hostAppCommand = host->backendType == NativeHostBackend::typeName()
+                                               ? NativeHostBackend::desktopCommandFor(appId)
+                                               : QString();
             QObject::connect(
                 worker, &StreamWorkerHost::responseReady, qApp,
                 [respond, worker, &g_Pool, &g_DualSupport, &g_LiveSunshineUids, &authManager,
                  &sessionMetrics, sessionFacts, sessionStartedAt, reqSlot, standby, hostUuidCopy,
-                 uid, sessionToken](int code, QJsonObject bodyObj) {
+                 uid, sessionToken, hostAppCommand](int code, QJsonObject bodyObj) {
                     const bool ok =
                         code == 200 && bodyObj["status"].toString() == QLatin1String("streaming");
                     // Count a session once it actually carries a picture, and
@@ -3933,6 +3965,12 @@ int main(int argc, char* argv[])
                         g_LiveSunshineUids.insert(uid);
                         // A successful standby launch IS the capability probe.
                         if (standby) g_DualSupport[hostUuidCopy] = true;
+                        if (!standby && !hostAppCommand.isEmpty()) {
+                            QString why;
+                            if (!HostAppLauncher::open(hostAppCommand, &why))
+                                qWarning().noquote()
+                                    << "[Session] the app could not be opened:" << why;
+                        }
                         respond(HttpResponse::json(bodyObj, 200));
                         return;
                     }
@@ -4111,7 +4149,7 @@ int main(int argc, char* argv[])
                     SessionPool::Slot& sl = g_Pool.at(reqSlot);
                     const bool onVirtualDisplay =
                         host->backendType == NativeHostBackend::typeName() &&
-                        sl.appId == NativeHostBackend::virtualDisplayAppId();
+                        NativeHostBackend::usesVirtualDisplay(sl.appId);
                     if (sl.worker == worker) {
                         sl.worker = nullptr;
                         sl.clientUniqueId.clear();
@@ -4240,7 +4278,7 @@ int main(int argc, char* argv[])
             int vdRefresh = VirtualDisplay::refreshForStream(reqFps, vdBenchRefresh, vdFaster) *
                             VirtualDisplay::kMilliHz;
             if (host->backendType == NativeHostBackend::typeName() &&
-                appId == NativeHostBackend::virtualDisplayAppId()) {
+                NativeHostBackend::usesVirtualDisplay(appId)) {
                 const char* why = vdBenchRefresh > 0 ? "(MW_VDD_REFRESH)"
                                   : vdFaster         ? "(faster than the stream)"
                                                      : "";
@@ -4315,7 +4353,7 @@ int main(int argc, char* argv[])
             const bool vdHdr = reqHdr;
             std::function<void()> readyThenStart = claimThenStart;
             if (host->backendType == NativeHostBackend::typeName() &&
-                appId == NativeHostBackend::virtualDisplayAppId()) {
+                NativeHostBackend::usesVirtualDisplay(appId)) {
                 readyThenStart = [claimThenStart, worker, respond, standby, reqSlot, generation,
                                   vdWidth, vdHeight, vdRefresh, vdHdr]() {
                     VirtualDisplayJob::instance().activate(
@@ -4543,6 +4581,16 @@ int main(int argc, char* argv[])
                 }
                 qInfo() << "[quit] Stopping stream worker slot" << i
                         << (keepHostSession ? "(keeping host session)" : "");
+                // The native host's apps outlive their stream (HostAppLauncher);
+                // quitting one runs its own way out, when it has one — Steam
+                // leaves Big Picture.
+                if (quitApp && host->backendType == NativeHostBackend::typeName()) {
+                    const QString quitCommand =
+                        NativeHostBackend::hostAppFor(sl.appId).value("quit_command").toString();
+                    QString why;
+                    if (!quitCommand.isEmpty() && !HostAppLauncher::open(quitCommand, &why))
+                        qWarning().noquote() << "[quit] the app's quit command failed:" << why;
+                }
                 // Suppressed ended-cleanup: this handler owns the Sunshine
                 // /cancel decision (keyed by quitUniqueId below; none at all
                 // when retiring).
@@ -5367,7 +5415,7 @@ int main(int argc, char* argv[])
         // viewer, so an invited player's session replays it too — otherwise
         // the host's own screen would raise a dialog nobody is there to answer.
         const bool portalVirtual = host->backendType == NativeHostBackend::typeName() &&
-                                   appId == NativeHostBackend::virtualDisplayAppId();
+                                   NativeHostBackend::usesVirtualDisplay(appId);
         cfg["portalRestoreToken"] = appSettings.portalRestoreToken(portalVirtual);
         // An app of the owner's in gamescope: the guest joins its session,
         // found by its name (GamescopeSession.h), and would start it the same.
@@ -5497,7 +5545,7 @@ int main(int argc, char* argv[])
                 cancelGuestHostSessionSoon(slot, host->uuid, uid);
                 SessionPool::Slot& sl = g_Pool.at(slot);
                 const bool onVirtualDisplay = host->backendType == NativeHostBackend::typeName() &&
-                                              sl.appId == NativeHostBackend::virtualDisplayAppId();
+                                              NativeHostBackend::usesVirtualDisplay(sl.appId);
                 if (sl.worker == worker) {
                     sl.worker = nullptr;
                     sl.clientUniqueId.clear();
@@ -5598,7 +5646,7 @@ int main(int argc, char* argv[])
         // is left as it is: a new mode would take it from whoever watches it.
         std::function<void()> readyThenStart = claimThenStart;
         if (host->backendType == NativeHostBackend::typeName() &&
-            appId == NativeHostBackend::virtualDisplayAppId()) {
+            NativeHostBackend::usesVirtualDisplay(appId)) {
             // As the owner's /start: 240 Hz on Windows whatever the stream's.
             const int vdRefresh =
                 VirtualDisplay::refreshForStream(60, qEnvironmentVariableIntValue("MW_VDD_REFRESH"),

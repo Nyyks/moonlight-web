@@ -32,6 +32,11 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QHash>
+#include <QSet>
+#include <QUuid>
+
+#include <algorithm>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -1112,62 +1117,334 @@ bool AppSettings::setNativeVideoPipeline(const QString& pipeline)
     return true;
 }
 
-// ── Apps in gamescope (Linux native host) ───────────────────────────────────
+// ── The native host's apps ─────────────────────────────────────────────────
 
 namespace {
 
-/// One entry, trimmed, or an empty object with @p error when it is not one.
-QJsonObject gamescopeAppEntry(const QJsonValue& value, QString* error)
+const QStringList& hostAppSources()
 {
-    const QJsonObject in = value.toObject();
-    const QString name = in.value("name").toString().trimmed();
-    const QString command = in.value("command").toString().trimmed();
-    if (!value.isObject() || name.isEmpty() || name.size() > AppSettings::kGamescopeAppNameMax) {
-        if (error)
-            *error = QStringLiteral("each app needs a name of 1 to %1 characters")
-                         .arg(AppSettings::kGamescopeAppNameMax);
-        return {};
-    }
-    if (command.isEmpty() || command.size() > AppSettings::kGamescopeCommandMax ||
-        command.contains(QLatin1Char('\n')) || command.contains(QLatin1Char('\r')) ||
-        command.contains(QChar(0))) {
-        if (error)
-            *error = QStringLiteral("\"%1\" needs a command of 1 to %2 characters, on one line")
-                         .arg(name)
-                         .arg(AppSettings::kGamescopeCommandMax);
-        return {};
-    }
-    return QJsonObject{{"name", name}, {"command", command}};
+    static const QStringList sources{QStringLiteral("user"), QStringLiteral("steam"),
+                                     QStringLiteral("playnite"), QStringLiteral("xbox")};
+    return sources;
 }
 
-} // namespace
+bool validHostAppId(const QString& id)
+{
+    static const QRegularExpression uuid(
+        QStringLiteral("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"));
+    return uuid.match(id).hasMatch();
+}
 
-QJsonArray AppSettings::gamescopeApps() const
+QString newHostAppId()
+{
+    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
+
+/// A command of 1 to kHostAppCommandMax characters on one line, trimmed into
+/// @p out; false for anything else.
+bool hostAppCommand(const QJsonValue& value, QString* out)
+{
+    const QString command = value.toString().trimmed();
+    *out = command;
+    return !command.isEmpty() && command.size() <= AppSettings::kHostAppCommandMax &&
+           !command.contains(QLatin1Char('\n')) && !command.contains(QLatin1Char('\r')) &&
+           !command.contains(QChar(0));
+}
+
+/// The name and command of one entry, trimmed, or false with @p error.
+bool hostAppFields(const QJsonValue& value, QString* name, QString* command, QString* error)
+{
+    const QJsonObject in = value.toObject();
+    *name = in.value("name").toString().trimmed();
+    if (!value.isObject() || name->isEmpty() || name->size() > AppSettings::kHostAppNameMax) {
+        if (error)
+            *error = QStringLiteral("each app needs a name of 1 to %1 characters")
+                         .arg(AppSettings::kHostAppNameMax);
+        return false;
+    }
+    if (!hostAppCommand(in.value("command"), command)) {
+        if (error)
+            *error = QStringLiteral("\"%1\" needs a command of 1 to %2 characters, on one line")
+                         .arg(*name)
+                         .arg(AppSettings::kHostAppCommandMax);
+        return false;
+    }
+    return true;
+}
+
+/// One stored entry, cleaned, or an empty object when it is not valid.
+QJsonObject storedHostApp(const QJsonValue& value)
+{
+    QString name, command;
+    if (!hostAppFields(value, &name, &command, nullptr)) return {};
+    const QJsonObject in = value.toObject();
+    const QString id = in.value("id").toString();
+    const int appId = in.value("app_id").toInt();
+    if (!validHostAppId(id) || appId < 1100) return {};
+    QJsonObject out{{"id", id}, {"app_id", appId}, {"name", name}, {"command", command}};
+    QString quit;
+    if (hostAppCommand(in.value("quit_command"), &quit)) out["quit_command"] = quit;
+    const QString source = in.value("source").toString();
+    out["source"] = hostAppSources().contains(source) ? source : QStringLiteral("user");
+    static const QRegularExpression hash(QStringLiteral("^[0-9a-f]{16,64}$"));
+    const QString image = in.value("image").toString();
+    if (hash.match(image).hasMatch()) out["image"] = image;
+    return out;
+}
+
+QJsonArray storedHostApps(const QJsonObject& obj)
 {
     QJsonArray out;
-    for (const QJsonValue& v : readAll().value("gamescope_apps").toArray()) {
-        const QJsonObject entry = gamescopeAppEntry(v, nullptr);
-        if (!entry.isEmpty() && out.size() < kGamescopeAppsMax) out.append(entry);
+    QSet<int> ids;
+    for (const QJsonValue& v : obj.value("host_apps").toArray()) {
+        const QJsonObject entry = storedHostApp(v);
+        if (entry.isEmpty() || out.size() >= AppSettings::kHostAppsMax) continue;
+        // Two cards under one id would open the same program: the first wins.
+        if (ids.contains(entry.value("app_id").toInt())) continue;
+        ids.insert(entry.value("app_id").toInt());
+        out.append(entry);
     }
     return out;
 }
 
-bool AppSettings::setGamescopeApps(const QJsonArray& apps, QString* error)
+/// The next card id to hand out: past the counter and past every entry's.
+int nextHostAppId(const QJsonObject& obj, const QJsonArray& apps)
 {
-    if (apps.size() > kGamescopeAppsMax) {
-        if (error) *error = QStringLiteral("%1 apps at most").arg(kGamescopeAppsMax);
+    int next = (std::max)(obj.value("host_apps_next_id").toInt(), AppSettings::kHostAppIdFirst);
+    for (const QJsonValue& v : apps)
+        next = (std::max)(next, v.toObject().value("app_id").toInt() + 1);
+    return next;
+}
+
+/// A new entry for the launcher @p detected, numbered from @p obj's counter
+/// (moved on), or an empty object when @p detected is not one.
+QJsonObject detectedHostApp(const QJsonObject& detected, QJsonObject& obj, const QJsonArray& apps)
+{
+    QString name, command;
+    const QString source = detected.value("source").toString();
+    if (!hostAppFields(detected, &name, &command, nullptr) || source == QLatin1String("user") ||
+        !hostAppSources().contains(source))
+        return {};
+    const int appId = nextHostAppId(obj, apps);
+    obj["host_apps_next_id"] = appId + 1;
+    QJsonObject entry{{"id", newHostAppId()},
+                      {"app_id", appId},
+                      {"name", name},
+                      {"command", command},
+                      {"source", source}};
+    QString quit;
+    if (hostAppCommand(detected.value("quit_command"), &quit)) entry["quit_command"] = quit;
+    return entry;
+}
+
+bool hasSource(const QJsonArray& apps, const QString& source)
+{
+    for (const QJsonValue& v : apps)
+        if (v.toObject().value("source").toString() == source) return true;
+    return false;
+}
+
+QStringList dismissedSources(const QJsonObject& obj)
+{
+    QStringList out;
+    for (const QJsonValue& v : obj.value("host_apps_dismissed").toArray())
+        if (hostAppSources().contains(v.toString()) && !out.contains(v.toString()))
+            out.append(v.toString());
+    return out;
+}
+
+} // namespace
+
+QJsonArray AppSettings::hostApps() const
+{
+    return storedHostApps(readAll());
+}
+
+QJsonObject AppSettings::hostApp(int appId) const
+{
+    if (appId <= 0) return {};
+    for (const QJsonValue& v : hostApps())
+        if (v.toObject().value("app_id").toInt() == appId) return v.toObject();
+    return {};
+}
+
+bool AppSettings::setHostApps(const QJsonArray& apps, QString* error, QStringList* removed)
+{
+    if (apps.size() > kHostAppsMax) {
+        if (error) *error = QStringLiteral("%1 apps at most").arg(kHostAppsMax);
         return false;
     }
+    QJsonObject obj = readAll();
+    const QJsonArray before = storedHostApps(obj);
+    QHash<QString, QJsonObject> known;
+    for (const QJsonValue& v : before)
+        known.insert(v.toObject().value("id").toString(), v.toObject());
+
     QJsonArray checked;
+    QSet<QString> kept;
     for (const QJsonValue& v : apps) {
-        const QJsonObject entry = gamescopeAppEntry(v, error);
-        if (entry.isEmpty()) return false;
+        QString name, command;
+        if (!hostAppFields(v, &name, &command, error)) return false;
+        const QString id = v.toObject().value("id").toString();
+        QJsonObject entry;
+        if (known.contains(id) && !kept.contains(id)) {
+            // The server's own fields stay as they were: only the name and
+            // the command are the page's to change.
+            entry = known.value(id);
+        } else {
+            const int appId = nextHostAppId(obj, before);
+            obj["host_apps_next_id"] = appId + 1;
+            entry = QJsonObject{{"id", newHostAppId()}, {"app_id", appId}, {"source", "user"}};
+        }
+        entry["name"] = name;
+        entry["command"] = command;
+        kept.insert(entry.value("id").toString());
         checked.append(entry);
     }
-    QJsonObject obj = readAll();
-    obj["gamescope_apps"] = checked;
+
+    QStringList dismissed = dismissedSources(obj);
+    for (const QJsonValue& v : before) {
+        const QJsonObject entry = v.toObject();
+        const QString id = entry.value("id").toString();
+        if (kept.contains(id)) continue;
+        if (removed) removed->append(id);
+        // A launcher's card the owner removed stays removed: no later version
+        // seeds it again.
+        const QString source = entry.value("source").toString();
+        if (source != QLatin1String("user") && !dismissed.contains(source) &&
+            !hasSource(checked, source))
+            dismissed.append(source);
+    }
+    obj["host_apps"] = checked;
+    obj["host_apps_dismissed"] = QJsonArray::fromStringList(dismissed);
     writeAll(obj);
     return true;
+}
+
+bool AppSettings::setHostAppImage(const QString& id, const QString& hash)
+{
+    QJsonObject obj = readAll();
+    QJsonArray apps = storedHostApps(obj);
+    for (int i = 0; i < apps.size(); ++i) {
+        QJsonObject entry = apps.at(i).toObject();
+        if (entry.value("id").toString() != id) continue;
+        if (hash.isEmpty())
+            entry.remove("image");
+        else
+            entry["image"] = hash;
+        apps[i] = entry;
+        obj["host_apps"] = apps;
+        writeAll(obj);
+        return true;
+    }
+    return false;
+}
+
+QStringList AppSettings::hostAppsDismissed() const
+{
+    return dismissedSources(readAll());
+}
+
+QJsonObject AppSettings::restoreHostApp(const QJsonObject& detected, QString* error)
+{
+    QJsonObject obj = readAll();
+    QJsonArray apps = storedHostApps(obj);
+    const QString source = detected.value("source").toString();
+    if (hasSource(apps, source)) {
+        if (error) *error = QStringLiteral("that app is already on the host");
+        return {};
+    }
+    if (apps.size() >= kHostAppsMax) {
+        if (error) *error = QStringLiteral("%1 apps at most").arg(kHostAppsMax);
+        return {};
+    }
+    const QJsonObject entry = detectedHostApp(detected, obj, apps);
+    if (entry.isEmpty()) {
+        if (error) *error = QStringLiteral("that launcher is not one this PC has");
+        return {};
+    }
+    apps.append(entry);
+    QStringList dismissed = dismissedSources(obj);
+    dismissed.removeAll(source);
+    obj["host_apps"] = apps;
+    obj["host_apps_dismissed"] = QJsonArray::fromStringList(dismissed);
+    writeAll(obj);
+    return entry;
+}
+
+bool AppSettings::seedHostApps(const QJsonArray& detected, const QString& version,
+                               QJsonArray* added)
+{
+    QJsonObject obj = readAll();
+    if (obj.value("host_apps_seeded_version").toString() == version) return false;
+    QJsonArray apps = storedHostApps(obj);
+    const QStringList dismissed = dismissedSources(obj);
+    for (const QJsonValue& v : detected) {
+        const QString source = v.toObject().value("source").toString();
+        if (hasSource(apps, source) || dismissed.contains(source) || apps.size() >= kHostAppsMax)
+            continue;
+        const QJsonObject entry = detectedHostApp(v.toObject(), obj, apps);
+        if (entry.isEmpty()) continue;
+        apps.append(entry);
+        if (added) added->append(entry);
+    }
+    obj["host_apps"] = apps;
+    obj["host_apps_seeded_version"] = version;
+    writeAll(obj);
+    return true;
+}
+
+void AppSettings::migrateHostApps()
+{
+    QJsonObject obj = readAll();
+    bool changed = false;
+    QJsonArray apps = obj.value("host_apps").toArray();
+    if (obj.contains("gamescope_apps")) {
+        // 1100 + rank was the card's id in the betas: kept, so a grid cached
+        // by a browser still opens the same program.
+        const QJsonArray old = obj.value("gamescope_apps").toArray();
+        for (int i = 0; i < old.size() && i < kHostAppsMax; ++i) {
+            QString name, command;
+            if (!hostAppFields(old.at(i), &name, &command, nullptr)) continue;
+            apps.append(QJsonObject{{"id", newHostAppId()},
+                                    {"app_id", 1100 + i},
+                                    {"name", name},
+                                    {"command", command},
+                                    {"source", "user"}});
+        }
+        obj.remove("gamescope_apps");
+        Logger::info(QStringLiteral("settings.json: %1 gamescope app(s) moved to host_apps")
+                         .arg(old.size()));
+        changed = true;
+    }
+    // An entry written in by hand, without the server's fields: given them.
+    for (int i = 0; i < apps.size(); ++i) {
+        QJsonObject entry = apps.at(i).toObject();
+        if (!entry.contains("name")) continue;
+        bool fixed = false;
+        if (!validHostAppId(entry.value("id").toString())) {
+            entry["id"] = newHostAppId();
+            fixed = true;
+        }
+        if (entry.value("app_id").toInt() < 1100) {
+            const int appId = nextHostAppId(obj, apps);
+            obj["host_apps_next_id"] = appId + 1;
+            entry["app_id"] = appId;
+            fixed = true;
+        }
+        if (fixed) {
+            apps[i] = entry;
+            changed = true;
+        }
+    }
+    if (!changed) return;
+    obj["host_apps"] = apps;
+    writeAll(obj);
+}
+
+QString AppSettings::hostAppImagesDir() const
+{
+    return QFileInfo(m_FilePath).absolutePath() + QStringLiteral("/host-app-images");
 }
 
 // ── Video enhancement ───────────────────────────────────────────────────────

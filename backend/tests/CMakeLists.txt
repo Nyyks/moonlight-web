@@ -44,7 +44,7 @@ endif()
 find_package(OpenSSL 1.1 REQUIRED)
 
 # ── Qt 6 ────────────────────────────────────────────────────────────────────
-find_package(Qt6 REQUIRED COMPONENTS Core Network WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network WebSockets)
 set(CMAKE_AUTOMOC ON)
 
 # ── Test runner ─────────────────────────────────────────────────────────────
@@ -58,6 +58,8 @@ add_executable(run_tests
     test_input_crypto.cpp
     test_rest_router.cpp
     test_app_settings.cpp
+    test_launcher_detect.cpp
+    test_host_app_image.cpp
     test_log_archive.cpp
     test_auth_manager.cpp
     test_connection_guard.cpp
@@ -171,6 +173,9 @@ add_executable(run_tests
     ${_src}/src/common/ZipWriter.cpp
     ${_src}/src/server/LogArchive.cpp
     ${_src}/src/server/LogScrubber.cpp
+    # The native host's apps: the launchers found on a PC, and their cards' images.
+    ${_src}/src/server/LauncherDetect.cpp
+    ${_src}/src/server/HostAppImage.cpp
 )
 
 target_include_directories(run_tests PRIVATE
@@ -196,7 +201,7 @@ target_compile_definitions(run_tests PRIVATE
 )
 
 target_link_libraries(run_tests PRIVATE
-    Qt6::Core Qt6::Network Qt6::WebSockets
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::WebSockets
     OpenSSL::SSL OpenSSL::Crypto
 )
 

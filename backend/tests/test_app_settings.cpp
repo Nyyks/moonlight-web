@@ -136,52 +136,163 @@ void run_app_settings_tests()
             CHECK(parsed == n.engine);
         }
     }
-    // The owner's apps in gamescope (Linux): none until some are set; stored
-    // trimmed, refused whole when one entry is not valid — the file is then
-    // left as it was — and an entry edited by hand into nonsense left out.
+    // The native host's apps: none until some are set; stored trimmed with
+    // server-made ids, refused whole when one entry is not valid — the file is
+    // then left as it was — and an entry edited by hand into nonsense left out.
     {
-        CHECK_EQ(s.gamescopeApps().size(), 0);
+        CHECK_EQ(s.hostApps().size(), 0);
         QJsonArray apps;
         apps.append(QJsonObject{{"name", "  RetroArch "}, {"command", " retroarch -f "}});
         apps.append(QJsonObject{{"name", "Heroic"}, {"command", "heroic --no-gui"}});
         QString why;
-        CHECK(s.setGamescopeApps(apps, &why));
-        CHECK_EQ(s.gamescopeApps().size(), 2);
-        CHECK_EQ(s.gamescopeApps().at(0).toObject().value("name").toString(), QString("RetroArch"));
-        CHECK_EQ(s.gamescopeApps().at(0).toObject().value("command").toString(),
-                 QString("retroarch -f"));
+        CHECK(s.setHostApps(apps, &why));
+        QJsonArray stored = s.hostApps();
+        CHECK_EQ(stored.size(), 2);
+        const QJsonObject retro = stored.at(0).toObject();
+        CHECK_EQ(retro.value("name").toString(), QString("RetroArch"));
+        CHECK_EQ(retro.value("command").toString(), QString("retroarch -f"));
+        CHECK_EQ(retro.value("source").toString(), QString("user"));
+        CHECK_EQ(retro.value("app_id").toInt(), AppSettings::kHostAppIdFirst);
+        CHECK_EQ(retro.value("id").toString().size(), 36);
+        CHECK_EQ(stored.at(1).toObject().value("app_id").toInt(), AppSettings::kHostAppIdFirst + 1);
+        CHECK_EQ(s.hostApp(AppSettings::kHostAppIdFirst + 1).value("name").toString(),
+                 QString("Heroic"));
+        CHECK(s.hostApp(4242).isEmpty());
 
         QJsonArray bad = apps;
         bad.append(QJsonObject{{"name", "Two lines"}, {"command", "a\nb"}});
-        CHECK(!s.setGamescopeApps(bad, &why));
+        CHECK(!s.setHostApps(bad, &why));
         CHECK(why.contains("one line"));
         QJsonArray unnamed;
         unnamed.append(QJsonObject{{"name", "   "}, {"command", "x"}});
-        CHECK(!s.setGamescopeApps(unnamed, &why));
+        CHECK(!s.setHostApps(unnamed, &why));
         QJsonArray tooLong;
         tooLong.append(QJsonObject{{"name", QString(41, 'n')}, {"command", "x"}});
-        CHECK(!s.setGamescopeApps(tooLong, &why));
+        CHECK(!s.setHostApps(tooLong, &why));
         QJsonArray tooMany;
-        for (int i = 0; i <= AppSettings::kGamescopeAppsMax; ++i)
+        for (int i = 0; i <= AppSettings::kHostAppsMax; ++i)
             tooMany.append(QJsonObject{{"name", QString("App %1").arg(i)}, {"command", "x"}});
-        CHECK(!s.setGamescopeApps(tooMany, &why));
-        CHECK_EQ(s.gamescopeApps().size(), 2);
+        CHECK(!s.setHostApps(tooMany, &why));
+        CHECK_EQ(s.hostApps().size(), 2);
 
+        // Removing the first keeps the second's card id, and a new one gets a
+        // fresh id — never the removed one's. The page cannot set the server's
+        // fields: a forged app_id, source or image is ignored.
+        QJsonObject heroic = s.hostApps().at(1).toObject();
+        heroic["app_id"] = 1;
+        heroic["source"] = "steam";
+        heroic["image"] = "0123456789abcdef";
+        QJsonArray edited;
+        edited.append(heroic);
+        edited.append(QJsonObject{{"name", "New"}, {"command", "new"}, {"app_id", 5}});
+        QStringList removed;
+        CHECK(s.setHostApps(edited, &why, &removed));
+        CHECK_EQ(removed.size(), 1);
+        CHECK_EQ(removed.at(0), retro.value("id").toString());
+        stored = s.hostApps();
+        CHECK_EQ(stored.at(0).toObject().value("app_id").toInt(), AppSettings::kHostAppIdFirst + 1);
+        CHECK_EQ(stored.at(0).toObject().value("source").toString(), QString("user"));
+        CHECK(!stored.at(0).toObject().contains("image"));
+        CHECK_EQ(stored.at(1).toObject().value("app_id").toInt(), AppSettings::kHostAppIdFirst + 2);
+
+        // The image's hash is the server's to record.
+        const QString heroicId = stored.at(0).toObject().value("id").toString();
+        CHECK(s.setHostAppImage(heroicId, "0123456789abcdef"));
+        CHECK_EQ(s.hostApps().at(0).toObject().value("image").toString(),
+                 QString("0123456789abcdef"));
+        CHECK(s.setHostAppImage(heroicId, QString()));
+        CHECK(!s.hostApps().at(0).toObject().contains("image"));
+        CHECK(!s.setHostAppImage("not-an-id", "0123456789abcdef"));
+
+        // Hand-edited nonsense is left out.
         QFile f(s.m_FilePath);
         CHECK(f.open(QIODevice::ReadOnly));
-        QJsonObject edited = QJsonDocument::fromJson(f.readAll()).object();
+        QJsonObject file = QJsonDocument::fromJson(f.readAll()).object();
         f.close();
-        QJsonArray stored = edited["gamescope_apps"].toArray();
-        stored.append(QJsonObject{{"name", "Hand-made"}});
-        stored.append(QString("not an object"));
-        edited["gamescope_apps"] = stored;
+        QJsonArray hand = file["host_apps"].toArray();
+        hand.append(QJsonObject{{"name", "Hand-made"}});
+        hand.append(QString("not an object"));
+        file["host_apps"] = hand;
         CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        f.write(QJsonDocument(edited).toJson());
+        f.write(QJsonDocument(file).toJson());
         f.close();
-        CHECK_EQ(s.gamescopeApps().size(), 2);
+        CHECK_EQ(s.hostApps().size(), 2);
 
-        CHECK(s.setGamescopeApps(QJsonArray(), &why));
-        CHECK_EQ(s.gamescopeApps().size(), 0);
+        CHECK(s.setHostApps(QJsonArray(), &why));
+        CHECK_EQ(s.hostApps().size(), 0);
+    }
+    // Launchers found on this PC: seeded once per version; a seeded card the
+    // owner removes is dismissed, never seeded again, and can be restored.
+    {
+        QJsonArray found;
+        found.append(QJsonObject{{"source", "steam"},
+                                 {"name", "Steam Big Picture"},
+                                 {"command", "steam://open/bigpicture"},
+                                 {"quit_command", "steam://close/bigpicture"}});
+        found.append(QJsonObject{{"source", "user"}, {"name", "Not a launcher"}, {"command", "x"}});
+        QJsonArray added;
+        CHECK(s.seedHostApps(found, "0.4.0", &added));
+        CHECK_EQ(added.size(), 1);
+        CHECK_EQ(s.hostApps().size(), 1);
+        const QJsonObject steam = s.hostApps().at(0).toObject();
+        CHECK_EQ(steam.value("source").toString(), QString("steam"));
+        CHECK_EQ(steam.value("quit_command").toString(), QString("steam://close/bigpicture"));
+        // Same version: nothing more, even a launcher found since.
+        CHECK(!s.seedHostApps(found, "0.4.0", &added));
+
+        // Renamed by the owner, it stays the Steam card.
+        QJsonArray renamed;
+        QJsonObject mine = steam;
+        mine["name"] = "Big Picture";
+        renamed.append(mine);
+        QString why;
+        CHECK(s.setHostApps(renamed, &why));
+        CHECK_EQ(s.hostApps().at(0).toObject().value("source").toString(), QString("steam"));
+        CHECK_EQ(s.hostApps().at(0).toObject().value("quit_command").toString(),
+                 QString("steam://close/bigpicture"));
+
+        // Removed: dismissed, and the next version leaves it out.
+        CHECK(s.setHostApps(QJsonArray(), &why));
+        CHECK_EQ(s.hostAppsDismissed(), QStringList{"steam"});
+        added = QJsonArray();
+        CHECK(s.seedHostApps(found, "0.4.1", &added));
+        CHECK_EQ(added.size(), 0);
+        CHECK_EQ(s.hostApps().size(), 0);
+
+        // Restored at the owner's request: back, with a new card id.
+        const QJsonObject back = s.restoreHostApp(found.at(0).toObject(), &why);
+        CHECK(!back.isEmpty());
+        CHECK(back.value("app_id").toInt() > steam.value("app_id").toInt());
+        CHECK(s.hostAppsDismissed().isEmpty());
+        CHECK(s.restoreHostApp(found.at(0).toObject(), &why).isEmpty());
+        CHECK(why.contains("already"));
+        CHECK(s.setHostApps(QJsonArray(), &why));
+    }
+    // The betas' gamescope_apps move to host_apps, keeping their card ids.
+    {
+        QFile f(s.m_FilePath);
+        CHECK(f.open(QIODevice::ReadOnly));
+        QJsonObject file = QJsonDocument::fromJson(f.readAll()).object();
+        f.close();
+        file.remove("host_apps");
+        QJsonArray old;
+        old.append(QJsonObject{{"name", "RetroArch"}, {"command", "retroarch"}});
+        old.append(QJsonObject{{"name", "Lutris"}, {"command", "lutris"}});
+        file["gamescope_apps"] = old;
+        CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write(QJsonDocument(file).toJson());
+        f.close();
+        s.migrateHostApps();
+        const QJsonArray moved = s.hostApps();
+        CHECK_EQ(moved.size(), 2);
+        CHECK_EQ(moved.at(0).toObject().value("app_id").toInt(), 1100);
+        CHECK_EQ(moved.at(1).toObject().value("app_id").toInt(), 1101);
+        CHECK_EQ(moved.at(1).toObject().value("name").toString(), QString("Lutris"));
+        CHECK(!s.readAll().contains("gamescope_apps"));
+        s.migrateHostApps(); // idempotent
+        CHECK_EQ(s.hostApps().size(), 2);
+        QString why;
+        CHECK(s.setHostApps(QJsonArray(), &why));
     }
 
     s.setUniqueId("abcd1234");

@@ -81,7 +81,9 @@ QString sessionUserName(DWORD sessionId)
 /// it exists: the worker then types into elevated windows the way the user
 /// could, and still runs as the user, not as SYSTEM. Both need SeTcbPrivilege
 /// to come back as primary tokens, which a LocalSystem service has.
-HANDLE acquireConsoleToken(ConsoleSession::Info& info)
+/// @p preferLinked false keeps the filtered token: a program the user opens
+/// themselves, never raised.
+HANDLE acquireConsoleToken(ConsoleSession::Info& info, bool preferLinked = true)
 {
     const DWORD sessionId = ::WTSGetActiveConsoleSessionId();
     if (sessionId == 0xFFFFFFFF) {
@@ -114,7 +116,8 @@ HANDLE acquireConsoleToken(ConsoleSession::Info& info)
 
     TOKEN_LINKED_TOKEN linked = {};
     DWORD len = 0;
-    if (::GetTokenInformation(token, TokenLinkedToken, &linked, sizeof(linked), &len) &&
+    if (preferLinked &&
+        ::GetTokenInformation(token, TokenLinkedToken, &linked, sizeof(linked), &len) &&
         linked.LinkedToken) {
         ::CloseHandle(token);
         token = linked.LinkedToken;
@@ -597,6 +600,52 @@ struct ConsoleProcess::Impl
     std::mutex writeMutex;
     QString user;
 };
+
+bool ConsoleSession::startAsConsoleUser(const QString& program, const QStringList& args,
+                                        QString* error)
+{
+#ifndef Q_OS_WIN
+    Q_UNUSED(program);
+    Q_UNUSED(args);
+    if (error) *error = QStringLiteral("console-session launch exists on Windows only");
+    return false;
+#else
+    ConsoleSession::Info info;
+    HANDLE token = acquireConsoleToken(info, /*preferLinked=*/false);
+    if (!token) {
+        if (error) *error = info.reason;
+        return false;
+    }
+    // The user's own environment and desktop; no handle of ours crosses over.
+    LPVOID env = nullptr;
+    if (!::CreateEnvironmentBlock(&env, token, FALSE)) env = nullptr;
+    wchar_t desktop[] = L"winsta0\\default";
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    si.lpDesktop = desktop;
+    QString commandLine = quoteArg(program);
+    for (const QString& arg : args)
+        commandLine += QLatin1Char(' ') + quoteArg(arg);
+    std::wstring cmd = commandLine.toStdWString();
+    const std::wstring app = program.toStdWString();
+    const std::wstring cwd = QFileInfo(program).absolutePath().toStdWString();
+    PROCESS_INFORMATION pi = {};
+    const BOOL created = ::CreateProcessAsUserW(
+        token, app.c_str(), cmd.data(), nullptr, nullptr, FALSE,
+        CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, env, cwd.c_str(), &si, &pi);
+    const DWORD createError = created ? 0 : ::GetLastError();
+    if (env) ::DestroyEnvironmentBlock(env);
+    ::CloseHandle(token);
+    if (!created) {
+        if (error)
+            *error = QStringLiteral("CreateProcessAsUser failed (error %1)").arg(createError);
+        return false;
+    }
+    ::CloseHandle(pi.hThread);
+    ::CloseHandle(pi.hProcess);
+    return true;
+#endif
+}
 
 ConsoleProcess::ConsoleProcess(QObject* parent)
     : QObject(parent)
