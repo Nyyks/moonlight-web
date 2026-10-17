@@ -92,6 +92,7 @@
         "initTitle": "Erreur d'initialisation",
         "connectionTitle": "Erreur de connexion",
         "unableToConnect": "Impossible de se connecter au serveur",
+        "serverUnreadable": "Le serveur a renvoyé une réponse que MoonlightWeb ne sait pas lire. Il redémarre ou se met peut-être à jour : réessayez dans un instant.",
         "boothTitle": "Mode borne",
         "boothBody": "Ce MoonlightWeb n'accepte que les appareils qu'il connaît déjà. Demandez à son propriétaire d'ajouter celui-ci."
     },

@@ -44,6 +44,20 @@ describe('BackendClient', () => {
         expect(fetchMock).toHaveBeenCalledWith('/api/hosts');
     });
 
+    // A proxy page, a restarting server or the app shell can answer 200 with
+    // HTML: the browser's "Unexpected token '<'" must not reach the user.
+    it('says the answer was unreadable when an OK answer is not JSON', async () => {
+        const html = {
+            ok: true,
+            status: 200,
+            json: async () => JSON.parse('<!doctype html>'),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(html));
+        const err = await BackendClient.getHosts().catch((e) => e);
+        expect(err.message).toBe('appError.serverUnreadable');
+        expect(err.statusCode).toBe(200);
+    });
+
     it('POST sends a JSON body with the right headers', async () => {
         const fetchMock = mockFetch(jsonResponse({ ok: true }));
         await BackendClient.addManualHost('10.0.0.9');

@@ -19,6 +19,8 @@
  * MoonlightWeb — REST API client
  */
 
+import { t } from '../i18n/i18n.js';
+
 /**
  * Ride out a gap instead of asking the host for a keyframe. **The A/B switch.**
  *
@@ -186,10 +188,26 @@ export class BackendClient {
         throw error;
     }
 
+    /**
+     * The body of an answer that said OK. Not JSON means something other than
+     * our API answered — a page from a proxy, a server restarting or mid-update,
+     * the app shell itself — and the browser's own parse error ("Unexpected
+     * token '<'") tells the user nothing, so say it in their words.
+     */
+    static async _json(resp) {
+        try {
+            return await resp.json();
+        } catch (_) {
+            const e = /** @type {BackendError} */ (new Error(t('appError.serverUnreadable')));
+            e.statusCode = resp.status;
+            throw e;
+        }
+    }
+
     static async get(path) {
         const resp = await fetch(path);
         if (!resp.ok) return this._handleError(resp, path);
-        return resp.json();
+        return this._json(resp);
     }
 
     static async post(path, body = {}, { timeoutMs = 0, _retried = false } = {}) {
@@ -222,7 +240,7 @@ export class BackendClient {
                     return this.post(path, body, { timeoutMs, _retried: true });
             }
             if (!resp.ok) return this._handleError(resp, path);
-            return resp.json();
+            return this._json(resp);
         } catch (err) {
             if (err && err.name === 'AbortError') {
                 const e = /** @type {BackendError} */ (new Error('server_timeout'));
@@ -244,7 +262,7 @@ export class BackendClient {
 
         const resp = await fetch(path, { method: 'DELETE', headers });
         if (!resp.ok) return this._handleError(resp, path);
-        return resp.json();
+        return this._json(resp);
     }
 
     static async getHosts() {
@@ -438,7 +456,7 @@ export class BackendClient {
                 signal: controller ? controller.signal : undefined,
             });
             if (!resp.ok) return this._handleError(resp, 'running-app');
-            return resp.json();
+            return this._json(resp);
         } finally {
             if (timer) clearTimeout(timer);
         }
