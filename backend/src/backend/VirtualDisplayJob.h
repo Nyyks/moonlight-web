@@ -105,6 +105,18 @@ public:
     /// that teardown starts the grace again — under the new stream.
     void setInUse(std::function<bool()> inUse) { m_InUse = std::move(inUse); }
 
+    /// Asked when the display is about to go off for good (no stream left
+    /// once the grace ran out; on Linux, at the stream's end): closes what
+    /// was opened on it, so it does not land on a physical screen instead
+    /// (HostAppLauncher: Steam leaves Big Picture). True when it closed
+    /// something — the display then waits kCloseSettleMs before going off,
+    /// for that window to be gone.
+    void setBeforeRelease(std::function<bool()> beforeRelease)
+    {
+        m_BeforeRelease = std::move(beforeRelease);
+    }
+    static constexpr int kCloseSettleMs = 3000;
+
     bool running() const;
 
     /// The rate, in millihertz, this process last turned the display on at
@@ -164,6 +176,7 @@ private:
     /// Since when runTask() waits for the task's previous run to end.
     QElapsedTimer m_TaskBusySince;
     std::function<bool()> m_InUse;
+    std::function<bool()> m_BeforeRelease;
     QByteArray m_HelperOut;
     // The service path runs the node stage as SYSTEM and the desktop stages
     // in the console session, one child each; these are the ones still to run.

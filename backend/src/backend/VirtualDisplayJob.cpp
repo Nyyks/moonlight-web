@@ -116,6 +116,15 @@ VirtualDisplayJob::VirtualDisplayJob(QObject* parent)
             return;
         }
         Logger::info(QStringLiteral("[vdisplay] no stream left on the virtual display"));
+        if (m_BeforeRelease && m_BeforeRelease()) {
+            // What was opened there is closing: off once it is gone, unless
+            // a stream came back in the meantime.
+            QTimer::singleShot(kCloseSettleMs, this, [this]() {
+                if (m_InUse && m_InUse()) return;
+                deactivate(nullptr);
+            });
+            return;
+        }
         deactivate(nullptr);
     });
 }
@@ -233,8 +242,12 @@ void VirtualDisplayJob::deactivate(Callback cb)
 
 void VirtualDisplayJob::releaseSoon()
 {
-    // Linux: it went with the stream's portal session.
-    if (VirtualDisplay::livesInStream()) return;
+    // Linux: it went with the stream's portal session — what was opened on
+    // it is closed now, with nothing left to turn off.
+    if (VirtualDisplay::livesInStream()) {
+        if (m_BeforeRelease && !(m_InUse && m_InUse())) m_BeforeRelease();
+        return;
+    }
     m_Release.start();
 }
 

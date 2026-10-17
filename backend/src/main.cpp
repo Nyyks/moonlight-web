@@ -153,6 +153,11 @@ static int g_LastOwnerAppId = 0;
 // when its turn comes and stands down. File scope for the same reason as the
 // two above.
 static QHash<int, quint64> g_SlotLaunchGeneration;
+// The quit commands of the native host's apps opened on "MoonlightWeb Virtual
+// Display" since it came on: run when it goes off (setBeforeRelease), or the
+// program would land on a physical screen — Big Picture full screen on the
+// owner's monitor. Sunshine closes Big Picture at the stream's end too.
+static QStringList g_HostAppCloseOnRelease;
 
 // Load KEY=VALUE pairs from a .env file into the process environment.
 // Supports PEM blocks: if a value starts with "-----BEGIN", lines are
@@ -2293,6 +2298,17 @@ int main(int argc, char* argv[])
         }
         return false;
     });
+    VirtualDisplayJob::instance().setBeforeRelease([]() {
+        if (g_HostAppCloseOnRelease.isEmpty()) return false;
+        for (const QString& command : std::as_const(g_HostAppCloseOnRelease)) {
+            qInfo().noquote() << "[Session] closing what the virtual display showed:" << command;
+            QString why;
+            if (!HostAppLauncher::open(command, &why))
+                qWarning().noquote() << "[Session] the app's quit command failed:" << why;
+        }
+        g_HostAppCloseOnRelease.clear();
+        return true;
+    });
     // Per-host result of the dual-stream capability probe (first standby
     // launch): missing = unknown (assume yes), false = host rejected a second
     // concurrent session → frontend falls back to the legacy relaunch.
@@ -3937,11 +3953,17 @@ int main(int argc, char* argv[])
             const QString hostAppCommand = host->backendType == NativeHostBackend::typeName()
                                                ? NativeHostBackend::desktopCommandFor(appId)
                                                : QString();
+            // ... and closed again when that display goes off.
+            const QString hostAppCloseCommand =
+                !hostAppCommand.isEmpty() && NativeHostBackend::usesVirtualDisplay(appId)
+                    ? NativeHostBackend::hostAppFor(appId).value("quit_command").toString()
+                    : QString();
             QObject::connect(
                 worker, &StreamWorkerHost::responseReady, qApp,
                 [respond, worker, &g_Pool, &g_DualSupport, &g_LiveSunshineUids, &authManager,
                  &sessionMetrics, sessionFacts, sessionStartedAt, reqSlot, standby, hostUuidCopy,
-                 uid, sessionToken, hostAppCommand](int code, QJsonObject bodyObj) {
+                 uid, sessionToken, hostAppCommand,
+                 hostAppCloseCommand](int code, QJsonObject bodyObj) {
                     const bool ok =
                         code == 200 && bodyObj["status"].toString() == QLatin1String("streaming");
                     // Count a session once it actually carries a picture, and
@@ -3970,6 +3992,9 @@ int main(int argc, char* argv[])
                             if (!HostAppLauncher::open(hostAppCommand, &why))
                                 qWarning().noquote()
                                     << "[Session] the app could not be opened:" << why;
+                            else if (!hostAppCloseCommand.isEmpty() &&
+                                     !g_HostAppCloseOnRelease.contains(hostAppCloseCommand))
+                                g_HostAppCloseOnRelease.append(hostAppCloseCommand);
                         }
                         respond(HttpResponse::json(bodyObj, 200));
                         return;
@@ -4590,6 +4615,7 @@ int main(int argc, char* argv[])
                     QString why;
                     if (!quitCommand.isEmpty() && !HostAppLauncher::open(quitCommand, &why))
                         qWarning().noquote() << "[quit] the app's quit command failed:" << why;
+                    g_HostAppCloseOnRelease.removeAll(quitCommand);
                 }
                 // Suppressed ended-cleanup: this handler owns the Sunshine
                 // /cancel decision (keyed by quitUniqueId below; none at all
