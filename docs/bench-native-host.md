@@ -7322,6 +7322,14 @@ exactement.
 **Décision D3 (Bruno, 16/10)** : `vddmatch` par défaut sous Windows, avec le
 repli ×1 et le plafond de 330 Hz (`b3451a38`).
 
+**Le défaut vu en direct (16/10, 10:17)** : un stream du Mac (flux à 120 i/s)
+sur la `--dev` de `b3451a38`, sans clé de banc. Le journal dit « virtual
+display at 240.012 Hz for a 120 fps stream (vddmatch: 2 x the client's
+120.006 Hz) ». L'écran du Mac tourne à 120,006 Hz, et l'écran virtuel a pris
+le double exact. En fin de stream, « capture hold at 240 Hz: not judged, 1 s
+of dense content (20 needed) » : trop peu de contenu animé pour juger la tenue
+de la capture, donc aucun refus enregistré.
+
 ### 8x.10 Ce qui reste
 
 - **Choisir la phase** (§8x.7). Pour N périodes par image, la porte calée a N
