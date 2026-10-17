@@ -38,8 +38,7 @@ void run_launcher_detect_tests()
     SECTION("LauncherDetect");
 
     // The program of a protocol handler's command line.
-    CHECK_EQ(LauncherDetect::programOf(
-                 "\"C:\\Program Files (x86)\\Steam\\steam.exe\" -- \"%1\""),
+    CHECK_EQ(LauncherDetect::programOf("\"C:\\Program Files (x86)\\Steam\\steam.exe\" -- \"%1\""),
              QString("C:\\Program Files (x86)\\Steam\\steam.exe"));
     CHECK_EQ(LauncherDetect::programOf("C:\\Program Files\\Playnite\\Playnite.DesktopApp.exe %1"),
              QString("C:\\Program Files\\Playnite\\Playnite.DesktopApp.exe"));
@@ -48,7 +47,8 @@ void run_launcher_detect_tests()
     // slashes as Steam writes it.
     {
         FakeMachine m;
-        m.registry["HKCU\\Software\\Valve\\Steam|SteamExe"] = "c:/program files (x86)/steam/steam.exe";
+        m.registry["HKCU\\Software\\Valve\\Steam|SteamExe"] =
+            "c:/program files (x86)/steam/steam.exe";
         m.files << "c:\\program files (x86)\\steam\\steam.exe";
         const auto steam = LauncherDetect::steamWindows(m.lookup());
         CHECK(steam.has_value());
@@ -76,8 +76,7 @@ void run_launcher_detect_tests()
     // Playnite: its uninstall entry, then its default place.
     {
         FakeMachine m;
-        const QString uninstall =
-            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+        const QString uninstall = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
         m.subkeys[uninstall] = QStringList{"Other", "{1234}"};
         m.registry[uninstall + "\\{1234}|DisplayName"] = "Playnite";
         m.registry[uninstall + "\\{1234}|InstallLocation"] = "E:\\Apps\\Playnite\\";
