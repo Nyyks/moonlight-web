@@ -123,6 +123,38 @@ MACHINES = _load_fleet()
 DEV_HTTP = 48080
 DEV_HTTPS = 48443
 
+# The acceptance run probes the DEV edition, which installs beside production.
+# A pre-release campaign measures the hidden PROD staging build instead:
+# MW_BENCH_EDITION=prod points every probe at MoonlightWeb, not MoonlightWebDev.
+EDITION = os.environ.get("MW_BENCH_EDITION", "dev").strip().lower()
+
+_PROD_NAMES = [
+    # Most specific first: the bare "MoonlightWebDev" would match inside them.
+    ("/Applications/MoonlightWebDev.app/Contents/MacOS/MoonlightWebDev",
+     "/Applications/MoonlightWeb.app/Contents/MacOS/MoonlightWeb"),
+    ("com.moonlightweb.agent.dev", "com.moonlightweb.agent"),
+    ("MoonlightWeb/MoonlightWebDev/logs", "MoonlightWeb/MoonlightWeb/logs"),
+    ("Logs/MoonlightWebDev/", "Logs/MoonlightWeb/"),
+    ("moonlightweb-dev", "moonlightweb"),
+    ("MoonlightWebDev", "MoonlightWeb"),
+]
+
+
+def _for_edition(script, os_name):
+    """The probe script as written for DEV, renamed for PROD when asked."""
+    if EDITION != "prod":
+        return script
+    # The process pattern: "MoonlightWeb" alone would also match a DEV beside it.
+    pattern = "MoonlightWeb.app/" if os_name == "macos" else "/opt/moonlightweb/"
+    script = script.replace("python3 - MoonlightWebDev", "python3 - " + pattern)
+    for dev, prod in _PROD_NAMES:
+        script = script.replace(dev, prod)
+    # The guessed ports, when the process's own are not readable (lsof without
+    # root on Linux): the DEV defaults would land on a DEV running beside it.
+    script = script.replace("for guess in (48080, 48443, 18080, 18443, 80, 443):",
+                            "for guess in (49080, 49443, 80, 443):")
+    return script
+
 
 class RemoteError(Exception):
     pass
@@ -574,7 +606,7 @@ if (Test-Path $exe) {
 
 'MWPROBE ' + ($out | ConvertTo-Json -Compress -Depth 4)
 """
-        rc, out, err = run_script(mid, script, timeout=300)
+        rc, out, err = run_script(mid, _for_edition(script, m["os"]), timeout=300)
 
     else:
         extra = ""
@@ -657,7 +689,7 @@ print("MWPROBE " + json.dumps(out))
         # caffeinate first: this Mac falls asleep in the middle of an ssh session.
         prefix = "caffeinate -d -i -t 300 >/dev/null 2>&1 </dev/null &\n" if m["os"] == "macos" else ""
         script = prefix + "python3 - MoonlightWebDev <<'MWPY'\n" + body + "\nMWPY\n"
-        rc, out, err = run_script(mid, script, timeout=300)
+        rc, out, err = run_script(mid, _for_edition(script, m["os"]), timeout=300)
 
     parsed = {"_rc": rc, "_stderr": (err or "").strip()[:400]}
     for chunk in (out or "").splitlines():

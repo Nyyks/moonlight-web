@@ -195,6 +195,9 @@ def kiosk_start(url, on_gpu=None):
                       "--test-type",
                       "--hide-crash-restore-bubble",
                       "--autoplay-policy=no-user-gesture-required",
+                      # Nothing audible at the desk, whatever the pass asks of
+                      # the host's audio: the stream's sound is never judged by ear.
+                      "--mute-audio",
                       "--remote-debugging-port=%d" % DEBUG_PORT,
                       "--ignore-certificate-errors",
                       # Covered by another window, Chrome calls the page hidden
