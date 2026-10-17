@@ -86,7 +86,9 @@ The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio through i
 
 **On Wi-Fi, the stream goes ahead of the house's downloads.** Its packets are marked for the Wi-Fi's video queue (AF41): with a download running on the same access point as your device, each click came back 32 to 40 ms sooner in our tests, where the unmarked stream fell to a few Mbit/s. If your other devices struggle while you stream (a video call, a download), untick **Give the stream priority on the network** in the admin page: the stream then queues like any other device, and its picture can turn less steady on a busy network.
 
-**On Linux, Steam gets a screen of its own.** With gamescope 3.16.22 or later (Fedora 43+, Arch, Bazzite, SteamOS, Ubuntu 26.10+), a **Steam Big Picture** card opens Steam in its own screen, at the size of the device that streams it, without touching the desktop — an X11 session included. The apps you list in **Admin → Games outside Steam** get a card each.
+**On Linux, Steam gets a screen of its own.** With gamescope 3.16.22 or later (Fedora 43+, Arch, Bazzite, SteamOS, Ubuntu 26.10+), a **Steam Big Picture** card opens Steam in its own screen, at the size of the device that streams it, without touching the desktop — an X11 session included. The apps you list in **Admin → Apps on this PC** open there too.
+
+**Your apps on the host, on every OS.** **Admin → Apps on this PC** gives any program or link a card on the host: a name, a command (`steam://open/bigpicture`, a path to a game, `lutris lutris:rungameid/3`) and an image. On Windows and macOS it opens on the virtual display, at the size of the device that streams it, as the user at the desktop. If Steam is installed, a **Steam Big Picture** card is there after installing or updating MoonlightWeb, like Sunshine's; Playnite's full-screen mode too on Windows. The program keeps running when the stream ends, and **Quit** closes Big Picture.
 
 ### Stream settings
 

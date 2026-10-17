@@ -28,7 +28,8 @@
 /**
  * The interactive desktop, seen from a process that may not be on it.
  *
- * MoonlightWeb's standard installation is a Windows service (NSSM, session 0).
+ * MoonlightWeb's server runs as a logon task in the user's session now; an
+ * installation that had the Windows service (NSSM, session 0) keeps it.
  * Session 0 has no desktop anybody looks at: DXGI Desktop Duplication has
  * nothing to duplicate there, SendInput reaches no window, and the native
  * engine's own probe says so in one line ("no interactive desktop session").
