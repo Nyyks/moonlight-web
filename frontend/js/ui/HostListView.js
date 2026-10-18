@@ -771,9 +771,21 @@ export class HostListView {
 
         // Phase 1 — the host is still answering. Bounded: on the platforms whose
         // installer needs a prompt on the host desktop, nothing kills this server
-        // and an unanswered dialog would keep us polling forever.
+        // and an unanswered dialog would keep us polling forever. A minute past
+        // the host's own deadline (SelfUpdater::armWatchdog: 15 minutes with a
+        // prompt, 3 without), so that what it reports — "failed", with its
+        // reason — is what this page shows, rather than a guess made first.
+        // Counted from the end of the download, as the host's is.
+        let startedAt = Date.now();
+        let budgetMs = 4 * 60 * 1000;
+        const hardStop = Date.now() + 30 * 60 * 1000; // a download that never ends
         let alive = true;
-        for (let i = 0; i < 600 && !this._destroyed && alive; i++) {
+        while (
+            Date.now() - startedAt < budgetMs &&
+            Date.now() < hardStop &&
+            !this._destroyed &&
+            alive
+        ) {
             await sleep(900);
             let status;
             try {
@@ -793,6 +805,8 @@ export class HostListView {
                 alive = false;
                 break;
             }
+            if (status.state === 'downloading') startedAt = Date.now();
+            if (status.requires_host_confirmation) budgetMs = 16 * 60 * 1000;
             this._renderUpdateProgress(status);
         }
         if (this._destroyed) return;
