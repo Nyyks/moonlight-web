@@ -64,6 +64,7 @@
 #include <memory>
 #include <utility>
 #include "server/AppSettings.h"
+#include "common/DetachedProcess.h"
 #include "server/ClientUniqueId.h"
 #include "server/LogArchive.h"
 #include "server/routes/LogRoutes.h"
@@ -325,7 +326,7 @@ static void writeAdminShortcut(const QString& url)
                                     QFileDevice::ExeOwner | QFileDevice::ReadGroup |
                                     QFileDevice::ExeGroup | QFileDevice::ReadOther |
                                     QFileDevice::ExeOther);
-    QProcess::startDetached(
+    mw::startDetached(
         QStringLiteral("gio"),
         {QStringLiteral("set"), path, QStringLiteral("metadata::trusted"), QStringLiteral("true")});
 #elif defined(Q_OS_WIN)
@@ -454,7 +455,7 @@ static bool arecordRunning()
 static void openInBrowser(const QString& url)
 {
 #if defined(Q_OS_LINUX)
-    if (QProcess::startDetached(QStringLiteral("xdg-open"), {url})) return;
+    if (mw::startDetached(QStringLiteral("xdg-open"), {url})) return;
     // xdg-open missing (minimal desktop): fall through to Qt's opener.
 #endif
     QDesktopServices::openUrl(QUrl(url));

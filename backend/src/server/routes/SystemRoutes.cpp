@@ -20,6 +20,7 @@
 #include "server/HttpServer.h"
 #include "server/RestRouter.h"
 #include "server/AppSettings.h"
+#include "common/DetachedProcess.h"
 #include "server/AuthManager.h"
 #include "server/Provisioning.h"
 #include "network/InternetAccessManager.h"
@@ -991,7 +992,7 @@ void registerSystemRoutes(HttpServer& server, AppSettings& appSettings, AuthMana
             QString appPath = QCoreApplication::applicationFilePath();
             QStringList args = QCoreApplication::arguments();
             if (!args.isEmpty()) args.removeFirst(); // argv[0]; startDetached re-adds it
-            QProcess::startDetached(appPath, args);
+            mw::startDetached(appPath, args);
         }
         Logger::info(QStringLiteral("[System] Restart requested over loopback (%1)")
                          .arg(supervised ? QStringLiteral("supervisor respawn")

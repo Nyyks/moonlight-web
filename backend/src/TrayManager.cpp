@@ -18,6 +18,7 @@
 #include "TrayManager.h"
 #include "Autostart.h"
 #include "common/Edition.h"
+#include "common/DetachedProcess.h"
 #include "server/HttpServer.h"
 
 #include <QApplication>
@@ -421,7 +422,7 @@ void TrayManager::onRestart()
     QStringList args = QCoreApplication::arguments();
     if (!args.isEmpty()) args.removeFirst(); // argv[0] is the app path, startDetached handles it
 
-    if (!QProcess::startDetached(appPath, args)) {
+    if (!mw::startDetached(appPath, args)) {
         qWarning() << "[TrayManager] Restart failed — could not launch new process";
         return;
     }

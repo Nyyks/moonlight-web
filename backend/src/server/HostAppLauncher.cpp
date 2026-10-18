@@ -18,6 +18,7 @@
 #include "HostAppLauncher.h"
 
 #include "common/Logger.h"
+#include "common/DetachedProcess.h"
 
 #include <QCoreApplication>
 #include <QProcess>
@@ -253,7 +254,7 @@ bool open(const QString& command, QString* error)
         arguments = run;
     }
 #endif
-    if (!QProcess::startDetached(program, arguments)) {
+    if (!mw::startDetached(program, arguments)) {
         if (error) *error = QStringLiteral("%1 could not be started").arg(program);
         Logger::warning(QStringLiteral("[HostApp] could not open %1").arg(line));
         return false;

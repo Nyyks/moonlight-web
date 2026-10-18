@@ -19,6 +19,7 @@
 #include "RelaunchScript.h"
 #include "UpdateChecker.h"
 #include "common/Edition.h"
+#include "common/DetachedProcess.h"
 #include "common/Logger.h"
 #include "common/WinSystemPath.h"
 #include "server/AppSettings.h"
@@ -748,7 +749,7 @@ bool SelfUpdater::launchDetached(const QString& install)
     const QString script = relaunchscript::build(install, QCoreApplication::applicationPid(), exe,
                                                  AppSettings::fileOverride());
 
-    if (!QProcess::startDetached(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), script})) {
+    if (!mw::startDetached(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), script})) {
         fail(QStringLiteral("Could not launch the installer"));
         return false;
     }
