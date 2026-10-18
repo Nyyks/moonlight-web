@@ -140,20 +140,8 @@ EOF
 # actually index. Without it the app is installable but invisible in every
 # graphical software centre. The same file is compiled into the repository
 # index by the `linux-repo` job (see .github/workflows/release.yml).
-sed -e "s/@MW_VERSION@/$VERSION/g" -e "s/@MW_DATE@/$(date -u +%Y-%m-%d)/g" \
-    -e "s/top\.moonlightweb\.MoonlightWeb/$APPID/g" \
-    -e "s|^  <name>MoonlightWeb</name>|  <name>$APP</name>|" \
-    -e "s|<binary>moonlightweb</binary>|<binary>$NAME</binary>|" \
-    "$(dirname "$0")/top.moonlightweb.MoonlightWeb.metainfo.xml" \
-    > "$PKG/usr/share/metainfo/$APPID.metainfo.xml"
-
-# Catches a malformed template before it reaches a user's software centre.
-# Advisory only: appstreamcli is not installed on every build host, and its
-# newer releases add warnings that would otherwise break packaging.
-if command -v appstreamcli >/dev/null 2>&1; then
-    appstreamcli validate --no-net "$PKG/usr/share/metainfo/$APPID.metainfo.xml" \
-        || echo "warning: AppStream validation reported issues (not fatal)"
-fi
+bash "$(dirname "$0")/make-metainfo.sh" "$APP" "$NAME" "$VERSION" \
+    "$PKG/usr/share/metainfo/$APPID.metainfo.xml"
 
 # In-app updates without a password (SelfUpdater's "repo" path): a root helper
 # that upgrades the package from its signed repository, the polkit action that

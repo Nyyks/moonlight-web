@@ -675,7 +675,35 @@ jobs:
       # AppImage: portable fallback for distros without deb/rpm (Arch, and
       # immutable gaming distros like SteamOS/Bazzite). Needs chmod +x once.
       - name: Build AppImage
+        env:
+          APP: ${{ needs.setup.outputs.app }}
+          # -x86_64, not -linux-x64: the AppImage catalog's test warns on "linux"
+          # in the name (all AppImages are for Linux) and names the arch this way.
+          # Releases up to v0.3.1 used -linux-x64; website/install.sh tries both.
+          # Named here, not renamed after: the .zsync names the file it updates.
+          LDAI_OUTPUT: ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-x86_64.AppImage
+          PKG: ${{ needs.setup.outputs.pkg }}
+          # make-metainfo.sh validates the metadata already, as advice only; the
+          # check appimagetool runs would make a new appstreamcli warning fatal.
+          LDAI_NO_APPSTREAM: 1
         run: |
+          # AppStream metadata, in the AppImage only (removed again below: the
+          # .deb and the .rpm write their own, named after their menu entry).
+          # The AppImage catalog takes the app page's screenshot from it;
+          # without it the page shows the catalog's own test capture, a browser
+          # on a certificate warning in a throwaway profile.
+          mkdir -p AppDir/usr/share/metainfo
+          bash backend/packaging/linux/make-metainfo.sh "$APP" "$PKG" \
+            ${{ needs.setup.outputs.pkg_version }} \
+            "AppDir/usr/share/metainfo/top.moonlightweb.$APP.metainfo.xml" "$APP.desktop"
+          # Update information (AppImageUpdate and the like), on a release only:
+          # a CI or staging build must not offer to update itself to the latest
+          # release. Exported only then: the plugin passes the variable on even
+          # when empty. It writes the .zsync next to the AppImage, and the
+          # release publishes both. The AppImage catalog warns without it.
+          if [ "$GITHUB_REF" != "${GITHUB_REF#refs/tags/}" ]; then
+            export LDAI_UPDATE_INFORMATION="gh-releases-zsync|linckosz|moonlight-web|latest|$PKG-*-x86_64.AppImage.zsync"
+          fi
           # The same excludes as the first pass: this one deploys dependencies
           # again, and without them it bundled libva (v0.3.1).
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
@@ -683,6 +711,12 @@ jobs:
             --exclude-library 'libva-drm.so.*' \
             --exclude-library 'libGLESv2.so.*' \
             --output appimage
+          rm -r AppDir/usr/share/metainfo
+          test -f "$LDAI_OUTPUT" || { echo "::error::$LDAI_OUTPUT was not written"; exit 1; }
+          # A warning, not a failure: the AppImage itself is fine without it.
+          if [ -n "${LDAI_UPDATE_INFORMATION:-}" ] && [ ! -f "$LDAI_OUTPUT.zsync" ]; then
+            echo "::warning::$LDAI_OUTPUT.zsync was not written — AppImageUpdate cannot update this release"
+          fi
           # Checked on the AppDir as it stands after the LAST pass: the .deb and
           # the .rpm are built from it too.
           for lib in libva.so libva-drm.so libGLESv2.so libdrm.so libEGL.so libgbm.so libpipewire-0.3.so; do
@@ -691,10 +725,6 @@ jobs:
               exit 1
             fi
           done
-          # -x86_64, not -linux-x64: the AppImage catalog's test warns on "linux"
-          # in the name (all AppImages are for Linux) and names the arch this way.
-          # Releases up to v0.3.1 used -linux-x64; website/install.sh tries both.
-          mv ${{ needs.setup.outputs.app }}*.AppImage ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-x86_64.AppImage
 
       # Native packages: double-click installs via the distro's GUI installer
       # (no chmod needed). .deb → Debian/Ubuntu/Mint, .rpm → Fedora/RHEL/Nobara.
@@ -719,6 +749,7 @@ jobs:
             ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-linux-x64.deb
             ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-linux-x64.rpm
             ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-x86_64.AppImage
+            ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-x86_64.AppImage.zsync
 
   # ── macOS arm64 (.pkg) ───────────────────────────────────────────────────
   macos:
