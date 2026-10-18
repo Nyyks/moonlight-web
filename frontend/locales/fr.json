@@ -158,7 +158,12 @@
         "failed": "La mise à jour a échoué",
         "timeout": "L'hôte n'est pas revenu à temps — vérifiez-le directement",
         "releaseNotes": "Nouveautés",
-        "dismiss": "Masquer l'avis de mise à jour"
+        "dismiss": "Masquer l'avis de mise à jour",
+        "sectionTitle": "Mise à jour",
+        "upToDate": "Vous avez la dernière version de MoonlightWeb ({{version}}).",
+        "checking": "Recherche d'une mise à jour…",
+        "checkFailed": "Impossible de vérifier les mises à jour pour le moment.",
+        "installed": "Version installée : {{version}}"
     },
     "stats": {
         "title": "Aidez à décider ce que MoonlightWeb prendra en charge",

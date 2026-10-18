@@ -158,7 +158,12 @@
         "failed": "The update failed",
         "timeout": "The host did not come back in time — check it directly",
         "releaseNotes": "What's new",
-        "dismiss": "Dismiss update notice"
+        "dismiss": "Dismiss update notice",
+        "sectionTitle": "Update",
+        "upToDate": "You have the latest version of MoonlightWeb ({{version}}).",
+        "checking": "Checking for an update…",
+        "checkFailed": "Could not check for an update right now.",
+        "installed": "Installed version: {{version}}"
     },
     "stats": {
         "title": "Help decide what MoonlightWeb supports next",

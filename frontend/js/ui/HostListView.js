@@ -49,6 +49,7 @@ import {
 import { noteHostUse, forgetHostUse, hostUsageRanker } from '../util/hostUsage.js';
 import * as RemoteNav from './RemoteNav.js';
 import { confirmAction } from './ConfirmDialog.js';
+import { hostUpdate, canSelfUpdate } from './HostUpdate.js';
 
 /**
  * Where the empty host list sends someone who has nothing to stream from yet.
@@ -59,10 +60,6 @@ import { confirmAction } from './ConfirmDialog.js';
  * app started on its own.
  */
 const SUNSHINE_DOWNLOAD_URL = 'https://github.com/LizardByte/Sunshine/releases/latest';
-
-/** Set while a host update this tab started is under way; read by the entry
- *  page (bootstrap/v1/boot.js) so it waits for the host to come back. */
-const UPDATE_PENDING_KEY = 'mw-update-pending';
 
 /**
  * The order a host card shows its apps in: "MoonlightWeb Virtual Display"
@@ -80,32 +77,6 @@ function sortApps(apps) {
             a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }),
     );
 }
-
-/**
- * Update progress is driven by a local animation, not by the poll samples.
- *
- * The host reports a figure every ~900 ms at best, and stops reporting at all
- * the moment the installer kills it — a bar painted straight from those samples
- * reads as "jump, jump, freeze". Instead each phase owns a slice of the bar and
- * eases towards its ceiling without ever reaching it, so the bar is always
- * moving; a figure coming from the host only ever pushes it forward.
- *
- * `tau` is the exponential time constant in seconds: ~63 % of the remaining
- * distance to the ceiling is covered in that time.
- */
-const UPDATE_PHASES = {
-    // Seconds on any usable link — a small slice, quickly filled.
-    downloading: { ceiling: 30, tau: 4 },
-    // The host flips to `restarting` as soon as it has spawned the installer,
-    // but it is the install that is actually running (and it still answers us),
-    // so both share one slow budget.
-    installing: { ceiling: 90, tau: 18 },
-    restarting: { ceiling: 90, tau: 18 },
-    // Host gone: nothing left to poll but /api/health. Slightly brisker — this
-    // is the tail, and the bar should read as nearly there when the new build
-    // answers and the page reloads.
-    finalizing: { ceiling: 99, tau: 16 },
-};
 
 export class HostListView {
     // First backoff before re-attempting an app-list fetch that failed
@@ -179,9 +150,11 @@ export class HostListView {
         // Bounded fast retries while the host's first GitHub fetch is in flight.
         this._updateWarmupTries = 0;
         this._updateInfo = null;
-        this._updateBusy = false;
         this._hostsLoaded = false;
         this.renderShell();
+        // An update under way (started here or from Settings) owns the banner.
+        // After the shell: the banner it paints into is part of it.
+        this._unsubUpdate = hostUpdate.subscribe((view) => this._paintUpdateRun(view));
 
         // Auto-scan when page gains focus. Also re-ask about updates: a phone
         // keeps this page alive for days behind a locked screen, and coming back
@@ -206,7 +179,7 @@ export class HostListView {
 
             // ── Update banner: apply on the host ───────────────────────────
             if (e.target.closest('.update-banner-apply')) {
-                this._startUpdate();
+                hostUpdate.start(this._updateInfo);
                 return;
             }
 
@@ -220,9 +193,9 @@ export class HostListView {
                 if (banner) {
                     banner.hidden = true;
                     banner.innerHTML = '';
-                    this._stopProgressAnimation();
                     this._progressFill = null;
                 }
+                hostUpdate.clearFailure();
                 // Only for this page load — a reload offers the update again.
                 this._updateInfo = null;
                 return;
@@ -240,7 +213,6 @@ export class HostListView {
                 if (banner) {
                     banner.hidden = true;
                     banner.innerHTML = '';
-                    this._stopProgressAnimation();
                     this._progressFill = null;
                 }
                 return;
@@ -535,7 +507,7 @@ export class HostListView {
     async _checkForUpdate() {
         // Nothing to learn while the banner shows an update in flight, and don't
         // re-ask more often than the backend could plausibly change its answer.
-        if (this._updateBusy) return;
+        if (hostUpdate.busy) return;
         const now = Date.now();
         if (now - this._updateCheckedAt < HostListView.UPDATE_CHECK_MIN_MS) return;
         this._updateCheckedAt = now;
@@ -560,29 +532,14 @@ export class HostListView {
         this._renderUpdateBanner();
     }
 
-    /**
-     * Whether this browser can have the update applied for it.
-     *
-     * The installer runs on the HOST, never here — offering a download link to a
-     * phone streaming from the other side of the house would be a dead end. So
-     * the banner only ever offers an action when the host can carry it out
-     * itself, which needs two things:
-     *   - the machine running MoonlightWeb is paired with its local Sunshine.
-     *     That is the "already set up" marker: the installer has nothing left to
-     *     ask (no credentials, no pairing), so it can run unattended.
-     *   - the platform has an unattended elevation path at all (self_update.
-     *     supported — see SelfUpdater).
-     * Anything else degrades to "go update the host PC".
-     */
+    /** Whether this browser can have the update applied for it (HostUpdate.js). */
     _canSelfUpdate() {
-        const cap = this._updateInfo && this._updateInfo.self_update;
-        if (!cap || !cap.supported) return false;
-        return this.hosts.some((h) => h.isLocalHost && h.isPaired);
+        return canSelfUpdate(this._updateInfo, this.hosts);
     }
 
     _renderUpdateBanner() {
         // An update in flight owns the banner (progress bar); never repaint over it.
-        if (this._updateBusy) return;
+        if (hostUpdate.busy) return;
         // A booth's visitors can do nothing about an update: the banner stays hidden.
         if (BackendClient.adminLocked) return;
         // Wait for the host list: painting "update the host PC by hand" and then
@@ -596,7 +553,6 @@ export class HostListView {
         const notes = info.release_url || '';
         const canUpdate = this._canSelfUpdate();
         // Whatever this replaces, the progress row's nodes are gone with it.
-        this._stopProgressAnimation();
         this._progressFill = null;
         banner.innerHTML = `
             <span class="update-banner-icon" aria-hidden="true">${Icons.power}</span>
@@ -624,15 +580,21 @@ export class HostListView {
         banner.hidden = false;
     }
 
-    // --- Applying the update (host-side, watched from here) ---
+    // --- Applying the update (host-side, watched from HostUpdate.js) ---
+
+    /** Paint what the update run shows (HostUpdate.js subscribe). */
+    _paintUpdateRun(view) {
+        if (this._destroyed || !view) return;
+        if (view.state === 'failed') this._renderUpdateFailed(view.message);
+        else this._renderUpdateProgress(view.label, view.percent);
+    }
 
     // Repaint the banner as a progress row. No dismiss button: the host is being
     // replaced under us, hiding the bar would only lose the user.
     //
     // The row is built once and then updated in place — re-rendering the markup
-    // on every poll would hand the animation a brand new element each time, with
-    // no width to continue from.
-    _renderUpdateProgress(status) {
+    // on every frame would restart the sheen and churn the DOM for nothing.
+    _renderUpdateProgress(label, percent) {
         const banner = this.container.querySelector('#update-banner');
         if (!banner) return;
 
@@ -648,76 +610,15 @@ export class HostListView {
             this._progressTrack = banner.querySelector('.update-banner-progress');
             this._progressFill = banner.querySelector('.update-banner-progress-fill');
             this._progressLabel = banner.querySelector('.update-banner-text');
-            this._progressShown = 0;
-            this._progressFloor = 0;
         }
         banner.hidden = false;
-
-        let label;
-        if (status.requires_host_confirmation && status.state !== 'downloading')
-            label = t('update.confirmOnHost');
-        else if (status.state === 'downloading') label = t('update.downloading');
-        else if (status.state === 'installing') label = t('update.installing');
-        else label = t('update.restarting');
         if (this._progressLabel.textContent !== label) this._progressLabel.textContent = label;
-
-        this._progressPhase = UPDATE_PHASES[status.state] ? status.state : 'installing';
-        // The host's own figure is a floor, never a setpoint: it may be stale by
-        // up to a poll, and it must not drag the bar backwards.
-        const pct = Math.max(0, Math.min(100, status.percent || 0));
-        if (pct > this._progressFloor) this._progressFloor = pct;
-        this._startProgressAnimation();
-    }
-
-    // Ease the bar towards the ceiling of its phase, one frame at a time.
-    _startProgressAnimation() {
-        if (this._progressRaf) return;
-        this._progressAt = performance.now();
-        const step = () => {
-            this._progressRaf = null;
-            if (this._destroyed || !this._progressFill) return;
-            const now = performance.now();
-            // Clamp: a backgrounded tab stops firing frames, and the catch-up
-            // step on return should not slam the bar into its ceiling.
-            const dt = Math.min((now - this._progressAt) / 1000, 1);
-            this._progressAt = now;
-
-            const phase = UPDATE_PHASES[this._progressPhase] || UPDATE_PHASES.installing;
-            let value = this._progressShown;
-            // Catching up to a figure the host reported is still a slide, not a
-            // snap — the download typically lands whole in the very first poll.
-            if (value < this._progressFloor)
-                value += (this._progressFloor - value) * (1 - Math.exp(-dt / 0.6));
-            if (value < phase.ceiling)
-                value += (phase.ceiling - value) * (1 - Math.exp(-dt / phase.tau));
-            this._progressShown = Math.min(value, phase.ceiling);
-
-            this._paintProgress(this._progressShown);
-            this._progressRaf = requestAnimationFrame(step);
-        };
-        this._progressRaf = requestAnimationFrame(step);
-    }
-
-    _stopProgressAnimation() {
-        if (this._progressRaf) cancelAnimationFrame(this._progressRaf);
-        this._progressRaf = null;
-    }
-
-    _paintProgress(value) {
-        const pct = Math.max(0, Math.min(100, value));
+        const pct = Math.max(0, Math.min(100, percent));
         this._progressFill.style.width = `${pct.toFixed(1)}%`;
-        if (this._progressTrack)
-            this._progressTrack.setAttribute('aria-valuenow', String(Math.round(pct)));
+        this._progressTrack.setAttribute('aria-valuenow', String(Math.round(pct)));
     }
 
     _renderUpdateFailed(message) {
-        this._updateBusy = false;
-        try {
-            sessionStorage.removeItem(UPDATE_PENDING_KEY);
-        } catch (_) {
-            /* expires on its own */
-        }
-        this._stopProgressAnimation();
         this._progressFill = null;
         const banner = this.container.querySelector('#update-banner');
         if (!banner) return;
@@ -730,117 +631,6 @@ export class HostListView {
                     aria-label="${this.esc(t('update.dismiss'))}">${Icons.close || '✕'}</button>
         `;
         banner.hidden = false;
-    }
-
-    async _startUpdate() {
-        if (this._updateBusy) return;
-        this._updateBusy = true;
-        // Fresh bar even if a previous attempt failed halfway up.
-        this._stopProgressAnimation();
-        this._progressFill = null;
-        this._renderUpdateProgress({ state: 'downloading', percent: 0 });
-        try {
-            await BackendClient.startUpdate();
-        } catch (err) {
-            this._renderUpdateFailed(err.message);
-            return;
-        }
-        // Through the rendezvous, the installer taking the host down closes the
-        // connection and sends this tab back to the entry page before the new
-        // build is up. This note tells that page to keep calling rather than
-        // report the machine offline (bootstrap/v1/boot.js, same key).
-        try {
-            sessionStorage.setItem(UPDATE_PENDING_KEY, String(Date.now()));
-        } catch (_) {
-            /* the entry page gives up at once, as before; a refresh still works */
-        }
-        this._watchUpdate();
-    }
-
-    /**
-     * Follow the update to its end, across the moment the server disappears.
-     *
-     * Phase 1 polls /api/update/status for real progress. The installer then
-     * replaces (and on Windows kills) that very server, so the polling failing is
-     * the expected transition, not an error. Phase 2 waits for the new build to
-     * answer /api/health and reloads the app on it.
-     */
-    async _watchUpdate() {
-        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-        const info = this._updateInfo || {};
-
-        // Phase 1 — the host is still answering. Bounded: on the platforms whose
-        // installer needs a prompt on the host desktop, nothing kills this server
-        // and an unanswered dialog would keep us polling forever. A minute past
-        // the host's own deadline (SelfUpdater::armWatchdog: 15 minutes with a
-        // prompt, 3 without), so that what it reports — "failed", with its
-        // reason — is what this page shows, rather than a guess made first.
-        // Counted from the end of the download, as the host's is.
-        let startedAt = Date.now();
-        let budgetMs = 4 * 60 * 1000;
-        const hardStop = Date.now() + 30 * 60 * 1000; // a download that never ends
-        let alive = true;
-        while (
-            Date.now() - startedAt < budgetMs &&
-            Date.now() < hardStop &&
-            !this._destroyed &&
-            alive
-        ) {
-            await sleep(900);
-            let status;
-            try {
-                status = await BackendClient.getUpdateStatus();
-            } catch (_) {
-                alive = false; // server gone: the installer took it down
-                break;
-            }
-            if (status.state === 'failed') {
-                this._renderUpdateFailed(status.error);
-                return;
-            }
-            // `idle` from a server that we told to update means we are already
-            // talking to its freshly started replacement — phase 2's version
-            // check is what settles that.
-            if (status.state === 'idle') {
-                alive = false;
-                break;
-            }
-            if (status.state === 'downloading') startedAt = Date.now();
-            if (status.requires_host_confirmation) budgetMs = 16 * 60 * 1000;
-            this._renderUpdateProgress(status);
-        }
-        if (this._destroyed) return;
-        if (alive) {
-            // Still up after the whole budget — the install never went through.
-            this._renderUpdateFailed(t('update.timeout'));
-            return;
-        }
-
-        // Phase 2 — wait for the new build. Generous budget: a Windows install
-        // plus the server rebinding its ports can take a couple of minutes, and
-        // an elevation prompt on the host desktop may be waiting for someone.
-        // Nothing reports progress any more, so the bar rides on its own easing
-        // from wherever phase 1 left it — no jump to a fixed 98 % that would
-        // then sit still for the whole restart.
-        this._renderUpdateProgress({ state: 'finalizing', percent: 0 });
-        for (let i = 0; i < 200 && !this._destroyed; i++) {
-            await sleep(3000);
-            const health = await BackendClient.probeHealth();
-            // Wait for a version that is no longer the one we started from. The
-            // old server can keep answering for a few seconds (or phase 1 may
-            // have broken on a transient error), and reloading onto it would
-            // silently look like the update did nothing.
-            if (health && health.version && health.version !== info.current) {
-                localStorage.removeItem('mw_update_dismissed');
-                // Close the bar before the reload wipes it — the last thing seen
-                // should be a full bar, not one frozen at 96 %.
-                this._stopProgressAnimation();
-                if (this._progressFill) this._paintProgress(100);
-                location.reload();
-                return;
-            }
-        }
-        if (!this._destroyed) this._renderUpdateFailed(t('update.timeout'));
     }
 
     async _autoScan() {
@@ -875,7 +665,8 @@ export class HostListView {
         this._active = false;
         this._destroyed = true;
         this.stop();
-        this._stopProgressAnimation();
+        if (this._unsubUpdate) this._unsubUpdate();
+        this._unsubUpdate = null;
         this._progressFill = null;
         this._launchFailTimers.forEach((id) => clearTimeout(id));
         this._launchFailTimers.clear();

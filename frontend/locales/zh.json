@@ -158,7 +158,12 @@
         "failed": "更新失败",
         "timeout": "主机未能及时恢复 — 请直接检查",
         "releaseNotes": "更新内容",
-        "dismiss": "忽略更新提示"
+        "dismiss": "忽略更新提示",
+        "sectionTitle": "更新",
+        "upToDate": "您使用的是最新版本的 MoonlightWeb（{{version}}）。",
+        "checking": "正在检查更新…",
+        "checkFailed": "暂时无法检查更新。",
+        "installed": "已安装版本：{{version}}"
     },
     "stats": {
         "title": "帮助决定 MoonlightWeb 下一步支持什么",
