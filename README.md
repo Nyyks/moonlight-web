@@ -33,7 +33,7 @@ Moonlight‑Web turns your gaming PC into a stream, and **any device with a mode
 - 🎮 **Low‑latency streaming** up to 4K HDR, 240 FPS, **H.264 / HEVC / AV1**, on **NVENC · AMF · Quick Sync · VA‑API · VideoToolbox** (software fallback).
 - 🌐 **WebRTC transport** (DataChannels + RTP media tracks), automatic WSS fallback.
 - 🔊 **Opus audio**, adaptive jitter buffer, stereo.
-- ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble.
+- ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble. On Windows it reaches the lock screen and UAC prompts too, and **Ctrl+Alt+Del** works from the touch keyboard bar (Ctrl, Alt, then Del). A Windows PC with no mouse plugged in shows its pointer in the stream too. **Racing wheels, flight sticks and RC radios** too, as an Xbox pad or sent to the game as themselves, force feedback included ([see below](#controllers)).
 - 🤝 **Pairs with other hosts too** — Sunshine/Apollo, Wolf, MultiSeat: [see below](#other-hosts-it-can-pair-with). mDNS discovery, PIN pairing, multi‑host.
 - 🌍 **Internet access** opt‑in, at a `stream.moonlightweb.top/「id」` address, with nothing published in your name.
 - 🪄 **Video Enhancement** (bonus): GPU upscaling & sharpening in the browser.
@@ -61,13 +61,37 @@ Moonlight‑Web turns your gaming PC into a stream, and **any device with a mode
 **The native engine** hands the captured GPU surface straight to the GPU encoder, in the process that holds the WebRTC connection: `capture → encode (zero‑copy) → SCTP/DTLS → browser`. No loopback hop, RTSP, RTP or FEC. On an RTX 5060 Ti at 1440p: **0.06 ms** to acquire a frame, **3.46 ms** to encode it, **one** memory copy.\
 The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio through its own **WebRTC** player (an **AudioWorklet** on the WSS fallback).
 
-> The engine also runs under the Windows service, in the logged‑on user's session. Where it cannot run (no usable encoder, Windows ARM64), the card is hidden and the app offers a host to pair with. A **headless** PC keeps its card through **"MoonlightWeb Virtual Display"**, a signed virtual monitor offered by the installer (a Mac creates its own). It turns on for a stream at 1080p 120 Hz, and your displays are restored when the stream ends.
+**On an Intel GPU, the picture takes a D3D12 chain**: conversion and encoding on queues that stay ahead of a game, and a rate control of its own. On an Arc A380 under a game, the host time falls by half. NVIDIA and AMD keep their D3D11 path, which measured faster there. **On Linux with an AMD GPU**, HEVC and AV1 go through Vulkan Video from end to end, once the driver has proved on real pictures that it encodes correctly: a desktop that barely moves then takes under 1 Mbit/s, where VA-API under Mesa 26 kept close to the full bitrate. VA-API, which still carries H.264, now keeps a quality floor too: a still desktop no longer takes the whole bitrate. Otherwise, and in H.264, the conversion runs in Vulkan in front of VA-API: under a game that saturates the iGPU, 8 ms from the screen to the encoded picture, against 15 to 38 through GL depending on the Mesa version. Any failure falls back to the older path without cutting the stream. **Admin → Advanced → Video pipeline** picks a chain by hand (`native_video_pipeline`: `auto`, `d3d11`, `d3d12`; on Linux `auto`, `vaapi`, `vulkan`).
+
+**PyroWave (Wired LAN only)** joins the codec menu, for a device on Ethernet streaming a Windows native host: every frame travels whole, about 130 Mbit/s at 120 fps, and the page decodes it on the GPU — WebGPU, or WebGL2 where WebGPU is off (Chrome on Linux, Safari 18), both checked against the reference decoder. On an NVIDIA PC its picture arrives about 1 ms after HEVC's, with less sharp text, and without HDR. The option is greyed out, with the reason, where no host codes it; a choice that cannot run streams as Auto.
+
+> The engine also runs under the Windows service, in the logged‑on user's session. Where it cannot run (no usable encoder, Windows ARM64), the card is hidden and the app offers a host to pair with. A **headless** PC keeps its card through **"MoonlightWeb Virtual Display"**, a signed virtual monitor offered by the installer (a Mac creates its own). It turns on for a stream and your displays are restored when it ends. On Windows it runs faster than your screen, at a whole multiple of its measured rate: 239.744 Hz for a "120 Hz" panel that really runs at 119.872, up to 330 Hz, and 240 Hz when no multiple fits. What the PC draws reaches the stream sooner (6 to 17 ms less behind an Intel or AMD GPU), the stream keeps your screen's rate, and no picture is lost to a beat between the two. A PC whose capture does not hold such a rate goes back to your screen's own from its next stream on.
+
+**With the FPS on Auto, the stream can go faster than your screen.** When the picture on the host changes faster than your screen refreshes and your device keeps up, a Windows host steps the stream up, to 240 at most. The step stays only while what you see gets younger: 1 to 14 ms younger on a PC on Ethernet, 3 to 15 ms on a Mac on Wi-Fi. A device that falls behind is back at its own rate within three seconds, and remembers it: its next streams to that PC do not try again in their first quarter of an hour. A TV keeps its own rate.
+
+**A Windows host keeps a steadier rhythm.** Its frames now line up with its display's refreshes. On a screen that paints on vsync (a Mac, an iPhone, an iPad, a TV, Firefox), the small hitches that came back for half a minute every two minutes, a frame a little early then one a little late, are gone: they touched 4 to 6 % of refreshes, about 1 % now, which comes from the game or the page itself. Latency and bitrate do not change.
+
+**A click shows sooner.** When a Windows host streams slower than its display (60 or 120 fps on the 240 Hz virtual display), the frames right after a key, a click or a pad button go out at once, instead of waiting for the stream's next slot. At 60 fps in our tests, a click's picture came 5.8 ms sooner in median, and 72 % of clicks showed within 20 ms instead of 18 %. It costs about three frames per press, and steps aside on a busy link. It is on for Chrome and Edge on Windows with **Allow tearing** ticked, their default; a screen that paints on vsync keeps the stream's own rhythm.
+
+**Against v0.3.1, on the same machines** (a Windows host on an RTX 5060 Ti, a Windows client on Ethernet, 1080p in H.264, HEVC and AV1 at 60, 120 and 240 fps): what you see is 2 to 5 ms younger at 120 fps, and the slowest frames 6 to 13 ms younger at 60 and 120 fps. A click shows 3 ms sooner over all clicks, 8 ms at 120 fps. Encoding and decoding take the same time; the bitrate is 5 to 10 % higher.
+
+**On Wi-Fi, the picture waits less on its way out.** A host running MoonlightWeb (Windows, Linux or macOS) no longer holds frames back in its own network stack between two acknowledgements: from a click to its picture, about 8 ms less on a Mac on Wi-Fi; behind a cable, the picture arrives 4 to 6 ms younger. A Windows host also lowers the bitrate the moment the Wi-Fi starts resending, before the delay shows.
+
+**The sound comes sooner.** The browser no longer holds every sound back by a fixed 60 ms: it keeps only what the link needs. In Chrome on a Mac on Wi-Fi, each sound plays 15 to 35 ms earlier and sits closer to its picture, and a blind listening heard no crackle more. **A Windows host no longer crackles:** its capture used to put a few milliseconds of silence in place of sound that came a little late, one to four times a second under music; it now waits for it, and the sound leaves the PC 1 to 2 ms sooner as well.
+
+**On Wi-Fi, the stream goes ahead of the house's downloads.** Its packets are marked for the Wi-Fi's video queue (AF41): with a download running on the same access point as your device, each click came back 32 to 40 ms sooner in our tests, where the unmarked stream fell to a few Mbit/s. If your other devices struggle while you stream (a video call, a download), untick **Give the stream priority on the network** in the admin page: the stream then queues like any other device, and its picture can turn less steady on a busy network.
+
+**On Linux, Steam gets a screen of its own.** With gamescope 3.16.22 or later (Fedora 43+, Arch, Bazzite, SteamOS, Ubuntu 26.10+), a **Steam Big Picture** card opens Steam in its own screen, at the size of the device that streams it, without touching the desktop — an X11 session included. The apps you list in **Admin → Apps on this PC** open there too.
+
+**Your apps on the host, on every OS.** **Admin → Apps on this PC** gives any program or link a card on the host: a name, a command (`steam://open/bigpicture`, a path to a game, `lutris lutris:rungameid/3`) and an image. On Windows and macOS it opens on the virtual display, at the size of the device that streams it, as the user at the desktop. If Steam is installed, a **Steam Big Picture** card is there after installing or updating MoonlightWeb, like Sunshine's; Playnite's full-screen mode too on Windows. When the stream ends, Big Picture closes with the virtual display, as with Sunshine; **Quit** closes it too.
 
 ### Stream settings
 
 From the in‑app overlay: **bitrate** (1–150 Mbps or auto), **resolution** (720p–2160p),\
-**FPS** (15–240), **codec** (auto / H.264 / HEVC / AV1, unsupported options greyed out),\
+**FPS** (15–240), **codec** (auto / H.264 / HEVC / AV1 / **PyroWave (Wired LAN only)**, unsupported options greyed out),\
 **HDR**, **4:4:4 chroma**, **Mouse Gaming Mode** (pointer‑lock), perf stats and aspect ratio.
+
+**Settings → Start streams in fullscreen** (off by default) opens every stream in fullscreen. On an iPhone, Safari keeps its bars and the stream fills the page; added to the Home Screen, MoonlightWeb is fullscreen anyway.
 
 <div align="center">
 
@@ -92,8 +116,18 @@ Standard pads just work. Others are recognized from [SDL_GameControllerDB](https
 | 8BitDo SN30 Pro | Bluetooth, Start+A (PS4) | ✅ |
 | 8BitDo SN30 Pro | Bluetooth, Start+B (8BitDo) | ✅ |
 | 8BitDo SN30 Pro | Bluetooth, Start+Y (Switch Pro) | ❌ not read correctly by browsers |
+| Radiomaster TX12 (EdgeTX) | USB Joystick (HID) | ✅ recognized on plug-in, like any EdgeTX/OpenTX radio |
+| Logitech G923 for Xbox One and PC | USB, with G HUB on the client | ✅ recognized on plug-in |
+
+**Wheels and radios as themselves** (Chrome or Edge on a computer, MoonlightWeb native host): in **Settings → Controllers**, switch **As itself** on the wheel's or radio's row (the browser asks for the device the first time), or accept the offer when a stream starts. The game then sees the real wheel or radio instead of an Xbox pad: every axis, clutch included, and all 8 channels of a TX12. Force feedback works on Windows and Linux hosts, tested with the G923 in ACC; wheels that speak USB PID (Moza, Simucube, Fanatec…) are supported but not tried yet. An invited player gets it only when you tick **Wheel / Radio** on their sharing row. A Linux host needs nothing more. On a Windows host (x64), the installer sets up the **MoonlightWeb Virtual HID** driver: no test mode, Secure Boot stays on ([details](docs/wiki/04-Frontend.md#49-wheels-and-radios-as-themselves)). A Mac host cannot. Where the host cannot, the switch says why and what to do. On a Windows host, a game left running keeps the wheel and its force feedback when you stop the stream and start a new one within 10 minutes. With Medal on the host, start Medal before the game: started after it, Medal leaves the game without force feedback until it restarts ([details](docs/wiki/04-Frontend.md#49-wheels-and-radios-as-themselves)).
 
 Details and test notes in the [wiki](docs/wiki/04-Frontend.md#48-controller-compatibility).
+
+### On a TV
+
+An Android TV box is a client too, from a TV browser — tested with **TV Bro** on a Mi TV and on a Freebox Player POP. The stream is sized for what the TV's decoder and browser can show — Auto streams 720p at most there, for the lowest latency — and shown by the TV browser's own video player: every frame, where drawing them in the page held a TV to about 30 a second. A decoder that freezes on the PC's loss-healing stream (the Freebox's does) is noticed, and the stream comes back on keyframes: once, and that TV remembers it.\
+**With the remote:** switch TV Bro to **Direct navigation** (hold OK on a link, then pick the D‑pad icon). The arrows then move between the cards and OK launches. In a stream, the arrows and OK go to the PC, and **holding OK** opens the stream's menu (Resume, Mouse, Statistics, Stop): a TV browser keeps Back for itself. Its **Mouse** turns the remote into the PC's mouse: the arrows move the pointer, OK clicks, Ch+ / Ch− scroll. A pad paired to the TV gets around the pages too, and **Select + Start + LB + RB** opens the same menu.\
+**With TV Bro's own cursor** (its default mode), the pages scroll at the screen's edge and a click in a stream lands right under the cursor. Every page has an on‑screen way out (✕, Close). A TV asked for more than its Auto would pick (1080p60 on a Mi TV) says so at launch, and streams as asked.
 
 ---
 
@@ -115,6 +149,8 @@ The native engine streams **the machine MoonlightWeb runs on**. Moonlight‑Web 
 | **[Sunshine](https://github.com/LizardByte/Sunshine)** · **Apollo** | The reference GameStream host, and its fork | mDNS or by IP, with the PIN MoonlightWeb shows, typed into the host's web page. |
 | **[Wolf](https://games-on-whales.github.io/wolf/)** (Games‑on‑Whales) | Containerised host: profiles, Docker catalogue, lobbies and co‑op | Automatic: MoonlightWeb posts the PIN through Wolf's `/api/v1`. One certificate per device, so two players are two clients. |
 | **MultiSeat** | One Windows box split into independent seats, each with its own Apollo | Seats are provisioned through MultiSeat's API, then each is paired on its own. |
+
+**On Sunshine and Apollo, Stop leaves the game running, as in Moonlight.** Its card then shows **Running**: click it to resume, or **Quit** to close it. Launching another app while one runs asks first: quit it and launch, or resume it instead. **Settings → Quit the app when the stream stops** brings back the old behaviour. A game Sunshine started detached (a Steam launch, for instance) still survives Quit: Sunshine no longer tracks it, in Moonlight too.
 
 > ⚠️ MultiSeat's per‑seat stream path is **not yet tested end to end**: provisioning a seat needs a free Windows session the bench cannot offer.
 
@@ -213,7 +249,7 @@ Or install a package directly. All are **self‑contained** (Qt + OpenSSL bundle
 | **Debian · Ubuntu · Mint · Pop!\_OS · elementary · Zorin · Kali** | **`.deb`** | `sudo apt install ./moonlightweb-<ver>-linux-x64.deb` |
 | **Fedora · RHEL · CentOS Stream · Rocky · Alma · Nobara** | **`.rpm`** | `sudo dnf install ./moonlightweb-<ver>-linux-x64.rpm` |
 | **openSUSE · SLE** | **`.rpm`** | `sudo zypper install --allow-unsigned-rpm ./moonlightweb-<ver>-linux-x64.rpm` |
-| **Arch · Manjaro · EndeavourOS · SteamOS · Bazzite · anything else** | **`.AppImage`** | `chmod +x moonlightweb-<ver>-linux-x64.AppImage && ./moonlightweb-<ver>-linux-x64.AppImage` |
+| **Arch · Manjaro · EndeavourOS · SteamOS · Bazzite · anything else** | **`.AppImage`** | `chmod +x moonlightweb-<ver>-x86_64.AppImage && ./moonlightweb-<ver>-x86_64.AppImage` |
 
 > 💡 **On Debian/Ubuntu, prefer the `.deb`.** The AppImage needs `chmod +x` and **FUSE 2**
 > (`sudo apt install libfuse2t64`, or `libfuse2` before 24.04).
@@ -221,7 +257,7 @@ Or install a package directly. All are **self‑contained** (Qt + OpenSSL bundle
 > ⚠️ **To stream *this* machine, use the `.deb`, `.rpm` or AUR package.** Screen capture needs a file
 > capability that an AppImage cannot keep; the AppImage only streams paired hosts.
 
-**Nothing else to install.** Capture uses **KMS** (zero‑copy DMA‑BUF → VA‑API), or the **ScreenCast portal** where the compositor requires it. Audio comes from PipeWire and input goes through `uinput`. The first launch opens `https://localhost/setup`.
+**Nothing else to install.** Capture uses **KMS** (zero‑copy DMA‑BUF → VA‑API or Vulkan Video), or the **ScreenCast portal** where the compositor requires it. Audio comes from PipeWire and input goes through `uinput`. The first launch opens `https://localhost/setup`.
 
 **Autostart** uses an XDG autostart entry; for a headless server use the systemd unit in
 [`backend/packaging/systemd/`](backend/packaging/systemd/).
@@ -255,7 +291,7 @@ caveats).
 
 | | |
 |---|---|
-| **Tags** | `latest` · `0.2.4` · `0.2` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
+| **Tags** | `latest` · `0.4.0` · `0.4` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
 | **Ports to open** | **443/tcp** (web UI + signalling) and **80/tcp** (HTTP→HTTPS redirect). WebRTC media takes **48550‑48573/udp**, one port per stream slot, with or without UPnP. A GameStream host is reached *outbound* on 47989/47984/47990 tcp, 47998‑48000 udp, 48010 tcp/udp. |
 | **Volume** | `/data` — settings, TLS material, paired hosts and the **client identity**. Losing it un‑pairs every host. |
 | **Env** | `MW_HTTPS_PORT` · `MW_HTTP_PORT` · `MW_UPNP` · `TZ` |
@@ -294,8 +330,8 @@ Browser‑side image enhancement on the GPU (WebGL2, or WebGPU in HDR): **upscal
 
 ## Admin page
 
-The **Admin** page configures the server itself and is reachable **only from the local machine** (`https://localhost/admin`, or tray icon → *Server Settings*).\
-All `/api/admin/*` routes return **403** for non‑localhost requests.
+The **Admin** page configures the server itself. It opens on the local machine (`https://localhost/admin`, or tray icon → *Server Settings*), and on another device only once you set a **Remote administration** password: from your LAN, or through your entry link if you tick that too.\
+Any other request to `/api/admin/*` gets **403**.
 
 It controls: admin **PIN**, active **sessions**, HTTP/HTTPS **ports**, **transport** (WebRTC/WSS), **Internet access**, and the **certificate token**.
 
@@ -387,7 +423,7 @@ Restart the server after a manual edit. Every key is described in the [settings 
 
 `keyboard_layout_fidelity` (default `false`) types the character **your** layout produced, whatever the host's layout: `azerty` on an AZERTY board shows `azerty` on a QWERTY host, and every key stays a real key press games can read. The **MoonlightWeb host** corrects every key; a **Sunshine Windows host** corrects letters only; Sunshine macOS, Linux and Wolf hosts stay positional.
 
-`keyboard_debug` (default `false`, add it by hand) logs how each printable key was resolved, with two verdicts: **Notepad** (the character typed) and **Game** (the physical key). Remove it once the diagnosis is done.
+`keyboard_debug` (default `false`, add it by hand) logs how each printable key was resolved, with two verdicts: **Notepad** (the character typed) and **Game** (the physical key). The log then holds what you type, so nothing is written while the lock screen or a UAC prompt has the keyboard. Remove it once the diagnosis is done.
 
 `native_host_enabled` (default `true`) shows this machine as a host. Set it to `false` to use MoonlightWeb only as a front end for Sunshine, Wolf or your own rig; the engine stays installed.
 
