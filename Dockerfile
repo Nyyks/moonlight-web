@@ -48,12 +48,14 @@ FROM debian:${DEBIAN_RELEASE} AS build
 
 # qt6-base-dev covers Core/Gui/Widgets/Network; WebSockets is a separate module.
 # libssl-dev is required by both the server (TLS listener, ACME) and
-# moonlight-common-c (the GameStream crypto).
+# moonlight-common-c (the GameStream crypto). git applies our submodule patches
+# at configure time (mw_apply_patch in backend/CMakeLists.txt).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         cmake \
+        git \
         ninja-build \
         pkg-config \
         libssl-dev \
