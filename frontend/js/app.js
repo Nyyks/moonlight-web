@@ -50,6 +50,7 @@
 import { refreshClientLog } from './util/ClientLog.js';
 import { HostListView } from './ui/HostListView.js';
 import { StreamView } from './ui/StreamView.js';
+import { lockLandscape } from './ui/StreamViewFullscreen.js';
 import { SettingsView } from './ui/SettingsView.js';
 import { AdminView } from './ui/AdminView.js';
 import { LoginView } from './ui/LoginView.js';
@@ -4606,7 +4607,9 @@ export const MoonlightApp = {
         if (!wanted || document.fullscreenElement || typeof root.requestFullscreen !== 'function')
             return;
         this._launchFullscreen = true;
-        root.requestFullscreen().catch((err) => {
+        // On a phone, fullscreen comes sideways and stays so (lockLandscape) —
+        // asked now, while the launch click still counts as a gesture.
+        root.requestFullscreen().then(lockLandscape, (err) => {
             this._launchFullscreen = false;
             console.warn('[MW] Fullscreen at launch refused:', err.message);
         });
