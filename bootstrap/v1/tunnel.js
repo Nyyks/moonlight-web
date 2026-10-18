@@ -360,15 +360,25 @@ export class Tunnel {
             wsUrl.searchParams.set('v', String(PROTO));
 
             this._ws = new WebSocket(wsUrl);
+            let opened = false;
+            this._ws.onopen = () => {
+                opened = true;
+            };
             this._ws.onmessage = (ev) => this._onRelayFrame(ev.data, settle);
             this._ws.onerror = () =>
                 settle(passingError('Could not reach the introduction server.'));
             this._ws.onclose = (ev) => {
                 // The code and reason are the only account of WHY the line went,
                 // and this is the failure a user reports as "it just stops".
-                console.warn(
-                    `[MW] Signalling line closed: code=${ev.code} reason=${ev.reason || '(none)'}`,
-                );
+                // A line that never opened has no such account to give — 1006,
+                // nothing more — and its failure is the rejection below; a page
+                // that keeps calling a server that is down (lineKeeper behind a
+                // stream, the entry page's retries) would log it on every try.
+                if (opened) {
+                    console.warn(
+                        `[MW] Signalling line closed: code=${ev.code} reason=${ev.reason || '(none)'}`,
+                    );
+                }
                 if (!this.connected) {
                     settle(passingError('The introduction server hung up.'));
                     return;

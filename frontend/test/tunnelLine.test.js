@@ -45,6 +45,10 @@ class FakeWebSocket {
     }
     send() {}
     close() {}
+    /** The handshake completing. */
+    open() {
+        this.onopen?.();
+    }
     /** The server, or whatever sits in front of it, going away. */
     drop(code = 1001) {
         this.readyState = 3;
@@ -181,6 +185,49 @@ describe('the signalling line dropping before the channel opens', () => {
         FakeWebSocket.last.drop();
 
         await expect(connecting).rejects.toThrow('The introduction server hung up.');
+    });
+});
+
+/* A page that keeps calling a server that is down — lineKeeper behind a stream,
+   the entry page's retries — reaches the console once per try. Only a line that
+   was open has something to say about why it went. */
+describe('what the console hears of a line closing', () => {
+    let warn;
+
+    beforeEach(() => {
+        FakeWebSocket.last = null;
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    const closedLines = () =>
+        warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('Signalling line'));
+
+    async function dial(act) {
+        const t = new tunnelModule.Tunnel(HOST, 'https://example.test');
+        const connecting = t.connect();
+        await vi.waitFor(() => expect(FakeWebSocket.last).not.toBeNull());
+        act(FakeWebSocket.last);
+        await connecting.catch(() => {});
+    }
+
+    it('says nothing of a line that never opened', async () => {
+        await dial((ws) => {
+            ws.onerror();
+            ws.drop(1006);
+        });
+        expect(closedLines()).toEqual([]);
+    });
+
+    it('gives the code of a line that was open', async () => {
+        await dial((ws) => {
+            ws.open();
+            ws.drop(1001);
+        });
+        expect(closedLines()).toEqual(['[MW] Signalling line closed: code=1001 reason=(none)']);
     });
 });
 
