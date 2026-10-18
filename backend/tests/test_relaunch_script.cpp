@@ -36,4 +36,14 @@ void run_relaunch_script_tests()
     const QString percent = build(QStringLiteral("mv %1"), 9, QStringLiteral("/x/%1"), {});
     CHECK(percent.startsWith(QStringLiteral("mv %1; kill 9 ")));
     CHECK(percent.contains(QStringLiteral("'/x/%1' --autostart >")));
+
+    // Under its LaunchAgent the server comes back through launchd, never by a
+    // direct start that would leave it outside the job. No -k: a job launchd
+    // already restarted after the kill is left alone.
+    const QString agent = build(QStringLiteral("rsync a b"), 42, QStringLiteral("/A.app/x"), {},
+                                QStringLiteral("gui/501/com.moonlightweb.agent"));
+    CHECK(agent == QStringLiteral("rsync a b; kill 42 2>/dev/null; sleep 3; "
+                                  "/bin/launchctl kickstart 'gui/501/com.moonlightweb.agent' "
+                                  ">/dev/null 2>&1"));
+    CHECK(!agent.contains(QStringLiteral("--autostart")));
 }

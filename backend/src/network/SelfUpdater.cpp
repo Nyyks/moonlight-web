@@ -745,9 +745,18 @@ bool SelfUpdater::launchDetached(const QString& install)
     // when it is already gone by then; the .pkg's postinstall kickstarts its
     // LaunchAgent. This relaunch covers whatever they left down (AppImage, a
     // .deb whose old app was still exiting) and is harmless elsewhere — the
-    // single-instance lock turns the extra launch into a silent no-op.
+    // single-instance lock turns the extra launch into a silent no-op. Under a
+    // LaunchAgent, launchd does the relaunch instead (see RelaunchScript.h).
+    QString service;
+#if defined(Q_OS_MACOS)
+    // launchd names its job in our environment; only our own agents count, not
+    // a bench plist or a terminal started from some other job.
+    const QString job = qEnvironmentVariable("XPC_SERVICE_NAME");
+    if (job.startsWith(QLatin1String("com.moonlightweb.agent")))
+        service = QStringLiteral("gui/%1/%2").arg(::getuid()).arg(job);
+#endif
     const QString script = relaunchscript::build(install, QCoreApplication::applicationPid(), exe,
-                                                 AppSettings::fileOverride());
+                                                 AppSettings::fileOverride(), service);
 
     if (!mw::startDetached(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), script})) {
         fail(QStringLiteral("Could not launch the installer"));

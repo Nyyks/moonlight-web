@@ -34,9 +34,21 @@ inline QString shQuote(const QString& s)
 
 /// `exe` is what starts the app (the binary, its launcher, or the AppImage);
 /// `configOverride` the --config it runs on, empty for the default one.
+/// `launchdService` is the LaunchAgent we run under (`gui/<uid>/<label>`),
+/// empty when launchd did not start us.
 inline QString build(const QString& install, qint64 pid, const QString& exe,
-                     const QString& configOverride)
+                     const QString& configOverride, const QString& launchdService = {})
 {
+    // Under launchd the job is what comes back: a crash-only KeepAlive already
+    // restarts it once our kill lands, and the kickstart (no -k, so it never
+    // stops a running one) covers a clean exit. Started by hand instead, the
+    // new server would live outside its agent: launchd would report it stopped,
+    // never restart it after a crash, and the next .pkg would not find it.
+    if (!launchdService.isEmpty())
+        return QStringLiteral("%1; kill %2 2>/dev/null; sleep 3; "
+                              "/bin/launchctl kickstart %3 >/dev/null 2>&1")
+            .arg(install, QString::number(pid), shQuote(launchdService));
+
     // --autostart: nobody clicked anything, so the app comes back as from the
     // login item, without opening its admin page in a browser on the host's
     // desktop. (On a .deb the maintainer scripts skip their own start while the
