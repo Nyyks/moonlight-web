@@ -962,15 +962,18 @@ body.streaming-active::after {
    shows; hovering (or tabbing into) it slides the level out to the LEFT — the
    control is anchored by its right edge (translate -100%, left set by
    StreamView._positionGamingOverlay), so opening it never nudges the
-   Fullscreen button under the cursor. */
+   Fullscreen button under the cursor. Open, it may reach over the brand and
+   the version badge on a narrow window, so it is opaque (the header's #111
+   under the same white tint) and sits above them, never see-through. */
 .stream-volume {
     position: absolute;
+    z-index: 2;
     top: 50%;
     transform: translate(-100%, -50%);
     display: inline-flex;
     align-items: center;
     height: 30px;
-    background: rgba(255, 255, 255, 0.06);
+    background: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06)) #111;
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
     color: rgba(255, 255, 255, 0.65);
@@ -983,8 +986,9 @@ body.streaming-active::after {
 }
 .stream-volume:hover,
 .stream-volume:focus-within {
-    background: rgba(255, 255, 255, 0.12);
+    background: linear-gradient(rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.12)) #111;
     border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 0 6px #111;
 }
 .stream-volume-btn {
     display: inline-flex;
