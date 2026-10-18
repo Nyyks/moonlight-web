@@ -992,6 +992,9 @@ export const MoonlightApp = {
         const hostname = window.location.hostname;
 
         if (!info.internetActive) {
+            // Booth mode (--noadmin): nobody here can turn it on, so the
+            // pointer at the admin page has nowhere to lead.
+            if (BackendClient.adminLocked) return null;
             // The action is a clause of the sentence, not a second copy of it
             // bolted on the end. Built by escaping the whole translated line
             // first and putting the anchor back at a marker no escape touches,
