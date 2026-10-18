@@ -26,6 +26,7 @@ import {
     hostIdFromLocation,
     hostKeyFromLocation,
     knownInstances,
+    forgetInstance,
     landingPathFromLocation,
     shareTokenFromLocation,
     rememberLastHost,
@@ -39,6 +40,7 @@ const ui = {
     status: document.getElementById('status'),
     note: document.getElementById('note'),
     instances: document.getElementById('instance-menu'),
+    forget: document.getElementById('forget'),
 };
 
 function say(stage, detail) {
@@ -163,6 +165,7 @@ function fail(message, hint) {
     // most of them the machine in the address is exactly the one that cannot
     // help them. This is the moment the caption becomes a way out.
     paintInstances(true);
+    paintForget(true);
 }
 
 /** Back to work after a failure the page had already shown: the bar runs again
@@ -171,6 +174,7 @@ function resume() {
     document.body.dataset.state = 'working';
     if (ui.note) ui.note.textContent = '';
     paintInstances(false);
+    paintForget(false);
     ticking = true;
     heartbeat = setInterval(render, 250);
     requestAnimationFrame(raf);
@@ -212,9 +216,10 @@ function resume() {
  * a plain contradiction of the machines listed a centimetre below, so the button
  * says what pressing it does: "Choose a machine".
  *
- * Read-only, always: nothing here writes to that register. Only the application
- * can, because only the application ever gets close enough to a machine to be
- * told what it calls itself.
+ * Nothing here adds to that register or renames a row in it. Only the
+ * application can, because only the application ever gets close enough to a
+ * machine to be told what it calls itself. The one write this page makes is
+ * the removal below, and only when the person asks for it.
  */
 
 /** Neither name nor identifier is ours; both are drawn as text, never as HTML. */
@@ -367,6 +372,45 @@ function paintInstances(choosing) {
         mount.classList.add('is-open');
         document.addEventListener('click', onDocClick);
         document.addEventListener('keydown', onKeyDown);
+    });
+}
+
+/* ── Forgetting the machine that did not answer ────────────────────────────
+ *
+ * A browser that has been to many machines keeps every one of them in its
+ * menu, including the one that was retired, sold or reinstalled under a new
+ * identifier. Opening it lands here, on "Not connected", for good — and the
+ * row stays in every menu after that. So this page, which is exactly where
+ * that machine shows itself to be gone, offers to drop it.
+ *
+ * Discreet on purpose: the usual reason for this page is a machine that is
+ * merely switched off, and the offer must not read as the thing to do about
+ * it. Only offered for a machine that is in the list — there is nothing to
+ * remove otherwise — and the removal is from this browser only: the machine,
+ * its pairing and its address are untouched, and opening that address again
+ * once it answers puts it back.
+ *
+ * Once it is done the page stops calling that machine: the person has just
+ * said they are done with it, and a handover a minute later would put the row
+ * straight back.
+ */
+let forgotten = false;
+
+function paintForget(show) {
+    const btn = ui.forget;
+    if (!btn) return;
+    const listed = !!paintedHostId && knownInstances().some((e) => e.id === paintedHostId);
+    btn.hidden = !show || forgotten || !listed;
+}
+
+if (ui.forget) {
+    ui.forget.addEventListener('click', () => {
+        if (!paintedHostId) return;
+        forgetInstance(paintedHostId);
+        forgotten = true;
+        paintForget(false);
+        if (ui.note) ui.note.textContent = 'Removed from this browser’s list of machines.';
+        paintInstances(true);
     });
 }
 
@@ -707,6 +751,10 @@ async function main() {
         }
         tunnel = await connectThroughRestart(hostId, e);
         if (!tunnel) return;
+        if (forgotten) {
+            tunnel.close();
+            return;
+        }
         resume();
     }
 

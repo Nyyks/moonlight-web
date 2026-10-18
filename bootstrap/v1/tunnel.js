@@ -861,7 +861,7 @@ export function rememberLastHost(hostId) {
 /**
  * The machines this browser has been to, newest first.
  *
- * READ ONLY, and that is the whole relationship: the register is written by the
+ * READ ONLY, but for one removal (forgetInstance): the register is written by the
  * application (frontend/js/util/instances.js), which is the only code that ever
  * learns what a machine calls itself — it asks the machine. This page never
  * reaches one far enough to be told a name, so it can offer the list and must
@@ -902,6 +902,29 @@ export function knownInstances() {
         // No storage, or a value this build cannot parse. The page keeps working
         // and simply has nothing to offer, which is what it did before.
         return [];
+    }
+}
+
+/**
+ * Drop one machine from the register, at the person's request (boot.js, the
+ * "Not connected" page). The single exception to the read-only rule above, and
+ * a narrow one: it removes a row, never writes one, and leaves every other row
+ * exactly as the application stored it — fields this build does not know
+ * included. The last-used marker goes with it, or the bare address would keep
+ * opening the machine that was just let go.
+ */
+export function forgetInstance(id) {
+    try {
+        const raw = JSON.parse(localStorage.getItem('mw-instances') || '[]');
+        if (Array.isArray(raw)) {
+            localStorage.setItem(
+                'mw-instances',
+                JSON.stringify(raw.filter((e) => !(e && e.id === id))),
+            );
+        }
+        if (localStorage.getItem('mw-last-host') === id) localStorage.removeItem('mw-last-host');
+    } catch {
+        /* no storage: there was no list to remove it from */
     }
 }
 
