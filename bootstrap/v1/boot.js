@@ -590,14 +590,45 @@ function failureHint(e) {
     );
 }
 
+/* Written when this page hands a tab over to a machine, and never removed: the
+   application does not know about it, which is the point. A tab that comes
+   back here for the machine it had open has watched that machine go away
+   under it — an update, a restart, a reboot — rather than typed the address of
+   one that is switched off.
+
+   That is the case the update note above covers, except when the host's own
+   application is too old to write that note: 0.3.1 updating to 0.4.0 came
+   back here as a plain failure, gave up after a minute, and a Windows install
+   takes longer than that (18/10/2026). Such a tab keeps calling, slowly and
+   with nothing new on screen, for as long as an update may take. */
+const OPENED_HOST_KEY = 'mw-opened-host';
+const OPENED_RETRY_MS = 10000;
+
+function openedHostHere() {
+    try {
+        return sessionStorage.getItem(OPENED_HOST_KEY) || '';
+    } catch {
+        return '';
+    }
+}
+
+function rememberOpenedHost(hostId) {
+    try {
+        sessionStorage.setItem(OPENED_HOST_KEY, hostId);
+    } catch {
+        /* a failure after a restart gives up after a minute, as before */
+    }
+}
+
 /**
  * Show a passing failure, and keep calling under it.
  * @returns {Promise<Tunnel | null>} the tunnel once a call gets through, or null
  *   once the page has given up and shows the last failure for good
  */
 async function connectThroughRestart(hostId, first) {
+    const startedAt = Date.now();
     fail(first.message, PASSING_NOTE);
-    const giveUpAt = Date.now() + PASSING_WAIT_MS;
+    const giveUpAt = startedAt + PASSING_WAIT_MS;
     let last = first;
     for (let i = 0; ; i++) {
         const pause = PASSING_PAUSES_MS[Math.min(i, PASSING_PAUSES_MS.length - 1)];
@@ -618,6 +649,21 @@ async function connectThroughRestart(hostId, first) {
         }
     }
     fail(last.message, failureHint(last));
+    if (!last.transient || openedHostHere() !== hostId) return null;
+
+    // The machine this tab had open: the failure stays on screen as it is,
+    // and the page carries on by itself the moment the machine answers.
+    while (Date.now() + OPENED_RETRY_MS < startedAt + UPDATE_WAIT_MS) {
+        await sleep(OPENED_RETRY_MS);
+        const tunnel = new Tunnel(hostId);
+        try {
+            await tunnel.connect();
+            return tunnel;
+        } catch (e) {
+            tunnel.close();
+            if (!e.transient) return null;
+        }
+    }
     return null;
 }
 
@@ -709,6 +755,7 @@ async function main() {
     } catch {
         /* worst case the seal is shown twice; nothing breaks */
     }
+    rememberOpenedHost(hostId);
 
     // The identifier moves from the path to the fragment. The application uses
     // ordinary absolute paths for its own routes and its own assets, and a
