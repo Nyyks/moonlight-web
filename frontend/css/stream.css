@@ -628,6 +628,25 @@ body.streaming-active::after {
     color: #fff;
     background: rgba(255, 255, 255, 0.12);
 }
+/* A finger needs a target the size of a fingertip, not of a 16px glyph: on a
+   phone the × kept missing and the tap dragged the card instead. The hit area
+   grows past the card's corner rather than into its numbers; the glyph grows
+   a little, the card barely. A mouse keeps the small one. */
+@media (pointer: coarse) {
+    .stream-stats-overlay {
+        padding-right: 32px;
+    }
+    .overlay-close-btn {
+        top: -6px;
+        right: -6px;
+        width: 40px;
+        height: 40px;
+        font-size: 22px;
+        line-height: 40px;
+        border-radius: 10px;
+        color: rgba(255, 255, 255, 0.6);
+    }
+}
 
 /* The 60-second history strip, drawn under the card's numbers when the latency
    breakdown is open. A canvas: four lanes of hairlines at 2 Hz cost nothing to
