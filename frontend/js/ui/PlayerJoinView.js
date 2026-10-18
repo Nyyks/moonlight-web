@@ -225,6 +225,11 @@ export class PlayerJoinView {
 
         input.addEventListener('input', () => {
             input.value = input.value.replace(/\D/g, '').slice(0, 6);
+            // All six typed on a phone: put the keyboard away, so the button
+            // is in plain sight instead of under it.
+            if (input.value.length === 6 && window.matchMedia?.('(pointer: coarse)').matches) {
+                input.blur();
+            }
         });
 
         form.addEventListener('submit', async (e) => {

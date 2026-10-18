@@ -33,6 +33,9 @@ import { InstanceMenu } from './InstanceMenu.js';
 import { currentInstanceRef, listInstances } from '../util/instances.js';
 import { tunnelHostId } from '../net/tunnelBridge.js';
 
+/** The session name last signed in under (see rememberedMachineName). */
+const MACHINE_NAME_KEY = 'mw-session-name';
+
 export class LoginView {
     constructor(container, onAuthenticated) {
         this.container = container;
@@ -112,6 +115,7 @@ export class LoginView {
         this._releaseServerField();
         this._stopLockoutTimer();
         this._releaseSubmitInView();
+        this._releasePinCaret();
     }
 
     /**
@@ -142,11 +146,42 @@ export class LoginView {
     }
 
     /**
-     * Build a suggested machine name from client OS + browser.
-     * e.g. "Windows Chrome", "macOS Safari", "Android Chrome"
+     * The name this browser signed in under last time, else one built from
+     * client OS + browser, e.g. "Windows Chrome", "macOS Safari".
      */
     _suggestMachineName() {
-        this._machineName = LoginView.suggestedMachineName();
+        this._machineName = LoginView.rememberedMachineName();
+    }
+
+    /**
+     * The name typed into "Name this session" at the last successful sign-in.
+     *
+     * The host lists every device by that name, so someone who took the
+     * trouble to call their phone "Living-room tablet" should not find it back
+     * as "Android Chrome" after the session ends and they unlock again. Kept
+     * only when it differs from the suggestion: an untouched field keeps
+     * following the browser, which is what the suggestion is for.
+     */
+    static rememberedMachineName() {
+        try {
+            const stored = (localStorage.getItem(MACHINE_NAME_KEY) || '').trim();
+            if (stored) return stored.slice(0, 24);
+        } catch {
+            /* no storage: the suggestion, as before */
+        }
+        return LoginView.suggestedMachineName();
+    }
+
+    static _rememberMachineName(name) {
+        try {
+            if (name && name !== LoginView.suggestedMachineName()) {
+                localStorage.setItem(MACHINE_NAME_KEY, name);
+            } else {
+                localStorage.removeItem(MACHINE_NAME_KEY);
+            }
+        } catch {
+            /* the field just starts from the suggestion next time */
+        }
     }
 
     /** The name suggestion alone, for a session created without this form. */
@@ -436,6 +471,16 @@ export class LoginView {
             this._bindPinEvents();
         }
 
+        // The session name, kept in state for the same reason as "Remember
+        // me" below: a wrong PIN re-renders the form, and the name typed a
+        // moment ago used to come back as the suggestion.
+        const machineInput = this.container.querySelector('#login-machine-input');
+        if (machineInput) {
+            machineInput.addEventListener('input', () => {
+                this._machineName = machineInput.value;
+            });
+        }
+
         // "Remember me" — shared by both forms, kept in state so a failed
         // attempt (which re-renders) does not silently flip it back on.
         const rememberCheck = this.container.querySelector('#login-remember');
@@ -467,16 +512,36 @@ export class LoginView {
 
         if (!input || !btn) return;
 
+        // Right after the last digit (start when none yet): the only place the
+        // caret may be. Anywhere else, the next digit lands among the dashes
+        // or between two digits, and the mask then reads them back in an
+        // order the person never typed.
+        const caretSlot = () => {
+            const count = input.value.replace(/\D/g, '').length;
+            return count + (count > 3 ? 1 : 0);
+        };
+        const pinCaret = () => {
+            if (document.activeElement !== input) return;
+            const slot = caretSlot();
+            if (input.selectionStart !== slot || input.selectionEnd !== slot) {
+                input.setSelectionRange(slot, slot);
+            }
+        };
+
         input.addEventListener('input', () => {
             // Mask: fill a "DDD DDD" template left-to-right — each typed digit
             // replaces the next dash. Caret stays right after the last digit.
             const digits = input.value.replace(/\D/g, '').slice(0, 6);
             const filled = digits.padEnd(6, '-');
             input.value = filled.slice(0, 3) + ' ' + filled.slice(3);
-            // Caret right after the last digit (start when none yet).
-            const caret = digits.length + (digits.length > 3 ? 1 : 0);
+            const caret = caretSlot();
             input.setSelectionRange(caret, caret);
             btn.disabled = digits.length === 0 || this._lockoutRemaining > 0 || this._submitting;
+            // All six typed on a phone: put the keyboard away, so Unlock is in
+            // plain sight instead of under it.
+            if (digits.length === 6 && window.matchMedia?.('(pointer: coarse)').matches) {
+                input.blur();
+            }
         });
 
         // Show the "--- ---" template (centered) while focused, caret on the
@@ -486,11 +551,24 @@ export class LoginView {
             if (digits.length === 0) {
                 input.value = '--- ---';
             }
-            // Caret on the first dash: right after the last digit (start when none).
             // Defer so it wins over the mouse-click caret placement.
-            const caret = digits.length + (digits.length > 3 ? 1 : 0);
-            setTimeout(() => input.setSelectionRange(caret, caret), 0);
+            setTimeout(pinCaret, 0);
         });
+
+        // A click, a tap, an arrow key or a long-press selection would all move
+        // the caret off its slot: each is put straight back. selectionchange
+        // covers taps and drags on every engine; the key and pointer events are
+        // there for the ones that do not fire it for text fields.
+        input.addEventListener('keydown', (e) => {
+            if (/^(Arrow(Left|Right|Up|Down)|Home|End|PageUp|PageDown)$/.test(e.key)) {
+                e.preventDefault();
+            }
+        });
+        for (const type of ['select', 'click', 'keyup']) input.addEventListener(type, pinCaret);
+        input.addEventListener('pointerup', () => setTimeout(pinCaret, 0));
+        this._releasePinCaret();
+        document.addEventListener('selectionchange', pinCaret);
+        this._pinCaretCleanup = () => document.removeEventListener('selectionchange', pinCaret);
         input.addEventListener('blur', () => {
             if (input.value.replace(/\D/g, '').length === 0) {
                 input.value = '';
@@ -582,6 +660,11 @@ export class LoginView {
         this._submitInViewCleanup = null;
     }
 
+    _releasePinCaret() {
+        if (this._pinCaretCleanup) this._pinCaretCleanup();
+        this._pinCaretCleanup = null;
+    }
+
     _bindCertEvents() {
         const certInput = this.container.querySelector('#login-cert-input');
         const machineInput = this.container.querySelector('#login-machine-input');
@@ -642,6 +725,7 @@ export class LoginView {
             const result = await BackendClient.validatePin(pin, machineName, this._remember);
 
             if (result.status === 'ok') {
+                LoginView._rememberMachineName(machineName);
                 Toast.success(t('login.authSuccess'));
                 this._releaseServerField();
                 this.onAuthenticated();
@@ -672,6 +756,7 @@ export class LoginView {
             );
 
             if (result.status === 'ok') {
+                LoginView._rememberMachineName(machineName);
                 Toast.success(t('login.authSuccess'));
                 this._releaseServerField();
                 this.onAuthenticated();
