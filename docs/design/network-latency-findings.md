@@ -2173,6 +2173,48 @@ is when it is shown; differences are AF41 minus none, per pair.
 - The virtual display stayed on after every pass ("the screens did not come
   back"). It was switched off by the product's own tool at the end.
 
+### 19/10/2026 — Losses on a cable are the browser's socket, not the wire (plan « Gels du lien », point 1)
+
+Bruno saw link freezes of 0.4 to 1.5 s, and on DualRTX streaming the N95's
+DEV host over a 1 Gbit/s cable (HEVC, 40 Mbit/s) SCTP sent 74 chunks again
+in 90 s, with one T3. On a LAN a T3 waits out the 200 ms minimum RTO, which
+alone backs the send buffer up past its 250 ms tolerance. The question was
+where a cable loses packets. Bench of 19/10, 17:02-17:25 and 19:28-19:39,
+N95 host, DualRTX client (a headless Chrome of its own profile, hardware
+HEVC on the RTX), counters read before and after every pass on both sides
+(every adapter, `netstat -s`, Hyper-V's virtual switch).
+
+| Pass | What | Lost |
+|---|---|---|
+| UDP bursts, 40 Mbit/s at 60 fps, 60 s | receiver buffer 8 MB | 0 of 248,400 |
+| same | receiver buffer 64 KB | 39, all at a burst's tail |
+| UDP bursts, 128 Mbit/s, 45 s | 8 MB | 0 of 599,400 |
+| same | 64 KB | 631 (0.1 %), middle and tail |
+| Stream, a game clip, 1080p, 3 min (17:16) | Chrome | 18 chunks sent again of 464,794 |
+| Stream, YouTube as content, 3 min (17:21) | Chrome | 249 of 229,140, 49 inside a recovery |
+| Same content, 19:28 and 19:33 | Chrome, without and with `rxbuf=1` | 0 and 0 |
+
+- No adapter on either machine and no port of the virtual switch dropped
+  anything, and every datagram the N95 sent reached DualRTX's UDP layer.
+  The wire, the switch, the Realtek card and Hyper-V are cleared.
+- **Windows does not count a datagram a full socket drops**: on loopback,
+  4,993 of 5,000 datagrams thrown away by a small buffer left "Receive
+  Errors" at 0 and were counted as received. `netstat` cannot see it; the
+  N95's "nothing counted" of W1 bis was the same blind spot.
+- Chrome gives a WebRTC UDP socket 64 KB of receive buffer
+  (`kUdpRecvSocketBufferSize`, `services/network/p2p/socket_udp.cc`), and
+  only a video channel raises it, to 256 KB
+  (`WebRtcVideoReceiveChannel::SetInterface`, field trial
+  `WebRTC-ReceiveBufferSize`). A DataChannel stream has none, and neither has
+  PyroWave, whose frames ride an Opus track: one 40 Mbit/s frame arriving at
+  line rate is already more than 64 KB. Bruno's PyroWave stream of 15:27 lost
+  0.6 % of its packets on the same cable.
+- The losses come and go with the client's load: the same YouTube content
+  lost 249 chunks at 17:21 and none at 19:28. The reading is a socket that
+  overflows while Chrome reads late. `rxbuf=1` (a silent video section in the
+  offer, `844f1db2`) is the A/B that settles it; at rest neither arm loses
+  anything, so it has to run under an equal CPU load. Still to do.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
@@ -2296,6 +2338,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `flood=`, `floodsize=`, `floodchannel=` | useless traffic on channel 3 | |
 | `pace=<n>`, `paceburst=<KB>` | pacing of a frame's chunks | `b2b52486` |
 | `retrcut=<‰>` | governor cuts on SCTP retransmissions; **3 by default on Windows**, 0 off | `e0324f4e`, `55dd9cde` |
+| `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; off unless said) | `352a30ad` |
 | `sctpbuf=<KB>` | usrsctp's real send buffer (via `maxMessageSize`) | `dc7f9c72` |
 | `linkhold=<ms>` | hold the picture after a backlog that long (Windows) | `dc7f9c72`, `a511bdd3` |
 | `sctpburst=<n>` | usrsctp's max burst in packets, 0 no limit; **0 by default on the Windows native host**, 10 elsewhere | `01717368`, `2ef56bfe` |
