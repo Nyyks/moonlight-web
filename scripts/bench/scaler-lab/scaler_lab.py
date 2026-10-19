@@ -48,6 +48,8 @@ DEFAULT_CASES = [
     ("x133-text", "in=1920x1080&out=2560x1440&content=text&set=feed,base"),
     ("x133-game", "in=1920x1080&out=2560x1440&content=game&set=feed,base"),
     ("x1-text", "in=1920x1080&out=1920x1080&content=text&set=feed,base"),
+    ("x075-text", "in=2560x1440&out=1920x1080&content=text&set=feed,base"),
+    ("x2-ui", "in=1280x720&out=2560x1440&content=ui&set=feed,base"),
     ("x2-text-tick", "in=1280x720&out=2560x1440&content=text&set=feed,base&pace=tick&batches=6"),
 ]
 
