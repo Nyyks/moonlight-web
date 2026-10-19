@@ -3453,11 +3453,21 @@ void DataChannelRelay::sendRtpVideo(const QByteArray& frameData, bool isKeyframe
                                     static_cast<size_t>(frameData.size()), info);
         }
         const int64_t endUs = steadyUs();
-        // The bench's frame log (relaylog=1): the first and the last packet
-        // handed to libdatachannel, as the sender stamps a DataChannel frame.
+        // The first and the last packet handed to libdatachannel, as the
+        // sender stamps a DataChannel frame: the engine that stamps its frames
+        // closes their timeline on it — queue, send and the host's total.
+        // Without it the stats card under PyroWave, whose frames all ride this
+        // track, had acquire, convert and encode but a HOST TOTAL of "–", and
+        // its LATENCY left the host out: 5.2 ms read beside 8 + 15 + 31 ms of
+        // host stages (19/10/2026). The bench's frame log (relaylog=1) stands
+        // in between, as in sendFragmented.
+        FrameSentSink* sink = (frameNumber >= 0 && m_Shim) ? m_Shim->frameSentSink() : nullptr;
         if (m_FrameLog && frameNumber >= 0) {
             if (wireId >= 0) m_FrameLog->sent(frameNumber, static_cast<uint32_t>(wireId));
+            m_FrameLog->setInner(sink);
             m_FrameLog->frameSent(static_cast<uint32_t>(frameNumber), sendStartUs, endUs);
+        } else if (sink) {
+            sink->frameSent(static_cast<uint32_t>(frameNumber), sendStartUs, endUs);
         }
         m_RtpSendUs.push_back(static_cast<int>(endUs - sendStartUs));
         // backendTs is the steady clock in ms, mod 2^32: the difference wraps alike.
