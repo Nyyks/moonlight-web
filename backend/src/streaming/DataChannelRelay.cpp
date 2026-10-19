@@ -2366,6 +2366,8 @@ void DataChannelRelay::sendFragmented(const QByteArray& data, bool isKeyframe,
             // evictions (design §9.10.2): a stall longer than the encoder's
             // references reach ends in the keyframe the session asks for.
             auto* native = qobject_cast<NativeMediaEngine*>(m_Shim);
+            // The rate it overflowed at, for the governor (ovfgood=).
+            if (native) native->noteOverflow();
             const bool named = native && frameNumber >= 0 && native->nameLinkDrops() &&
                                native->referenceInvalidation();
             if (named) {
@@ -2432,6 +2434,7 @@ void DataChannelRelay::sendFragmented(const QByteArray& data, bool isKeyframe,
                                    m_Backlog.ageMs(backlogNowMs), steadyUs());
             m_Freezes.note(backlogNowMs - m_Backlog.ageMs(backlogNowMs), backlogNowMs,
                            LinkFreezeLog::Backlog);
+            if (auto* native = qobject_cast<NativeMediaEngine*>(m_Shim)) native->noteOverflow();
             if (m_KeyframeBackpressureWarnings <= 5) {
                 qInfo() << "[DataChannelRelay] Dropped keyframe (link not draining)"
                         << "bufferedAmount=" << bufAmt

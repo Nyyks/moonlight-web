@@ -351,6 +351,10 @@ public:
     /// next reportLink(): to the governor an eviction is loss the host caused
     /// itself, and the surest sign the link is full.
     void noteEviction() { m_Evictions.fetch_add(1, std::memory_order_relaxed); }
+    /// The relay shed a frame off a send buffer backed up past its tolerance
+    /// ("link not draining"). Carried by the next reportLink() as
+    /// LinkFeedback::overflows, which the governor reads under ovfgood= only.
+    void noteOverflow() { m_Overflows.fetch_add(1, std::memory_order_relaxed); }
 
     /// The client's screen changed mid-session (a `clientrefresh` message):
     /// its refresh in millihertz and whether it paints on vsync. The engine
@@ -596,6 +600,9 @@ private:
 
     /// Sender evictions since the last link report — see noteEviction().
     std::atomic<int> m_Evictions{0};
+    /// Frames shed off a backed-up send buffer since the last link report —
+    /// see noteOverflow().
+    std::atomic<int> m_Overflows{0};
 
     /// The session's EncoderTuning::nameLinkDrops key, for the relay's thread.
     std::atomic<mw::native::EncoderTuning::Choice> m_NameLinkDropsKey{

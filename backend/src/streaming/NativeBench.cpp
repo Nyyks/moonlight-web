@@ -237,6 +237,9 @@ const char* const kUsage =
     "  retrcut=<permille>  the rate governor also cuts when SCTP retransmits at least that\n"
     "                    many chunks in a thousand (Windows host: 3 unless said, 0 off;\n"
     "                    plan Wi-Fi W2 B)\n"
+    "  ovfgood=0|1       a frame shed off a backed-up send buffer is overuse, and lowers\n"
+    "                    the link's last good rate to a cut under it (Windows host; off\n"
+    "                    unless said; plan Gels du lien, G)\n"
     "  sctpbuf=<KB>      usrsctp's send buffer, 24-1024, really: also the largest message\n"
     "                    either side may send (256 KB otherwise; plan Wi-Fi W2 C)\n"
     "  sctpss=0|1|3|4|5  usrsctp's stream scheduler: default, round robin, priority, fair\n"
@@ -668,6 +671,9 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
     } else if (key == "retrcut") {
         tuning.retransCutPermille = value.toInt(&ok);
         ok = ok && tuning.retransCutPermille >= 0 && tuning.retransCutPermille <= 1000;
+    } else if (key == "ovfgood") {
+        tuning.overflowGood = value.toInt(&ok);
+        ok = ok && (tuning.overflowGood == 0 || tuning.overflowGood == 1);
     } else if (key == "sctpbuf") {
         tuning.sctpBufferKb = value.toInt(&ok);
         ok = ok && tuning.sctpBufferKb >= 24 && tuning.sctpBufferKb <= 1024;

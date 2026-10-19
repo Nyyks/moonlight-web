@@ -84,6 +84,14 @@ namespace mw::native::encode {
 ///    kProbeGraceMs of its last step, says the link really narrowed. The
 ///    good rate falls back to where the climb started, so the next climb is
 ///    a slow one: the rate can overshoot once, not oscillate.
+///  - **A queue that overflowed** (the bench's `ovfgood=1`, off otherwise):
+///    a frame the relay shed off a backed-up send buffer is overuse, and the
+///    good rate falls to one cut under the rate it overflowed at, however
+///    long ago the climb ended. Seen on an N95 host on 19/10/2026: back at
+///    30 Mbit/s in 1.5 s at 15:19:05, the buffer overflowed 7.4 s later —
+///    past the grace, so the good rate stayed 30 Mbit/s — and again at
+///    15:19:25. The fast climb then stops a cut short, and the last step is
+///    the slow one: ~2.5 s more from there back to the rate that overflowed.
 ///
 /// Pure and clocked by the caller, so it can be tested without a network.
 ///
@@ -132,6 +140,9 @@ public:
         m_ClimbStartKbps = 0;
         m_LastFastRaiseMs = kNever;
         m_LastRaiseFast = false;
+        m_AreaSinceMs = nowMs;
+        m_AreaLastMs = nowMs;
+        m_AreaKbpsMs = 0;
     }
 
     /// The viewer moved the ceiling (the frontend's ladder, or a new session
@@ -154,6 +165,7 @@ public:
     /// changed.
     bool report(const LinkFeedback& fb, int64_t nowMs)
     {
+        account(nowMs);
         m_LastReportMs = nowMs;
         m_LastRaiseFast = false;
         if (m_Follow) return false;
@@ -177,10 +189,12 @@ public:
         const bool retransOver = m_RetransCut > 0 && fb.retransPermille >= m_RetransCut;
         const bool retransQuiet = m_RetransCut <= 0 || fb.retransPermille * 2 < m_RetransCut;
         if (retransOver) m_RetransOveruses++;
-        const bool overuse =
-            fb.owdRiseMs >= kOveruseMs || fb.gaps > 0 || fb.evictions > 0 || retransOver;
-        const bool quiet =
-            fb.owdRiseMs < kQuietMs && fb.gaps == 0 && fb.evictions == 0 && retransQuiet;
+        // The relay's shed frames, only under ovfgood= (setOverflowLowersGood).
+        const bool overflowed = m_OverflowLowersGood && fb.overflows > 0;
+        const bool overuse = fb.owdRiseMs >= kOveruseMs || fb.gaps > 0 || fb.evictions > 0 ||
+                             retransOver || overflowed;
+        const bool quiet = fb.owdRiseMs < kQuietMs && fb.gaps == 0 && fb.evictions == 0 &&
+                           retransQuiet && !overflowed;
 
         if (overuse) {
             m_QuietSinceMs = nowMs;
@@ -191,6 +205,13 @@ public:
             if (m_LastFastRaiseMs != kNever && nowMs - m_LastFastRaiseMs < kProbeGraceMs)
                 m_GoodKbps = m_ClimbStartKbps;
             m_LastFastRaiseMs = kNever;
+            // A queue that overflowed at this rate, the climb long over: the
+            // link no longer carries it, whatever it carried before.
+            if (overflowed) {
+                m_Overflows++;
+                const int under = m_Target - m_Target * kCutPercent / 100;
+                if (m_GoodKbps > under) m_GoodKbps = under;
+            }
             const bool changed = cut();
             rearmGoodSample(nowMs);
             return changed;
@@ -215,6 +236,7 @@ public:
     /// target changed — only ever because the reports stopped coming.
     bool tick(int64_t nowMs)
     {
+        account(nowMs);
         if (m_Follow || m_SilenceCut || nowMs - m_LastReportMs < kSilenceMs) return false;
         m_SilenceCut = true;
         m_TargetBeforeSilence = m_Target;
@@ -261,6 +283,27 @@ public:
     /// the rest.
     int retransOveruses() const { return m_RetransOveruses; }
 
+    /// `ovfgood=1` (plan « Gels du lien », G): the relay's shed frames
+    /// (LinkFeedback::overflows) are overuse, and lower the good rate to one
+    /// cut under the rate they overflowed at. Off, where it starts, the
+    /// governor does not read them at all.
+    void setOverflowLowersGood(bool on) { m_OverflowLowersGood = on; }
+    bool overflowLowersGood() const { return m_OverflowLowersGood; }
+    /// Reports that carried shed frames, under ovfgood=1.
+    int overflows() const { return m_Overflows; }
+
+    /// The target's mean since start(), weighted by how long each value
+    /// lasted, up to @p nowMs: what the encoder was given over the session,
+    /// for its last log line (the A/B of ovfgood=). A ceiling the viewer
+    /// moved counts from the next report or tick.
+    int meanTargetKbps(int64_t nowMs) const
+    {
+        const int64_t last = nowMs > m_AreaLastMs ? nowMs - m_AreaLastMs : 0;
+        const int64_t span = nowMs - m_AreaSinceMs;
+        if (span <= 0) return m_Target;
+        return static_cast<int>((m_AreaKbpsMs + static_cast<int64_t>(m_Target) * last) / span);
+    }
+
     /// At the setting, the reports coming, and every one of them quiet for at
     /// least @p forMs before @p nowMs: a link with room to spare, for the few
     /// pictures more a press sends (core/InputAdmit.h).
@@ -291,6 +334,14 @@ public:
 
 private:
     static constexpr int64_t kNever = INT64_MIN;
+
+    /// The time the target spent at its value since the last call.
+    void account(int64_t nowMs)
+    {
+        if (nowMs <= m_AreaLastMs) return;
+        m_AreaKbpsMs += static_cast<int64_t>(m_Target) * (nowMs - m_AreaLastMs);
+        m_AreaLastMs = nowMs;
+    }
 
     void rearmGoodSample(int64_t nowMs)
     {
@@ -334,6 +385,8 @@ private:
     bool m_Follow = false; ///< the bench's governor=off
     int m_RetransCut = 0;  ///< retrcut=, per thousand; 0 off
     int m_RetransOveruses = 0;
+    bool m_OverflowLowersGood = false; ///< ovfgood=
+    int m_Overflows = 0;
     int m_FloorPercent = kFloorPercent;
     int m_Setting = 20000;
     int m_Target = 20000;
@@ -355,6 +408,10 @@ private:
     int m_Overuses = 0;
     int m_Silences = 0;
     int m_Changes = 0;
+    /// The target integrated over time, kbps × ms, since m_AreaSinceMs.
+    int64_t m_AreaKbpsMs = 0;
+    int64_t m_AreaSinceMs = 0;
+    int64_t m_AreaLastMs = 0;
 };
 
 } // namespace mw::native::encode

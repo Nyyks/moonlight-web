@@ -242,6 +242,19 @@ void run_cadence_choice_tests()
         CHECK_EQ(t.describe(), std::string("retrcut=5"));
     }
 
+    // ovfgood= (plan « Gels du lien », G): off unless said, 0 and 1 named.
+    SECTION("ovfgood= — off unless said, both values named");
+    {
+        EncoderTuning t;
+        CHECK_EQ(t.overflowGood, -1);
+        CHECK(t.isDefault());
+        t.overflowGood = 0;
+        CHECK(!t.isDefault());
+        CHECK_EQ(t.describe(), std::string("ovfgood=0"));
+        t.overflowGood = 1;
+        CHECK_EQ(t.describe(), std::string("ovfgood=1"));
+    }
+
     // usrsctp's max burst (plan Wi-Fi W2.5): libdatachannel's 10 unless said,
     // 0 a key like any other (no limit).
     SECTION("sctpburst= — libdatachannel's unless said, 0 named");

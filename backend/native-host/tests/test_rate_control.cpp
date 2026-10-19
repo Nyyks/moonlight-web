@@ -745,6 +745,111 @@ void run_rate_control_tests()
         CHECK_EQ(g.targetKbps(), 5250);
     }
 
+    SECTION("RateGovernor — shed frames move nothing without ovfgood=");
+    {
+        RateGovernor g;
+        g.start(30000, 0);
+        CHECK(!g.overflowLowersGood());
+        LinkFeedback quiet;
+        for (int64_t t = 500; t <= 6000; t += 500)
+            g.report(quiet, t);
+        LinkFeedback shed;
+        shed.overflows = 3;
+        CHECK(!g.report(shed, 6500));
+        CHECK_EQ(g.targetKbps(), 30000);
+        CHECK_EQ(g.goodKbps(), 30000);
+        CHECK_EQ(g.overuses(), 0);
+        CHECK_EQ(g.overflows(), 0);
+    }
+
+    SECTION("RateGovernor — ovfgood=: a queue that overflowed lowers the good rate");
+    {
+        // The N95 of 19/10/2026: 30 Mbit/s proven, then the send buffer
+        // overflowed at that rate long after the last climb.
+        RateGovernor g;
+        g.start(30000, 0);
+        g.setOverflowLowersGood(true);
+        LinkFeedback quiet;
+        for (int64_t t = 500; t <= 14500; t += 500)
+            g.report(quiet, t);
+        CHECK_EQ(g.goodKbps(), 30000);
+        LinkFeedback shed;
+        shed.overflows = 1;
+        CHECK(g.report(shed, 15000)); // overuse on its own, no delay needed
+        CHECK_EQ(g.targetKbps(), 24000);
+        CHECK_EQ(g.goodKbps(), 24000); // one cut under the rate that overflowed
+        CHECK_EQ(g.overflows(), 1);
+        LinkFeedback rising;
+        rising.owdRiseMs = 45;
+        CHECK(g.report(rising, 15500));
+        CHECK_EQ(g.targetKbps(), 19200);
+        CHECK_EQ(g.goodKbps(), 24000); // a delay alone still proves nothing
+        // Back fast to the good rate, then the slow steps above it:
+        // 19 200 → 24 000, then 25 200 → 26 460 → 27 783 → 29 172 → 30 000.
+        CHECK(!g.report(quiet, 18000));
+        CHECK(g.report(quiet, 18500));
+        CHECK(g.lastRaiseFast());
+        CHECK_EQ(g.targetKbps(), 24000);
+        CHECK(g.report(quiet, 19000));
+        CHECK(!g.lastRaiseFast());
+        CHECK_EQ(g.targetKbps(), 25200);
+        int64_t t = 19500;
+        int steps = 0;
+        while (g.limiting() && steps < 100) {
+            g.report(quiet, t);
+            t += 500;
+            steps++;
+        }
+        CHECK_EQ(g.targetKbps(), 30000);
+        CHECK_EQ(steps, 4);
+        // Without the key, the same reports went from 24 000 straight back.
+        RateGovernor off;
+        off.start(30000, 0);
+        for (int64_t u = 500; u <= 14500; u += 500)
+            off.report(quiet, u);
+        off.report(rising, 15000);
+        off.report(rising, 15500);
+        off.report(quiet, 18500);
+        off.report(quiet, 19000);
+        CHECK_EQ(off.targetKbps(), 30000);
+    }
+
+    SECTION("RateGovernor — ovfgood=: the probe's own rule still holds inside the grace");
+    {
+        RateGovernor g;
+        g.start(20000, 0);
+        g.setOverflowLowersGood(true);
+        LinkFeedback quiet;
+        for (int64_t t = 500; t <= 6000; t += 500)
+            g.report(quiet, t);
+        LinkFeedback frozen;
+        frozen.owdRiseMs = 200;
+        for (int64_t t = 6500; t <= 10000; t += 500)
+            g.report(frozen, t);
+        CHECK(g.report(quiet, 13000));
+        CHECK(g.report(quiet, 13500));
+        CHECK(g.report(quiet, 14000));
+        CHECK_EQ(g.targetKbps(), 7812);
+        LinkFeedback shed;
+        shed.overflows = 2;
+        CHECK(g.report(shed, 14500));
+        CHECK_EQ(g.goodKbps(), 4000); // where the climb started, under 6 250
+    }
+
+    SECTION("RateGovernor — the target's mean over time");
+    {
+        RateGovernor g;
+        g.start(20000, 0);
+        CHECK_EQ(g.meanTargetKbps(0), 20000);
+        LinkFeedback rising;
+        rising.owdRiseMs = 45;
+        g.report(rising, 1000); // 20 000 for 1 s, then 16 000
+        CHECK_EQ(g.meanTargetKbps(3000), 17333);
+        g.tick(3000);
+        CHECK_EQ(g.meanTargetKbps(3000), 17333);
+        CHECK_EQ(g.meanTargetKbps(5000), 16800);
+    }
+
     SECTION("RateGovernor — a session's first seconds prove nothing");
     {
         RateGovernor g;

@@ -506,6 +506,11 @@ struct EncoderTuning
     /// host). -1, the product: the engine's own, RateGovernor's
     /// kRetransCutPermille; 0 the governor does not look at SCTP.
     int retransCutPermille = -1;
+    /// A frame the relay sheds off a backed-up send buffer is overuse to the
+    /// rate governor, and lowers the link's last good rate to one cut under
+    /// the rate it overflowed at (plan « Gels du lien », G; Windows host).
+    /// -1, the product: off until measured; 0 off; 1 on.
+    int overflowGood = -1;
     /// usrsctp's send buffer, in KB, really (plan Wi-Fi W2 C). 0, the product:
     /// 256 KiB whatever the bitrate, since libdatachannel raises the buffer to
     /// its largest message. What waits in there the host cannot see; what it
@@ -584,7 +589,7 @@ struct EncoderTuning
                vplExtBrc == Choice::Default && vplLowDelayBrc == Choice::Default &&
                vplGamingScenario == Choice::Default && vplWinBrcFrames == 0 &&
                vplRateControl == VplRateControl::Default && vplIntraRefreshQpDelta == 0 &&
-               intraRefreshDist == 0 && linkGovernor == Choice::Default &&
+               intraRefreshDist == 0 && linkGovernor == Choice::Default && overflowGood < 0 &&
                nameLinkDrops == Choice::Default && vbvFrames == 0 && dpbFrames == 0 &&
                fallback == Fallback::None && pipeline == VideoPipeline::Auto &&
                conv12 == ConvertQueue12::Default && enc12 == Encoder12::Default &&
@@ -719,6 +724,7 @@ struct EncoderTuning
         if (paceMultiple > 0) add("pace=" + std::to_string(paceMultiple));
         if (paceBurstKb > 0) add("paceburst=" + std::to_string(paceBurstKb));
         if (retransCutPermille >= 0) add("retrcut=" + std::to_string(retransCutPermille));
+        if (overflowGood >= 0) add("ovfgood=" + std::to_string(overflowGood));
         if (sctpBufferKb > 0) add("sctpbuf=" + std::to_string(sctpBufferKb));
         if (linkHoldMs > 0) add("linkhold=" + std::to_string(linkHoldMs));
         if (sctpMaxBurst >= 0) add("sctpburst=" + std::to_string(sctpMaxBurst));

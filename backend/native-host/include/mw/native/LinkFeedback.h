@@ -62,6 +62,13 @@ struct LinkFeedback
     /// on the Windows host).
     int retransPermille = 0;
 
+    /// Frames the relay shed in the window because the video's send buffer
+    /// had stayed backed up past its tolerance (SendBacklog: "link not
+    /// draining"). Filled by the host. They never got a frame number, so the
+    /// receiver sees no gap: the link overflowed at the rate in force, which
+    /// only the bench's ovfgood= tells the governor (plan « Gels du lien », G).
+    int overflows = 0;
+
     /// The receiver's first report after its page was hidden or frozen. The
     /// gaps it names were frames the host's own sender evicted because nobody
     /// was draining them, and the silence before it was the browser's, not the

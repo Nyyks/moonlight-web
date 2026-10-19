@@ -784,6 +784,9 @@ public:
                 m_LinkFeedback.owdRiseMs = feedback.owdRiseMs;
             m_LinkFeedback.gaps += feedback.gaps;
             m_LinkFeedback.evictions += feedback.evictions;
+            m_LinkFeedback.overflows += feedback.overflows;
+            if (feedback.retransPermille > m_LinkFeedback.retransPermille)
+                m_LinkFeedback.retransPermille = feedback.retransPermille;
             m_LinkFeedback.receivedFps = feedback.receivedFps;
         } else {
             m_LinkFeedback = feedback;
@@ -2253,6 +2256,31 @@ private:
             log::info("[native] rate governor: also cuts at " +
                       std::to_string(governor.retransCut()) +
                       " SCTP chunks retransmitted in a thousand (retrcut=)");
+        // ovfgood= (plan « Gels du lien », G): a shed frame lowers the good rate.
+        governor.setOverflowLowersGood(m_Config.tuning.overflowGood > 0);
+        if (governor.overflowLowersGood())
+            log::info("[native] rate governor: a frame shed off the send buffer lowers the "
+                      "link's last good rate (bench ovfgood=1)");
+        // The session's account of the link, however the loop ends: what the
+        // encoder was given on average, and why it was cut (the A/B of
+        // ovfgood=; the moves themselves are logged ten at most, then every
+        // tenth).
+        struct GovernorSummary
+        {
+            const encode::RateGovernor& g;
+            ~GovernorSummary()
+            {
+                if (g.changes() == 0) return;
+                log::info("[native] rate governor this session: target " +
+                          std::to_string(g.meanTargetKbps(steadyNowUs() / 1000)) +
+                          " kbps on average of the " + std::to_string(g.settingKbps()) + " set, " +
+                          std::to_string(g.changes()) + " moves, " + std::to_string(g.overuses()) +
+                          " overuses (" + std::to_string(g.retransOveruses()) +
+                          " on SCTP's retransmissions, " + std::to_string(g.overflows()) +
+                          " on shed frames), " + std::to_string(g.silences()) +
+                          " silences, last good rate " + std::to_string(g.goodKbps()) + " kbps");
+            }
+        } governorSummary{governor};
         if (m_Config.tuning.linkHoldMs > 0)
             log::info("[native] link hold: a picture waits, unencoded, once video has waited "
                       "outside usrsctp " +
@@ -2610,7 +2638,9 @@ private:
                     if (governor.report(fb, nowMs))
                         applyGovernor(
                             fb.resumed ? "the receiver is back from the background"
-                            : fb.gaps > 0 || fb.evictions > 0                  ? "frames lost"
+                            : fb.gaps > 0 || fb.evictions > 0 ? "frames lost"
+                            : fb.overflows > 0 && governor.overflowLowersGood()
+                                ? "send buffer overflowed"
                             : fb.owdRiseMs >= encode::RateGovernor::kOveruseMs ? "delay rising"
                             : governor.retransCut() > 0 &&
                                     fb.retransPermille >= governor.retransCut()

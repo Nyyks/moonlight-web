@@ -1127,6 +1127,9 @@ void NativeMediaEngine::reportLink(const mw::native::LinkFeedback& feedback)
 {
     mw::native::LinkFeedback fb = feedback;
     const int evicted = m_Evictions.exchange(0, std::memory_order_relaxed);
+    // Carried to this engine's own governor only: the guests' feed follows
+    // their delays and SCTP drops, and its arbiter knows nothing of these.
+    fb.overflows += m_Overflows.exchange(0, std::memory_order_relaxed);
     // A guest's link goes to the feed, which follows the slowest guest's
     // (down to its floor) — this one's governor has no encoder to move.
     if (m_Subscriber) {
