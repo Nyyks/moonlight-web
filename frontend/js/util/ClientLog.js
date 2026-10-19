@@ -68,6 +68,8 @@ let seq = 0;
 let authed = IS_GUEST; // a guest's cookie is checked by the route itself
 let timer = 0;
 let sending = false;
+/** refreshClientLog calls made so far: only the latest one's answer counts. */
+let probes = 0;
 const pageId = Math.random().toString(36).slice(2, 10);
 
 /** @type {Record<string, (...args: any[]) => void>} */
@@ -252,6 +254,7 @@ async function tick() {
  * the admin page switches debug mode.
  */
 export async function refreshClientLog() {
+    const probe = ++probes;
     let health = null;
     try {
         const r = await fetch('/api/health', { cache: 'no-store' });
@@ -259,9 +262,16 @@ export async function refreshClientLog() {
     } catch {
         // No answer: the next call decides.
     }
+    // A later call was made meanwhile: its answer is the newer one.
+    if (probe !== probes) return;
     // No answer on a page the tunnel serves: the tunnel is still being made.
     // Keep listening; app.js asks again once it is up.
     if (!health && state === 'probing' && cameThroughTunnel()) return;
+    // No answer is not "debug off": a mirror the server switched on stays on.
+    // The first probe through a tunnel can be held by the service worker
+    // until it gives up (a 504, tens of seconds on), long after the call made
+    // once the tunnel was up has switched the mirror on.
+    if (!health && state === 'on') return;
     serverDiag.debug = !!(health && health.debug === true);
     serverDiag.verbose = !!(health && health.verbose === true);
     if (!serverDiag.debug) {
