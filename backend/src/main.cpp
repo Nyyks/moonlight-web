@@ -79,6 +79,7 @@
 #include "server/NetClassify.h"
 #include "server/ShareManager.h"
 #include "server/SessionPool.h"
+#include "server/SingleSessionHosts.h"
 #include "server/StreamActivity.h"
 #include "server/routes/AuthRoutes.h"
 #include "server/routes/HostRoutes.h"
@@ -2314,6 +2315,12 @@ int main(int argc, char* argv[])
     // launch): missing = unknown (assume yes), false = host rejected a second
     // concurrent session → frontend falls back to the legacy relaunch.
     QHash<QString, bool> g_DualSupport;
+    // The hosts that answered a standby as streaming and never showed a
+    // picture on it (issue #36): kept on disk, never offered a second session
+    // again — the failed attempt can leave the app there unable to stream.
+    SingleSessionHosts g_SingleSessionHosts(
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+        QStringLiteral("/dual-support.json"));
     // When a standby (slot 1) launch starts: if slot 0 dies within ~3s of it,
     // the host "took over" instead of adding a session → mark no-dual.
     qint64 g_LastStandbyStartMs = 0;
@@ -2877,8 +2884,9 @@ int main(int argc, char* argv[])
                                                         &g_ActiveMediaTrackRelay, &g_ActiveSession,
                                                         &g_ActiveRelayRoot, &g_ActiveClientUniqueId,
                                                         &g_ActiveHostUuid, &g_HostAspect, &g_Pool,
-                                                        &g_DualSupport, &g_LastStandbyStartMs,
-                                                        &g_LiveSunshineUids, &g_PendingHostCancels,
+                                                        &g_DualSupport, &g_SingleSessionHosts,
+                                                        &g_LastStandbyStartMs, &g_LiveSunshineUids,
+                                                        &g_PendingHostCancels,
                                                         &dropPendingHostCancel, &detachWorkerSlot,
                                                         &quitsPerDevice, &quitDeviceApp,
                                                         &releaseSeatIfIdle, &slotSignalingPort,
@@ -2922,6 +2930,16 @@ int main(int argc, char* argv[])
         // another one gets a slot of its own instead of evicting them. Both
         // sessions then run side by side, each with its own ports and /wsN.
         int reqSlot = standby ? qBound(0, body["session_slot"].toInt(1), 1) : 0;
+
+        // A host already seen failing a standby is not asked again: the page
+        // keeps the live stream and takes the classic relaunch.
+        if (standby && g_SingleSessionHosts.contains(uuid)) {
+            respond(HttpResponse::json(
+                QJsonObject{{"status", QStringLiteral("dual_unavailable")},
+                            {"reason", QStringLiteral("host kept to one session")}},
+                200));
+            return;
+        }
 
         // A multi-user backend gives each device its own identity and its own
         // session upstream — Wolf pairs a certificate per device — so one
@@ -3977,10 +3995,10 @@ int main(int argc, char* argv[])
                     : QString();
             QObject::connect(
                 worker, &StreamWorkerHost::responseReady, qApp,
-                [respond, worker, &g_Pool, &g_DualSupport, &g_LiveSunshineUids, &authManager,
-                 &sessionMetrics, sessionFacts, sessionStartedAt, reqSlot, standby, hostUuidCopy,
-                 uid, sessionToken, hostAppCommand, hostAppOnVirtual,
-                 hostAppCloseCommand](int code, QJsonObject bodyObj) {
+                [respond, worker, &g_Pool, &g_DualSupport, &g_SingleSessionHosts,
+                 &g_LiveSunshineUids, &authManager, &sessionMetrics, sessionFacts, sessionStartedAt,
+                 reqSlot, standby, hostUuidCopy, uid, sessionToken, hostAppCommand,
+                 hostAppOnVirtual, hostAppCloseCommand](int code, QJsonObject bodyObj) {
                     const bool ok =
                         code == 200 && bodyObj["status"].toString() == QLatin1String("streaming");
                     // Count a session once it actually carries a picture, and
@@ -3999,7 +4017,8 @@ int main(int argc, char* argv[])
                     }
                     if (ok) {
                         bodyObj["slot"] = reqSlot;
-                        bodyObj["dual_supported"] = g_DualSupport.value(hostUuidCopy, true);
+                        bodyObj["dual_supported"] = g_DualSupport.value(hostUuidCopy, true) &&
+                                                    !g_SingleSessionHosts.contains(hostUuidCopy);
                         authManager.setSessionStreaming(sessionToken, true);
                         g_LiveSunshineUids.insert(uid);
                         // A successful standby launch IS the capability probe.
@@ -4539,8 +4558,8 @@ int main(int argc, char* argv[])
         "/api/hosts/:id/quit",
         [&computerManager, &g_ActiveRelay, &g_ActiveStreamRelay, &g_ActiveMediaTrackRelay,
          &g_ActiveSession, &g_ActiveClientUniqueId, &g_ActiveHostUuid, &g_Pool, &g_LiveSunshineUids,
-         &dropPendingHostCancel, &detachWorkerSlot, &appOutlivesStream, &anyOtherSlotLive,
-         &endPlayerSessions, &quitsPerDevice, &quitDeviceApp,
+         &g_DualSupport, &g_SingleSessionHosts, &dropPendingHostCancel, &detachWorkerSlot,
+         &appOutlivesStream, &anyOtherSlotLive, &endPlayerSessions, &quitsPerDevice, &quitDeviceApp,
          &releaseSeatIfIdle](const HttpRequest& req, const ResponseCallback& respond) {
             QString uuid = req.pathParams.value("id");
             qInfo() << "[quit] ENTER — uuid=" << uuid << "relay=" << g_ActiveRelay.data()
@@ -4566,6 +4585,16 @@ int main(int argc, char* argv[])
             QJsonObject qbody = QJsonDocument::fromJson(req.body).object();
             const QString quitUniqueId =
                 sanitizeClientUniqueId(qbody["client_uniqueid"].toString());
+
+            // The page retiring a standby that was answered as streaming and
+            // never showed a picture (issue #36): this host is kept to one
+            // session from now on, across restarts.
+            if (qbody["dual_failed"].toBool(false)) {
+                g_DualSupport[host->uuid] = false;
+                if (g_SingleSessionHosts.add(host->uuid))
+                    qWarning() << "[quit] Standby never showed a picture — host" << host->name
+                               << "kept to one session from now on";
+            }
 
             // ── Worker-mode sessions ───────────────────────────────────────
             // session_slot present → tear down ONLY that slot's child (the

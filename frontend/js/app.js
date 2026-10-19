@@ -2287,6 +2287,7 @@ export const MoonlightApp = {
                 // Remember context so a failed transport can be relaunched with
                 // the next entry in the priority chain (see _onTransportFailed).
                 this._lastStreamingSettings = streamingSettings;
+                this._noteLiveQuality();
                 // A codec/HDR fallback re-launch (codecOverride set) is not a
                 // fresh user launch — don't re-show the shortcuts/help slide.
                 this._startStreamView(result, host, streamingSettings, !!codecOverride);
@@ -3807,6 +3808,7 @@ export const MoonlightApp = {
         // the loser's session kills the winner's stream.
         if (this._relaunching) return;
         this._relaunching = true;
+        this._noteLiveQuality();
         let failReason = null;
         try {
             failReason = await this._doRelaunchTransport(nextIndex, host, app);
@@ -4063,11 +4065,60 @@ export const MoonlightApp = {
         this._standbyView = sv;
         this._standbyResult = result;
         sv.onFirstFrame = () => this._promoteStandby();
-        sv.onConnectionFailed = (reason) =>
-            this._abortStandby('connect failed: ' + reason, relaunchIndex);
-        sv.onQuit = () => this._abortStandby('standby quit', relaunchIndex);
+        sv.onConnectionFailed = (reason) => this._failStandby('connect failed: ' + reason);
+        sv.onQuit = () => this._failStandby('standby quit');
         // Failsafe: a standby that never produces a frame must not dangle.
-        this._standbyTimer = setTimeout(() => this._abortStandby('timeout', relaunchIndex), 25000);
+        this._standbyTimer = setTimeout(() => this._failStandby('timeout'), 25000);
+    },
+
+    /**
+     * The host said the standby was streaming and it never showed a picture
+     * (issue #36). That host cannot run two sessions of one app, and on a
+     * Sunshine the failed attempt can leave the running app unable to stream
+     * at all until it is quit — so it is never tried there again, by this page
+     * or (told through the standby's /quit) by the backend, which keeps it
+     * across restarts. The live stream was never the problem: it keeps playing
+     * at the quality it has, and the next step of the ladder takes the classic
+     * relaunch. Tearing the live stream down here to apply the step anyway is
+     * what used to leave every resume without a picture.
+     */
+    _failStandby(reason) {
+        if (!this._standbyView) return;
+        this._dualSupported = false;
+        this._restoreLiveQuality();
+        console.warn('[MW] Standby never showed a picture — this host is kept to one session');
+        this._abortStandby(reason, { dualFailed: true });
+    },
+
+    /**
+     * What the live stream was launched with: settings, ladder overrides and
+     * rung. Every quality change writes the wished-for state first and then
+     * relaunches; a standby that fails puts this back, so the state never
+     * claims a quality the stream does not have.
+     */
+    _noteLiveQuality() {
+        this._liveQuality = {
+            settings: this._lastStreamingSettings ? { ...this._lastStreamingSettings } : null,
+            overrides: this._degradeOverrides
+                ? { ...this._degradeOverrides }
+                : this._degradeOverrides,
+            level: this._degradeLevel,
+            originalHeight: this._originalStreamHeight,
+        };
+    },
+
+    _restoreLiveQuality() {
+        const q = this._liveQuality;
+        if (!q) return;
+        // In place: the view and the ladder hold this object.
+        const s = this._lastStreamingSettings;
+        if (s && q.settings) {
+            for (const k of Object.keys(s)) delete s[k];
+            Object.assign(s, q.settings);
+        }
+        this._degradeOverrides = q.overrides ? { ...q.overrides } : q.overrides;
+        this._degradeLevel = q.level;
+        this._originalStreamHeight = q.originalHeight;
     },
 
     /** First decoded frame on the standby: swap the display, hand over input
@@ -4096,6 +4147,7 @@ export const MoonlightApp = {
         this._activeSlot =
             typeof result.slot === 'number' ? result.slot : this._activeSlot === 0 ? 1 : 0;
         if (typeof result.dual_supported === 'boolean') this._dualSupported = result.dual_supported;
+        this._noteLiveQuality();
 
         this.streamView = sv;
         sv.onFirstFrame = null;
@@ -4121,9 +4173,9 @@ export const MoonlightApp = {
         }
     },
 
-    /** Tear down a failed/stale standby. When a relaunch index is provided the
-     *  quality transition still happens via the legacy path. */
-    _abortStandby(reason, relaunchIndex) {
+    /** Tear down a failed/stale standby; the live stream is left as it is.
+     *  opts.dualFailed: tell the backend this host cannot run two sessions. */
+    _abortStandby(reason, opts = {}) {
         if (this._standbyTimer) {
             clearTimeout(this._standbyTimer);
             this._standbyTimer = null;
@@ -4137,12 +4189,11 @@ export const MoonlightApp = {
         sv.onConnectionFailed = null;
         sv.onFirstFrame = null;
         try {
-            sv.quit({ silent: true, retire: true }).catch(() => {});
+            sv.quit({ silent: true, retire: true, dualFailed: opts.dualFailed === true }).catch(
+                () => {},
+            );
         } catch (e) {
             /* ignore */
-        }
-        if (this.streamView && typeof relaunchIndex === 'number') {
-            this._relaunchTransport(relaunchIndex);
         }
     },
 

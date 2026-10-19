@@ -12114,11 +12114,22 @@ export class StreamView {
         // stops" setting. Without it, a host whose app outlives the stream
         // keeps it running for a later resume (the backend decides by host).
         const quitApp = !keepHostSession && opts.quitApp === true;
+        // dualFailed: this was a seamless standby that the host said it was
+        // streaming and never sent a picture for — the backend remembers the
+        // host as unable to run two sessions (issue #36).
+        const dualFailed = opts.dualFailed === true;
         // Guard: prevent re-entrant calls (e.g. from WS onClose -> setTimeout)
         if (this._quitting) return;
         this._quitting = true;
         try {
-            await this._quitTeardown({ silent, takenOver, retire, keepHostSession, quitApp });
+            await this._quitTeardown({
+                silent,
+                takenOver,
+                retire,
+                keepHostSession,
+                quitApp,
+                dualFailed,
+            });
         } catch (err) {
             // A throw half-way used to skip destroy(): the exit screen stayed
             // up over a page whose keys were already unbound, and every later
@@ -12130,7 +12141,7 @@ export class StreamView {
     }
 
     /** quit()'s body: everything between the guard and the hand-back. */
-    async _quitTeardown({ silent, takenOver, retire, keepHostSession, quitApp }) {
+    async _quitTeardown({ silent, takenOver, retire, keepHostSession, quitApp, dualFailed }) {
         // Exit fullscreen if active (before unbinding events).
         // Covers both standard Fullscreen API and iOS webkitExitFullscreen.
         // Also exit CSS fallback fullscreen if active.
@@ -12364,6 +12375,7 @@ export class StreamView {
                 if (this._slotUniqueId) quitExtras.client_uniqueid = this._slotUniqueId;
                 if (keepHostSession) quitExtras.keep_host_session = true;
                 if (quitApp) quitExtras.quit_app = true;
+                if (dualFailed) quitExtras.dual_failed = true;
                 await BackendClient.quitApp(this.host.uuid, quitExtras);
                 this.webrtc.close();
                 if (!silent) {

@@ -110,6 +110,7 @@ describe('quit() always hands the page back', () => {
             retire: false,
             keepHostSession: false,
             quitApp: true,
+            dualFailed: false,
         });
     });
 });
