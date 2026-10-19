@@ -39,6 +39,14 @@
 // swapped atomically — and a mutex of the same name orders a takeover against
 // an end.
 //
+// "The display's own mode" is what Windows calls its registry mode, unless
+// our virtual display is on: Windows then has 800x600 there for the owner's
+// own virtual display (N95, 16/10/2026), and an end that asked for it put
+// that display in 800x600 until ours went off. So the section keeps a second
+// word: the mode the display had when a session first changed it — the
+// sessions that take it over after that never saw it — and the holder's end
+// puts that one back itself when the registry's is another.
+//
 // The rules (the name, the word) are pure and tested on every OS; the section
 // and the mutex are Windows' (DisplayModeHold.cpp).
 
@@ -110,6 +118,64 @@ inline uint64_t released(uint64_t current, uint64_t mine)
     return holds(current, mine) ? 0 : current;
 }
 
+/// A display mode in one word: width and height (16 bits each), refresh in
+/// hertz (16), bits per pixel (8); 0 is none, or a mode that does not fit.
+inline uint64_t mode(uint32_t width, uint32_t height, uint32_t hz, uint32_t bitsPerPixel)
+{
+    if (width == 0 || height == 0 || width > 0xffff || height > 0xffff || hz > 0xffff ||
+        bitsPerPixel > 0xff)
+        return 0;
+    return (static_cast<uint64_t>(width) << 48) | (static_cast<uint64_t>(height) << 32) |
+           (static_cast<uint64_t>(hz) << 16) | (static_cast<uint64_t>(bitsPerPixel) << 8);
+}
+
+inline uint32_t widthOf(uint64_t m)
+{
+    return static_cast<uint32_t>(m >> 48);
+}
+
+inline uint32_t heightOf(uint64_t m)
+{
+    return static_cast<uint32_t>(m >> 32) & 0xffff;
+}
+
+inline uint32_t hzOf(uint64_t m)
+{
+    return static_cast<uint32_t>(m >> 16) & 0xffff;
+}
+
+inline uint32_t bitsPerPixelOf(uint64_t m)
+{
+    return static_cast<uint32_t>(m >> 8) & 0xff;
+}
+
+/// The display's own mode once a session has claimed it, the word being
+/// @p current before the claim and @p recorded the own mode kept: @p before
+/// (the mode that session changed) when nobody held the display, else the
+/// one kept — the mode @p before then is another session's.
+inline uint64_t ownAfterClaim(uint64_t current, uint64_t recorded, uint64_t before)
+{
+    return current == 0 ? before : recorded;
+}
+
+/// The own mode kept once the claim @p mine lets go: none, when it held the
+/// display.
+inline uint64_t ownAfterRelease(uint64_t current, uint64_t recorded, uint64_t mine)
+{
+    return holds(current, mine) ? 0 : recorded;
+}
+
+/// Whether the holder's end puts the display's own mode @p own back itself:
+/// it is known, and Windows' registry mode (@p registry, 0 when unread) is
+/// another size or another refresh (one hertz either way is the same).
+inline bool putsOwnBackItself(uint64_t own, uint64_t registry)
+{
+    if (own == 0) return false;
+    if (widthOf(own) != widthOf(registry) || heightOf(own) != heightOf(registry)) return true;
+    const uint32_t a = hzOf(own), b = hzOf(registry);
+    return (a > b ? a - b : b - a) > 1;
+}
+
 } // namespace modehold
 
 /// One session's standing on one display's mode (Windows only).
@@ -130,8 +196,12 @@ public:
     /// is alive.
     bool heldByAnother() const;
 
-    /// This session holds the display's mode from now on.
-    void claim();
+    /// This session holds the display's mode from now on. @p before: the
+    /// mode it changed, 0 for a takeover (ownAfterClaim).
+    void claim(uint64_t before = 0);
+
+    /// The display's own mode, kept since a session first changed it, or 0.
+    uint64_t ownMode() const;
 
     /// No session has claimed the display since this one did.
     bool held() const;
@@ -157,7 +227,9 @@ public:
 private:
     void* m_Section = nullptr;
     void* m_Mutex = nullptr;
+    /// The holder, then the own mode: two words of the section.
     volatile int64_t* m_Word = nullptr;
+    volatile int64_t* m_Own = nullptr;
     uint64_t m_Mine = 0;
 };
 

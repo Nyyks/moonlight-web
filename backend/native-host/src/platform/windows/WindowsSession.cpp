@@ -1030,7 +1030,11 @@ private:
                          std::to_string(rc) + ") — the display keeps its mode");
             return false;
         }
-        hold->claim();
+        // The mode changed: the display's own, unless another session's was
+        // on it (DisplayModeHold.h).
+        hold->claim(nowKnown ? platform::modehold::mode(now.dmPelsWidth, now.dmPelsHeight,
+                                                        now.dmDisplayFrequency, now.dmBitsPerPel)
+                             : 0);
         m_ModeHold = std::move(hold);
         m_ModeChangedDevice = name;
         m_ModeChangedHz = static_cast<int>(wanted.dmDisplayFrequency);
@@ -1091,20 +1095,66 @@ private:
                 log::info("[native] the display's mode belongs to the session that took it over "
                           "— left as it is");
             } else {
-                const LONG rc = ::ChangeDisplaySettingsExW(m_ModeChangedDevice.c_str(), nullptr,
-                                                           nullptr, 0, nullptr);
-                if (rc == DISP_CHANGE_SUCCESSFUL)
-                    log::info("[native] the display's own mode is back");
-                else
-                    log::warning("[native] the display's own mode could not be put back "
-                                 "(ChangeDisplaySettingsEx " +
-                                 std::to_string(rc) + ")");
+                if (!putOwnModeBack()) {
+                    const LONG rc = ::ChangeDisplaySettingsExW(m_ModeChangedDevice.c_str(), nullptr,
+                                                               nullptr, 0, nullptr);
+                    if (rc == DISP_CHANGE_SUCCESSFUL)
+                        log::info("[native] the display's own mode is back");
+                    else
+                        log::warning("[native] the display's own mode could not be put back "
+                                     "(ChangeDisplaySettingsEx " +
+                                     std::to_string(rc) + ")");
+                }
                 if (m_ModeHold) m_ModeHold->release();
             }
         }
         m_ModeHold.reset();
         m_ModeChangedDevice.clear();
         m_ModeChangedHz = 0;
+    }
+
+    /// The display's own mode, kept since a session first changed it, set
+    /// again by this session — when Windows' registry mode, which passing no
+    /// mode would give, is another: 800x600 for the owner's virtual display
+    /// while ours is on (DisplayModeHold.h). A change of no CDS_FULLSCREEN,
+    /// which Windows leaves as it is when this process exits. False, nothing
+    /// done, when the registry's is the one, or when the set failed.
+    bool putOwnModeBack()
+    {
+        const uint64_t own = m_ModeHold ? m_ModeHold->ownMode() : 0;
+        DEVMODEW registry{};
+        registry.dmSize = sizeof(registry);
+        const uint64_t inRegistry =
+            ::EnumDisplaySettingsExW(m_ModeChangedDevice.c_str(), ENUM_REGISTRY_SETTINGS, &registry,
+                                     0)
+                ? platform::modehold::mode(registry.dmPelsWidth, registry.dmPelsHeight,
+                                           registry.dmDisplayFrequency, registry.dmBitsPerPel)
+                : 0;
+        if (!platform::modehold::putsOwnBackItself(own, inRegistry)) return false;
+        DEVMODEW back{};
+        back.dmSize = sizeof(back);
+        back.dmPelsWidth = platform::modehold::widthOf(own);
+        back.dmPelsHeight = platform::modehold::heightOf(own);
+        back.dmDisplayFrequency = platform::modehold::hzOf(own);
+        back.dmBitsPerPel = platform::modehold::bitsPerPixelOf(own);
+        back.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_BITSPERPEL;
+        const auto spelled = [](uint64_t m) {
+            return std::to_string(platform::modehold::widthOf(m)) + "x" +
+                   std::to_string(platform::modehold::heightOf(m)) + " @ " +
+                   std::to_string(platform::modehold::hzOf(m)) + " Hz";
+        };
+        const LONG rc =
+            ::ChangeDisplaySettingsExW(m_ModeChangedDevice.c_str(), &back, nullptr, 0, nullptr);
+        if (rc != DISP_CHANGE_SUCCESSFUL) {
+            log::warning("[native] the display's own mode, " + spelled(own) +
+                         ", could not be set again (ChangeDisplaySettingsEx " + std::to_string(rc) +
+                         ") — Windows' registry mode instead");
+            return false;
+        }
+        log::info("[native] the display's own mode is back: " + spelled(own) +
+                  (inRegistry ? ", where Windows' registry has " + spelled(inRegistry)
+                              : std::string(", Windows' registry mode unread")));
+        return true;
     }
 
     /// Start @p capture's duplication from a thread standing on the input

@@ -89,6 +89,61 @@ void run_display_mode_hold_tests()
         CHECK(claimed(word(300, 0xffffffffu), 300) != 0u);
     }
 
+    SECTION("Display mode hold — a mode in one word, and back");
+    {
+        const uint64_t m = mode(2560, 1440, 120, 32);
+        CHECK_EQ(widthOf(m), 2560u);
+        CHECK_EQ(heightOf(m), 1440u);
+        CHECK_EQ(hzOf(m), 120u);
+        CHECK_EQ(bitsPerPixelOf(m), 32u);
+        CHECK_EQ(mode(0, 1440, 120, 32), 0u);
+        CHECK_EQ(mode(70000, 1440, 120, 32), 0u);
+    }
+
+    SECTION("Display mode hold — the own mode: the first change's, through a takeover");
+    {
+        // The N95 of 16/10/2026: the owner's virtual display in 2560x1440 at
+        // 120 Hz, Windows' registry mode 800x600 at 30 Hz while ours is on.
+        const uint64_t own = mode(2560, 1440, 120, 32);
+        const uint64_t registry = mode(800, 600, 30, 32);
+        const uint64_t client = mode(1920, 1080, 120, 32);
+        // The first session changes the display: its mode before is the own.
+        uint64_t slot = 0, kept = 0;
+        const uint64_t first = claimed(slot, 100);
+        kept = ownAfterClaim(slot, kept, own);
+        slot = first;
+        CHECK_EQ(kept, own);
+        // A relaunch to another size: the mode before is the first's client
+        // mode, and the own one stays.
+        const uint64_t second = claimed(slot, 200);
+        kept = ownAfterClaim(slot, kept, client);
+        slot = second;
+        CHECK_EQ(kept, own);
+        // A takeover keeps it too (no mode before).
+        const uint64_t third = claimed(slot, 300);
+        kept = ownAfterClaim(slot, kept, 0);
+        slot = third;
+        CHECK_EQ(kept, own);
+        // An old session's end keeps it; the holder's end puts it back itself
+        // — Windows' registry has 800x600 — and clears it.
+        CHECK_EQ(ownAfterRelease(slot, kept, second), own);
+        CHECK(putsOwnBackItself(kept, registry));
+        CHECK_EQ(ownAfterRelease(slot, kept, third), 0u);
+        CHECK_EQ(released(slot, third), 0u);
+    }
+
+    SECTION("Display mode hold — the registry's mode is the own one: Windows puts it back");
+    {
+        const uint64_t own = mode(1920, 1080, 60, 32);
+        CHECK(!putsOwnBackItself(own, mode(1920, 1080, 60, 32)));
+        CHECK(!putsOwnBackItself(own, mode(1920, 1080, 59, 32)));
+        CHECK(putsOwnBackItself(own, mode(1920, 1080, 30, 32)));
+        CHECK(putsOwnBackItself(own, mode(1280, 720, 60, 32)));
+        // The registry unread, or the own mode unknown.
+        CHECK(putsOwnBackItself(own, 0));
+        CHECK(!putsOwnBackItself(0, mode(800, 600, 30, 32)));
+    }
+
     SECTION("Display mode hold — nobody holds, or no claim made: nothing to keep");
     {
         CHECK(!holds(0, 0));
