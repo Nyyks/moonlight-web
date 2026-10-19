@@ -1703,7 +1703,14 @@ export class StreamView {
         // host as VK_ESCAPE) instead of exiting fullscreen. Fullscreen is then
         // left only via the keyboard combo. Synced on every fullscreenchange.
         this._keyboardLocked = false;
-        this._onFsChangeLock = () => this._syncKeyboardLock();
+        // The header's middle (Fullscreen button, volume) is laid out again on
+        // the way out, on every platform: a stream that started fullscreen
+        // ("Start streams in fullscreen") hid both, and on a desktop nothing
+        // else brought them back (issue #35).
+        this._onFsChangeLock = () => {
+            this._syncKeyboardLock();
+            this._updateMobileFsButtonVisibility();
+        };
         // Transient on-screen hint element (reused for the fullscreen-exit tip).
         this._transientHintEl = null;
         this._transientHintTimer = null;
