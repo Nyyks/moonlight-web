@@ -7346,6 +7346,9 @@ de la capture, donc aucun refus enregistré.
 - **Le décompte « not carried »**, qui repart de zéro à chaque changement de
   porte.
 - **Canvas2D à 13,2 ms par image** sur le 780M en 1080p120, vu au test à l'œil.
+  Non reproduit le 19/10 (§8x.12).
+- **La porte calée sur un écran physique** de l'iGPU AMD : jamais engagée le
+  19/10, parce que DDA y date les présentations hors de la grille (§8x.11).
 
 **Concrètement, pour l'utilisateur** : sur un hôte Windows, les images
 partent maintenant à un rythme régulier. Sur un écran qui affiche au vsync
@@ -7361,6 +7364,127 @@ client au stream suivant. La latence et le débit ne changent pas. Sur un PC
 qui déchire (Chrome sous Windows, par défaut), la différence se voit peu : les
 images arrivent seulement plus régulièrement. Les hôtes Linux et macOS gardent
 leur règle d'avant.
+
+### 8x.11 Un flux à 50 i/s sur un vrai écran à 144 Hz (19/10/2026, 11:59-12:17)
+
+- **Le but** : vérifier sur un vrai écran le défaut du banc TV du 08/10. Un
+  contenu à 60 i/s, capturé sur un écran à 144 Hz et envoyé à 50 i/s,
+  n'arrivait qu'à 40 i/s. La porte à fenêtres (`251d7438`) le corrige, mais
+  elle n'avait été vérifiée qu'en rejeu et sur l'écran virtuel.
+- **Le cadre** :
+  - l'écran : DISPLAY9, l'iGPU AMD de DualRTX avec AMF, passé à 144 Hz en
+    dynamique pour ce banc avec l'accord de Bruno, puis remis à 120 Hz et
+    vérifié ;
+  - le contenu : une page à 60 i/s dessus (`scroll.html`, `--game-fps 60`) ;
+  - l'hôte : la `--dev` de `build\` (19/10, 00:20) ;
+  - le client : le Chrome de l'UM790Pro sous Windows, en Ethernet, qui
+    déchire ;
+  - le flux : HEVC sur SCTP, avec `clicktrace=1` pour avoir les
+    présentations.
+
+| Flux | Portées par l'hôte | Tracés par seconde (page) | Ancienne porte rejouée |
+|---|---|---|---|
+| 50 i/s, passe 1 | 50,0 i/s | 50 | 40,9 i/s |
+| 50 i/s, passe 2 | 50,0 i/s | 50 | 40,6 i/s |
+| 60 i/s, passe 1 | 60,0 i/s | 60 | 59,3 i/s |
+| 60 i/s, passe 2 | 60,0 i/s | 60 | 59,3 i/s |
+
+- La porte d'aujourd'hui, rejouée sur les mêmes présentations
+  (`gatesim.py`), redonne exactement le compte de l'hôte.
+- Celle de 08-09/10 (`gatesim.py --before`) retombe à 40,6-40,9 i/s. C'est
+  le défaut du banc TV, et `251d7438` le corrige sur un vrai écran. Les
+  seuils des tests natifs (≥ 49,5 et ≥ 59,4 i/s) sont tenus.
+
+**La porte calée ne s'est jamais engagée sur cet écran.**
+
+- À 144 Hz, ni 50 ni 60 ne divisent la fréquence : ces flux restent sur les
+  fenêtres de toute façon. Le contrôle prévu était un flux à 72 i/s, soit 2
+  périodes par image.
+- Avec la page, les présentations tombent au hasard sur la grille de 144 Hz :
+  netteté de 0,24 à 0,27 période, la valeur du hasard. Le treillis s'engage
+  un moment, puis lâche au-dessus de T/5 : c'est la garde qui joue.
+- Avec `mw-click-target --sync 1`, qui présente au rafraîchissement de
+  DISPLAY9, la netteté tombe à 0,13, mais jamais sous T/10. L'outil n'a tenu
+  que ~64 i/s sur cet iGPU, et une passe à 50 i/s a été erratique : elle est
+  écartée.
+- **La cause** : sur cet écran physique, l'heure de présentation que rend DDA
+  ne tombe pas sur la grille. La trace de l'hôte relève aussi l'horloge de
+  composition de DWM (`DwmGetCompositionTimingInfo`, période de 6,951 ms) :
+  - ses vblanks sont espacés de multiples exacts de la période (13,9, 20,9,
+    7,0 et 27,8 ms) ;
+  - les présentations de DDA tombent entre −5,7 et +3,4 ms de ces vblanks
+    (p5-p95).
+
+  Sur l'écran virtuel du produit, les deux heures coïncident : netteté de
+  0,045 à 0,06 (§8x.2).
+- **Ce que ça change** : sur un écran physique de cet iGPU, la porte reste sur
+  les fenêtres, qui portent le débit. Rien ne régresse, mais la porte calée
+  n'y apporte rien. Une piste, qui n'est pas codée : nourrir le treillis de
+  l'horloge de DWM quand l'heure de DDA s'en écarte.
+
+### 8x.12 Canvas2D sur le 780M en 1080p120 (19/10/2026, 12:18-13:25)
+
+- **Le but** : retrouver les 13,2 ms par image que la bascule de rendu avait
+  vues pendant Y2 du test à l'œil (§8x.9).
+- **Le cadre** :
+  - DISPLAY9 à 120 Hz, avec `scroll.html` dessus (kiosque muet), à 120 i/s ;
+  - le flux : 1080p120 en HEVC ;
+  - le client : le Chrome de l'UM790Pro sous Windows, avec le profil du test
+    à l'œil, qui garde le verdict « webgl » de ce jour-là, et
+    `--mute-audio` ;
+  - la mesure : le flux tenu 60 s **sans sonde**, dont la copie pèserait sur
+    le tracé, et 30 s de lignes `[perf]` (`mw_perf_diag`) lues par CDP ;
+  - un facteur à la fois, deux passes par bras.
+- **Le tableau** : le tracé est `renderSubmitMs`, la médiane des secondes,
+  passe 1 / passe 2.
+
+| Bras | Tracé | p95 | Reçues / montrées | Chemin |
+|---|---|---|---|---|
+| R0 : Canvas2D forcé, vsync | 0,2 / 0,4 ms | 0,4 / 0,5 | 120 / 120 | `nv12-direct` |
+| R1 : Canvas2D forcé, client qui déchire | 0,2 / 0,2 | 0,2 / 0,2 | 120 / 120 | `nv12-direct` |
+| R2 : H.264 | 0,4 / 0,2 | 0,4 / 0,2 | 120 / 120 | `drawImage` |
+| R3 : 1080p60 | 0,3 / 0,3 | 0,3 / 0,3 | 60 / 60 | `nv12-direct` |
+| R3 : 720p120 | 0,2 / 0,2 | 0,5 / 0,2 | 120 / 120 | `nv12-direct` |
+| R4 : WebGL2, verdict posé | 0,3 / 0,3 | 0,3 / 0,3 | 120 / 120 | `off:frame` |
+| R5 : défaut du produit, verdict effacé | 0,4 / 0,2 | 0,4 / 0,3 | 120 / 120 | `nv12-direct` |
+| R0, fenêtre en plein écran | 0,3 / 0,3 | 0,3 / 0,3 | 118-120 / 120 | `nv12-direct` |
+| R5, fenêtre en plein écran | 0,3 / 0,3 | 0,3 / 0,3 | 119 / 120 | `nv12-direct` |
+| R0, page en plein écran (bouton Fullscreen) | 0,3 | 0,3 | 115 / 114 | `nv12-direct` |
+| R5, page en plein écran (bouton Fullscreen) | 0,4 / 0,2 | 0,4 / 0,4 | 120 / 120 | `nv12-direct` |
+
+- **Pas reproduit.** Sur 23 passes mesurées, le tracé coûte 0,2 à 0,4 ms. Aucune
+  image n'est sautée, et il n'y a aucune bascule, même en R5 où elle était
+  libre.
+  - L'AV1 demandé a été servi en HEVC : l'iGPU de DualRTX (RDNA2) n'encode
+    pas l'AV1. Ce bras ne compte pas.
+  - Une passe de R0 en page plein écran a été perdue sur une connexion
+    coupée.
+  - La page plein écran est vérifiée par `document.fullscreenElement`.
+- **Les pistes du plan** :
+  - (a) écartée : Chrome dessine sur le 780M. `chrome://gpu` ne donne qu'un
+    adaptateur actif, « AMD Radeon 780M » en ANGLE D3D11, et WebGL rend le
+    même nom ; la GTX 1050 n'y est pas.
+  - (b) sans objet : `chrome://gpu` annonce le décodage matériel HEVC,
+    H.264 et AV1. Le nom du décodeur de la session n'a pas été lu, mais un
+    tracé à 0,2 ms ne laisse rien à expliquer.
+  - (c) écartée : vsync ou déchirure, R0 et R1 sont égaux.
+  - (d) reste seule : ce qui diffère du 16/10, c'est l'hôte (l'écran virtuel
+    du produit à 240 Hz, rendu par la RTX, avec `vddmatch`) et le moment.
+    La bascule n'agit qu'après 2 s d'affilée au-dessus de 60 % de
+    l'intervalle : le coût du 16/10 était donc réel, mais passager, et sa
+    cause n'est pas connue.
+- **La décision** : aucun défaut ne change (`client-renderer-defaults` :
+  Canvas2D sur le thread principal). La bascule a fait son travail le 16/10 :
+  elle est passée en WebGL et l'a retenu pour cette version de Chrome. Si le
+  coût revient, la console le dit (« Renderer: canvas2d draws cost … »), et
+  une capture `[perf]` prise à ce moment donnera l'étape en cause.
+
+**Concrètement, pour l'utilisateur** : sur un hôte Windows, un flux réglé à
+50 ou 60 i/s devant un écran à 144 Hz garde son débit. Avant le correctif du
+09/10, le flux à 50 i/s tombait à 40 i/s. Sur un mini-PC à Radeon 780M,
+l'image coûte 0,2 à 0,4 ms à dessiner en 1080p120, en fenêtre comme en plein
+écran : le rendu par défaut reste le bon. Si une machine le trouve lent, le
+client passe seul en WebGL et s'en souvient.
 
 ## 9. Pour l'A/B
 
