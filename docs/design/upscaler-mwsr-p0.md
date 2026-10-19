@@ -47,6 +47,19 @@
 Validation d'abord sur l'adaptateur logiciel (SwiftShader, règle « WARP d'abord ») : les 27
 cellules compilent, dessinent (recadrages PNG relus) et s'horodatent avant tout GPU réel.
 
+**La chaîne de qualité** (`--quality <image>`) : la page rend l'image à la taille de sortie
+(`gt=1`, la vérité terrain, règle 2 du §7.1), le pilote la réduit à la taille d'entrée par un
+Lanczos-3 en lumière linéaire (une fois, le même fichier pour toutes les cellules), fait tourner
+les noyaux dessus (`tex-s1`, `sgsr-repo`, `sgsr-src`, `nis`, `easu`, `fsr1`, feed `texture_2d`, sans
+compression), relit chaque sortie entière (`dump=`) et la note dans `metrics.py` : PSNR, SSIM
+(fenêtre gaussienne ; sur le RGB, sur la luma, et sur le tiers central), **taux de dépassement**
+(part des pixels qui sortent du min/max des quatre texels d'entrée qui les entourent de plus de
+2/255 : la sonnerie, sans référence) et FLIP quand `flip-evaluator` s'importe. Deux mires
+s'ajoutent aux images : `zone` (zone-plate jusqu'à Nyquist et réseaux de 1 à 6 px, pour la
+réduction, C10) et `code` (syntaxe colorée sur fond sombre, pour les contours de chroma, C9).
+Alignement vérifié : le bilinéaire du labo et celui de PIL sur la même entrée concordent à
+58 dB, et tout décalage d'un pixel fait tomber le PSNR contre la vérité.
+
 ## 2. Le parc, relevé
 
 | Machine | GPU | `adapter.info` | Fonctionnalités utiles au plan |
@@ -188,6 +201,32 @@ annonçait, mesuré : 2,6 × sur le plancher.
   Chrome n'est pas connue. Les rapports entre cellules, mesurés dans les mêmes conditions, sont
   la donnée de P0 ; l'UM790Pro (même GPU, écran) recoupera les absolus en P5.
 
+## 4 bis. Qualité : premiers repères des noyaux livrés
+
+Mesurés sur l'adaptateur logiciel (SwiftShader : même WGSL, filtrage bilinéaire 8 bits ; à
+rejouer sur un GPU en P2, l'écart attendu est au centième de dB), ×2 de 1280×720 vers
+2560×1440, entrée = vérité réduite (Lanczos-3, linéaire), sans compression. Les chiffres se
+lisent **les uns contre les autres** : à ×2, du texte de 12 px à 720p est en grande partie
+irrécupérable (le meilleur agrandissement de PIL, Lanczos, atteint 18,1 dB sur `text`).
+
+| Noyau | `text` PSNR / SSIM / dépassement | `code` PSNR / SSIM / dép. | `game` PSNR / SSIM / dép. | `zone` PSNR / SSIM / dép. |
+|---|---|---|---|---|
+| bilinéaire (`tex-s1`) | 16,99 / 0,816 / 0 % | 29,97 / 0,977 / 0 % | 35,01 / 0,880 / 0 % | 10,41 / 0,423 / 0 % |
+| SGSR1 du dépôt | 18,13 / 0,869 / 4,4 % | 29,65 / 0,974 / 2,6 % | 35,61 / 0,883 / 0,7 % | 10,80 / 0,491 / 0 % |
+| SGSR1, constantes Qualcomm | 17,81 / 0,857 / 2,3 % | 29,87 / 0,972 / 2,5 % | 35,52 / 0,882 / 0,7 % | 10,79 / 0,484 / 0 % |
+| NIS | 18,30 / 0,868 / 7,1 % | 28,20 / 0,970 / 4,0 % | 35,07 / 0,887 / 1,6 % | 10,88 / 0,507 / 27,7 % |
+| EASU seul | 17,53 / 0,843 / 0 % | 30,32 / 0,976 / 0 % | 35,56 / 0,885 / 0 % | 10,71 / 0,471 / 0 % |
+| FSR1 (EASU + RCAS) | 17,57 / 0,845 / 0,3 % | 30,36 / 0,975 / 0,7 % | 35,55 / 0,887 / 0,03 % | 10,79 / 0,484 / 3,4 % |
+
+Ce que ces repères disent avant le noyau : sur le texte, SGSR1 et NIS gagnent 1,1-1,3 dB sur le
+bilinéaire **en dépassant** (4-7 % des pixels sortent de la plage locale : la sonnerie qu'on
+voit sur les serifs), FSR1 gagne 0,6 dB **sans dépasser** (la borne 2×2 d'EASU, puis RCAS tenu
+par sa limite) ; sur le texte coloré, EASU et FSR1 sont les meilleurs (30,3 dB, chroma filtrée)
+et NIS le pire (28,2) ; sur la zone-plate, NIS sonne sur 28 % des pixels. Le critère C3 (« FLIP ≤
+FSR1 + 0,01 ») attend FLIP, qui n'a pas encore de roue pour Python 3.14 (compilation refusée) :
+d'ici là, PSNR, SSIM et dépassements servent de garde-fous, et FSR1 est la référence de qualité à
+égaler, SGSR1 celle à battre sur la sonnerie.
+
 ## 5. Réponses de P0 et porte
 
 | Question (§6.4) | Réponse | Démontré / attendu |
@@ -222,7 +261,9 @@ mais entrent avant la porte P2.
   (`scaler_lab.py --serve 0.0.0.0:8766`, règle de pare-feu à ouvrir), l'URL imprimée s'ouvre dans
   Safari ou Chrome, le résultat revient en `bench-out/scaler-lab/phone-*.json`. `mw-arm` en WebGL2
   seulement (pas de WebGPU sur l'Adreno 618).
-- La chaîne Python des métriques de qualité (FLIP, SSIM, dépassements) n'est pas encore écrite :
-  P0 a mesuré le temps ; la qualité arrive avec le noyau (P2), sur les recadrages que le labo
-  sait déjà relire (`shot=1`).
-- Les mires 4:4:4, zone-plate et PQ (P3).
+- FLIP : une roue `flip-evaluator` pour Python 3.14 (ou une réécriture numpy du LDR-FLIP),
+  avant les verdicts C3/C4 de P2.
+- La version compressée des images (boucle WebCodecs → `dump` sur le feed externe) dans la
+  chaîne de qualité, et la mire PQ (P3).
+- Les repères de qualité ci-dessus rejoués sur un GPU réel (une minute, `--quality` sans
+  `--swiftshader`).
