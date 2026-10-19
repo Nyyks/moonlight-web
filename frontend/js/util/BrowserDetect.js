@@ -296,10 +296,22 @@ const REF_REPAIRS_VERDICT_KEY = 'mw_ref_repairs';
  * wave (01/10/2026). Nothing tells it in advance: the stream finds out, the
  * device keeps the verdict, and /start then asks for none (`ref_invalidation`):
  * one reference, a keyframe for a loss.
+ *
+ * Nor on an Apple platform, for the reason it rides nothing out: a lost frame
+ * is healed by the host only once it hears of it, and the deltas already on
+ * their way still predict from the frame that never came. VideoToolbox rejects
+ * the first of them. Seen 19/10/2026 from a Mac (Chrome, office Wi-Fi, an N95
+ * host on QuickSync): every one of seven single-frame gaps was a "Decoding
+ * error" on the next frame, a new decoder and a keyframe anyway.
+ * @param {string} [ua]
  * @param {Storage|null} [store]
  * @returns {boolean}
  */
-export function decoderTakesReferenceRepairs(store = rideOutStore()) {
+export function decoderTakesReferenceRepairs(
+    ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '',
+    store = rideOutStore(),
+) {
+    if (/mac|iphone|ipad|ipod/i.test(ua)) return false;
     try {
         return !store || store.getItem(REF_REPAIRS_VERDICT_KEY) !== 'off';
     } catch (e) {

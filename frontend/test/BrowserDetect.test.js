@@ -221,9 +221,26 @@ describe('BrowserDetect.decoderTakesReferenceRepairs', () => {
                 throw new Error('denied');
             },
         };
-        expect(decoderTakesReferenceRepairs(broken)).toBe(true);
+        expect(decoderTakesReferenceRepairs('', broken)).toBe(true);
         expect(() => noteDecoderRefusesReferenceRepairs(broken)).not.toThrow();
-        expect(decoderTakesReferenceRepairs(null)).toBe(true);
+        expect(decoderTakesReferenceRepairs('', null)).toBe(true);
+    });
+
+    // VideoToolbox fails on the deltas already sent after a lost frame, before
+    // the host heard of it: an Apple device asks for keyframes from the start.
+    it('says no on an Apple platform, whatever the store says', () => {
+        const MAC_CHROME =
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+        const IPAD_SAFARI =
+            'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+        const WIN_CHROME =
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+        expect(decoderTakesReferenceRepairs(MAC_CHROME, null)).toBe(false);
+        expect(decoderTakesReferenceRepairs(IPAD_SAFARI, null)).toBe(false);
+        expect(decoderTakesReferenceRepairs(WIN_CHROME, null)).toBe(true);
+        vi.stubGlobal('navigator', { userAgent: MAC_CHROME });
+        expect(decoderTakesReferenceRepairs()).toBe(false);
+        vi.unstubAllGlobals();
     });
 });
 
