@@ -60,6 +60,11 @@ struct LaunchRequest
     /// not read. Empty when the server found none. Absent, the backend
     /// resolves appId itself. Only the native engine reads it.
     std::optional<QString> displayKey;
+    /// Whether the owner's app whose card is appId is still in the settings,
+    /// as the server found it for a stream worker — for the same reason as
+    /// displayKey. Absent, the backend looks it up itself. Only the native
+    /// engine reads it.
+    std::optional<bool> hostAppKnown;
     QByteArray rikey;
     int rikeyid = 0;
     QString clientUniqueId;

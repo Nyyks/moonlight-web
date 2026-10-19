@@ -625,6 +625,9 @@ int runStreamWorker(QCoreApplication& app)
     // process, SYSTEM's maybe, does not read the file the cards are numbered in.
     if (cfg.contains(QStringLiteral("displayKey")))
         session->setDisplayKey(cfg[QStringLiteral("displayKey")].toString());
+    // One of the owner's apps: whether it is still there, for the same reason.
+    if (cfg.contains(QStringLiteral("hostAppKnown")))
+        session->setHostAppKnown(cfg[QStringLiteral("hostAppKnown")].toBool());
     // Absent (an older parent) → not an administrator: the safe reading,
     // since the only thing it grants is the host's administrator windows.
     session->setViewerAdmin(cfg["viewerAdmin"].toBool(false));

@@ -137,8 +137,11 @@ const mw::native::DisplayInfo* primaryDisplay(const mw::native::Capabilities& ca
     return first;
 }
 
-/// The display @p appId stands for among @p caps, or -1 with @p why.
-int displayOf(const mw::native::Capabilities& caps, int appId, QString* why)
+/// The display @p appId stands for among @p caps, or -1 with @p why. For one
+/// of the owner's apps, @p hostAppKnown says whether it is still in the
+/// settings when the server already found out (LaunchRequest::hostAppKnown).
+int displayOf(const mw::native::Capabilities& caps, int appId, QString* why,
+              std::optional<bool> hostAppKnown = std::nullopt)
 {
     const auto virtualDisplay = [&caps, why]() {
         // Our virtual display, turned on by the server before this launch
@@ -150,7 +153,7 @@ int displayOf(const mw::native::Capabilities& caps, int appId, QString* why)
     };
     if (appId == kVirtualDisplayAppId) return virtualDisplay();
     if (appId >= kHostAppIdFloor) {
-        if (AppSettings().hostApp(appId).isEmpty()) {
+        if (!hostAppKnown.value_or(!AppSettings().hostApp(appId).isEmpty())) {
             if (why) *why = QStringLiteral("That app is no longer in the host's settings");
             return -1;
         }
@@ -356,6 +359,11 @@ int NativeHostBackend::displayForKey(const QString& key, QString* error)
 bool NativeHostBackend::isDisplayCard(int appId)
 {
     return appId > 0 && appId < AppSettings::kDisplayAppIdEnd;
+}
+
+bool NativeHostBackend::isHostAppCard(int appId)
+{
+    return appId >= kHostAppIdFloor;
 }
 
 bool NativeHostBackend::isEnabled()
@@ -633,10 +641,11 @@ void NativeHostBackend::launch(const QString& seatId, const LaunchRequest& req,
     }
 
     QString why;
-    // A worker's display card comes resolved by the server: this process may
-    // not read the settings the cards are numbered in (LaunchRequest).
+    // A worker's display card comes resolved by the server, and an app card
+    // known or not by it: this process may not read the settings the cards
+    // are numbered in (LaunchRequest).
     const int displayId = req.displayKey ? displayWithKey(caps, *req.displayKey, &why)
-                                         : displayOf(caps, req.appId, &why);
+                                         : displayOf(caps, req.appId, &why, req.hostAppKnown);
     if (displayId < 0) {
         cb(false, BackendError::make(BackendError::NotFound, why), MediaDescriptor{});
         return;

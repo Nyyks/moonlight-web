@@ -3864,6 +3864,11 @@ int main(int argc, char* argv[])
                 if (!why.isEmpty())
                     qWarning() << "[Session] no display for app" << appId << ":" << why;
             }
+            // One of the owner's apps: whether it is still in that file, for
+            // the same reason. Its screen the worker finds by itself.
+            if (host->backendType == NativeHostBackend::typeName() &&
+                NativeHostBackend::isHostAppCard(appId))
+                cfg["hostAppKnown"] = !NativeHostBackend::hostAppFor(appId).isEmpty();
             // The admin's picture chain for a native Windows session.
             cfg["nativeVideoPipeline"] = appSettings.nativeVideoPipeline();
             // The bench's knobs, read here: a SYSTEM worker's own AppData is
@@ -5476,6 +5481,10 @@ int main(int argc, char* argv[])
             cfg["displayKey"] = NativeHostBackend::displayKeyForApp(appId, &why);
             if (!why.isEmpty()) qWarning() << "[Session] no display for app" << appId << ":" << why;
         }
+        // An app of the owner's: whether it is still there, as the owner path.
+        if (host->backendType == NativeHostBackend::typeName() &&
+            NativeHostBackend::isHostAppCard(appId))
+            cfg["hostAppKnown"] = !NativeHostBackend::hostAppFor(appId).isEmpty();
         // The host's own setting, whoever the viewer is: the chain is the
         // machine's, not the session's.
         cfg["nativeVideoPipeline"] = appSettings.nativeVideoPipeline();

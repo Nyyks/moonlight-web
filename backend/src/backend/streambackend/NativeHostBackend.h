@@ -131,6 +131,9 @@ public:
     /// (AppSettings::displayAppIds), unlike the virtual display's and the
     /// owner's apps'.
     static bool isDisplayCard(int appId);
+    /// Whether @p appId is the card of one of the owner's apps
+    /// (AppSettings::hostApps), whether or not the app is still there.
+    static bool isHostAppCard(int appId);
 
     /// Where the owner's apps (AppSettings::hostApps) open, the same for all
     /// of them on a given machine: in a gamescope of their own (Linux, when

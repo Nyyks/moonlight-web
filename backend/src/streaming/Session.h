@@ -156,6 +156,10 @@ public:
     /// it (LaunchRequest::displayKey). A stream worker's only.
     void setDisplayKey(const QString& key) { m_DisplayKey = key; }
 
+    /// Whether the owner's app this stream shows is still in the settings, as
+    /// the server found it (LaunchRequest::hostAppKnown). A stream worker's only.
+    void setHostAppKnown(bool known) { m_HostAppKnown = known; }
+
     /// Whether the viewer administers MoonlightWeb here — HttpRequest::isLocal
     /// at /start. Only the native engine acts on it: anyone else is kept out
     /// of the host's windows that run as administrator (InputGate).
@@ -522,6 +526,9 @@ private:
 
     /// See setDisplayKey. Absent, the backend resolves the app id itself.
     std::optional<QString> m_DisplayKey;
+
+    /// See setHostAppKnown. Absent, the backend looks the app up itself.
+    std::optional<bool> m_HostAppKnown;
 
     /// See setViewerAdmin. Defaults to the trusting value only because every
     /// caller sets it; a worker whose parent predates the field is the owner
