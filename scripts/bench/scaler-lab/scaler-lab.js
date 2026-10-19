@@ -373,6 +373,129 @@ function drawGame(ctx, w, h) {
   ctx.stroke();
 }
 
+// The reduction test pattern (§7.1, C10): a zone plate on the left (every
+// spatial frequency up to Nyquist, where aliasing shows as moiré), gratings of
+// 1 to 6 px period on the right, and thin diagonal lines.
+function drawZone(ctx, w, h) {
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
+  const half = Math.floor(w / 2);
+  const cx = half / 2;
+  const cy = h / 2;
+  const kmax = Math.PI / Math.max(cx, cy); // Nyquist at the edge
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let v;
+      if (x < half) {
+        const dx = x - cx;
+        const dy = y - cy;
+        v = 0.5 + 0.5 * Math.cos((kmax * (dx * dx + dy * dy)) / 2);
+      } else {
+        const band = Math.floor(((y / h) * 6) % 6); // period 1..6 px
+        const period = band + 1;
+        v = Math.floor((x - half) / period) % 2 ? 0.9 : 0.1;
+        if (band === 5) v = Math.floor(y / period) % 2 ? 0.9 : 0.1;
+      }
+      const i = (y * w + x) * 4;
+      const g = Math.round(v * 255);
+      d[i] = d[i + 1] = d[i + 2] = g;
+      d[i + 3] = 255;
+    }
+  ctx.putImageData(img, 0, 0);
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  for (let k = 0; k < 8; k++) {
+    ctx.beginPath();
+    ctx.moveTo(half + 10 + k * 30, h - 10);
+    ctx.lineTo(w - 10, h * 0.1 + k * 12);
+    ctx.stroke();
+  }
+}
+
+// Coloured syntax on a dark background: text whose edges live in the chroma
+// as much as in the luma (§4.2, C9).
+function drawCode(ctx, w, h) {
+  ctx.fillStyle = "#1e1e1e";
+  ctx.fillRect(0, 0, w, h);
+  const px = Math.max(9, Math.round(h / 56));
+  ctx.font = px + "px Consolas, monospace";
+  const colors = {
+    kw: "#569cd6",
+    str: "#ce9178",
+    cmt: "#6a9955",
+    id: "#9cdcfe",
+    num: "#b5cea8",
+    fn: "#dcdcaa",
+    pl: "#d4d4d4",
+  };
+  const lines = [
+    [
+      ["kw", "const "],
+      ["id", "frame "],
+      ["pl", "= "],
+      ["kw", "await "],
+      ["fn", "decode"],
+      ["pl", "(chunk, "],
+      ["num", "16667"],
+      ["pl", ");"],
+    ],
+    [["cmt", "// the external texture expires with the frame"]],
+    [
+      ["kw", "for "],
+      ["pl", "("],
+      ["kw", "let "],
+      ["id", "i "],
+      ["pl", "= "],
+      ["num", "0"],
+      ["pl", "; i < "],
+      ["id", "n"],
+      ["pl", "; i++) {"],
+    ],
+    [
+      ["pl", "    "],
+      ["id", "pass"],
+      ["pl", "."],
+      ["fn", "setBindGroup"],
+      ["pl", "("],
+      ["num", "0"],
+      ["pl", ", "],
+      ["fn", "bind"],
+      ["pl", "(ext));"],
+    ],
+    [
+      ["pl", "    "],
+      ["id", "log"],
+      ["pl", "("],
+      ["str", "'gpu p50 ' "],
+      ["pl", "+ "],
+      ["id", "t"],
+      ["pl", "."],
+      ["fn", "toFixed"],
+      ["pl", "("],
+      ["num", "3"],
+      ["pl", "));"],
+    ],
+    [["pl", "}"]],
+  ];
+  const lh = Math.round(px * 1.45);
+  let y = px * 2;
+  let n = 0;
+  while (y < h - px) {
+    const line = lines[n % lines.length];
+    let x = px;
+    ctx.fillStyle = "#858585";
+    ctx.fillText(String(n + 1).padStart(3), x, y);
+    x += px * 3;
+    for (const [kind, text] of line) {
+      ctx.fillStyle = colors[kind];
+      ctx.fillText(text, x, y);
+      x += ctx.measureText(text).width;
+    }
+    y += lh;
+    n++;
+  }
+}
+
 async function makePicture(kind, w, h, k) {
   const cv = new OffscreenCanvas(w, h);
   const ctx = cv.getContext("2d", {
@@ -391,6 +514,8 @@ async function makePicture(kind, w, h, k) {
     bmp.close();
   } else if (kind === "ui") drawUi(ctx, w, h);
   else if (kind === "game") drawGame(ctx, w, h);
+  else if (kind === "zone") drawZone(ctx, w, h);
+  else if (kind === "code") drawCode(ctx, w, h);
   else drawText(ctx, w, h);
   // frame k: a small moving square, so that an encoded clip has P-frames
   // with motion and the artefacts of a real stream (still.html's anim).
@@ -538,6 +663,28 @@ export async function runLab(p, log = () => {}) {
     ? p.cells.split(",")
     : sets.flatMap((s) => CELL_SETS[s] || []);
   const errors = [];
+
+  // gt=1: the ground truth, the same picture at the output size, posted as PNG
+  // to the serving script, which reduces it (Lanczos-3, linear light) into the
+  // input of the quality runs (§7.1, rule 2). Nothing else is done.
+  if (p.gt === "1") {
+    const cv = await makePicture(content, outW, outH, 0);
+    const blob = await cv.convertToBlob({ type: "image/png" });
+    const name = (p.tag || "lab") + "-gt";
+    await postBlob("/__png?name=" + encodeURIComponent(name), blob);
+    log("ground truth posted: " + name);
+    return { gt: name, params: { out: `${outW}x${outH}`, content } };
+  }
+  // dump=base|all|a,b,c: after the measurement, each of these cells rendered
+  // once more and its whole output posted as PNG (for metrics.py).
+  const dumpList =
+    p.dump === "all"
+      ? cellNames.filter((c) => !c.startsWith("chain"))
+      : p.dump === "base"
+        ? ["tex-s1", "sgsr-repo", "sgsr-src", "nis", "easu", "fsr1"].filter(
+            (c) => cellNames.includes(c),
+          )
+        : (p.dump || "").split(",").filter(Boolean);
 
   if (!navigator.gpu) throw new Error("no WebGPU (navigator.gpu)");
   // The product's renderer asks for the default adapter and a bare device:
@@ -1171,6 +1318,20 @@ export async function runLab(p, log = () => {}) {
       }
     }
   }
+  const dumped = [];
+  for (const c of cells) {
+    if (!c || c.feed === "chain" || !dumpList.includes(c.name)) continue;
+    try {
+      await measure(c, 1, false);
+      const blob = await readPng(device, outTex, format, 0, 0, outW, outH);
+      const name = (p.tag || "lab") + "-" + c.name;
+      await postBlob("/__png?name=" + encodeURIComponent(name), blob);
+      dumped.push(name);
+    } catch (e) {
+      errors.push("[dump " + c.name + "] " + e.message);
+    }
+  }
+  if (dumped.length) log("dumped: " + dumped.join(" "));
 
   for (const f of frames) f.close();
   for (const r of renderers.values()) r.dispose();
@@ -1207,8 +1368,14 @@ export async function runLab(p, log = () => {}) {
     elapsedMs: elapsed,
     cells: out,
     shots,
+    dumped,
     errors,
   };
+}
+
+async function postBlob(url, blob) {
+  const r = await fetch(url, { method: "POST", body: blob });
+  if (!r.ok) throw new Error("POST " + url + ": " + r.status);
 }
 
 // A centre crop of the output texture (512×288), as a PNG data URL.
@@ -1217,6 +1384,16 @@ async function crop(device, tex, format, w, h) {
   const ch = Math.min(288, h);
   const x = Math.floor((w - cw) / 2);
   const y = Math.floor((h - ch) / 2);
+  const blob = await readPng(device, tex, format, x, y, cw, ch);
+  return await new Promise((res) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.readAsDataURL(blob);
+  });
+}
+
+// A region of a texture read back, as a PNG blob.
+async function readPng(device, tex, format, x, y, cw, ch) {
   const bpr = Math.ceil((cw * 4) / 256) * 256;
   const buf = device.createBuffer({
     size: bpr * ch,
@@ -1246,12 +1423,7 @@ async function crop(device, tex, format, w, h) {
   buf.destroy();
   const cv = new OffscreenCanvas(cw, ch);
   cv.getContext("2d").putImageData(img, 0, 0);
-  const blob = await cv.convertToBlob({ type: "image/png" });
-  return await new Promise((res) => {
-    const fr = new FileReader();
-    fr.onload = () => res(fr.result);
-    fr.readAsDataURL(blob);
-  });
+  return await cv.convertToBlob({ type: "image/png" });
 }
 
 // ── hooks for the product's renderer ───────────────────────────────────────

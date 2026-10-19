@@ -55,13 +55,31 @@ DEFAULT_CASES = [
 
 
 class LabHandler(Handler):
-    """The repository, C:\\Test under /test/, results posted under /__result."""
+    """The repository, C:\\Test under /test/, the output directory under /__dir/,
+    results posted under /__result, pictures (PNG) under /__png."""
 
     def translate_path(self, path):
         clean = path.split("?", 1)[0]
         if clean.startswith("/test/"):
             return os.path.join(TEST_IMAGES, os.path.basename(clean))
+        if clean.startswith("/__dir/"):
+            return os.path.join(self.server.lab_dir, os.path.basename(clean))
         return super().translate_path(path)
+
+    def _name(self):
+        name = "lab"
+        if "name=" in self.path:
+            name = self.path.split("name=", 1)[1].split("&", 1)[0]
+        return "".join(c for c in urllib.request.unquote(name) if c.isalnum() or c in "-_.")
+
+    def _save_png(self):
+        n = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(n)
+        out = os.path.join(self.server.lab_dir, self._name() + ".png")
+        with open(out, "wb") as f:
+            f.write(body)
+        self.send_response(204)
+        self.end_headers()
 
     def end_headers(self):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
@@ -69,15 +87,14 @@ class LabHandler(Handler):
         super().end_headers()
 
     def do_POST(self):
+        if self.path.startswith("/__png"):
+            return self._save_png()
         if not self.path.startswith("/__result"):
             self.send_error(404)
             return
         n = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(n)
-        name = "phone"
-        if "name=" in self.path:
-            name = self.path.split("name=", 1)[1].split("&", 1)[0]
-        name = "".join(c for c in urllib.request.unquote(name) if c.isalnum() or c in "-_.")
+        name = self._name()
         out = os.path.join(self.server.lab_dir, "phone-%s-%d.json" % (name, int(time.time())))
         with open(out, "wb") as f:
             f.write(body)
@@ -121,6 +138,23 @@ def print_result(name, res):
             print("  error:", e[:300])
 
 
+def make_input(gt_path, in_path, size):
+    """The ground truth reduced to the input size: Lanczos-3, in linear light
+    (§7.1 rule 2), once, so that every cell reads the same picture."""
+    import numpy as np
+    from PIL import Image
+    img = np.asarray(Image.open(gt_path).convert("RGB"), dtype=np.float32) / 255.0
+    lin = np.where(img <= 0.04045, img / 12.92, ((img + 0.055) / 1.055) ** 2.4)
+    chans = [Image.fromarray(np.ascontiguousarray(lin[..., c]), mode="F").resize(size, Image.LANCZOS)
+             for c in range(3)]
+    lin2 = np.clip(np.stack([np.asarray(c, dtype=np.float32) for c in chans], axis=2), 0.0, 1.0)
+    srgb = np.where(lin2 <= 0.0031308, lin2 * 12.92, 1.055 * np.power(lin2, 1 / 2.4) - 0.055)
+    Image.fromarray((srgb * 255.0 + 0.5).astype(np.uint8), mode="RGB").save(in_path)
+
+
+QUALITY_CELLS = "tex-s1,sgsr-repo,sgsr-src,nis,easu,fsr1"
+
+
 def md_table(tag, runs):
     lines = ["# scaler-lab — %s" % tag, ""]
     for name, res in runs:
@@ -159,6 +193,12 @@ def main():
     ap.add_argument("--http-port", type=int, default=0, help="fixed port for the server (remote runs)")
     ap.add_argument("--serve", default="", help="host:port — serve for a phone and wait for posted results")
     ap.add_argument("--md", action="store_true", help="write <dir>/<tag>.md, a table of the run")
+    ap.add_argument("--quality", action="append", default=[],
+                    help="a content (text, ui, game, code, zone, img:<url>): its ground truth at --out, the "
+                         "Lanczos-3 input at --in, the kernels on it (%s), their outputs through metrics.py"
+                         % QUALITY_CELLS)
+    ap.add_argument("--in", dest="size_in", default="1280x720")
+    ap.add_argument("--out", dest="size_out", default="2560x1440")
     a = ap.parse_args()
     os.makedirs(a.dir, exist_ok=True)
 
@@ -225,11 +265,9 @@ def main():
                 if msg.get("id") == mid:
                     return msg.get("result", msg)
 
-        cases = case_list(a.case)
-        for name, query in cases:
+        def run_page(query):
             url = "http://127.0.0.1:%d/scripts/bench/scaler-lab/scaler-lab.html?%s%s" % (http_port, query, extra)
             call("Page.navigate", url=url)
-            t0 = time.time()
             for _ in range(1200):
                 time.sleep(0.5)
                 ready = call("Runtime.evaluate", returnByValue=True,
@@ -238,9 +276,52 @@ def main():
                     break
             r = call("Runtime.evaluate", expression="window.__labResult", awaitPromise=True, returnByValue=True)
             res = r.get("result", {}).get("value") or {"error": json.dumps(r)[:2000]}
+            res["url"] = url
+            return res
+
+        if a.quality:
+            sys.path.insert(0, HERE)
+            import metrics
+            inw, inh = (int(x) for x in a.size_in.split("x"))
+            for content in a.quality:
+                base = "%s-%s" % (a.tag, content.replace(":", "_").replace("/", "_"))
+                res = run_page("gt=1&content=%s&out=%s&tag=%s" % (content, a.size_out, base))
+                if "error" in res:
+                    print(base, "ground truth ERROR", res["error"][:600])
+                    continue
+                gt_path = os.path.join(a.dir, base + "-gt.png")
+                in_path = os.path.join(a.dir, base + "-in.png")
+                make_input(gt_path, in_path, (inw, inh))
+                res = run_page("in=%s&out=%s&content=img:/__dir/%s-in.png&codec=none&cells=%s&dump=base"
+                               "&rounds=1&batches=1&batch=4&warm=1&tag=%s" % (
+                                   a.size_in, a.size_out, base, QUALITY_CELLS, base))
+                if "error" in res:
+                    print(base, "cells ERROR", res["error"][:600])
+                    continue
+                print("== quality %s (%s -> %s), adapter %s" % (base, a.size_in, a.size_out, res["adapter"]["name"]))
+                gt = metrics.load(gt_path)
+                inp = metrics.load(in_path)
+                rows = []
+                for name in res.get("dumped", []):
+                    r = metrics.measure(gt, inp, metrics.load(os.path.join(a.dir, name + ".png")))
+                    r["cell"] = name[len(base) + 1:]
+                    rows.append(r)
+                    print("  %-12s PSNR %6.2f  SSIM %.4f  SSIM Y %.4f  overshoot %5.2f%%  centre PSNR %6.2f SSIM %.4f  FLIP %s" % (
+                        r["cell"], r["psnr"], r["ssim"], r["ssimY"], 100 * r["overshoot"],
+                        r["centre"]["psnr"], r["centre"]["ssim"], metrics.fmt(r["flip"])))
+                if res.get("errors"):
+                    print("  errors:", res["errors"][:5])
+                with open(os.path.join(a.dir, base + "-quality.json"), "w") as f:
+                    json.dump({"adapter": res["adapter"], "gt": gt_path, "input": in_path, "rows": rows}, f, indent=1)
+                sys.stdout.flush()
+            return
+
+        cases = case_list(a.case)
+        for name, query in cases:
+            t0 = time.time()
+            res = run_page(query)
             res["case"] = name
             res["tag"] = a.tag
-            res["url"] = url
             res["wallSeconds"] = time.time() - t0
             shots = res.pop("shots", None)
             with open(os.path.join(a.dir, "%s-%s.json" % (a.tag, name)), "w") as f:
