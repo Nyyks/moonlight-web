@@ -1292,15 +1292,15 @@ upscalers spatiaux.
 
 ### 12.1 Tâches, par phase (effort Opus 5.5 entre crochets)
 
-**P0 — Labo et lignes de base**
-- [ ] Page de laboratoire : chargement des images (PNG, boucle WebCodecs), variantes, horodatages, amortissement, compteur de quads, relecture PNG, export JSON [`high`]
-- [ ] Mires : texte coloré 4:4:4, zone-plate et traits fins, rampe PQ [`medium`]
-- [ ] Réductions hors ligne de la vérité terrain (Lanczos-3, lumière linéaire), versionnées hors dépôt [`low`]
-- [ ] Chaîne Python : FLIP, SSIM, PSNR, SSIMULACRA 2, dépassements, scintillement, métrique de défilement [`medium`]
-- [ ] Relevé `adapter.features` / `adapter.info` / version sur chaque navigateur du parc [`low`]
-- [ ] Essai décisif : N bilinéaires sur externe contre blit + N sur RGBA (N = 1, 5, 9) ; coût des dérivées [`high`]
-- [ ] Lignes de base : SGSR1 (dépôt et source), NIS, FSR1, bilinéaire, Smooth2D ; chaîne et noyau seul ; DualRTX (3 GPU), `mw-arm`, Mac M1, iPhone [`high`]
-- [ ] Rapport P0 et porte (dispersion, décision passe 0) [`xhigh`]
+**P0 — Labo et lignes de base** (joué la nuit du 19 au 20/10/2026 ; rapport `upscaler-mwsr-p0.md`)
+- [x] Page de laboratoire : images dessinées par la page, boucle WebCodecs, cellules, horodatages par lots, relecture PNG, export JSON (`scripts/bench/scaler-lab/`, `4e249b3f`) ; sans compteur de quads ni amortissement (les horodatages ont marché partout)
+- [~] Mires : texte coloré (`code`), zone-plate et traits fins (`zone`) faits ; rampe PQ en P3
+- [x] Réduction hors ligne de la vérité terrain (Lanczos-3, lumière linéaire) par le pilote (`--quality`)
+- [~] Chaîne Python : PSNR, SSIM, dépassements faits (`metrics.py`) ; FLIP attend une roue Python 3.14 ; SSIMULACRA 2, scintillement et défilement en P2 s'ils servent
+- [~] Relevé `adapter.features` / `adapter.info` : DualRTX (RTX, 780M) fait ; téléphones et Mac aux créneaux de Bruno ; `mw-arm` sans WebGPU
+- [x] Essai décisif externe contre blit + RGBA (N = 1, 5, 9, chargements, dérivées) : RTX et 780M
+- [~] Lignes de base : DualRTX fait (l'Arc A380 n'est plus énumérée) ; `mw-arm` (WebGL2), Mac M1, iPhone 13 Pro, realme Note 60 à jouer ; Smooth2D (Canvas2D) non mesuré, hors WebGPU
+- [x] Rapport P0 et porte : tenue pour l'ordinateur (dispersion ≤ 2,6 %, pas de passe 0 en SDR)
 
 **P1 — Contournement 1:1**
 - [ ] Détection par image, pipelines de présentation, gouverneur en pause, overlay, dans `WebGpuRenderer` et `WebGlRenderer` [`medium`]
