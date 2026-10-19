@@ -2192,7 +2192,9 @@ HEVC on the RTX), counters read before and after every pass on both sides
 | same | 64 KB | 631 (0.1 %), middle and tail |
 | Stream, a game clip, 1080p, 3 min (17:16) | Chrome | 18 chunks sent again of 464,794 |
 | Stream, YouTube as content, 3 min (17:21) | Chrome | 249 of 229,140, 49 inside a recovery |
-| Same content, 19:28 and 19:33 | Chrome, without and with `rxbuf=1` | 0 and 0 |
+| Same content, 19:28 and 19:33, bench build | Chrome, without and with `rxbuf=1` | 0 and 0 |
+| Clip, bench build, 24 cores busy (22:05) | Chrome | 0 of 457,105 |
+| Clip, the day's vmouse build (22:09) | Chrome | 116 of 455,673 |
 
 - No adapter on either machine and no port of the virtual switch dropped
   anything, and every datagram the N95 sent reached DualRTX's UDP layer.
@@ -2209,11 +2211,16 @@ HEVC on the RTX), counters read before and after every pass on both sides
   PyroWave, whose frames ride an Opus track: one 40 Mbit/s frame arriving at
   line rate is already more than 64 KB. Bruno's PyroWave stream of 15:27 lost
   0.6 % of its packets on the same cable.
-- The losses come and go with the client's load: the same YouTube content
-  lost 249 chunks at 17:21 and none at 19:28. The reading is a socket that
-  overflows while Chrome reads late. `rxbuf=1` (a silent video section in the
-  offer, `844f1db2`) is the A/B that settles it; at rest neither arm loses
-  anything, so it has to run under an equal CPU load. Still to do.
+- **The losses came with the host's build, not the client's load** (22:00-22:17,
+  the same game clip looped from its start, ~455,000 chunks a pass): the
+  bench build `844f1db2` lost nothing, at rest or with all 24 cores of
+  DualRTX busy at normal priority, and `rxbuf=1` nothing either; the build
+  the N95 ran that day (`bed60618` and an uncommitted virtual mouse,
+  "vmouse") lost 116, then 73 with the bench build's page. Every lossy pass
+  of the day, Bruno's of 15:33 included, ran that build. The packets still
+  reach DualRTX's UDP layer and die in Chrome's socket, so that build most
+  likely sends bigger bursts; why is not found yet. The A/B of `rxbuf=`
+  stays open: on a sender that loses, it says whether 256 KB is enough.
 
 ## 4. The model so far (04/10/2026)
 
