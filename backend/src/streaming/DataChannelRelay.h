@@ -514,6 +514,14 @@ private:
     // report the session's own. Written once in onOpen, then the flag is raised.
     mw::sctp::Counters m_SctpAtOpen{};
     std::atomic<bool> m_SctpAtOpenSet{false};
+    // usrsctp's counters at every stats tick, the last kFreezeSctpKeepMs of
+    // them: what SCTP repaired around each freeze, for its [LinkFreeze] line.
+    // Relay thread only.
+    std::deque<std::pair<qint64, mw::sctp::Counters>> m_FreezeSctp;
+    static constexpr qint64 kFreezeSctpKeepMs = 30000;
+    /// One [LinkFreeze] line per freeze the log hands out at @p nowMs (see
+    /// LinkFreezeLog::takeClosed; @p all: the session is over).
+    void logClosedFreezes(qint64 nowMs, bool all);
     // Bidirectional clipboard sync (only when the streamed host is this
     // machine). Written once on the main thread before the relay moves to its
     // dedicated thread, read from relay/libdatachannel threads afterwards.

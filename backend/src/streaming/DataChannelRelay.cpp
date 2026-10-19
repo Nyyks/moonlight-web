@@ -714,6 +714,8 @@ void DataChannelRelay::setClipboardEnabled(bool enabled)
 DataChannelRelay::~DataChannelRelay()
 {
     qInfo() << "[DataChannelRelay] Destructor";
+    // The freezes the stats tick had not told yet, the last one included.
+    logClosedFreezes(QDateTime::currentMSecsSinceEpoch(), true);
     // What SCTP had to repair during the session. A T3 timeout is a repair
     // that waited out the retransmission timer (200 ms at least) instead of a
     // fast retransmit — on a LAN, the one way a single frame arrives that late.
@@ -1618,7 +1620,7 @@ void DataChannelRelay::handleVideoFrame(const QByteArray& data, bool isKeyframe,
         if (m_FrameLog)
             m_FrameLog->decide(frameNumber, RelayFrameLog::Outcome::Gated, gatedBuffered,
                                m_Backlog.ageMs(nowMs), steadyUs());
-        if (shedding) m_Freezes.note(nowMs - m_Backlog.ageMs(nowMs), nowMs);
+        if (shedding) m_Freezes.note(nowMs - m_Backlog.ageMs(nowMs), nowMs, LinkFreezeLog::Backlog);
         if (m_IdrWaitsForDrain) {
             if (!m_Backlog.backedUp()) requestIdrOnDrain();
         } else if (shedding) {
@@ -1804,7 +1806,7 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
     if (m_Shim) {
         if (const qint64 silentMs = m_Shim->noteClientAlive(); silentMs > 0) {
             const int64_t nowMs = QDateTime::currentMSecsSinceEpoch();
-            m_Freezes.note(nowMs - silentMs, nowMs);
+            m_Freezes.note(nowMs - silentMs, nowMs, LinkFreezeLog::InputSilent);
         }
     }
 
@@ -2043,10 +2045,14 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
             // of them missing is the link frozen upstream, held key or not —
             // the input watchdog only sees a silence while something is held.
             // The one report the browser itself delayed says so (`resumed`).
+            // How late the page's timer sent this one (`late`, absent from a
+            // page before it) goes with the freeze to its log line: a gap the
+            // page made itself is not the link's.
             const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             if (m_LastLinkstatsMs > 0 && !fb.resumed &&
                 nowMs - m_LastLinkstatsMs >= kLinkstatsSilentMs) {
-                m_Freezes.note(m_LastLinkstatsMs + kLinkstatsPeriodMs, nowMs);
+                m_Freezes.note(m_LastLinkstatsMs + kLinkstatsPeriodMs, nowMs,
+                               LinkFreezeLog::Reports, msg["late"].toInt(-1));
             }
             m_LastLinkstatsMs = nowMs;
             if (!m_LinkReportsSeen) {
@@ -2349,7 +2355,8 @@ void DataChannelRelay::sendFragmented(const QByteArray& data, bool isKeyframe,
         if (m_Backlog.note(bufAmt, backlogNowMs)) {
             m_DeltaDroppedCount++;
             m_BackpressureDropCount++;
-            m_Freezes.note(backlogNowMs - m_Backlog.ageMs(backlogNowMs), backlogNowMs);
+            m_Freezes.note(backlogNowMs - m_Backlog.ageMs(backlogNowMs), backlogNowMs,
+                           LinkFreezeLog::Backlog);
 
             // The engine that heals by reference invalidation can be told
             // which frame never left (namedrops, plan §9-25). No wire id was
@@ -2423,7 +2430,8 @@ void DataChannelRelay::sendFragmented(const QByteArray& data, bool isKeyframe,
             if (m_FrameLog)
                 m_FrameLog->decide(frameNumber, RelayFrameLog::Outcome::KeyframeDrop, bufAmt,
                                    m_Backlog.ageMs(backlogNowMs), steadyUs());
-            m_Freezes.note(backlogNowMs - m_Backlog.ageMs(backlogNowMs), backlogNowMs);
+            m_Freezes.note(backlogNowMs - m_Backlog.ageMs(backlogNowMs), backlogNowMs,
+                           LinkFreezeLog::Backlog);
             if (m_KeyframeBackpressureWarnings <= 5) {
                 qInfo() << "[DataChannelRelay] Dropped keyframe (link not draining)"
                         << "bufferedAmount=" << bufAmt
@@ -2658,6 +2666,16 @@ void DataChannelRelay::onStatsTimerTick()
         if (const auto rtt = m_Pc->rtt()) m_SrttMs.store(static_cast<int>(rtt->count()));
     }
 
+    // SCTP's counters for the freezes' lines, then the lines of the freezes
+    // that are over.
+    {
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        m_FreezeSctp.emplace_back(nowMs, mw::sctp::readCounters());
+        while (m_FreezeSctp.size() > 2 && nowMs - m_FreezeSctp.front().first > kFreezeSctpKeepMs)
+            m_FreezeSctp.pop_front();
+        logClosedFreezes(nowMs, false);
+    }
+
     double hostRttMs = 0.0;
     int64_t decodeLatUs = m_LastDecodeLatencyUs.load(std::memory_order_acquire);
 
@@ -2755,6 +2773,56 @@ void DataChannelRelay::onStatsTimerTick()
         if (!m_Stopping.load()) {
             qWarning() << "[DataChannelRelay] Stats send error:" << e.what();
         }
+    }
+}
+
+void DataChannelRelay::logClosedFreezes(qint64 nowMs, bool all)
+{
+    const std::vector<LinkFreezeLog::Episode> closed = m_Freezes.takeClosed(nowMs, all);
+    if (closed.empty()) return;
+    const mw::sctp::Counters nowSctp = mw::sctp::readCounters();
+    const auto clock = [](qint64 ms) {
+        return QDateTime::fromMSecsSinceEpoch(ms).toString(QStringLiteral("HH:mm:ss.zzz"));
+    };
+    for (const LinkFreezeLog::Episode& ep : closed) {
+        // Between the last reading before it began and the first after it
+        // ended: the stats tick reads once a second, so up to a second on
+        // each side.
+        mw::sctp::Counters before = m_FreezeSctp.empty() ? nowSctp : m_FreezeSctp.front().second;
+        mw::sctp::Counters after = nowSctp;
+        for (const auto& [atMs, c] : m_FreezeSctp) {
+            if (atMs <= ep.startMs) before = c;
+            if (atMs >= ep.endMs) {
+                after = c;
+                break;
+            }
+        }
+        const mw::sctp::Counters d = after - before;
+        QString seen;
+        const auto add = [&seen](const char* what) {
+            if (!seen.isEmpty()) seen += QStringLiteral(" + ");
+            seen += QLatin1String(what);
+        };
+        if (ep.sources & LinkFreezeLog::Backlog) add("the video's send buffer not draining");
+        if (ep.sources & LinkFreezeLog::InputSilent) add("the input link silent");
+        if (ep.sources & LinkFreezeLog::Reports) add("the receiver's link reports missing");
+        if (seen.isEmpty()) seen = QStringLiteral("nothing named");
+        const QString page =
+            ep.pageLateMs >= 0
+                ? QStringLiteral("; the page sent the report that ended the gap %1 ms late")
+                      .arg(ep.pageLateMs)
+                : QString();
+        qInfo().noquote() << QStringLiteral("[LinkFreeze] #%1%2: %3 ms, %4 to %5, seen by %6; "
+                                            "SCTP around it: %7 chunks sent again (%8 fast), "
+                                            "%9 T3%10")
+                                 .arg(ep.number)
+                                 .arg(ep.stretched ? QStringLiteral(" (stretched)") : QString())
+                                 .arg(ep.endMs - ep.startMs)
+                                 .arg(clock(ep.startMs), clock(ep.endMs), seen)
+                                 .arg(d.retrans)
+                                 .arg(d.fast)
+                                 .arg(d.t3)
+                                 .arg(page);
     }
 }
 

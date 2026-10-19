@@ -5529,6 +5529,7 @@ export class StreamView {
             recentSince: performance.now(),
             gaps: 0,
             frames: 0,
+            sentAt: 0,
         };
         this._linkTimer = setInterval(() => {
             if (this._quitting || !this._link) return;
@@ -5539,7 +5540,14 @@ export class StreamView {
                 owdRiseMs = Math.max(0, Math.round(l.windowMinOffset - l.sessionMinOffset));
             }
             const fps = Math.round(l.frames * 2);
-            const report = { type: 'linkstats', owdRiseMs, gaps: l.gaps, fps };
+            // How much later than its 500 ms this report leaves after the
+            // last one: a main thread held up here makes the same gap in the
+            // reports as a link frozen upstream, and the host counts a freeze
+            // on that gap. It writes this figure next to it (plan « Gels du
+            // lien », D).
+            const late = l.sentAt > 0 ? Math.max(0, Math.round(now - l.sentAt - 500)) : 0;
+            l.sentAt = now;
+            const report = { type: 'linkstats', owdRiseMs, gaps: l.gaps, fps, late };
             // The first report after the tab came back (see _resyncAfterHidden)
             // says so: the frames it names as missing were evicted by the host's
             // own sender while nobody here was draining them, and the host cut
