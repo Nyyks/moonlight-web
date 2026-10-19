@@ -497,6 +497,10 @@ private:
     // `sctpmtu=` (plan Wi-Fi W2.6): the connection's path MTU in bytes, 0
     // libdatachannel's 1280. Set at setup.
     int m_SctpMtu = 0;
+    // `rxbuf=1` (plan « Gels du lien », point 1): a silent video section in
+    // the offer, for the browser's receive buffer (setupPeerConnection).
+    bool m_RxBufVideo = false;
+    std::shared_ptr<rtc::Track> m_RxBufTrack;
     // usrsctp's counters at the last link report, for the share of chunks
     // sent again in each report window (LinkFeedback::retransPermille).
     // Relay thread only.

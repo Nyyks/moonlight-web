@@ -881,6 +881,7 @@ void DataChannelRelay::setLinkBench(const mw::native::EncoderTuning& tuning)
     m_SctpMaxBurst = tuning.sctpMaxBurst >= 0 ? tuning.sctpMaxBurst : kNativeSctpMaxBurst;
     m_SctpScheduler = tuning.sctpScheduler;
     m_SctpMtu = tuning.sctpMtu;
+    m_RxBufVideo = tuning.rxBufVideo;
     if (tuning.relayLog && !m_FrameLog) {
         m_FrameLog = std::make_unique<RelayFrameLog>();
         qWarning() << "[DataChannelRelay] bench frame log on (relaylog=1): each video frame's way "
@@ -1188,6 +1189,24 @@ void DataChannelRelay::createDataChannels()
     // within a round trip, and one timer-driven retry inside the lifetime.
     // Before the first createDataChannel(), like the audio track (above).
     createRtpVideoTracks();
+
+    // The bench's `rxbuf=1` (plan « Gels du lien », point 1): a video section
+    // nothing is ever sent on. Chrome's UDP socket keeps 64 KB of receive
+    // buffer (services/network/p2p/socket_udp.cc) unless a video channel asks
+    // for more, 256 KB (WebRTC-ReceiveBufferSize), on the transport the whole
+    // bundle shares: a DataChannel stream has none, and a 40 Mbit/s frame
+    // arriving at line rate is more than 64 KB. The page answers it like any
+    // RTP video section, and nothing arrives there. Offered beside the bench's
+    // RTP roads too: the audio road (PyroWave's) is an Opus track.
+    if (m_RxBufVideo) {
+        auto desc = rtc::Description::Video("rxbuf", rtc::Description::Direction::SendOnly);
+        desc.addH264Codec(97);
+        std::random_device rd;
+        desc.addSSRC(static_cast<uint32_t>(rd()), "rxbuf");
+        m_RxBufTrack = m_Pc->addTrack(desc);
+        qInfo() << "[DataChannelRelay] bench rxbuf=1: a silent video section offered, for the "
+                   "browser's UDP receive buffer";
+    }
 
     rtc::DataChannelInit videoConfig;
     videoConfig.reliability.unordered = false;
@@ -3022,6 +3041,13 @@ void DataChannelRelay::stop()
             } catch (...) {}
             m_AudioTrack.reset();
         }
+    }
+    // The bench's silent video section: nothing was ever sent on it.
+    if (m_RxBufTrack) {
+        try {
+            m_RxBufTrack->close();
+        } catch (...) {}
+        m_RxBufTrack.reset();
     }
 
     // Stop the sender thread AFTER closing the DataChannels: a send that is

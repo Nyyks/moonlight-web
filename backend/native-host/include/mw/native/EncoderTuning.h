@@ -550,6 +550,12 @@ struct EncoderTuning
     /// §6.41), and a path that does not hold the size drops every full packet,
     /// the DTLS handshake's first: only for a LAN known to hold 1500.
     int sctpMtu = 0;
+    /// The offer carries a silent video section, never fed (plan « Gels du
+    /// lien », point 1). Chrome's UDP socket keeps 64 KB of receive buffer
+    /// unless a video channel raises it, to 256 KB (WebRTC-ReceiveBufferSize):
+    /// a DataChannel stream has no video channel, and one 40 Mbit/s frame
+    /// arriving at line rate is more than 64 KB. false, the product: none.
+    bool rxBufVideo = false;
     /// Each audio packet's way through the host — the pacer's tick, its queue,
     /// the frame's peak, the relay thread, the RTP track — written as a CSV
     /// next to the log when the session ends (plan « le son et la priorité des
@@ -591,7 +597,7 @@ struct EncoderTuning
                vplRateControl == VplRateControl::Default && vplIntraRefreshQpDelta == 0 &&
                intraRefreshDist == 0 && linkGovernor == Choice::Default && overflowGood < 0 &&
                nameLinkDrops == Choice::Default && vbvFrames == 0 && dpbFrames == 0 &&
-               fallback == Fallback::None && pipeline == VideoPipeline::Auto &&
+               !rxBufVideo && fallback == Fallback::None && pipeline == VideoPipeline::Auto &&
                conv12 == ConvertQueue12::Default && enc12 == Encoder12::Default &&
                rc12 == RateControl12::Default && reencode12 == Choice::Default &&
                reencodeFit12 == Choice::Default && interFloor12 == 0 &&
@@ -730,6 +736,7 @@ struct EncoderTuning
         if (sctpMaxBurst >= 0) add("sctpburst=" + std::to_string(sctpMaxBurst));
         if (sctpScheduler >= 0) add("sctpss=" + std::to_string(sctpScheduler));
         if (sctpMtu > 0) add("sctpmtu=" + std::to_string(sctpMtu));
+        if (rxBufVideo) add("rxbuf=1");
         if (audioLog) add("audiolog=1");
         if (audioFrameMs > 0) add("audioframe=" + std::to_string(audioFrameMs));
         if (audioGraceUs >= 0) add("audiograce=" + std::to_string(audioGraceUs) + "us");
