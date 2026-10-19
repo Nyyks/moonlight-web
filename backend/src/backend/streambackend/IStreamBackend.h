@@ -65,6 +65,11 @@ struct LaunchRequest
     /// displayKey. Absent, the backend looks it up itself. Only the native
     /// engine reads it.
     std::optional<bool> hostAppKnown;
+    /// The display our virtual display took the primary role from (its
+    /// DisplayInfo::key), as the server recorded it on turning it on, for a
+    /// stream worker — for the same reason as displayKey. Absent, the backend
+    /// reads it itself. Only the native engine reads it.
+    std::optional<QString> previousPrimary;
     QByteArray rikey;
     int rikeyid = 0;
     QString clientUniqueId;

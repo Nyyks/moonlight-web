@@ -134,6 +134,11 @@ public:
     /// Whether @p appId is the card of one of the owner's apps
     /// (AppSettings::hostApps), whether or not the app is still there.
     static bool isHostAppCard(int appId);
+    /// The display our virtual display took the primary role from, by its
+    /// DisplayInfo::key, as turning it on recorded it in the settings
+    /// (VirtualDisplayJob) — or empty. The server reads it for a worker
+    /// (LaunchRequest::previousPrimary).
+    static QString previousPrimary();
 
     /// Where the owner's apps (AppSettings::hostApps) open, the same for all
     /// of them on a given machine: in a gamescope of their own (Linux, when

@@ -191,12 +191,14 @@ int displayWithKey(const mw::native::Capabilities& caps, const QString& key, QSt
 /// The GPU that draws our virtual display (@p displayId) and the one that drew
 /// the display it took the primary role from, when they are not the same GPU;
 /// both left empty otherwise. Apps started before the stream render on the
-/// second (see NativeHostMedia::virtualDisplayGpu).
-void gpusApart(const mw::native::Capabilities& caps, int displayId, QString* virtualGpu,
+/// second (see NativeHostMedia::virtualDisplayGpu). That display is
+/// @p previousPrimary when the server said which (LaunchRequest).
+void gpusApart(const mw::native::Capabilities& caps, int displayId,
+               const std::optional<QString>& previousPrimary, QString* virtualGpu,
                QString* previousGpu)
 {
     const QString previous =
-        AppSettings().virtualDisplay().value(QLatin1String("previous_primary")).toString();
+        previousPrimary ? *previousPrimary : NativeHostBackend::previousPrimary();
     if (previous.isEmpty()) return;
     int oursGpu = -1;
     int theirsGpu = -1;
@@ -364,6 +366,11 @@ bool NativeHostBackend::isDisplayCard(int appId)
 bool NativeHostBackend::isHostAppCard(int appId)
 {
     return appId >= kHostAppIdFloor;
+}
+
+QString NativeHostBackend::previousPrimary()
+{
+    return AppSettings().virtualDisplay().value(QLatin1String("previous_primary")).toString();
 }
 
 bool NativeHostBackend::isEnabled()
@@ -661,7 +668,7 @@ void NativeHostBackend::launch(const QString& seatId, const LaunchRequest& req,
     media.nativeHost.refInvalidation = req.refInvalidation;
     media.nativeHost.cropsToFrame = req.cropsToFrame;
     if (usesVirtualDisplay(req.appId)) {
-        gpusApart(caps, displayId, &media.nativeHost.virtualDisplayGpu,
+        gpusApart(caps, displayId, req.previousPrimary, &media.nativeHost.virtualDisplayGpu,
                   &media.nativeHost.previousPrimaryGpu);
         if (!media.nativeHost.virtualDisplayGpu.isEmpty())
             Logger::info(

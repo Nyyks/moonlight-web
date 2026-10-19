@@ -628,6 +628,9 @@ int runStreamWorker(QCoreApplication& app)
     // One of the owner's apps: whether it is still there, for the same reason.
     if (cfg.contains(QStringLiteral("hostAppKnown")))
         session->setHostAppKnown(cfg[QStringLiteral("hostAppKnown")].toBool());
+    // On our virtual display: the display it took the primary role from.
+    if (cfg.contains(QStringLiteral("previousPrimary")))
+        session->setPreviousPrimary(cfg[QStringLiteral("previousPrimary")].toString());
     // Absent (an older parent) → not an administrator: the safe reading,
     // since the only thing it grants is the host's administrator windows.
     session->setViewerAdmin(cfg["viewerAdmin"].toBool(false));

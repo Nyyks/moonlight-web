@@ -160,6 +160,10 @@ public:
     /// the server found it (LaunchRequest::hostAppKnown). A stream worker's only.
     void setHostAppKnown(bool known) { m_HostAppKnown = known; }
 
+    /// The display our virtual display took the primary role from, as the
+    /// server recorded it (LaunchRequest::previousPrimary). A stream worker's only.
+    void setPreviousPrimary(const QString& key) { m_PreviousPrimary = key; }
+
     /// Whether the viewer administers MoonlightWeb here — HttpRequest::isLocal
     /// at /start. Only the native engine acts on it: anyone else is kept out
     /// of the host's windows that run as administrator (InputGate).
@@ -529,6 +533,9 @@ private:
 
     /// See setHostAppKnown. Absent, the backend looks the app up itself.
     std::optional<bool> m_HostAppKnown;
+
+    /// See setPreviousPrimary. Absent, the backend reads the settings itself.
+    std::optional<QString> m_PreviousPrimary;
 
     /// See setViewerAdmin. Defaults to the trusting value only because every
     /// caller sets it; a worker whose parent predates the field is the owner

@@ -4215,9 +4215,15 @@ int main(int argc, char* argv[])
                     if (onVirtualDisplay) VirtualDisplayJob::instance().releaseSoon();
                 });
 
+            const bool virtualStream = host->backendType == NativeHostBackend::typeName() &&
+                                       NativeHostBackend::usesVirtualDisplay(appId);
             auto startWorker = [worker, respond, standby, reqSlot, appId, &g_Pool,
-                                &g_LastStandbyStartMs, hostUuidCopy, uid,
-                                sessionToken](QJsonObject cfg) {
+                                &g_LastStandbyStartMs, hostUuidCopy, uid, sessionToken,
+                                virtualStream](QJsonObject cfg) {
+                // On our virtual display: the display it took the primary role
+                // from, which turning it on (below) has just recorded in this
+                // settings file — a SYSTEM worker does not read it.
+                if (virtualStream) cfg["previousPrimary"] = NativeHostBackend::previousPrimary();
                 if (!worker->start(cfg)) {
                     worker->deleteLater();
                     // Spawn failure. For a standby attempt just report
@@ -5628,8 +5634,13 @@ int main(int argc, char* argv[])
                          [slot, &releaseGuestHoleSoon]() { releaseGuestHoleSoon(slot); });
 
         const QString hostUuidCopy = host->uuid;
+        const bool virtualStream = host->backendType == NativeHostBackend::typeName() &&
+                                   NativeHostBackend::usesVirtualDisplay(appId);
         auto startWorker = [worker, respond, slot, appId, &g_Pool, hostUuidCopy, uid, onFeed,
-                            feedTicket, &sharedFeed](const QJsonObject& withHole) {
+                            feedTicket, &sharedFeed, virtualStream](QJsonObject withHole) {
+            // On our virtual display: the display it took the primary role
+            // from, as the owner path.
+            if (virtualStream) withHole["previousPrimary"] = NativeHostBackend::previousPrimary();
             // On the shared feed, the guest's worker runs exactly as the feed's
             // does, or its pipe would not let it in; a guest that cannot be
             // started that way encodes on its own.

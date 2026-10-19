@@ -277,6 +277,7 @@ LaunchRequest StreamSession::buildLaunchRequest() const
     req.cropsToFrame = m_CropsToFrame;
     req.displayKey = m_DisplayKey;
     req.hostAppKnown = m_HostAppKnown;
+    req.previousPrimary = m_PreviousPrimary;
     req.rikey = m_Config.rikey;
     req.rikeyid = m_Config.rikeyid;
     // Empty means "the provider's default identity"; effectiveUniqueId() would
