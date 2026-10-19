@@ -29,6 +29,7 @@ extern "C" {
 #include "NativeProbeService.h"
 
 #include <QCollator>
+#include <QHash>
 #include <QHostInfo>
 
 #include <algorithm>
@@ -48,26 +49,50 @@ mw::native::Capabilities probeEngine()
     return NativeProbeService::instance().snapshot();
 }
 
-/// Displays are presented to the browser as apps, so an app id has to survive
-/// the round trip and come back meaning the same display. Display ids start at
-/// 0 and NvApp treats id 0 as uninitialized, so the wire id is offset by one.
-constexpr int kAppIdBase = 1;
-
-int displayIdToAppId(int displayId)
-{
-    return displayId + kAppIdBase;
-}
-
-int appIdToDisplayId(int appId)
-{
-    return appId - kAppIdBase;
-}
-
 /// "MoonlightWeb Virtual Display" is a card whether or not the display exists
 /// right now — it is off between streams — so it cannot be numbered after a
 /// display index. A fixed id far above any display's: a machine has a handful
 /// of monitors, never a thousand.
 constexpr int kVirtualDisplayAppId = 1000;
+static_assert(AppSettings::kDisplayAppIdEnd <= kVirtualDisplayAppId,
+              "display cards are numbered below the virtual display's");
+
+/// Each display's DisplayInfo::key, in @p caps' order — told apart when two
+/// screens share one (on macOS, two monitors of one model that report no
+/// serial number): the second one seen is "<key>#2", and so on.
+QStringList displayKeys(const mw::native::Capabilities& caps)
+{
+    QStringList keys;
+    QHash<QString, int> seen;
+    for (const mw::native::DisplayInfo& display : caps.displays) {
+        QString key = QString::fromStdString(display.key);
+        const int nth = ++seen[key.toLower()];
+        if (nth > 1) key += QStringLiteral("#%1").arg(nth);
+        keys.append(key);
+    }
+    return keys;
+}
+
+/// Displays are presented to the browser as apps, so an app id has to survive
+/// the round trip and come back meaning the same display — not the same rank:
+/// a display that appears or turns primary moves the others' (on Windows, our
+/// virtual display goes first on its GPU). Each screen keeps an id of its own
+/// (AppSettings::displayAppIds), first given the number its card had when ids
+/// were ranks: its rank plus one, NvApp treating id 0 as uninitialized. 0 for
+/// the entries with no card numbered here: ours, which has its fixed id, and
+/// the one the owner's apps in gamescope share.
+QList<int> displayAppIds(const mw::native::Capabilities& caps)
+{
+    QStringList keys = displayKeys(caps);
+    QList<int> firstIds;
+    for (size_t i = 0; i < caps.displays.size(); ++i) {
+        const mw::native::DisplayInfo& display = caps.displays[i];
+        if (display.key == mw::native::kGamescopeAppDisplayKey || VirtualDisplay::isOurs(display))
+            keys[static_cast<int>(i)].clear();
+        firstIds.append(display.id + 1);
+    }
+    return AppSettings().displayAppIds(keys, firstIds);
+}
 
 /// The owner's apps that ran in gamescope in 0.4.0's betas kept their card
 /// ids, 1100 + their rank; every app since is numbered from
@@ -138,10 +163,24 @@ int displayOf(const mw::native::Capabilities& caps, int appId, QString* why)
             return -1;
         }
     }
-    const int displayId = appIdToDisplayId(appId);
-    for (const mw::native::DisplayInfo& display : caps.displays)
-        if (display.id == displayId) return displayId;
+    if (appId > 0 && appId < AppSettings::kDisplayAppIdEnd) {
+        const QList<int> ids = displayAppIds(caps);
+        for (int i = 0; i < ids.size(); ++i)
+            if (ids.at(i) == appId) return caps.displays[static_cast<size_t>(i)].id;
+    }
     // Almost always a display unplugged since the app list was fetched.
+    if (why) *why = QStringLiteral("That display is no longer connected");
+    return -1;
+}
+
+/// The display @p key names (displayKeys) among @p caps, or -1 with @p why.
+int displayWithKey(const mw::native::Capabilities& caps, const QString& key, QString* why)
+{
+    const QStringList keys = displayKeys(caps);
+    if (!key.isEmpty())
+        for (size_t i = 0; i < caps.displays.size(); ++i)
+            if (keys.at(static_cast<int>(i)).compare(key, Qt::CaseInsensitive) == 0)
+                return caps.displays[i].id;
     if (why) *why = QStringLiteral("That display is no longer connected");
     return -1;
 }
@@ -286,7 +325,23 @@ QString NativeHostBackend::toString(HostAppScreen screen)
     return QString();
 }
 
-int NativeHostBackend::displayForApp(int appId, QString* error)
+QString NativeHostBackend::displayKeyForApp(int appId, QString* error)
+{
+    const mw::native::Capabilities caps = probeEngine();
+    if (!caps.available) {
+        if (error)
+            *error = caps.diagnostic.empty() ? QString::fromUtf8(mw::native::toString(caps.reason))
+                                             : QString::fromStdString(caps.diagnostic);
+        return QString();
+    }
+    const int displayId = displayOf(caps, appId, error);
+    const QStringList keys = displayKeys(caps);
+    for (size_t i = 0; i < caps.displays.size(); ++i)
+        if (caps.displays[i].id == displayId) return keys.at(static_cast<int>(i));
+    return QString();
+}
+
+int NativeHostBackend::displayForKey(const QString& key, QString* error)
 {
     const mw::native::Capabilities caps = probeEngine();
     if (!caps.available) {
@@ -295,7 +350,12 @@ int NativeHostBackend::displayForApp(int appId, QString* error)
                                              : QString::fromStdString(caps.diagnostic);
         return -1;
     }
-    return displayOf(caps, appId, error);
+    return displayWithKey(caps, key, error);
+}
+
+bool NativeHostBackend::isDisplayCard(int appId)
+{
+    return appId > 0 && appId < AppSettings::kDisplayAppIdEnd;
 }
 
 bool NativeHostBackend::isEnabled()
@@ -507,6 +567,7 @@ void NativeHostBackend::getAppList(const QString& seatId, BackendAppListCallback
                                                  QString::fromStdString(b->label)) < 0;
                      });
 
+    const QList<int> ids = displayAppIds(caps);
     QVector<NvApp> apps;
     apps.reserve(caps.displays.size() + 1);
     bool virtualListed = false;
@@ -526,7 +587,11 @@ void NativeHostBackend::getAppList(const QString& seatId, BackendAppListCallback
             const mw::native::GpuInfo* gpu = caps.gpuFor(display);
             return gpu && gpu->supports10Bit;
         }();
-        NvApp app(displayIdToAppId(display.id), QString::fromStdString(display.label), hdrCapable);
+        const int appId = ids.value(static_cast<int>(entry - caps.displays.data()));
+        // A key the settings could not number (or not keep): no card rather
+        // than one that opens another screen.
+        if (appId <= 0) continue;
+        NvApp app(appId, QString::fromStdString(display.label), hdrCapable);
         // A monitor has no cover art, and there is no library here to look it up
         // in. Saying so spares the grid one 404 per display, on every render.
         app.setHasBoxArt(false);
@@ -568,7 +633,10 @@ void NativeHostBackend::launch(const QString& seatId, const LaunchRequest& req,
     }
 
     QString why;
-    const int displayId = displayOf(caps, req.appId, &why);
+    // A worker's display card comes resolved by the server: this process may
+    // not read the settings the cards are numbered in (LaunchRequest).
+    const int displayId = req.displayKey ? displayWithKey(caps, *req.displayKey, &why)
+                                         : displayOf(caps, req.appId, &why);
     if (displayId < 0) {
         cb(false, BackendError::make(BackendError::NotFound, why), MediaDescriptor{});
         return;

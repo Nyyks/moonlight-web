@@ -116,12 +116,21 @@ public:
     /// turns it off.
     static int virtualDisplayAppId();
 
-    /// The display an app id stands for, on this machine now: the display id
-    /// the engine streams, or -1 with @p error saying why (the virtual display
-    /// is off, the display was unplugged, native streaming is unavailable).
-    /// What launch() does, for the one worker that launches nothing: the
-    /// guests' shared feed, which shows the owner's display.
-    static int displayForApp(int appId, QString* error);
+    /// The display an app id stands for, on this machine now, by its
+    /// DisplayInfo::key — or empty with @p error saying why (the virtual
+    /// display is off, the display was unplugged, native streaming is
+    /// unavailable). The server answers it for a worker — a stream's, for a
+    /// display card (LaunchRequest::displayKey), and the guests' shared feed,
+    /// which shows the owner's display: the worker, SYSTEM's maybe, does not
+    /// read the settings file the display cards are numbered in.
+    static QString displayKeyForApp(int appId, QString* error);
+    /// The display id of the display @p key names (displayKeyForApp), in the
+    /// worker's own probe, or -1 with @p error.
+    static int displayForKey(const QString& key, QString* error);
+    /// Whether @p appId is a display's card — numbered in the settings
+    /// (AppSettings::displayAppIds), unlike the virtual display's and the
+    /// owner's apps'.
+    static bool isDisplayCard(int appId);
 
     /// Where the owner's apps (AppSettings::hostApps) open, the same for all
     /// of them on a given machine: in a gamescope of their own (Linux, when

@@ -25,6 +25,7 @@
 #include <QString>
 #include <QVector>
 #include <functional>
+#include <optional>
 
 // Everything a launch/resume needs, flattened so the interface owns no
 // dependency on StreamConfig (which only carries static defaults — the real
@@ -53,6 +54,12 @@ struct LaunchRequest
     /// The client cuts each decoded frame to the size the host announces.
     /// Only the native engine acts on it, as on rideOutLoss.
     bool cropsToFrame = false;
+    /// The display a native display card stands for, resolved by the server
+    /// for a stream worker (NativeHostBackend::displayKeyForApp): the cards
+    /// are numbered in the server's settings file, which a SYSTEM worker does
+    /// not read. Empty when the server found none. Absent, the backend
+    /// resolves appId itself. Only the native engine reads it.
+    std::optional<QString> displayKey;
     QByteArray rikey;
     int rikeyid = 0;
     QString clientUniqueId;

@@ -206,8 +206,9 @@ bool nameLooksVirtual(const std::string& monitorName);
 /// the ONLY thing they are ever asked to pick (§13 of the mission).
 struct DisplayInfo
 {
-    /// Stable within one process run. Carried in SessionConfig::displayId and,
-    /// above this module, used as the app id the browser launches.
+    /// An enumeration index, carried in SessionConfig::displayId. Not stable:
+    /// on Windows a display that appears or turns primary moves the others'.
+    /// Above this module the app id the browser launches is kept per `key`.
     int id = -1;
 
     /// What the user sees, already formatted by the platform layer: the OS's

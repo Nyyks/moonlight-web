@@ -581,6 +581,40 @@ void run_app_settings_tests()
     s.writeAll(all);
     CHECK_EQ(s.readAll().value("custom_key").toInt(), 99);
 
+    // The native host's display cards keep their ids. The N95 of 16/10/2026:
+    // our virtual display, made primary, went first on the Intel GPU, and
+    // "Display 1" moved from rank 0 to rank 1 — its card's id with it.
+    {
+        const QString display1 = "\\\\?\\DISPLAY#BNQ7F6B#5&1d3b2c2&0&UID4352#{e6f07b5f}";
+        const QString vdd = "\\\\?\\DISPLAY#MTT1337#1&15ecd195&0&UID256#{e6f07b5f}";
+        // First seen: each gets the id its card had as a rank (rank + 1).
+        CHECK(s.displayAppIds({display1, vdd}, {1, 2}) == (QList<int>{1, 2}));
+        // Ours turns on and goes first (no card numbered here: empty key):
+        // the others keep theirs at their new ranks.
+        CHECK(s.displayAppIds({QString(), display1, vdd}, {1, 2, 3}) == (QList<int>{0, 1, 2}));
+        // Any case: Windows promises none for a device path.
+        CHECK(s.displayAppIds({vdd.toUpper(), display1}, {1, 2}) == (QList<int>{2, 1}));
+        // A new screen whose rank id is taken gets the lowest free one; one
+        // unplugged keeps its id for when it comes back.
+        CHECK(s.displayAppIds({display1, "dp-3", vdd}, {1, 2, 3}) == (QList<int>{1, 3, 2}));
+        CHECK(s.displayAppIds({display1, vdd}, {1, 2}) == (QList<int>{1, 2}));
+        CHECK(s.displayAppIds({"dp-3"}, {1}) == (QList<int>{3}));
+        CHECK_EQ(s.readAll().value("display_app_ids").toObject().size(), 3);
+        // A kept id wins over whatever rank the screen has now.
+        CHECK(s.displayAppIds({display1}, {9}) == (QList<int>{1}));
+        // Every id taken: a screen not here gives its own up, the lowest.
+        QJsonObject full;
+        for (int id = 1; id < AppSettings::kDisplayAppIdEnd; ++id)
+            full[QString("screen-%1").arg(id)] = id;
+        QJsonObject file = s.readAll();
+        file["display_app_ids"] = full;
+        s.writeAll(file);
+        CHECK(s.displayAppIds({"screen-1", "new"}, {1, 2}) == (QList<int>{1, 2}));
+        CHECK(!s.readAll().value("display_app_ids").toObject().contains("screen-2"));
+        file.remove("display_app_ids");
+        s.writeAll(file);
+    }
+
     // FQDN validation.
     CHECK(AppSettings::isValidFqdn("host.example.com"));
     CHECK(AppSettings::isValidFqdn("a.b"));

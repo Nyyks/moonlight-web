@@ -18,6 +18,8 @@
 #include "SharedFeed.h"
 #include "FeedPublisher.h"
 
+#include "../backend/streambackend/NativeHostBackend.h"
+
 #include <QDebug>
 #include <QJsonObject>
 
@@ -143,6 +145,12 @@ bool SharedFeed::launch(bool relaunch)
     cfg[QStringLiteral("backendType")] = QStringLiteral("native");
     cfg[QStringLiteral("hostUuid")] = m_Spec.hostUuid;
     cfg[QStringLiteral("appId")] = m_Spec.appId;
+    // The display by its key, resolved here: the worker does not read the
+    // settings file the display cards are numbered in.
+    QString why;
+    cfg[QStringLiteral("displayKey")] = NativeHostBackend::displayKeyForApp(m_Spec.appId, &why);
+    if (!why.isEmpty())
+        qWarning() << "[SharedFeed] no display for app" << m_Spec.appId << ":" << why;
     cfg[QStringLiteral("width")] = m_Spec.width;
     cfg[QStringLiteral("height")] = m_Spec.height;
     cfg[QStringLiteral("fps")] = 60;

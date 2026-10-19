@@ -3855,6 +3855,15 @@ int main(int argc, char* argv[])
                     cfg["gamescopeCommand"] = gsCommand;
                 }
             }
+            // A display's card: its display, resolved here, where the cards
+            // are numbered — a SYSTEM worker does not read this settings file.
+            if (host->backendType == NativeHostBackend::typeName() &&
+                NativeHostBackend::isDisplayCard(appId)) {
+                QString why;
+                cfg["displayKey"] = NativeHostBackend::displayKeyForApp(appId, &why);
+                if (!why.isEmpty())
+                    qWarning() << "[Session] no display for app" << appId << ":" << why;
+            }
             // The admin's picture chain for a native Windows session.
             cfg["nativeVideoPipeline"] = appSettings.nativeVideoPipeline();
             // The bench's knobs, read here: a SYSTEM worker's own AppData is
@@ -5459,6 +5468,13 @@ int main(int argc, char* argv[])
                 cfg["gamescopeApp"] = gsName;
                 cfg["gamescopeCommand"] = gsCommand;
             }
+        }
+        // A display's card: its display, resolved here, as the owner path.
+        if (host->backendType == NativeHostBackend::typeName() &&
+            NativeHostBackend::isDisplayCard(appId)) {
+            QString why;
+            cfg["displayKey"] = NativeHostBackend::displayKeyForApp(appId, &why);
+            if (!why.isEmpty()) qWarning() << "[Session] no display for app" << appId << ":" << why;
         }
         // The host's own setting, whoever the viewer is: the chain is the
         // machine's, not the session's.

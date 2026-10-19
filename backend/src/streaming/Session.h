@@ -152,6 +152,10 @@ public:
     /// every path except the native engine.
     void setCropsToFrame(bool crops) { m_CropsToFrame = crops; }
 
+    /// The display a native display card stands for, as the server resolved
+    /// it (LaunchRequest::displayKey). A stream worker's only.
+    void setDisplayKey(const QString& key) { m_DisplayKey = key; }
+
     /// Whether the viewer administers MoonlightWeb here — HttpRequest::isLocal
     /// at /start. Only the native engine acts on it: anyone else is kept out
     /// of the host's windows that run as administrator (InputGate).
@@ -515,6 +519,9 @@ private:
     /// See setCropsToFrame. False, the frame on the encoder's grid, unless the
     /// /start request said otherwise.
     bool m_CropsToFrame = false;
+
+    /// See setDisplayKey. Absent, the backend resolves the app id itself.
+    std::optional<QString> m_DisplayKey;
 
     /// See setViewerAdmin. Defaults to the trusting value only because every
     /// caller sets it; a worker whose parent predates the field is the owner

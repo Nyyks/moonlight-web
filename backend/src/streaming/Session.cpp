@@ -275,6 +275,7 @@ LaunchRequest StreamSession::buildLaunchRequest() const
     req.rideOutLoss = m_RideOutLoss;
     req.refInvalidation = m_RefInvalidation;
     req.cropsToFrame = m_CropsToFrame;
+    req.displayKey = m_DisplayKey;
     req.rikey = m_Config.rikey;
     req.rikeyid = m_Config.rikeyid;
     // Empty means "the provider's default identity"; effectiveUniqueId() would

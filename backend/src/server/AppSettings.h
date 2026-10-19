@@ -361,6 +361,26 @@ public:
     void setVirtualDisplay(const QJsonObject& record);
     void clearVirtualDisplay();
 
+    // ── The native host's display cards ─────────────────────────────────────
+    //
+    // A card per display, whose id a grid fetched earlier sends back: it has
+    // to keep naming the same screen. An enumeration rank does not — on
+    // Windows our virtual display, made primary, goes first on its GPU and
+    // moves the others down one. So each screen keeps the id it got the
+    // first time it was seen. Key "display_app_ids": {"<DisplayInfo::key, in
+    // lower case>": card id}, file-only, state the server writes.
+
+    /// The card id of each display of @p keys (DisplayInfo::key): the one it
+    /// keeps. A screen seen for the first time gets @p firstIds' entry for
+    /// it — what its card was numbered before ids were kept — when that is
+    /// free, else the lowest free id below kDisplayAppIdEnd; with every id
+    /// taken, a screen not among @p keys gives its own up. Written down at
+    /// once. An empty key gets 0.
+    QList<int> displayAppIds(const QStringList& keys, const QList<int>& firstIds);
+    /// Display cards are numbered 1 to kDisplayAppIdEnd - 1; the virtual
+    /// display's card is kDisplayAppIdEnd (NativeHostBackend).
+    static constexpr int kDisplayAppIdEnd = 1000;
+
     // ── Update relay ──────────────────────────────────────────────────────────
     //
     // Whether the periodic update check goes through the project's relay

@@ -291,7 +291,7 @@ int runFeedWorker(const QJsonObject& cfg)
 {
     const int appId = cfg["appId"].toInt();
     QString why;
-    const int displayId = NativeHostBackend::displayForApp(appId, &why);
+    const int displayId = NativeHostBackend::displayForKey(cfg["displayKey"].toString(), &why);
     if (displayId < 0) {
         qWarning() << "[StreamWorker] feed: no display for app" << appId << ":" << why;
         emitEvent({{QStringLiteral("event"), QStringLiteral("response")},
@@ -621,6 +621,10 @@ int runStreamWorker(QCoreApplication& app)
     session->setRefInvalidation(cfg["refInvalidation"].toBool(true));
     // Absent (an older parent, a guest) → no cropping, the frame on the grid.
     session->setCropsToFrame(cfg["cropsToFrame"].toBool(false));
+    // A native display card: its display, as the server resolved it. This
+    // process, SYSTEM's maybe, does not read the file the cards are numbered in.
+    if (cfg.contains(QStringLiteral("displayKey")))
+        session->setDisplayKey(cfg[QStringLiteral("displayKey")].toString());
     // Absent (an older parent) → not an administrator: the safe reading,
     // since the only thing it grants is the host's administrator windows.
     session->setViewerAdmin(cfg["viewerAdmin"].toBool(false));

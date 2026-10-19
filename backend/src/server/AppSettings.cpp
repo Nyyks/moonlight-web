@@ -712,6 +712,66 @@ void AppSettings::clearVirtualDisplay()
     writeAll(obj);
 }
 
+// ── The native host's display cards ──────────────────────────────────────────
+
+static const char kDisplayAppIdsKey[] = "display_app_ids";
+
+QList<int> AppSettings::displayAppIds(const QStringList& keys, const QList<int>& firstIds)
+{
+    QJsonObject obj = readAll();
+    QJsonObject kept = obj.value(kDisplayAppIdsKey).toObject();
+    const auto valid = [](int id) { return id >= 1 && id < kDisplayAppIdEnd; };
+    QSet<int> taken;
+    for (auto it = kept.constBegin(); it != kept.constEnd(); ++it)
+        if (valid(it.value().toInt())) taken.insert(it.value().toInt());
+    QSet<QString> here;
+    for (const QString& key : keys)
+        here.insert(key.toLower());
+
+    QList<int> ids;
+    ids.reserve(keys.size());
+    bool changed = false;
+    for (int i = 0; i < keys.size(); ++i) {
+        const QString key = keys.at(i).toLower();
+        int id = key.isEmpty() ? 0 : kept.value(key).toInt();
+        if (key.isEmpty() || valid(id)) {
+            ids.append(key.isEmpty() ? 0 : id);
+            continue;
+        }
+        id = firstIds.value(i);
+        if (!valid(id) || taken.contains(id)) {
+            id = 0;
+            for (int free = 1; free < kDisplayAppIdEnd && !id; ++free)
+                if (!taken.contains(free)) id = free;
+        }
+        if (!id) {
+            // A screen for every id: the lowest one of a screen not here now
+            // is given up.
+            QString gone;
+            for (auto it = kept.constBegin(); it != kept.constEnd(); ++it) {
+                const int theirs = it.value().toInt();
+                if (here.contains(it.key()) || !valid(theirs) || (id && theirs > id)) continue;
+                id = theirs;
+                gone = it.key();
+            }
+            if (!id) {
+                ids.append(0);
+                continue;
+            }
+            kept.remove(gone);
+        }
+        kept[key] = id;
+        taken.insert(id);
+        ids.append(id);
+        changed = true;
+    }
+    if (changed) {
+        obj[kDisplayAppIdsKey] = kept;
+        writeAll(obj);
+    }
+    return ids;
+}
+
 QList<quint16> AppSettings::rememberedTunnelPorts() const
 {
     QList<quint16> ports;
