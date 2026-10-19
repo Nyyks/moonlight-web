@@ -143,6 +143,40 @@ if [ "$CONSOLE_UID" != "0" ]; then
     echo "chowned $APP to $CONSOLE_USER"
 fi
 
+# ── 2a ter) Remove the copy an older package left in ~/Applications. Before
+#    the package stopped being relocatable (12/10/2026), Installer upgraded a
+#    bundle it found there in place, so such a Mac now has two: the stale one
+#    shows up in Launchpad and Spotlight, and opening it runs an old build
+#    beside the new one. Only this edition's bundle, and only once it proves to
+#    be ours (our identifier, our executable name); anything else of that name
+#    is left alone. A copy still running is stopped first.
+OLD_APP="$CONSOLE_HOME/Applications/$APP_NAME.app"
+OLD_EXE="$OLD_APP/Contents/MacOS/$APP_NAME"
+if [ "$CONSOLE_UID" != "0" ] && [ -d "$OLD_APP" ] && [ ! "$OLD_APP" -ef "$APP" ]; then
+    OLD_ID="$(/usr/bin/defaults read "$OLD_APP/Contents/Info" CFBundleIdentifier 2>/dev/null)"
+    case "$OLD_ID" in
+        com.moonlightweb.*)
+            if [ -x "$OLD_EXE" ]; then
+                OLD_PATTERN="^$OLD_EXE( |\$)"
+                if /usr/bin/pgrep -u "$CONSOLE_UID" -f "$OLD_PATTERN" >/dev/null; then
+                    /usr/bin/pkill -TERM -u "$CONSOLE_UID" -f "$OLD_PATTERN"
+                    for _ in 1 2 3 4 5 6 7 8 9 10; do
+                        /usr/bin/pgrep -u "$CONSOLE_UID" -f "$OLD_PATTERN" >/dev/null || break
+                        /bin/sleep 0.5
+                    done
+                    /usr/bin/pkill -KILL -u "$CONSOLE_UID" -f "$OLD_PATTERN" 2>/dev/null
+                    echo "stopped the old copy running from $OLD_APP"
+                fi
+                /bin/rm -rf "$OLD_APP" && echo "removed the old copy $OLD_APP ($OLD_ID)" \
+                    || echo "WARN: could not remove $OLD_APP"
+            else
+                echo "left $OLD_APP alone: no $APP_NAME executable inside"
+            fi
+            ;;
+        *) echo "left $OLD_APP alone: identifier '$OLD_ID' is not ours" ;;
+    esac
+fi
+
 # ── 2b) Allow the app through the macOS application firewall. It is per-app
 #    (not per-port), so this covers every port the server ever binds — 443, a
 #    per-instance parity port (e.g. when another device already forwards 443 on
