@@ -52,4 +52,24 @@ void run_rxbuf_section_tests()
         CHECK_EQ(verdict(true, false, false, {120}),
                  std::string("taken, none of its codecs named"));
     }
+
+    SECTION("rxbuf section — a GameStream host's session: on unless rxbuf=0");
+    {
+        using mw::rxbuf::offeredFromSpec;
+        CHECK(offeredFromSpec("")); // the product: no native_tuning at all
+        CHECK(offeredFromSpec("rxbuf=1"));
+        CHECK(!offeredFromSpec("rxbuf=0"));
+        // Among the native host's keys, either separator, spaces and case.
+        CHECK(!offeredFromSpec("preset=1,rxbuf=0;retrcut=3"));
+        CHECK(!offeredFromSpec(" RxBuf = 0 "));
+        // The last one said wins, as in the native host's parser.
+        CHECK(offeredFromSpec("rxbuf=0,rxbuf=1"));
+        // Nothing it cannot read turns it off: a value other than 0 or 1, a
+        // native key that is not a pair, a key that only starts the same.
+        CHECK(offeredFromSpec("rxbuf=2"));
+        CHECK(offeredFromSpec("rxbuf=off"));
+        CHECK(offeredFromSpec("rxbuf"));
+        CHECK(offeredFromSpec("rxbuffer=0"));
+        CHECK(offeredFromSpec("garbage,,;"));
+    }
 }

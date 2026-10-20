@@ -26,6 +26,7 @@
 #include "NativeMediaEngine.h"
 #include "NativeBench.h"
 #include "InputMessageCodec.h"
+#include "RxBufSection.h"
 #include "StartChoice.h"
 #include "../backend/NvHTTP.h"
 #include "../backend/NvComputer.h"
@@ -944,6 +945,12 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
             if (!spec.isEmpty() && !parseEncoderTuningSpec(spec, tuning, gpu, error))
                 tuning = mw::native::EncoderTuning{};
             relay->setLinkBench(tuning);
+        } else {
+            // A GameStream host's stream has no video channel either, so Chrome
+            // keeps the same 64 KB socket: the silent section too (rxbuf=0
+            // takes it out), and none of the native host's other link keys.
+            relay->setRxBufVideo(
+                mw::rxbuf::offeredFromSpec(effectiveTuningSpec(m_NativeTuning).toStdString()));
         }
 
         // Which codecs ride an RTP video track (POC Ultra U1.4): the relay

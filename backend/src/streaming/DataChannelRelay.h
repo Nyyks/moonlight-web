@@ -175,6 +175,11 @@ public:
     /// prepare(), like the flags above.
     void setLinkBench(const mw::native::EncoderTuning& tuning);
 
+    /// The silent video section (`rxbuf=`) for a session the native host does
+    /// not serve, which takes none of setLinkBench's other keys. Before
+    /// prepare().
+    void setRxBufVideo(bool on) { m_RxBufVideo = on; }
+
     /// Which codecs ride an RTP video track instead of the video DataChannel
     /// (POC Ultra U1.4): `native:h264+hevc+av1+ultra;other:h264+hevc+av1`, the
     /// section matching @p nativeHost applies. Matched against the engine's
@@ -500,9 +505,9 @@ private:
     // libdatachannel's 1280. Set at setup.
     int m_SctpMtu = 0;
     // `rxbuf=` (plan « Gels du lien », point 1): a silent video section in
-    // the offer, for the browser's receive buffer (setupPeerConnection). The
-    // native host's default since 20/10, through setLinkBench; a GameStream
-    // host's sessions never call it and go without.
+    // the offer, for the browser's receive buffer (setupPeerConnection). On
+    // by default since 20/10: setLinkBench for the native host,
+    // setRxBufVideo for a GameStream host's sessions.
     bool m_RxBufVideo = false;
     std::shared_ptr<rtc::Track> m_RxBufTrack;
     // usrsctp's counters at the last link report, for the share of chunks
