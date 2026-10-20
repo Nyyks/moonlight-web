@@ -411,8 +411,9 @@ qui ne bloquent pas P1 ni P2.1 (labo sur DualRTX) mais entrent avant la porte P2
   pare-feu ouverte pour le créneau et retirée après, résultat en
   `bench-out/scaler-lab/phone-*.json`). `mw-arm` en WebGL2 seulement (pas de WebGPU sur l'Adreno
   618).
-- Une cadence `tick` (60 i/s) pour les cellules `chain-*`, afin de lire les budgets absolus d'un
-  téléphone à la cadence du produit (§4 ter).
+- ~~Une cadence `tick` (60 i/s) pour les cellules `chain-*`~~ : faite le 20/10 (`875c956a`, le
+  labo de P1 ; `runChain` honore `pace=tick`), le prochain passage iPhone avec les cas `-single`
+  en profite (§4 ter).
 - FLIP : une roue `flip-evaluator` pour Python 3.14 (ou une réécriture numpy du LDR-FLIP),
   avant les verdicts C3/C4 de P2.
 - La version compressée des images (boucle WebCodecs → `dump` sur le feed externe) dans la
