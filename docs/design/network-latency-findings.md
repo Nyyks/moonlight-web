@@ -2211,7 +2211,8 @@ HEVC on the RTX), counters read before and after every pass on both sides
   PyroWave, whose frames ride an Opus track: one 40 Mbit/s frame arriving at
   line rate is already more than 64 KB. Bruno's PyroWave stream of 15:27 lost
   0.6 % of its packets on the same cable.
-- **The losses came with the host's build, not the client's load** (22:00-22:17,
+- *(Withdrawn on 20/10: the alternated passes of the next entry lose on every
+  build; the zeros below were luck.)* **The losses came with the host's build, not the client's load** (22:00-22:17,
   the same game clip looped from its start, ~455,000 chunks a pass): the
   bench build `844f1db2` lost nothing, at rest or with all 24 cores of
   DualRTX busy at normal priority, and `rxbuf=1` nothing either; the build
@@ -2221,6 +2222,54 @@ HEVC on the RTX), counters read before and after every pass on both sides
   reach DualRTX's UDP layer and die in Chrome's socket, so that build most
   likely sends bigger bursts; why is not found yet. The A/B of `rxbuf=`
   stays open: on a sender that loses, it says whether 256 KB is enough.
+
+### 20/10/2026 — The cable loses on every build, and `rxbuf=1` stops it (plan « Gels du lien », points 1 and 3)
+
+**Alternated passes**, 08:36-09:24. The same N95 host and DualRTX client as
+on 19/10 (headless Chrome, client at rest), HEVC 1080p60 at 40 Mbit/s fixed,
+the same game clip rewound to its start for every pass, 3 min a pass, 4 arms
+alternated 3 times. Before each pass the bench checked the exe's hash, the
+version served and the hash of the `StreamView.js` served, and cleared the
+client's service-worker cache. Two exes shared `cf7fcedb`'s page:
+`cf7fcedb` itself, and `cf7fcedb` with the virtual-mouse work in progress
+(uncommitted, the "vmouse" build of 19/10).
+
+| Arm | SCTP chunks sent again, per pass (~457,000 sent) |
+|---|---|
+| `cf7fcedb`, no virtual mouse | 154, 5, 6 |
+| vmouse build, `vmouse=1` (its mouse made) | 3, 63, 23 |
+| vmouse build, `vmouse=0` | 171, 7, 151 |
+| vmouse build, `vmouse=1,rxbuf=1` | **0, 0, 0** |
+
+- **The losses do not follow the host's build**: they come in bursts on all
+  three of the arms without `rxbuf`, from 3 to 171 chunks a pass. The zeros of
+  19/10 evening were luck, and the entry above is withdrawn on that point.
+- **`rxbuf=1` takes them away**: 0 in 3 passes out of 3, against 3 or more in
+  each of the 9 others. A silent video section in the offer makes Chrome
+  raise the socket to 256 KB, and the bursts fit. No arm froze or lost a
+  frame on this cable: fast retransmit repaired every loss.
+- Not yet known: whether every browser accepts the extra section (Safari,
+  Firefox, phones, a client without H.264), and whether 256 KB is enough on
+  Wi-Fi, where the Mac's kernel drops 240-330 datagrams in a pass.
+
+**G (`ovfgood=1`) on the Mac**, 08:13-08:35. The Mac's bench Chrome is the
+client, on the house's Freebox Wi-Fi (not the corporate one of Bruno's
+measure 1). The N95 host is on `cf7fcedb`. Settings are measure 1's:
+30 Mbit/s, gaming mode off. Arms alternated, 3 passes each, Roblox stopped
+on the Mac (load 2-4).
+
+| Arm | Freezes, frozen time (longest) | Frames shed | Mean target | Chunks sent again | T3 |
+|---|---|---|---|---|---|
+| no key | 2, 4.5 s (3.0 s) | 3 | 24.0 Mbit/s | 1,314 | 3 |
+| `ovfgood=1` | 3, 2.3 s (1.35 s) | 3 | 24.3 Mbit/s | 1,643 | 3 |
+
+- Neutral: about one shed frame a pass, since `retrcut` already cuts on the
+  retransmissions before the buffer overflows, so G has almost nothing to act
+  on, and it costs nothing either.
+- An earlier try at 07:50 ran with Roblox at 45-65 % of the Mac's CPU: 19 and
+  13 freezes a pass, up to 11.6 s, mean target 6.5 Mbit/s. Without Roblox
+  at 08:13: 0 to 2 freezes. The client's load and the Wi-Fi of that hour
+  cannot be told apart from these passes.
 
 ## 4. The model so far (04/10/2026)
 
@@ -2345,7 +2394,8 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `flood=`, `floodsize=`, `floodchannel=` | useless traffic on channel 3 | |
 | `pace=<n>`, `paceburst=<KB>` | pacing of a frame's chunks | `b2b52486` |
 | `retrcut=<‰>` | governor cuts on SCTP retransmissions; **3 by default on Windows**, 0 off | `e0324f4e`, `55dd9cde` |
-| `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; off unless said) | `352a30ad` |
+| `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; off unless said; neutral on the Mac, 20/10) | `352a30ad` |
+| `rxbuf=0\|1` | a silent video section in the offer, so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 3 passes on the cable, 20/10) | `844f1db2` |
 | `sctpbuf=<KB>` | usrsctp's real send buffer (via `maxMessageSize`) | `dc7f9c72` |
 | `linkhold=<ms>` | hold the picture after a backlog that long (Windows) | `dc7f9c72`, `a511bdd3` |
 | `sctpburst=<n>` | usrsctp's max burst in packets, 0 no limit; **0 by default on the Windows native host**, 10 elsewhere | `01717368`, `2ef56bfe` |
