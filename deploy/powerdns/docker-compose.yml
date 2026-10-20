@@ -41,6 +41,8 @@ services:
     environment:
       MW_DOMAIN: ${MW_DOMAIN}
       MW_PUBLIC_IP: ${MW_PUBLIC_IP}
+      # Optional: every name gets an AAAA too (see .env.sample).
+      MW_PUBLIC_IP6: ${MW_PUBLIC_IP6:-}
       # User-facing key from .env, mapped to the var the official wrapper reads.
       PDNS_AUTH_API_KEY: ${MW_PDNS_API_KEY}
     volumes:

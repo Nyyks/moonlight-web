@@ -578,6 +578,22 @@ here — the VM's IPv6 address and default route are static (netplan,
 `accept_ra` 0) — but on a box that learns its IPv6 route from RAs, set
 `net.ipv6.conf.<if>.accept_ra=2` first or the route expires an hour later.
 
+**Publishing the AAAA records** comes after, one name at a time, with a short
+TTL, by hand in the running pdns (`MW_PUBLIC_IP6` stays empty meanwhile):
+
+```bash
+cd ~/moonlight-web/deploy/powerdns
+D=$(grep ^MW_DOMAIN= .env | cut -d= -f2 | tr -d '[:space:]')
+docker compose exec -T pdns pdnsutil --config-dir=/etc/powerdns \
+  replace-rrset "$D" stream.dev AAAA 300 2001:db8::1 </dev/null      # your address
+docker compose exec -T pdns pdnsutil --config-dir=/etc/powerdns rectify-zone "$D" </dev/null
+```
+
+Once every name has one, setting `MW_PUBLIC_IP6` in `.env` makes `init.sh`
+keep them (it adds only the AAAA a name lacks). `ns1`/`ns2` also need an IPv6
+glue at the registrar: without it, a resolver that cannot reach the IPv4 glue
+cannot reach the zone at all, AAAA or not.
+
 ### Cold backup and restore
 
 `--apply` (here and in `deploy-packages.sh`) first runs `backup-prod.sh`, and

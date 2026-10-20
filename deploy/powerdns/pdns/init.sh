@@ -6,6 +6,7 @@
 #
 #   MW_DOMAIN          parent zone (e.g. example.top)              [required]
 #   MW_PUBLIC_IP       public IPv4 of this DNS box                 [required]
+#   MW_PUBLIC_IP6      public IPv6 of this DNS box                 [optional]
 #   PDNS_AUTH_API_KEY  REST API key (set via MW_PDNS_API_KEY in
 #                      .env; consumed by the official wrapper)     [required]
 set -eu
@@ -77,6 +78,31 @@ ensure_a stream # stream — rendezvous host: bootstrap page + /v1 API (0.3.0+)
 # production's Caddy fronts it. A label of its own so MW_DOMAIN=dev.{domain} on
 # a host moves rendezvous, STUN and the handed-out address together.
 ensure_a stream.dev
+
+# The same names over IPv6, once MW_PUBLIC_IP6 is set — plus ns1/ns2, which
+# also need an IPv6 glue at the registrar. Any AAAA already on a name counts,
+# so one added by hand during a name-by-name rollout is left alone. A refusal
+# only warns: this is optional, and failing here would take the DNS down.
+# Trimmed, because pdnsutil — unlike compose — chokes on a stray space.
+MW_PUBLIC_IP6="$(printf '%s' "${MW_PUBLIC_IP6:-}" | tr -d '[:space:]')"
+ensure_aaaa() {  # ensure_aaaa <name>  — add an AAAA record to MW_PUBLIC_IP6 if absent
+    name="$1"
+    fqdn="$( [ "$name" = "@" ] && echo "$MW_DOMAIN" || echo "${name}.${MW_DOMAIN}" )"
+    if ! $PDNSUTIL list-zone "$MW_DOMAIN" 2>/dev/null \
+         | grep -qiE "^${fqdn}\.?[[:space:]].*[[:space:]]AAAA[[:space:]]"; then
+        echo "[mw] Adding missing AAAA record ${fqdn} -> $MW_PUBLIC_IP6"
+        if $PDNSUTIL add-record "$MW_DOMAIN" "$name" AAAA "$MW_PUBLIC_IP6"; then
+            NEED_RECTIFY=1
+        else
+            echo "[mw] WARN could not add AAAA ${fqdn} -> $MW_PUBLIC_IP6 (check MW_PUBLIC_IP6)"
+        fi
+    fi
+}
+if [ -n "$MW_PUBLIC_IP6" ]; then
+    for n in @ www api dnsapi stats updates metrics stream stream.dev ns1 ns2; do
+        ensure_aaaa "$n"
+    done
+fi
 
 # The domain sends and receives no mail. Saying so in DNS keeps anyone from
 # sending phishing "from" it, which is how a clean domain lands on a domain
