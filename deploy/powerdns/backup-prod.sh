@@ -42,6 +42,10 @@ VOLUMES=(powerdns_pdns_data powerdns_caddy_data powerdns_caddy_config
 SYSTEM=(/etc/ufw /etc/fail2ban /etc/ssh/sshd_config.d /etc/docker/daemon.json)
 
 main() {
+    # `docker compose exec` keeps stdin open even with -T, and would drain
+    # whatever feeds this shell: the rest of a script piped through
+    # `ssh box bash -s`, or the next line pasted into the terminal.
+    exec </dev/null
     if [[ "${1:-}" == "--list" ]]; then
         ls -lh "$DEST"/mw-prod-*.zip 2>/dev/null || echo "no backup in $DEST"
         exit 0

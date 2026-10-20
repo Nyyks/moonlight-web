@@ -66,6 +66,11 @@ line_census() {
 }
 
 main() {
+    # Nothing here reads stdin, and nothing may. backup-prod.sh's `docker
+    # compose exec` keeps it open (-T only drops the TTY): fed a script through
+    # `ssh box bash -s < script`, it swallowed the rest of that script after
+    # the checkout, and in a terminal it would take the next pasted line.
+    exec </dev/null
     local ref="${1:-}" mode="${2:-}"
     if [[ -z "$ref" || "$ref" == "-h" || "$ref" == "--help" ]]; then
         sed -n '2,7p' "$0"
