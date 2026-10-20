@@ -1302,9 +1302,10 @@ upscalers spatiaux.
 - [~] Lignes de base : DualRTX fait (l'Arc A380 n'est plus énumérée) ; `mw-arm` (WebGL2), Mac M1, iPhone 13 Pro, realme Note 60 à jouer ; Smooth2D (Canvas2D) non mesuré, hors WebGPU
 - [x] Rapport P0 et porte : tenue pour l'ordinateur (dispersion ≤ 2,6 %, pas de passe 0 en SDR)
 
-**P1 — Contournement 1:1**
-- [ ] Détection par image, pipelines de présentation, gouverneur en pause, overlay, dans `WebGpuRenderer` et `WebGlRenderer` [`medium`]
-- [ ] Tests `vitest` (logique pure) [`low`]
+**P1 — Contournement 1:1** (code le 20/10/2026, commit `36edf6ec`)
+- [x] Détection par image (`scaleRegime.js`, la règle de taille des deux renderers, partagée), copie directe (la passe 0 HDR existe dans ses deux cibles dès la création), gouverneur en pause (`passthrough` dans l'observation : les minuteries repartent de zéro), overlay « Off (1:1) », dans `WebGpuRenderer` et `WebGlRenderer`
+- [x] Tests `vitest` : `scaleRegime.test.js` (ajustement, plafond, 1:1 exact contre presque-1:1), `EnhancerGovernor.test.js` (ni descente ni remontée sur une fenêtre de copies, horloge remise à la reprise)
+- [ ] Labo (`scaler_lab.py --p1`) : chaîne du produit à 1:1 = coût de `off` (C7, ± 5 %), passage 1:1 ↔ ×2 à chaque image sans image perdue [`high`]
 - [ ] Mesure plein écran DualRTX : blit WebGPU, blit WebGL2, Canvas2D, au clic → photon [`high`]
 - [ ] Décision de Bruno : blit, ou deux canvas (hors v0.4.1 sinon)
 
