@@ -324,11 +324,15 @@ bool DxgiDuplication::updateCursor(const DXGI_OUTDUPL_FRAME_INFO& info)
         const int oldX = m_Cursor.x;
         const int oldY = m_Cursor.y;
 
+        // Where the pointer's image goes. Desktop Duplication gives its top-left
+        // corner already, not the hotspot: subtracting the hotspot again put
+        // every pointer that is not an arrow above and left of its place in the
+        // picture, by its own hotspot — the text I-beam, the resize arrows
+        // (N95, 19/10/2026, game mode). Microsoft's DesktopDuplication sample
+        // draws the shape at this position as it is.
         bool visible = news && info.PointerPosition.Visible != FALSE;
-        int px = news ? static_cast<int>(info.PointerPosition.Position.x)
-                      : m_Cursor.x + m_CursorHotspotX;
-        int py = news ? static_cast<int>(info.PointerPosition.Position.y)
-                      : m_Cursor.y + m_CursorHotspotY;
+        int px = news ? static_cast<int>(info.PointerPosition.Position.x) : m_Cursor.x;
+        int py = news ? static_cast<int>(info.PointerPosition.Position.y) : m_Cursor.y;
 
         // Desktop Duplication reports the pointer HIDDEN, at (0, 0), for a
         // pointer Windows is still showing: seen on Windows 11 for the whole
@@ -357,14 +361,17 @@ bool DxgiDuplication::updateCursor(const DXGI_OUTDUPL_FRAME_INFO& info)
                 const int rh = m_DesktopRect.height();
                 const double sx = rw > 0 && m_Width > 0 ? static_cast<double>(m_Width) / rw : 1.0;
                 const double sy = rh > 0 && m_Height > 0 ? static_cast<double>(m_Height) / rh : 1.0;
-                px = static_cast<int>((ci.ptScreenPos.x - m_DesktopRect.left) * sx);
-                py = static_cast<int>((ci.ptScreenPos.y - m_DesktopRect.top) * sy);
+                // Windows gives the hotspot, as for WGC (Win32Cursor).
+                const int hx = static_cast<int>((ci.ptScreenPos.x - m_DesktopRect.left) * sx);
+                const int hy = static_cast<int>((ci.ptScreenPos.y - m_DesktopRect.top) * sy);
+                px = hx - m_CursorHotspotX;
+                py = hy - m_CursorHotspotY;
                 visible = true;
                 if (!m_HiddenOverridden && !m_HiddenOverrideLogged) {
                     m_HiddenOverrideLogged = true;
                     log::info("[native] cursor: Desktop Duplication reports the pointer hidden "
                               "while Windows shows it at " +
-                              std::to_string(px) + "," + std::to_string(py) +
+                              std::to_string(hx) + "," + std::to_string(hy) +
                               " — Windows' word kept (once per session)");
                 }
             }
@@ -375,11 +382,8 @@ bool DxgiDuplication::updateCursor(const DXGI_OUTDUPL_FRAME_INFO& info)
 
         m_Cursor.visible = visible;
         m_Cursor.inImage = m_HiddenOverridden;
-        // Position is given for the hotspot; the image starts above and left of
-        // it. Drawing at the hotspot would offset every cursor by its own
-        // shape — an arrow would look right and a crosshair would not.
-        m_Cursor.x = px - m_CursorHotspotX;
-        m_Cursor.y = py - m_CursorHotspotY;
+        m_Cursor.x = px;
+        m_Cursor.y = py;
 
         changed = changed || m_Cursor.visible != wasVisible || m_Cursor.inImage != wasInImage ||
                   (m_Cursor.visible && (m_Cursor.x != oldX || m_Cursor.y != oldY));
