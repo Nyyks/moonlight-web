@@ -176,6 +176,17 @@ inline bool putsOwnBackItself(uint64_t own, uint64_t registry)
     return (a > b ? a - b : b - a) > 1;
 }
 
+/// Whether the holder sets its client mode @p set again on a display that
+/// runs @p now (0 when unread): the display was put in another size under
+/// its stream — our virtual display turning off puts the others back in the
+/// layout it saved. Its rate alone does not count: the picture is still the
+/// client's, pixel for pixel.
+inline bool setsClientModeAgain(uint64_t set, uint64_t now)
+{
+    if (set == 0 || now == 0) return false;
+    return widthOf(set) != widthOf(now) || heightOf(set) != heightOf(now);
+}
+
 } // namespace modehold
 
 /// One session's standing on one display's mode (Windows only).

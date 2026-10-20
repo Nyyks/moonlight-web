@@ -144,6 +144,22 @@ void run_display_mode_hold_tests()
         CHECK(!putsOwnBackItself(0, mode(800, 600, 30, 32)));
     }
 
+    SECTION("Display mode hold — the client's mode set again once the display is in another size");
+    {
+        // The N95 of 19/10/2026: Display 2 in the client's 1920x1080 at
+        // 244 Hz, put back in 2560x1440 at 120 Hz by our virtual display
+        // turning off under the stream.
+        const uint64_t set = mode(1920, 1080, 244, 32);
+        CHECK(setsClientModeAgain(set, mode(2560, 1440, 120, 32)));
+        CHECK(setsClientModeAgain(set, mode(1920, 1200, 244, 32)));
+        // The same size: the picture is still the client's, whatever the rate.
+        CHECK(!setsClientModeAgain(set, mode(1920, 1080, 244, 32)));
+        CHECK(!setsClientModeAgain(set, mode(1920, 1080, 120, 32)));
+        // No mode set, or the display's unread.
+        CHECK(!setsClientModeAgain(0, mode(2560, 1440, 120, 32)));
+        CHECK(!setsClientModeAgain(set, 0));
+    }
+
     SECTION("Display mode hold — nobody holds, or no claim made: nothing to keep");
     {
         CHECK(!holds(0, 0));

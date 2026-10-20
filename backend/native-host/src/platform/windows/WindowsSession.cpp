@@ -1041,6 +1041,8 @@ private:
         m_ModeHold = std::move(hold);
         m_ModeChangedDevice = name;
         m_ModeChangedHz = static_cast<int>(wanted.dmDisplayFrequency);
+        m_ModeSet = platform::modehold::mode(wanted.dmPelsWidth, wanted.dmPelsHeight,
+                                             wanted.dmDisplayFrequency, wanted.dmBitsPerPel);
         log::info("[native] " + display.osName + " put in " + std::to_string(wanted.dmPelsWidth) +
                   "x" + std::to_string(wanted.dmPelsHeight) + " @ " +
                   std::to_string(wanted.dmDisplayFrequency) + " Hz for the session (" +
@@ -1081,6 +1083,8 @@ private:
         m_ModeHold = std::move(hold);
         m_ModeChangedDevice = name;
         m_ModeChangedHz = 0;
+        m_ModeSet = platform::modehold::mode(now.dmPelsWidth, now.dmPelsHeight,
+                                             now.dmDisplayFrequency, now.dmBitsPerPel);
         log::info("[native] " + display.osName + " is in " + std::to_string(now.dmPelsWidth) + "x" +
                   std::to_string(now.dmPelsHeight) + " @ " +
                   std::to_string(now.dmDisplayFrequency) +
@@ -1114,6 +1118,7 @@ private:
         m_ModeHold.reset();
         m_ModeChangedDevice.clear();
         m_ModeChangedHz = 0;
+        m_ModeSet = 0;
     }
 
     /// The display's own mode, kept since a session first changed it, set
@@ -1157,6 +1162,47 @@ private:
         log::info("[native] the display's own mode is back: " + spelled(own) +
                   (inRegistry ? ", where Windows' registry has " + spelled(inRegistry)
                               : std::string(", Windows' registry mode unread")));
+        return true;
+    }
+
+    /// The client's mode set again on the display this session put in it,
+    /// found in another size as the capture comes back — while the session
+    /// still holds that mode (DisplayModeHold.h): our virtual display turning
+    /// off under a "Match my screen" stream of another display put that one
+    /// back in its own mode, and the stream went on in it (N95, 19/10/2026).
+    /// True when a change was tried, whatever came of it: once per restart.
+    bool setClientModeAgain()
+    {
+        if (m_ModeChangedDevice.empty() || m_ModeSet == 0) return false;
+        const platform::DisplayModeHold::Turn turn(m_ModeHold.get());
+        // Another session's now, or no holder to tell: left as it is.
+        if (!m_ModeHold || !m_ModeHold->valid() || !m_ModeHold->held()) return false;
+        DEVMODEW now{};
+        now.dmSize = sizeof(now);
+        if (!::EnumDisplaySettingsExW(m_ModeChangedDevice.c_str(), ENUM_CURRENT_SETTINGS, &now, 0))
+            return false;
+        const uint64_t running = platform::modehold::mode(now.dmPelsWidth, now.dmPelsHeight,
+                                                          now.dmDisplayFrequency, now.dmBitsPerPel);
+        if (!platform::modehold::setsClientModeAgain(m_ModeSet, running)) return false;
+        DEVMODEW again{};
+        again.dmSize = sizeof(again);
+        again.dmPelsWidth = platform::modehold::widthOf(m_ModeSet);
+        again.dmPelsHeight = platform::modehold::heightOf(m_ModeSet);
+        again.dmDisplayFrequency = platform::modehold::hzOf(m_ModeSet);
+        again.dmBitsPerPel = platform::modehold::bitsPerPixelOf(m_ModeSet);
+        again.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_BITSPERPEL;
+        const std::string sizes = std::to_string(again.dmPelsWidth) + "x" +
+                                  std::to_string(again.dmPelsHeight) + ", found in " +
+                                  std::to_string(now.dmPelsWidth) + "x" +
+                                  std::to_string(now.dmPelsHeight);
+        const LONG rc = ::ChangeDisplaySettingsExW(m_ModeChangedDevice.c_str(), &again, nullptr,
+                                                   CDS_FULLSCREEN, nullptr);
+        if (rc == DISP_CHANGE_SUCCESSFUL)
+            log::info("[native] the display is in the client's mode again: " + sizes);
+        else
+            log::warning("[native] the client's mode, " + sizes +
+                         ", could not be set again (ChangeDisplaySettingsEx " + std::to_string(rc) +
+                         ") — the stream follows the display");
         return true;
     }
 
@@ -1717,11 +1763,16 @@ private:
         int64_t nextTryUs = lostUs;
         int failures = 0;
         bool saidStillWaiting = false;
+        // Tried once per restart (setClientModeAgain).
+        bool modeSetAgain = false;
         for (;;) {
             if (!m_Running.load()) return Restart::Stopped;
 
             int64_t nowUs = steadyNowUs();
             if (nowUs >= nextTryUs) {
+                // The display back in another size than the client's mode
+                // this session holds: that mode first, then the duplication.
+                if (!modeSetAgain) modeSetAgain = setClientModeAgain();
                 // Through openCapture(), not m_Capture->start(): the reason the
                 // display went away may be the reason Desktop Duplication can
                 // serve it again — or stop being able to. A driver restart or a
@@ -4435,6 +4486,9 @@ private:
     /// Empty / 0 when none was.
     std::wstring m_ModeChangedDevice;
     int m_ModeChangedHz = 0;
+    /// That mode, set or taken over, in one word (DisplayModeHold.h): what
+    /// setClientModeAgain() puts back. 0 when none.
+    uint64_t m_ModeSet = 0;
     /// Whether that mode is still this session's to put back (DisplayModeHold.h).
     std::unique_ptr<platform::DisplayModeHold> m_ModeHold;
     encode::EncodeLoadCap m_LoadCap;
