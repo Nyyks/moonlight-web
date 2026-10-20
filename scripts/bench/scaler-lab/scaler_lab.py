@@ -60,7 +60,7 @@ DEFAULT_CASES = [
 # paced like the product; then the passage 1:1 <-> x2 on every other draw.
 P1_CASES = [
     ("x1-chain", "in=2560x1440&out=2560x1440&content=text"
-                 "&cells=blit,tex-s1,blit+sgsr-repo,blit+nis,blit+fsr1,chain-off,chain-sgsr,chain-nis,chain-fsr1&rounds=2"),
+                 "&cells=blit,tex-s1,blit%2Bsgsr-repo,blit%2Bnis,blit%2Bfsr1,chain-off,chain-sgsr,chain-nis,chain-fsr1&rounds=2"),
     ("x1-chain-tick", "in=2560x1440&out=2560x1440&content=text"
                       "&cells=chain-off,chain-sgsr,chain-nis,chain-fsr1&pace=tick&rounds=2"),
     ("x2-flip", "in=1280x720&out=2560x1440&content=text"
