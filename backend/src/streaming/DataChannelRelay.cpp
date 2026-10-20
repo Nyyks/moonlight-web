@@ -982,7 +982,7 @@ bool DataChannelRelay::setRemoteDescription(const std::string& sdp)
                     << "| Ultra RTP track"
                     << (m_UltraTrack ? (ultra ? "accepted" : "refused") : "not offered");
         }
-        // The bench's silent section: whether the browser kept it, and with
+        // The silent section (rxbuf=): whether the browser kept it, and with
         // which codec. Safari, iOS and the TVs have no console to ask.
         if (m_RxBufTrack) {
             bool found = false, removed = false, inactive = false;
@@ -997,7 +997,7 @@ bool DataChannelRelay::setRemoteDescription(const std::string& sdp)
                 inactive = media->direction() == rtc::Description::Direction::Inactive;
                 pts = media->payloadTypes();
             }
-            qInfo() << "[DataChannelRelay] bench rxbuf=1: the silent video section"
+            qInfo() << "[DataChannelRelay] rxbuf: the silent video section"
                     << QString::fromStdString(mw::rxbuf::verdict(found, removed, inactive, pts));
         }
         qInfo() << "[DataChannelRelay] Remote description set — starting ICE timeout ("
@@ -1209,10 +1209,11 @@ void DataChannelRelay::createDataChannels()
     // Before the first createDataChannel(), like the audio track (above).
     createRtpVideoTracks();
 
-    // The bench's `rxbuf=1` (plan « Gels du lien », point 1): a video section
-    // nothing is ever sent on. Chrome's UDP socket keeps 64 KB of receive
-    // buffer (services/network/p2p/socket_udp.cc) unless a video channel asks
-    // for more, 256 KB (WebRTC-ReceiveBufferSize), on the transport the whole
+    // `rxbuf=` (plan « Gels du lien », point 1; the native host's default
+    // since 20/10, rxbuf=0 takes it out): a video section nothing is ever
+    // sent on. Chrome's UDP socket keeps 64 KB of receive buffer
+    // (services/network/p2p/socket_udp.cc) unless a video channel asks for
+    // more, 256 KB (WebRTC-ReceiveBufferSize), on the transport the whole
     // bundle shares: a DataChannel stream has none, and a 40 Mbit/s frame
     // arriving at line rate is more than 64 KB. The page answers it like any
     // RTP video section, and nothing arrives there. Offered beside the bench's
@@ -1225,7 +1226,7 @@ void DataChannelRelay::createDataChannels()
         std::random_device rd;
         desc.addSSRC(static_cast<uint32_t>(rd()), "rxbuf");
         m_RxBufTrack = m_Pc->addTrack(desc);
-        qInfo() << "[DataChannelRelay] bench rxbuf=1: a silent video section offered, for the "
+        qInfo() << "[DataChannelRelay] rxbuf: a silent video section offered, for the "
                    "browser's UDP receive buffer";
     }
 

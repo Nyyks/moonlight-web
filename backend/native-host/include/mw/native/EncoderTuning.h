@@ -554,8 +554,11 @@ struct EncoderTuning
     /// lien », point 1). Chrome's UDP socket keeps 64 KB of receive buffer
     /// unless a video channel raises it, to 256 KB (WebRTC-ReceiveBufferSize):
     /// a DataChannel stream has no video channel, and one 40 Mbit/s frame
-    /// arriving at line rate is more than 64 KB. false, the product: none.
-    bool rxBufVideo = false;
+    /// arriving at line rate is more than 64 KB. true, the product since
+    /// 20/10/2026: Chrome's losses on the cable gone, and Firefox, Safari
+    /// (macOS, iOS) and Chrome on Android keep the section unharmed. rxbuf=0
+    /// takes it out.
+    bool rxBufVideo = true;
     /// Each audio packet's way through the host — the pacer's tick, its queue,
     /// the frame's peak, the relay thread, the RTP track — written as a CSV
     /// next to the log when the session ends (plan « le son et la priorité des
@@ -596,8 +599,8 @@ struct EncoderTuning
                vplGamingScenario == Choice::Default && vplWinBrcFrames == 0 &&
                vplRateControl == VplRateControl::Default && vplIntraRefreshQpDelta == 0 &&
                intraRefreshDist == 0 && linkGovernor == Choice::Default && overflowGood < 0 &&
-               nameLinkDrops == Choice::Default && vbvFrames == 0 && dpbFrames == 0 &&
-               !rxBufVideo && fallback == Fallback::None && pipeline == VideoPipeline::Auto &&
+               nameLinkDrops == Choice::Default && vbvFrames == 0 && dpbFrames == 0 && rxBufVideo &&
+               fallback == Fallback::None && pipeline == VideoPipeline::Auto &&
                conv12 == ConvertQueue12::Default && enc12 == Encoder12::Default &&
                rc12 == RateControl12::Default && reencode12 == Choice::Default &&
                reencodeFit12 == Choice::Default && interFloor12 == 0 &&
@@ -736,7 +739,7 @@ struct EncoderTuning
         if (sctpMaxBurst >= 0) add("sctpburst=" + std::to_string(sctpMaxBurst));
         if (sctpScheduler >= 0) add("sctpss=" + std::to_string(sctpScheduler));
         if (sctpMtu > 0) add("sctpmtu=" + std::to_string(sctpMtu));
-        if (rxBufVideo) add("rxbuf=1");
+        if (!rxBufVideo) add("rxbuf=0");
         if (audioLog) add("audiolog=1");
         if (audioFrameMs > 0) add("audioframe=" + std::to_string(audioFrameMs));
         if (audioGraceUs >= 0) add("audiograce=" + std::to_string(audioGraceUs) + "us");

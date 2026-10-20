@@ -252,7 +252,7 @@ const char* const kUsage =
     "                    a LAN that holds 1500 only (plan Wi-Fi W2.6)\n"
     "  rxbuf=0|1         the offer carries a silent video section, so that Chrome's video\n"
     "                    channel raises the UDP socket's receive buffer from 64 to 256 KB\n"
-    "                    (plan Gels du lien, point 1)\n"
+    "                    (plan Gels du lien, point 1); 1, the default since 20/10\n"
     "  linkhold=<ms>     a picture held, not encoded, once video has waited outside usrsctp\n"
     "                    that long, 1-100; the freshest goes once it drained (Windows host;\n"
     "                    with sctpbuf=)\n"

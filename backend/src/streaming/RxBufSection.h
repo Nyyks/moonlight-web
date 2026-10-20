@@ -20,8 +20,9 @@
 #include <string>
 #include <vector>
 
-/// The bench's `rxbuf=1` (plan « Gels du lien », point 1): the codecs of the
-/// silent video section, and what the browser's answer made of it.
+/// `rxbuf=` (plan « Gels du lien », point 1; the native host's default since
+/// 20/10): the codecs of the silent video section, and what the browser's
+/// answer made of it.
 ///
 /// The section is only there for Chrome's video channel, which raises the
 /// bundle's UDP receive buffer from 64 to 256 KB; nothing is ever sent on it.

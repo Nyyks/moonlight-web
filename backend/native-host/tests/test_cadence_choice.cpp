@@ -255,15 +255,17 @@ void run_cadence_choice_tests()
         CHECK_EQ(t.describe(), std::string("ovfgood=1"));
     }
 
-    // rxbuf= (plan « Gels du lien », point 1): no silent video section unless said.
-    SECTION("rxbuf= — off unless said, named when on");
+    // rxbuf= (plan « Gels du lien », point 1): the silent video section is the
+    // product since 20/10, and rxbuf=0, the one way out, is what gets named.
+    SECTION("rxbuf= — on unless said, named when off");
     {
         EncoderTuning t;
-        CHECK(!t.rxBufVideo);
+        CHECK(t.rxBufVideo);
         CHECK(t.isDefault());
-        t.rxBufVideo = true;
+        CHECK_EQ(t.describe(), std::string());
+        t.rxBufVideo = false;
         CHECK(!t.isDefault());
-        CHECK_EQ(t.describe(), std::string("rxbuf=1"));
+        CHECK_EQ(t.describe(), std::string("rxbuf=0"));
     }
 
     // usrsctp's max burst (plan Wi-Fi W2.5): libdatachannel's 10 unless said,

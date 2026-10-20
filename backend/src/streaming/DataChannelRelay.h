@@ -499,8 +499,10 @@ private:
     // `sctpmtu=` (plan Wi-Fi W2.6): the connection's path MTU in bytes, 0
     // libdatachannel's 1280. Set at setup.
     int m_SctpMtu = 0;
-    // `rxbuf=1` (plan « Gels du lien », point 1): a silent video section in
-    // the offer, for the browser's receive buffer (setupPeerConnection).
+    // `rxbuf=` (plan « Gels du lien », point 1): a silent video section in
+    // the offer, for the browser's receive buffer (setupPeerConnection). The
+    // native host's default since 20/10, through setLinkBench; a GameStream
+    // host's sessions never call it and go without.
     bool m_RxBufVideo = false;
     std::shared_ptr<rtc::Track> m_RxBufTrack;
     // usrsctp's counters at the last link report, for the share of chunks
