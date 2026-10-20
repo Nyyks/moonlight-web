@@ -653,6 +653,7 @@ export async function runLab(p, log = () => {}) {
   const codec = p.codec || "avc";
   const pace = p.pace || "back";
   const period = Number(p.period || 1000 / 60);
+  const flip = p.flip === "1";
   const batch = Number(p.batch || 16);
   const batches = Number(p.batches || 8);
   const warm = Number(p.warm || 2);
@@ -1136,6 +1137,10 @@ export async function runLab(p, log = () => {}) {
 
   // The product's renderer, on an OffscreenCanvas, one draw per iteration;
   // its passes stamped by the hooks, its draw() awaited as the page does.
+  // pace=tick spaces the draws by `period`, like the product's frames; flip=1
+  // alternates the output size between the page's and the input's (1:1) from
+  // one draw to the next: the renderer's 1:1 copy (P1) and the passage both
+  // ways, with the pass count and the draw time of every iteration.
   const renderers = new Map();
   async function chainRenderer(algo) {
     if (renderers.has(algo)) return renderers.get(algo);
@@ -1151,8 +1156,19 @@ export async function runLab(p, log = () => {}) {
     const r = await chainRenderer(cell.algo);
     const times = [];
     const walls = [];
-    let passes = 0;
+    const passSeq = [];
+    let copies = 0;
+    const start = performance.now();
     for (let i = 0; i < iters; i++) {
+      if (flip) {
+        if (i % 2) r.setOutputSize(inW, inH);
+        else r.setOutputSize(outW, outH);
+      }
+      if (pace === "tick") {
+        const due = start + i * period;
+        const now = performance.now();
+        if (due > now) await new Promise((res) => setTimeout(res, due - now));
+      }
       HOOK.active = stamp;
       HOOK.q = 0;
       const f = nextFrame().clone();
@@ -1160,20 +1176,26 @@ export async function runLab(p, log = () => {}) {
       await r.draw(f);
       walls.push(performance.now() - t0);
       HOOK.active = false;
+      if (r.passthrough === true) copies++;
+      let np = 0;
       if (stamp && HOOK.q && HOOK.dev) {
         const q = HOOK.q;
         await HOOK.read.mapAsync(GPUMapMode.READ, 0, q * 8);
         const a = new BigInt64Array(HOOK.read.getMappedRange(0, q * 8));
-        for (let k = 0; k < q; k += 2)
-          times.push(Number(a[k + 1] - a[k]) / 1e6);
+        const ts = [];
+        for (let k = 0; k < q; k += 2) ts.push(Number(a[k + 1] - a[k]) / 1e6);
         HOOK.read.unmap();
-        passes = q / 2;
+        np = q / 2;
+        times.push(ts);
       }
+      passSeq.push(np);
     }
+    if (flip) r.setOutputSize(outW, outH);
     return {
       wall: walls.reduce((a, b) => a + b, 0),
-      times: stamp && times.length ? times : null,
-      passes: passes || 1,
+      iterTimes: stamp && times.length ? times : null,
+      passSeq,
+      copies,
       iters,
       draws: walls,
     };
@@ -1238,7 +1260,19 @@ export async function runLab(p, log = () => {}) {
         const m = await measure(cell, iters, hasTs);
         wallMs += m.wall;
         n += m.iters;
-        if (m.times) {
+        if (m.iterTimes) {
+          // the chain: every iteration its own passes, whose count may change
+          // from one draw to the next (flip=1); totals also kept by that count
+          for (const ts of m.iterTimes) {
+            let s = 0;
+            ts.forEach((t, k) => {
+              s += t;
+              (perPass[k] ||= []).push(t);
+            });
+            totals.push(s);
+            ((cell.byPasses ||= {})[ts.length] ||= []).push(s);
+          }
+        } else if (m.times) {
           const np = m.passes;
           for (let i = 0; i + np <= m.times.length; i += np) {
             let s = 0;
@@ -1250,6 +1284,8 @@ export async function runLab(p, log = () => {}) {
           }
         }
         if (m.draws) (cell.draws ||= []).push(...m.draws);
+        if (m.passSeq) (cell.passSeq ||= []).push(...m.passSeq);
+        if (m.copies !== undefined) cell.copies = (cell.copies || 0) + m.copies;
       }
       if (!results.has(cell.name)) results.set(cell.name, { cell, rounds: [] });
       results
@@ -1302,6 +1338,17 @@ export async function runLab(p, log = () => {}) {
           : null,
       wallPerIter,
       draw: r.cell.draws ? stats(r.cell.draws) : null,
+      // the chain: how many draws had which pass count, how many were the
+      // renderer's 1:1 copy, and the GPU total by pass count (flip=1)
+      passSeq: r.cell.passSeq
+        ? r.cell.passSeq.reduce((h, k) => ((h[k] = (h[k] || 0) + 1), h), {})
+        : null,
+      copies: r.cell.copies === undefined ? null : r.cell.copies,
+      byPasses: r.cell.byPasses
+        ? Object.fromEntries(
+            Object.entries(r.cell.byPasses).map(([k, v]) => [k, stats(v)]),
+          )
+        : null,
     });
   }
 
@@ -1363,6 +1410,7 @@ export async function runLab(p, log = () => {}) {
       sets,
       power: p.power || null,
       fallback: p.fallback === "1",
+      flip,
     },
     frames: frameInfo,
     elapsedMs: elapsed,

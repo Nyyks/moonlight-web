@@ -54,6 +54,19 @@ DEFAULT_CASES = [
     ("x2-text-tick", "in=1280x720&out=2560x1440&content=text&set=feed,base&pace=tick&batches=6"),
 ]
 
+# The P1 set (--p1; upscaler-mwsr.md §5, gate C7): the product's chain at 1:1,
+# where every pass must now cost what 'off' costs, next to what the same passes
+# cost at scale 1 before (pass 0 + kernel on the same frame); the same chain
+# paced like the product; then the passage 1:1 <-> x2 on every other draw.
+P1_CASES = [
+    ("x1-chain", "in=2560x1440&out=2560x1440&content=text"
+                 "&cells=blit,tex-s1,blit+sgsr-repo,blit+nis,blit+fsr1,chain-off,chain-sgsr,chain-nis,chain-fsr1&rounds=2"),
+    ("x1-chain-tick", "in=2560x1440&out=2560x1440&content=text"
+                      "&cells=chain-off,chain-sgsr,chain-nis,chain-fsr1&pace=tick&rounds=2"),
+    ("x2-flip", "in=1280x720&out=2560x1440&content=text"
+                "&cells=chain-off,chain-sgsr,chain-nis,chain-fsr1&flip=1&rounds=2"),
+]
+
 
 class LabHandler(Handler):
     """The repository, C:\\Test under /test/, the output directory under /__dir/,
@@ -128,6 +141,17 @@ def fmt(x, w=7, d=3):
     return ("%*.*f" % (w, d, x)) if isinstance(x, (int, float)) else " " * (w - 1) + "-"
 
 
+def chain_note(c):
+    """A chain cell's extras: the draws that were the renderer's 1:1 copy, the
+    pass count of each draw, and the GPU total by pass count (flip=1)."""
+    seq = c.get("passSeq") or {}
+    parts = ["1:1 copies %s/%s" % (c.get("copies"), sum(seq.values())),
+             "passes %s" % json.dumps(seq, sort_keys=True)]
+    for k, g in sorted((c.get("byPasses") or {}).items()):
+        parts.append("%s-pass p50 %s" % (k, fmt((g or {}).get("p50"), 1)))
+    return " / ".join(parts)
+
+
 def print_result(name, res):
     if "error" in res:
         print("%-16s ERROR %s" % (name, res["error"][:800]))
@@ -144,6 +168,8 @@ def print_result(name, res):
             c["name"], c.get("passes") or 0, fmt(g.get("p50"), 8), fmt(g.get("p90"), 8), fmt(g.get("p99"), 8),
             fmt(c.get("disp"), 7, 1), fmt(c.get("wallPerIter"), 9),
             " ".join(fmt(x, 6) for x in (c.get("perPass") or []))))
+        if c.get("feed") == "chain":
+            print("  %-18s %s" % ("", chain_note(c)))
     if res.get("errors"):
         for e in res["errors"][:12]:
             print("  error:", e[:300])
@@ -229,6 +255,8 @@ def md_table(tag, runs):
             lines.append("| %s | %d | %s | %s | %s | %s | %s | %s |" % (
                 c["name"], c.get("passes") or 0, fmt(g.get("p50"), 1), fmt(g.get("p90"), 1), fmt(g.get("p99"), 1),
                 fmt(c.get("disp"), 1, 1), fmt(c.get("wallPerIter"), 1), " / ".join(fmt(x, 1) for x in (c.get("perPass") or []))))
+            if c.get("feed") == "chain":
+                lines.append("| | | | | | | | %s |" % chain_note(c))
         if res.get("errors"):
             lines += ["", "Errors:", ""] + ["- `%s`" % e[:300] for e in res["errors"][:20]]
         lines.append("")
@@ -242,6 +270,7 @@ def main():
     ap.add_argument("--extra", default="", help="query appended to every case (rounds=1, shot=1, codec=none...)")
     ap.add_argument("--power", default="", help="high-performance or low-power (the adapter asked for)")
     ap.add_argument("--swiftshader", action="store_true", help="the software adapter (fallback), for a first run")
+    ap.add_argument("--p1", action="store_true", help="the P1 set (the chain at 1:1, the passage 1:1 <-> x2) instead of P0's")
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab"))
     ap.add_argument("--chrome-arg", action="append", default=[])
     ap.add_argument("--headed", default="", help="X,Y,W,H: a shown window there instead of headless")
@@ -387,7 +416,7 @@ def main():
                 sys.stdout.flush()
             return
 
-        cases = case_list(a.case)
+        cases = case_list(a.case or (P1_CASES if a.p1 else None))
         for name, query in cases:
             t0 = time.time()
             res = run_page(query)
