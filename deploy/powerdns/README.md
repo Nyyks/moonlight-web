@@ -519,6 +519,65 @@ docker compose ps
 
 The same applies to restarting the Docker daemon by hand.
 
+### IPv6 on the Docker networks
+
+`mwnet` and `mw-edge` carry IPv6 (unique-local prefixes, MTU 1400 — the
+comment above `networks:` in `docker-compose.yml` says why). Without it, Docker
+still answers on `[::]:53/80/443`, but through its userland proxy, which
+reconnects to the container over IPv4: every IPv6 client would reach Caddy,
+the rendezvous and dnsdist as the bridge gateway, all of IPv6 in one
+rate-limit bucket. Requires Docker 27 or later; check with
+`docker network inspect mw-edge --format '{{.EnableIPv6}}'`.
+
+Docker cannot change a network's IPv6 or MTU in place, and `deploy-prod.sh`
+leaves networks alone, so the first tag that carries these settings is
+followed by one recreation of both networks. DNS and HTTPS stop for the
+half-minute it takes, and every held line drops and reconnects: pick a quiet
+moment.
+
+```bash
+# 1. the tag, read then applied as usual (it only checks the compose file out)
+cd ~/moonlight-web/deploy/powerdns
+./deploy-prod.sh srv-<date>
+./deploy-prod.sh srv-<date> --apply
+
+# 2. images first, while everything still serves
+docker compose pull dnsdist
+
+# 3. the rendezvous before anything else (same reason as a Caddy restart),
+#    then staging's Caddy: its endpoint on mw-edge would keep that network
+#    from being removed
+docker compose stop mw-rendezvous
+docker stop mw-dev-rendezvous 2>/dev/null
+docker stop mw-dev-caddy 2>/dev/null
+
+# 4. production down and up: containers and networks recreated from the
+#    images already there; volumes are kept (no -v)
+docker compose down
+docker compose up -d
+docker compose ps
+
+# 5. staging onto the new mw-edge: its Caddy must be RECREATED, a plain start
+#    looks for the network that no longer exists
+cd ~/moonlight-web-dev/deploy/powerdns
+docker compose up -d --no-deps --force-recreate caddy
+docker compose start mw-rendezvous
+docker compose ps
+cd ~
+
+# 6. check
+docker network inspect mw-edge powerdns_mwnet \
+  --format '{{.Name}} ipv6={{.EnableIPv6}} {{range .IPAM.Config}}{{.Subnet}} {{end}}'
+ip6tables -t nat -S DOCKER          # a DNAT each for 53/tcp, 53/udp, 80, 443
+ip -6 route show default            # still there (see below)
+```
+
+Creating an IPv6 network turns on `net.ipv6.conf.all.forwarding`, and a
+forwarding Linux stops listening to router advertisements. That is harmless
+here — the VM's IPv6 address and default route are static (netplan,
+`accept_ra` 0) — but on a box that learns its IPv6 route from RAs, set
+`net.ipv6.conf.<if>.accept_ra=2` first or the route expires an hour later.
+
 ### Cold backup and restore
 
 `--apply` (here and in `deploy-packages.sh`) first runs `backup-prod.sh`, and
