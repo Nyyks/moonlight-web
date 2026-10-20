@@ -43,6 +43,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -304,12 +305,38 @@ func (q *quota) sweep(now time.Time) {
 	q.lastSweep = now
 }
 
+// quotaKey is what an address's claims are charged to — the same rule as
+// mw-rendezvous. An IPv6 subscriber is handed a whole /64 at the least, so
+// keying on the full address would give one household 2^64 fresh budgets; the
+// /64 is what an IPv4 address is to an ISP. A mapped IPv4 address
+// (::ffff:a.b.c.d) is that IPv4 address. Brackets and a port are tolerated;
+// anything unparsable is used as it is. Only the budget is keyed this way: the
+// census still forwards the full address to Umami.
+func quotaKey(addr string) string {
+	s := strings.TrimSpace(addr)
+	a, err := netip.ParseAddr(strings.Trim(s, "[]"))
+	if err != nil {
+		ap, perr := netip.ParseAddrPort(s)
+		if perr != nil {
+			return s
+		}
+		a = ap.Addr()
+	}
+	a = a.WithZone("").Unmap()
+	if a.Is4() {
+		return a.String()
+	}
+	p, _ := a.Prefix(64)
+	return p.String()
+}
+
 // allow records a new-claim attempt for ip and reports whether it is within the
 // window budget. A max of 0 disables the quota.
 func (q *quota) allow(ip string) bool {
 	if q.max <= 0 {
 		return true
 	}
+	ip = quotaKey(ip)
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := time.Now()

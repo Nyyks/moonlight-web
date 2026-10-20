@@ -185,9 +185,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// clientIP returns the address the budgets are keyed on. Caddy terminates TLS
-// in front, so the socket peer is always the proxy — X-Forwarded-For is the only
-// place the real address appears. Nothing but rate limiting is decided from it.
+// clientIP returns the address the budgets are charged to (quotaKey narrows an
+// IPv6 one to its /64). Caddy terminates TLS in front, so the socket peer is
+// always the proxy — X-Forwarded-For is the only place the real address
+// appears. Nothing but rate limiting is decided from it.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.IndexByte(xff, ','); i >= 0 {
