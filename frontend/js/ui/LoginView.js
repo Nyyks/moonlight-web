@@ -515,13 +515,17 @@ export class LoginView {
         // Right after the last digit (start when none yet): the only place the
         // caret may be. Anywhere else, the next digit lands among the dashes
         // or between two digits, and the mask then reads them back in an
-        // order the person never typed.
+        // order the person never typed. A selection is left alone: a long
+        // press makes one, and it is what brings up the phone's Paste — put
+        // back to a caret, the menu went with it (realme, 20/10/2026). What is
+        // typed over it replaces it, and a paste is read whole (below).
         const caretSlot = () => {
             const count = input.value.replace(/\D/g, '').length;
             return count + (count > 3 ? 1 : 0);
         };
         const pinCaret = () => {
             if (document.activeElement !== input) return;
+            if (input.selectionStart !== input.selectionEnd) return;
             const slot = caretSlot();
             if (input.selectionStart !== slot || input.selectionEnd !== slot) {
                 input.setSelectionRange(slot, slot);
@@ -555,8 +559,19 @@ export class LoginView {
             setTimeout(pinCaret, 0);
         });
 
-        // A click, a tap, an arrow key or a long-press selection would all move
-        // the caret off its slot: each is put straight back. selectionchange
+        // A copied PIN fills the field wherever the caret or selection was:
+        // six digits pasted are the PIN, fewer follow the ones already typed.
+        input.addEventListener('paste', (e) => {
+            const pasted = (e.clipboardData?.getData('text') || '').replace(/\D/g, '');
+            if (!pasted) return;
+            e.preventDefault();
+            const typed = input.value.replace(/\D/g, '');
+            input.value = (pasted.length >= 6 ? pasted : typed + pasted).slice(0, 6);
+            input.dispatchEvent(new Event('input'));
+        });
+
+        // A click, a tap or an arrow key would all move the caret off its
+        // slot: each is put straight back. selectionchange
         // covers taps and drags on every engine; the key and pointer events are
         // there for the ones that do not fire it for text fields.
         input.addEventListener('keydown', (e) => {

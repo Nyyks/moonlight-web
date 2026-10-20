@@ -107,11 +107,35 @@ describe('LoginView session name and PIN caret', () => {
         pin.setSelectionRange(6, 6); // among the dashes
         pin.dispatchEvent(new Event('click'));
         expect([pin.selectionStart, pin.selectionEnd]).toEqual([2, 2]);
+    });
 
+    it('leaves a long-press selection alone, so the Paste menu stays', async () => {
+        await open();
+        const pin = pinInput();
+        pin.focus();
         type(pin, '3456');
-        pin.setSelectionRange(0, 7); // a selection
+        pin.setSelectionRange(0, 7);
         document.dispatchEvent(new Event('selectionchange'));
-        expect([pin.selectionStart, pin.selectionEnd]).toEqual([5, 5]);
+        expect([pin.selectionStart, pin.selectionEnd]).toEqual([0, 7]);
+    });
+
+    it('reads a pasted PIN whole, wherever the caret was', async () => {
+        await open();
+        const pin = pinInput();
+        pin.focus();
+        type(pin, '34');
+        const paste = (text) => {
+            const e = new Event('paste', { cancelable: true });
+            Object.defineProperty(e, 'clipboardData', { value: { getData: () => text } });
+            pin.dispatchEvent(e);
+            return e;
+        };
+        expect(paste('702 502').defaultPrevented).toBe(true);
+        expect(pin.value).toBe('702 502');
+
+        type(pin, '12');
+        paste('34');
+        expect(pin.value).toBe('123 4--');
     });
 
     it('swallows the keys that walk the caret', async () => {
