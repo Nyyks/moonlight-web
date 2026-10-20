@@ -127,9 +127,23 @@ public:
         c.VersionNumber = id.version;
         c.ReportDescriptorLength = static_cast<USHORT>(id.descriptor.size());
         c.ReportDescriptor = id.descriptor.data();
-        // No hardware ids: given some, VHF made no child at all (04/10). The
-        // collections enumerate as HID\HID_DEVICE_SYSTEM_VHF&COLnn, and
-        // HidD_GetAttributes still gives the vendor and product ids.
+        // Hardware ids, so the collections enumerate as
+        // HID\MOONLIGHTWEB_VHID&VID_046D&PID_C26E&COL01 instead of
+        // HID\HID_DEVICE_SYSTEM_VHF&COL01: the device path says whose it is and
+        // carries the ids a tool reads from it. The second is the one VHF gives
+        // when given none, so the collections keep every id they had. The first
+        // names the device and needs its enumerator: without one, no device at
+        // all (04/10). VHF puts its HID_DEVICE_SYSTEM_VHF, the id hidvhf.inf
+        // installs, before both (bench of 20/10). A device with no vendor id
+        // (the host's own mouse) keeps VHF's.
+        wchar_t ids[96] = {};
+        if (id.vendorId) {
+            const int n = swprintf_s(ids, L"VHF\\MOONLIGHTWEB_VHID&VID_%04X&PID_%04X", id.vendorId,
+                                     id.productId);
+            swprintf_s(ids + n + 1, std::size(ids) - n - 2, L"VHF\\VID_%04X&PID_%04X", id.vendorId,
+                       id.productId);
+            c.HardwareIDs = ids; // REG_MULTI_SZ: the array's zeros end both
+        }
         // DirectInput's name comes from the registry, written before the device
         // shows up so the first enumeration already reads it.
         nameForDirectInput(id.vendorId, id.productId, id.name);
