@@ -65,8 +65,9 @@ size_t MultiSzWcsLen(PCWSTR MultiSzString)
 	size_t len = 0;
 
 	while (*MultiSzString != UNICODE_NULL) {
-		len += 1 + wcslen(MultiSzString);
-		MultiSzString += len;
+		size_t one = 1 + wcslen(MultiSzString);
+		len += one;
+		MultiSzString += one;
 	}
 
 	return len;

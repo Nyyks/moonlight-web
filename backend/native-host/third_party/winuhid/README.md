@@ -22,8 +22,12 @@ MoonlightWeb's changes to these files are listed below, each one in its own comm
 
 ## MoonlightWeb changes
 
-One fix applies to every build, since it fixes a bug:
+Two fixes apply to every build, since they fix bugs:
 
+- `WinUHid/WinUHid.cpp` (client library): `MultiSzWcsLen` steps to the next string by that
+  string's length. Upstream stepped by the running total, so from the second hardware id on it
+  read past the list: the driver refused the length it got (ERROR_INVALID_PARAMETER) or, by luck,
+  took it (bench of 20/10/2026). One id alone was always right.
 - `WinUHid.c`: IOCTL_WINUHID_GET_NEXT_EVENT parks itself in its manual queue under the lock that
   operations are queued under, and `DispatchAsyncOperation` looks for a parked request under it
   too (`FillNextEventLocked`). Upstream parked the request after dropping the lock: an
