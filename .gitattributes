@@ -35,4 +35,3 @@ Dockerfile     text eol=lf
 # Driver packages the installer re-hashes against pins compiled into the exe
 # (VirtualHidApply.h): stored and checked out byte for byte, never converted.
 backend/installer/drivers/vhid/* -text
-backend/installer/drivers/vhid-arm64/* -text

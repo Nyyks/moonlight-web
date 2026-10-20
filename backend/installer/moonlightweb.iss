@@ -1163,8 +1163,9 @@ end;
 // passthrough is simply unavailable, so nothing here may fail the setup. The
 // package is signed by MoonlightWeb's own certificate, which the helper trusts
 // for the install alone (Root and Trusted Publishers, out of both again
-// before it returns). x64 and ARM64 each bundle their own package (ARM64
-// since driver 0.1.2.0); a build that bundles none skips it entirely. Exit
+// before it returns). A build that bundles no package (Windows on ARM: it
+// takes a driver signed by Microsoft only, 0x800b0109 on 20/10/2026) skips it
+// entirely. Exit
 // 3010 asks for no restart: a game
 // still held a device made through the old driver, which stays loaded until
 // Windows next restarts, and the app works with either. An update that brings

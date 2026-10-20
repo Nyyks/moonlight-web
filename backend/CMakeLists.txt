@@ -730,15 +730,13 @@ if(WIN32)
     # "MoonlightWeb Virtual HID": the HID passthrough's driver, and the host's
     # own mouse on a host with none, built and signed apart
     # (native-host/drivers/vhid/build.ps1 -Sign Own, our own certificate) and
-    # pinned file by file in VirtualHidApply.h. One package per platform, both
-    # installed as drivers/vhid: the ARM64 one is vhid-arm64 in the tree.
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-        set(_mw_vhid_package "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid-arm64")
-    else()
-        set(_mw_vhid_package "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid")
-    endif()
-    if(EXISTS "${_mw_vhid_package}/MoonlightWebVHid.inf")
-        install(DIRECTORY "${_mw_vhid_package}/" DESTINATION drivers/vhid)
+    # pinned file by file in VirtualHidApply.h. x64 only: Windows on ARM takes
+    # a driver package only signed by Microsoft (0x800b0109, 20/10/2026), so
+    # there the installer has nothing to set up and the passthrough reports
+    # itself unavailable, as on a machine without the driver.
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid/MoonlightWebVHid.inf")
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vhid" DESTINATION drivers)
     endif()
 endif()
 

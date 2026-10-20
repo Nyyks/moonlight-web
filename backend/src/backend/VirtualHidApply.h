@@ -68,25 +68,16 @@ inline QString deviceName()
     return QStringLiteral("MoonlightWeb Virtual HID");
 }
 
-/// The package under backend/installer/drivers/vhid (vhid-arm64 for Windows on
-/// ARM), as build.ps1 -Sign Own made it on 19/10/2026 (driver 0.1.2.0: the
-/// host's own mouse, after the event wakeup of 0.1.1.0), pinned file by file:
-/// any other bytes, and the install refuses. A new driver means a new package
-/// there, a higher -Version, and new pins here, all printed by build.ps1. A
-/// test-signed package is never bundled.
+/// The package under backend/installer/drivers/vhid, as build.ps1 -Sign Own
+/// made it on 19/10/2026 (driver 0.1.2.0: the host's own mouse, after the
+/// event wakeup of 0.1.1.0), pinned file by file: any other bytes, and the
+/// install refuses. A new driver means a new package there, a higher -Version,
+/// and new pins here, all printed by build.ps1. A test-signed package is never
+/// bundled. x64 only: Windows on ARM takes a driver package only signed by
+/// Microsoft (0x800b0109, "Code Integrity is enforced", mw-arm, 20/10/2026),
+/// so an ARM64 build bundles none, and the helper finds nothing to install.
 inline const std::vector<DriverPackage::File>& driverFiles()
 {
-#if defined(_M_ARM64)
-    static const std::vector<DriverPackage::File> files = {
-        {"MoonlightWebVHid.inf",
-         "6be8a472c6a32949c4859c8b8ffd2ba32e19906adde415668835adfc2c60ace1"},
-        {"MoonlightWebVHid.cat",
-         "d3c8478fd497dda3e0dcf63343fdf0d43b167bc48cd27c5cbea4fdd4bbb51266"},
-        {"MoonlightWebVHid.dll",
-         "1c20ac5856a31e0f473327bf0336f7fbf9a7191d4fc9471c90673e66a60835ab"},
-    };
-    return files;
-#else
     static const std::vector<DriverPackage::File> files = {
         {"MoonlightWebVHid.inf",
          "c9b5843f81fd8e3e128c90eaac76b7724760862812b97acc2f212e8f6db75544"},
@@ -96,7 +87,6 @@ inline const std::vector<DriverPackage::File>& driverFiles()
          "0a603918f1b9321badfb1dceaa56fb53c3cfec749db06634d03a3bdb1f2ec1c1"},
     };
     return files;
-#endif
 }
 
 /// SHA-1 thumbprint of the certificate that signs the catalog, the only

@@ -210,6 +210,14 @@ utilisateur sans pilote :
     l'installation (`VirtualDisplayApply.cpp:200-225`).
   - HIDMaestro fait de même avec un certificat auto-signé, sans mode test, sur
     Windows 11 build 26200.
+  - ⚠️ **Sauf sur Windows sur ARM [V, banc mw-arm du 20/10/2026]**. Le paquet ARM64 du
+    pilote 0.1.2.0, signé par notre certificat (mis dans Root et TrustedPublisher
+    pendant la pose), est refusé à l'import : `SetupCopyOEMInf` rend 0x800b0109, et
+    `setupapi.dev.log` indique « Driver package catalog file certificate does not belong
+    to Trusted Root Certificates, and Code Integrity is enforced ». Le même paquet en x64
+    passe, Secure Boot actif compris. Sur ARM64, même un pilote UMDF doit être signé par
+    Microsoft (WHQL ou attestation). L'ARM64 reste donc sans pilote : le passthrough y est
+    indisponible, et l'entrée passe par SendInput. À revoir après la v0.4.1.
 - **SignPath Foundation [V]** : certificat OV seulement, gratuit pour les projets
   libres. Pas de pilote noyau, mais le précédent du VDD montre qu'un pilote UMDF
   passe.
