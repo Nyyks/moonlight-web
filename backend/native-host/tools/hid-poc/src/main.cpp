@@ -21,6 +21,8 @@
 //
 //   mw-hid-poc [--port 39920] [--bind 0.0.0.0]   serve hid-probe.html's "Transmettre"
 //   mw-hid-poc --selftest dump.json              encode a hid-probe reading, no device
+//   mw-hid-poc --create dump.json [--hold 120]   create its devices without a page
+//   --hwid none|usb|ours|<id>                    the hardware ids a Windows device gets
 //
 // Protocol, one WebSocket per page:
 //   page → tool, text  {"type":"attach","slot":n,"vendorId","productId","productName",
@@ -79,6 +81,30 @@ QJsonArray reportsOf(const hid::Parsed& p)
                         {QStringLiteral("bytes"), int(hid::reportBytes(p, f.kind, f.reportId))}});
     }
     return out;
+}
+
+/// --hwid: "usb" and "ours" are the two forms the PnP bench compared (20/10),
+/// anything else is taken as it is. The first id names the device, so it needs
+/// an enumerator: without one, no device at all. VHF puts its own
+/// HID_DEVICE_SYSTEM_VHF, the id hidvhf.inf installs, before them.
+QStringList hardwareIdsFor(const QString& form, uint16_t vendorId, uint16_t productId)
+{
+    if (form.isEmpty() || form == QLatin1String("none")) return {};
+    const QString vp = QStringLiteral("VID_%1&PID_%2")
+                           .arg(vendorId, 4, 16, QLatin1Char('0'))
+                           .arg(productId, 4, 16, QLatin1Char('0'))
+                           .toUpper();
+    if (form == QLatin1String("usb")) return {QStringLiteral("VHF\\") + vp};
+    if (form == QLatin1String("ours")) return {QStringLiteral("VHF\\MOONLIGHTWEB_VHID&") + vp};
+    // Ours, then the one VHF gives when given none, which its collections then still carry.
+    if (form == QLatin1String("both"))
+        return {QStringLiteral("VHF\\MOONLIGHTWEB_VHID&") + vp, QStringLiteral("VHF\\") + vp};
+    return form.split(QLatin1Char(','));
+}
+
+uint16_t idOf(const QJsonValue& v)
+{
+    return static_cast<uint16_t>(v.isString() ? v.toString().toUInt(nullptr, 16) : v.toInt());
 }
 
 struct Built
@@ -157,6 +183,64 @@ int selftest(const QString& path)
     return bad ? 1 : 0;
 }
 
+/// --create: every accepted device of a hid-probe reading, made at once with
+/// one neutral report each and held for `holdS` seconds, so the PnP bench can
+/// read what the OS made of it without a page.
+int createFrom(const QString& path, const QString& hwid, int holdS)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        std::fprintf(stderr, "cannot read %s\n", qPrintable(path));
+        return 2;
+    }
+    if (!VirtualHid::unavailableReason().isEmpty()) {
+        std::fprintf(stderr, "%s\n", qPrintable(VirtualHid::unavailableReason()));
+        return 2;
+    }
+    const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    std::vector<std::unique_ptr<VirtualHid>> devices;
+    for (const QJsonValue& dv : root.value(QStringLiteral("devices")).toArray()) {
+        const QJsonObject d = dv.toObject();
+        const Built b = build(d.value(QStringLiteral("collections")).toArray());
+        VirtualHidIdentity id;
+        id.name = d.value(QStringLiteral("productName")).toString();
+        id.vendorId = idOf(d.value(QStringLiteral("vid")));
+        id.productId = idOf(d.value(QStringLiteral("pid")));
+        id.descriptor = b.descriptor;
+        id.hardwareIds = hardwareIdsFor(hwid, id.vendorId, id.productId);
+        if (!b.why.isEmpty()) {
+            std::printf("%s refused: %s\n", qPrintable(id.name), qPrintable(b.why));
+            continue;
+        }
+        std::unique_ptr<VirtualHid> dev = VirtualHid::make();
+        QString error;
+        if (!dev->create(id, &error)) {
+            std::printf("%s not created: %s\n", qPrintable(id.name), qPrintable(error));
+            continue;
+        }
+        const bool numbered = !(b.parsed.reportIds.size() == 1 && b.parsed.reportIds.front() == 0);
+        for (uint8_t rid : b.parsed.reportIds) {
+            const size_t n = hid::reportBytes(b.parsed, hid::Kind::Input, rid);
+            if (!n) continue;
+            QByteArray report(int(n), '\0');
+            if (numbered) report[0] = char(rid);
+            dev->input(report);
+        }
+        std::printf("%s %04x:%04x created, descriptor %zu bytes, hardware ids [%s]\n",
+                    qPrintable(id.name), id.vendorId, id.productId, b.descriptor.size(),
+                    qPrintable(id.hardwareIds.join(QStringLiteral(", "))));
+        devices.push_back(std::move(dev));
+    }
+    std::printf("holding %d s\n", holdS);
+    std::fflush(stdout);
+    if (devices.empty()) return 1;
+    QTimer::singleShot(holdS * 1000, qApp, [] { QCoreApplication::exit(0); });
+    const int rc = QCoreApplication::exec();
+    devices.clear();
+    std::printf("devices destroyed\n");
+    return rc;
+}
+
 struct Slot
 {
     std::unique_ptr<VirtualHid> device;
@@ -170,8 +254,9 @@ struct Slot
 class Server : public QObject
 {
 public:
-    Server(quint16 port, const QHostAddress& bind)
+    Server(quint16 port, const QHostAddress& bind, const QString& hwid)
         : m_server(QStringLiteral("mw-hid-poc"), QWebSocketServer::NonSecureMode, this)
+        , m_hwid(hwid)
     {
         if (!m_server.listen(bind, port)) {
             std::fprintf(stderr, "cannot listen on %s:%u: %s\n", qPrintable(bind.toString()), port,
@@ -259,6 +344,7 @@ private:
         id.vendorId = static_cast<uint16_t>(o.value(QStringLiteral("vendorId")).toInt());
         id.productId = static_cast<uint16_t>(o.value(QStringLiteral("productId")).toInt());
         id.descriptor = b.descriptor;
+        id.hardwareIds = hardwareIdsFor(m_hwid, id.vendorId, id.productId);
         QString error;
         if (!dev->create(id, &error)) return refuse(error);
 
@@ -340,6 +426,7 @@ private:
     }
 
     QWebSocketServer m_server;
+    QString m_hwid;
     QWebSocket* m_page = nullptr;
     std::map<int, Slot> m_slots;
 };
@@ -358,11 +445,23 @@ int main(int argc, char** argv)
                    QStringLiteral("address"), QStringLiteral("0.0.0.0")});
     cli.addOption({QStringLiteral("selftest"),
                    QStringLiteral("encode a hid-probe reading and exit"), QStringLiteral("file")});
+    cli.addOption({QStringLiteral("create"),
+                   QStringLiteral("create the devices of a hid-probe reading, no page"),
+                   QStringLiteral("file")});
+    cli.addOption({QStringLiteral("hold"), QStringLiteral("seconds --create keeps them"),
+                   QStringLiteral("seconds"), QStringLiteral("120")});
+    cli.addOption({QStringLiteral("hwid"),
+                   QStringLiteral("Windows hardware ids: none, usb, ours or an id"),
+                   QStringLiteral("form"), QStringLiteral("none")});
     cli.process(app);
     if (cli.isSet(QStringLiteral("selftest")))
         return selftest(cli.value(QStringLiteral("selftest")));
+    const QString hwid = cli.value(QStringLiteral("hwid"));
+    if (cli.isSet(QStringLiteral("create")))
+        return createFrom(cli.value(QStringLiteral("create")), hwid,
+                          cli.value(QStringLiteral("hold")).toInt());
 
     Server server(static_cast<quint16>(cli.value(QStringLiteral("port")).toUInt()),
-                  QHostAddress(cli.value(QStringLiteral("bind"))));
+                  QHostAddress(cli.value(QStringLiteral("bind"))), hwid);
     return app.exec();
 }

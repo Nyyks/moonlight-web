@@ -20,6 +20,7 @@
 #include <QByteArray>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <cstdint>
 #include <memory>
@@ -34,6 +35,9 @@ struct VirtualHidIdentity
     uint16_t productId = 0;
     uint16_t version = 0;
     std::vector<uint8_t> descriptor;
+    /// Windows only: the hardware ids VHF gives its device, in order; none
+    /// leaves VHF's own HID_DEVICE_SYSTEM_VHF.
+    QStringList hardwareIds;
 };
 
 /// One virtual HID device on this host: `uhid` on Linux, nothing elsewhere yet

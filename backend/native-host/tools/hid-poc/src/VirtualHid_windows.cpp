@@ -24,6 +24,8 @@
 
 #include "WinUHid.h"
 
+#include <string>
+
 namespace {
 
 QString lastError()
@@ -52,9 +54,16 @@ public:
         c.VersionNumber = id.version;
         c.ReportDescriptorLength = static_cast<USHORT>(id.descriptor.size());
         c.ReportDescriptor = id.descriptor.data();
-        // No hardware ids: given some (VID_xxxx&PID_yyyy, REG_MULTI_SZ), VHF made no child at
-        // all (04/10, UM790Pro). Without, the collections enumerate as
-        // HID\HID_DEVICE_SYSTEM_VHF&COLnn, while HidD_GetAttributes still gives VID and PID.
+        // Without hardware ids the collections enumerate as HID\HID_DEVICE_SYSTEM_VHF&COLnn;
+        // with VHF\<id> first, as HID\<id>&COLnn (bench of 20/10). An id with no enumerator
+        // makes no device at all (04/10).
+        std::wstring ids; // REG_MULTI_SZ
+        for (const QString& h : id.hardwareIds)
+            ids += h.toStdWString() + L'\0';
+        if (!ids.empty()) {
+            ids += L'\0';
+            c.HardwareIDs = ids.c_str();
+        }
         m_device = WinUHidCreateDevice(&c);
         if (!m_device) {
             *error = QStringLiteral("WinUHidCreateDevice failed (%1): is the driver installed?")
