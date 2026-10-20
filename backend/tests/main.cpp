@@ -43,6 +43,7 @@ void run_send_pacer_tests();
 void run_link_loss_tests();
 void run_annexb_filler_tests();
 void run_link_freeze_log_tests();
+void run_rxbuf_section_tests();
 void run_single_session_hosts_tests();
 void run_host_lag_tracker_tests();
 void run_tunnel_frame_tests();
@@ -106,6 +107,7 @@ int main(int argc, char** argv)
     run_link_loss_tests();
     run_annexb_filler_tests();
     run_link_freeze_log_tests();
+    run_rxbuf_section_tests();
     run_single_session_hosts_tests();
     run_host_lag_tracker_tests();
     run_tunnel_frame_tests();

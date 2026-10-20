@@ -20,6 +20,7 @@
 #include "ClipboardBridge.h"
 #include "InputMessageCodec.h"
 #include "PacketMarking.h"
+#include "RxBufSection.h"
 #include "IMediaEngine.h"
 #include "ExitNotice.h"
 // Only for the cursor-mode message, which is meaningless to any other engine:
@@ -981,6 +982,24 @@ bool DataChannelRelay::setRemoteDescription(const std::string& sdp)
                     << "| Ultra RTP track"
                     << (m_UltraTrack ? (ultra ? "accepted" : "refused") : "not offered");
         }
+        // The bench's silent section: whether the browser kept it, and with
+        // which codec. Safari, iOS and the TVs have no console to ask.
+        if (m_RxBufTrack) {
+            bool found = false, removed = false, inactive = false;
+            std::vector<int> pts;
+            for (int i = 0; i < answer.mediaCount(); ++i) {
+                const auto entry = answer.media(i);
+                if (!std::holds_alternative<const rtc::Description::Media*>(entry)) continue;
+                const auto* media = std::get<const rtc::Description::Media*>(entry);
+                if (media->mid() != "rxbuf") continue;
+                found = true;
+                removed = media->isRemoved();
+                inactive = media->direction() == rtc::Description::Direction::Inactive;
+                pts = media->payloadTypes();
+            }
+            qInfo() << "[DataChannelRelay] bench rxbuf=1: the silent video section"
+                    << QString::fromStdString(mw::rxbuf::verdict(found, removed, inactive, pts));
+        }
         qInfo() << "[DataChannelRelay] Remote description set — starting ICE timeout ("
                 << m_IceTimeoutMs << "ms)";
         // Start ICE connection timer. The remote description is set, so ICE
@@ -1197,10 +1216,12 @@ void DataChannelRelay::createDataChannels()
     // bundle shares: a DataChannel stream has none, and a 40 Mbit/s frame
     // arriving at line rate is more than 64 KB. The page answers it like any
     // RTP video section, and nothing arrives there. Offered beside the bench's
-    // RTP roads too: the audio road (PyroWave's) is an Opus track.
+    // RTP roads too: the audio road (PyroWave's) is an Opus track. H.264 and
+    // VP8, so that every browser shares one (RxBufSection.h).
     if (m_RxBufVideo) {
         auto desc = rtc::Description::Video("rxbuf", rtc::Description::Direction::SendOnly);
-        desc.addH264Codec(97);
+        desc.addH264Codec(mw::rxbuf::kH264Pt);
+        desc.addVP8Codec(mw::rxbuf::kVp8Pt);
         std::random_device rd;
         desc.addSSRC(static_cast<uint32_t>(rd()), "rxbuf");
         m_RxBufTrack = m_Pc->addTrack(desc);
