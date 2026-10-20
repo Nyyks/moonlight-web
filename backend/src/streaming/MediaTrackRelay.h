@@ -69,6 +69,8 @@ public:
 
     void stop() override;
 
+    void endFromSignaling() override;
+
     void notifyClientTakenOver() override;
 
     void notifyClientRevoked() override;

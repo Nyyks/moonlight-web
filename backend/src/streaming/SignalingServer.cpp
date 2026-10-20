@@ -26,6 +26,7 @@ extern "C" {
 #include "IMediaEngine.h"
 #include "InputMessageCodec.h"
 #include "SdpFingerprint.h"
+#include "SignalingWait.h"
 #include "common/Edition.h"
 #include "common/PairingCrypto.h"
 #include "network/RouterPortPools.h"
@@ -167,6 +168,11 @@ bool SignalingServer::start()
             &SignalingServer::onLocalIceCandidate);
     // Track when DataChannels/Tracks are fully open
     connect(m_Relay, &RelayBase::dataChannelsOpen, this, &SignalingServer::onDataChannelsOpen);
+    // Every way signalling gives up ends the session through the relay, which
+    // owns the teardown (Session::quit, the worker's exit). Until 20/10 this
+    // signal went nowhere: a browser gone mid-handshake or refused by MW-BIND
+    // left the session encoding for nobody until the next /start.
+    connect(this, &SignalingServer::sessionEnded, m_Relay, &RelayBase::endFromSignaling);
 
     // ICE timeout → WebSocket fallback (when UDP is blocked)
     if (auto* dcRelay = qobject_cast<DataChannelRelay*>(m_Relay)) {
@@ -178,6 +184,17 @@ bool SignalingServer::start()
 
     qInfo() << "[SignalingServer] Listening OK";
     m_Running = true;
+
+    // A browser that never opens this socket ends the session as well.
+    mw::signaling::armClientWait(
+        this, mw::signaling::kClientWaitMs,
+        [this]() { return m_ClientArrived || m_Stopping.load(); },
+        [this]() {
+            qWarning() << "[SignalingServer] No browser opened the signalling socket within"
+                       << mw::signaling::kClientWaitMs / 1000
+                       << "s — ending the session (the page was closed or lost after /start)";
+            emit sessionEnded();
+        });
 
     // The router hole, if any, was claimed by the parent before this process
     // existed (RouterPortAllocator); nothing to discover here.
@@ -311,6 +328,7 @@ void SignalingServer::onNewWsConnection()
         qWarning() << "[SignalingServer] nextPendingConnection returned null";
         return;
     }
+    m_ClientArrived = true;
 
     // MW-BIND-v1 state is per connection: nonces are single-use, and a
     // reconnect must not be able to reuse the previous exchange's material.
@@ -574,7 +592,9 @@ void SignalingServer::onWsDisconnected()
     // Emitting sessionEnded in that case would terminate the streaming
     // session prematurely.
     bool dcReady = wasComplete || m_DataChannelsOpen;
-    if (!dcReady) {
+    if (m_Stopping.load()) {
+        qInfo() << "[SignalingServer::onWsDisconnected] Stopping — the session is already ending";
+    } else if (!dcReady) {
         qInfo() << "[SignalingServer::onWsDisconnected] Signaling NOT complete & DCs NOT open — "
                    "emitting sessionEnded";
         emit sessionEnded();

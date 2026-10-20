@@ -795,6 +795,17 @@ void MediaTrackRelay::onShimConnectionTerminated(int errorCode)
     }
 }
 
+void MediaTrackRelay::endFromSignaling()
+{
+    // No exit notice: there is no channel to the page yet, only the signalling
+    // socket, which is the side that gave up.
+    if (!m_Stopping.exchange(true)) {
+        m_Connected = false;
+        if (m_IceCheckTimer) m_IceCheckTimer->stop();
+        emit sessionEnded();
+    }
+}
+
 // ── Input handling (from libdatachannel callback, marshaled to main thread) ──
 
 void MediaTrackRelay::onInputMessage(const std::string& message)

@@ -177,6 +177,8 @@ private:
     std::atomic<bool> m_Stopping{false};
     bool m_SignalingComplete = false;
     bool m_DataChannelsOpen = false;
+    /// A browser has opened this socket at least once (SignalingWait.h).
+    bool m_ClientArrived = false;
 
     int m_ClientPort = 0;
 

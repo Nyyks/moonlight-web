@@ -94,6 +94,13 @@ public:
     /// Stop the relay, close all channels and the PeerConnection.
     virtual void stop() = 0;
 
+    /// End the session on the signalling side's word: it saw the session fail
+    /// before the PeerConnection could (SignalingServer: a browser that never
+    /// came, left mid-handshake or was refused). Emits sessionEnded() once,
+    /// under the same guard as the relay's own exits, so whichever side speaks
+    /// first ends it and the other is a no-op.
+    virtual void endFromSignaling() = 0;
+
     /// Notify the browser that its session was taken over by another device,
     /// so it can show a graceful "session interrupted" exit before the channels
     /// close. Sent on the control channel just before stop(); implementations

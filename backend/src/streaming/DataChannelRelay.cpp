@@ -1819,6 +1819,17 @@ void DataChannelRelay::onShimConnectionTerminated(int errorCode)
     }
 }
 
+void DataChannelRelay::endFromSignaling()
+{
+    // No exit notice: there is no channel to the page yet, only the signalling
+    // socket, which is the side that gave up.
+    if (!m_Stopping.exchange(true)) {
+        m_Connected = false;
+        if (m_IceCheckTimer) m_IceCheckTimer->stop();
+        emit sessionEnded();
+    }
+}
+
 // --- Input handling ---
 // Runs on the relay thread for a GameStream engine (queued from the
 // libdatachannel callback), on the libdatachannel thread itself under
