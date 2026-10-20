@@ -2289,6 +2289,37 @@ put aside and run again last.
 - The section offers VP8 beside H.264 from `ece69487`, so that a browser
   without H.264 keeps it too, and the host logs what the answer did with it.
 
+**`rxbuf=1` across browsers**, 20/10 afternoon. Host the N95 on `ece69487`'s
+exe and page (VP8 in the section), then `8377ded5`'s for the two start checks.
+Bruno's own devices on the home Wi-Fi, the rest from DualRTX on the cable. The
+rendezvous VM was down most of the afternoon, so the realme, the Mac and the
+TV came over the LAN.
+
+| Client | Way | Without the key | `rxbuf=1` | What it kept of the section |
+|---|---|---|---|---|
+| Firefox 157, Windows, cable | LAN | 380, 313, 419 (one freeze of 301 ms) | 408, 332, 374 | H.264 + VP8 |
+| Firefox 157 without H.264 in WebRTC | LAN | 342, 346 | 327, 354 | VP8 |
+| Chrome, Android (realme Note 60), Wi-Fi | LAN | 2, 0 | 248 (one burst), 0 | H.264 + VP8 |
+| Safari, iOS (iPhone), Wi-Fi | rendezvous | 0, 0 | 0, 1 | H.264 + VP8 |
+| Safari, macOS (Mac M1), Wi-Fi | LAN | 0, 0 | 0 | H.264 + VP8 |
+| TV Bro, WebView 153 (Mi TV), cable | LAN | start check | start check | H.264 + VP8 |
+| Chrome 154, Linux (UM790Pro), cable | LAN | – | start check | H.264 + VP8 |
+
+Chunks sent again per pass of 3 to 10 min. No client broke: the stream started,
+and picture, sound and input were normal on Bruno's devices. Every browser
+keeps the section, recvonly; a Firefox without H.264 keeps it through VP8 alone.
+
+- Chrome on the cable stays the one client whose losses are its socket's, and
+  the key takes them away (above). Firefox reads its socket another way: about
+  350 a pass with the key or without, so the key neither helps it nor hurts.
+- On Wi-Fi the losses come in radio bursts that have nothing to do with the key.
+- The Mi TV's page is slow to send its link reports on a still desktop: freezes
+  of 1.3 and 0.8 s with the key, 2.4 s with 2 T3 without. The key adds nothing.
+- Safari on macOS accepts the LAN certificate for the signalling WebSocket once
+  it is in the keychain; Safari on iOS does not (its LAN WebSocket fails).
+- From 20/10 (`ef94fce5`) the section is the native host's default (`rxbuf=0` takes it
+  out). A GameStream host's sessions do not carry it.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
@@ -2413,7 +2444,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `pace=<n>`, `paceburst=<KB>` | pacing of a frame's chunks | `b2b52486` |
 | `retrcut=<‰>` | governor cuts on SCTP retransmissions; **3 by default on Windows**, 0 off | `e0324f4e`, `55dd9cde` |
 | `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; off unless said; neutral on the Mac, 20/10) | `352a30ad` |
-| `rxbuf=0\|1` | a silent video section in the offer (H.264 and VP8), so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 6 passes on the cable, at rest and under load, 20/10) | `844f1db2`, `ece69487` |
+| `rxbuf=0\|1` | a silent video section in the offer (H.264 and VP8), so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 6 passes on the cable, at rest and under load; kept by every browser tried, 20/10); **on by default** since 20/10, `rxbuf=0` takes it out | `844f1db2`, `ece69487`, default `ef94fce5` |
 | `sctpbuf=<KB>` | usrsctp's real send buffer (via `maxMessageSize`) | `dc7f9c72` |
 | `linkhold=<ms>` | hold the picture after a backlog that long (Windows) | `dc7f9c72`, `a511bdd3` |
 | `sctpburst=<n>` | usrsctp's max burst in packets, 0 no limit; **0 by default on the Windows native host**, 10 elsewhere | `01717368`, `2ef56bfe` |
