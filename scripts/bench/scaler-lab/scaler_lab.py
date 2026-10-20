@@ -27,6 +27,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 import tempfile
 import threading
 import time
@@ -407,7 +408,12 @@ def main():
     finally:
         if chrome:
             chrome.kill()
+            try:
+                chrome.wait(timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
         server.shutdown()
+        shutil.rmtree(profile, ignore_errors=True)  # the throw-away Chrome profile
     if a.md:
         path = os.path.join(a.dir, a.tag + ".md")
         with open(path, "w", encoding="utf-8") as f:
