@@ -592,10 +592,10 @@ export class StreamViewFullscreen {
      * Show/hide the header fullscreen button (placed next to the Stop button).
      *
      * Desktop: always visible (unless already in fullscreen).
-     * Mobile/tablet: in landscape, and in portrait too where the page can turn
-     * the picture itself (canLockLandscape): the tap then goes fullscreen
-     * sideways. Without the lock, portrait has nothing to offer — the user
-     * rotates first.
+     * Mobile/tablet: in landscape only. A phone's bar upright has no room
+     * for it: centred over the bar, it sat on the keyboard, Share and Stop
+     * buttons (realme, Android, 20/10/2026) — even where the page could turn
+     * the picture itself (canLockLandscape). The user rotates first.
      * @this {StreamViewInstance}
      */
     _updateMobileFsButtonVisibility() {
@@ -611,8 +611,7 @@ export class StreamViewFullscreen {
             // Desktop: always available
             this._mobileFsBtn.style.display = '';
         } else {
-            this._mobileFsBtn.style.display =
-                this._isDeviceLandscape() || canLockLandscape() ? '' : 'none';
+            this._mobileFsBtn.style.display = this._isDeviceLandscape() ? '' : 'none';
         }
 
         // Reposition the reminder (header vs top-center, where it then fades)
