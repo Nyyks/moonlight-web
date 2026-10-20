@@ -2318,7 +2318,21 @@ keeps the section, recvonly; a Firefox without H.264 keeps it through VP8 alone.
 - Safari on macOS accepts the LAN certificate for the signalling WebSocket once
   it is in the keychain; Safari on iOS does not (its LAN WebSocket fails).
 - From 20/10 (`ef94fce5`) the section is the native host's default (`rxbuf=0` takes it
-  out). A GameStream host's sessions do not carry it.
+  out), and from `5ed6e69a` a GameStream host's sessions carry it too (the same
+  `rxbuf=0` in `native_tuning` takes it out; the spec's other keys are not read).
+
+**On a GameStream host**, 20/10 20:35-21:04. The N95's own Apollo (Sunshine
+stopped) through the N95 DEV on `5ed6e69a`, the headless Chrome of DualRTX on the
+cable, 3 passes of 3 min with the section against 3 with `rxbuf=0`, alternated.
+Chrome keeps the section ("taken, H.264 + VP8") and the stream starts normally.
+Every data-channel phase of both arms sent 0 chunks again. The A/B measures
+nothing more: in both arms Apollo's frames come with holes in their numbering
+("Frame gap: expected N got N+1") within the first seconds, 1 to 10 of them
+before the first step. The host drops the deltas while it waits for the IDR,
+the page reads those drops as congestion and steps down its ladder 10-20 s in. Its second step moves to
+`webrtc-media`, which gave the headless Chrome no picture (`no_video` again and
+again). Both sit upstream of the section, the same with `rxbuf=0`, and are not
+followed up here.
 
 ## 4. The model so far (04/10/2026)
 
@@ -2444,7 +2458,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `pace=<n>`, `paceburst=<KB>` | pacing of a frame's chunks | `b2b52486` |
 | `retrcut=<‰>` | governor cuts on SCTP retransmissions; **3 by default on Windows**, 0 off | `e0324f4e`, `55dd9cde` |
 | `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; off unless said; neutral on the Mac, 20/10) | `352a30ad` |
-| `rxbuf=0\|1` | a silent video section in the offer (H.264 and VP8), so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 6 passes on the cable, at rest and under load; kept by every browser tried, 20/10); **on by default** since 20/10, `rxbuf=0` takes it out | `844f1db2`, `ece69487`, default `ef94fce5` |
+| `rxbuf=0\|1` | a silent video section in the offer (H.264 and VP8), so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 6 passes on the cable, at rest and under load; kept by every browser tried, 20/10); **on by default** since 20/10, `rxbuf=0` takes it out; GameStream sessions too since `5ed6e69a` | `844f1db2`, `ece69487`, default `ef94fce5`, GameStream `5ed6e69a` |
 | `sctpbuf=<KB>` | usrsctp's real send buffer (via `maxMessageSize`) | `dc7f9c72` |
 | `linkhold=<ms>` | hold the picture after a backlog that long (Windows) | `dc7f9c72`, `a511bdd3` |
 | `sctpburst=<n>` | usrsctp's max burst in packets, 0 no limit; **0 by default on the Windows native host**, 10 elsewhere | `01717368`, `2ef56bfe` |
