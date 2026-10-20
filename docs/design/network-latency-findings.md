@@ -2271,6 +2271,24 @@ on the Mac (load 2-4).
   at 08:13: 0 to 2 freezes. The client's load and the Wi-Fi of that hour
   cannot be told apart from these passes.
 
+**`rxbuf=1` under an equal client load**, 12:20-12:49. The same bench, on
+`cf7fcedb`'s exe and page alone, with every one of DualRTX's 24 logical
+cores busy at normal priority for each pass. Two arms alternated 3 times. The
+first pass ran beside another session's build for its first 40 s; it was
+put aside and run again last.
+
+| Arm | Chunks sent again, per pass (~456,000 sent) | T3 | Freezes |
+|---|---|---|---|
+| no key | 98, 213, 1 | 1 | 1 of 1.16 s, with 2 frames shed |
+| `rxbuf=1` | **0, 0, 0** | 0 | 0 |
+
+- Under load as at rest, the silent section takes the losses away. The
+  loaded client lost no more than the idle one of the morning (3 to 171 a
+  pass), but its one freeze shows what a burst can cost when a T3 is part of
+  it.
+- The section offers VP8 beside H.264 from `ece69487`, so that a browser
+  without H.264 keeps it too, and the host logs what the answer did with it.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
@@ -2395,7 +2413,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `pace=<n>`, `paceburst=<KB>` | pacing of a frame's chunks | `b2b52486` |
 | `retrcut=<‰>` | governor cuts on SCTP retransmissions; **3 by default on Windows**, 0 off | `e0324f4e`, `55dd9cde` |
 | `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; off unless said; neutral on the Mac, 20/10) | `352a30ad` |
-| `rxbuf=0\|1` | a silent video section in the offer, so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 3 passes on the cable, 20/10) | `844f1db2` |
+| `rxbuf=0\|1` | a silent video section in the offer (H.264 and VP8), so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 6 passes on the cable, at rest and under load, 20/10) | `844f1db2`, `ece69487` |
 | `sctpbuf=<KB>` | usrsctp's real send buffer (via `maxMessageSize`) | `dc7f9c72` |
 | `linkhold=<ms>` | hold the picture after a backlog that long (Windows) | `dc7f9c72`, `a511bdd3` |
 | `sctpburst=<n>` | usrsctp's max burst in packets, 0 no limit; **0 by default on the Windows native host**, 10 elsewhere | `01717368`, `2ef56bfe` |
