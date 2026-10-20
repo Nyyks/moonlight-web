@@ -826,6 +826,7 @@
         "statLegScreen": "Screen (compositor + scan-out)",
         "statLegScreenValue": "not measured, ~½–1 refresh",
         "enhancerOff": "Off",
+        "enhancerPassthrough": "Off (1:1)",
         "iosFullscreenHint": "For true fullscreen: Share → Add to Home Screen, then launch Moonlight from the icon.",
         "exitFullscreenHint": "Press {{combo}} to exit fullscreen",
         "volume": "Volume",

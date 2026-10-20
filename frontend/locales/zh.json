@@ -826,6 +826,7 @@
         "statLegScreen": "屏幕（合成 + 扫描输出）",
         "statLegScreenValue": "未测量，约 ½–1 个刷新周期",
         "enhancerOff": "关闭",
+        "enhancerPassthrough": "关闭 (1:1)",
         "iosFullscreenHint": "要获得真正的全屏：分享 → 添加到主屏幕，然后从图标启动 Moonlight。",
         "exitFullscreenHint": "按 {{combo}} 退出全屏",
         "volume": "音量",

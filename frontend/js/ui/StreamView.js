@@ -1355,6 +1355,9 @@ export class StreamView {
         // reports its verdicts).
         this._governor = null;
         this._enhancerDegraded = false;
+        // …and whether the last frame was copied at 1:1, the pass idle
+        // (VideoRenderer.passthrough; the worker posts it with its counters).
+        this._enhancerPassthrough = false;
         // The setting is the ladder's ceiling; the pass a session starts with
         // may be lower, where the ladder settled last time on this device
         // (EnhancerGovernor's memory) — a phone that could not decode and
@@ -2667,6 +2670,7 @@ export class StreamView {
                 this.stats.recoveries = m.recoveries || 0;
                 if (m.resolution && m.resolution !== this._resolution)
                     this._resolution = m.resolution;
+                this._enhancerPassthrough = !!m.passthrough;
                 // Client pipeline stages measured inside the worker (its own
                 // clock), already averaged over its 2s window.
                 if (m.clientDecodeMs > 0) this._clientDecodeStats.addSample(m.clientDecodeMs);
@@ -6336,27 +6340,33 @@ export class StreamView {
 
         // Enhancer: show the active algo when the WebGPU renderer is up. On
         // webrtc-media (<video>, no canvas) the Enhancer can't be applied — if the
-        // user enabled it, flag it OFF so they know it isn't active.
+        // user enabled it, flag it OFF so they know it isn't active. At 1:1 the
+        // shader renderers copy the frame and the pass sits idle
+        // (upscaler-mwsr.md §5): say that, not the name of a pass that is not
+        // running.
+        const passIdle = this._enhancerPassthrough && this._videoEnhancementAlgo !== 'off';
         let enhancerName = null;
         if (this._activeRendererKind === 'webgpu') {
-            enhancerName =
-                this._videoEnhancementAlgo === 'off'
-                    ? t('stream.enhancerOff')
-                    : { fsr1: 'FSR1', nis: 'NIS', sgsr: 'SGSR' }[this._videoEnhancementAlgo] ||
-                      'SGSR';
+            enhancerName = passIdle
+                ? t('stream.enhancerPassthrough')
+                : this._videoEnhancementAlgo === 'off'
+                  ? t('stream.enhancerOff')
+                  : { fsr1: 'FSR1', nis: 'NIS', sgsr: 'SGSR' }[this._videoEnhancementAlgo] ||
+                    'SGSR';
             // Stepped down by the governor: say so, otherwise the card reads as
             // if the user's setting silently changed.
-            if (this._enhancerDegraded) enhancerName += ' (auto)';
+            if (this._enhancerDegraded && !passIdle) enhancerName += ' (auto)';
         } else if (this._activeRendererKind === 'webgl') {
             // Enhancers without WebGPU: name what actually runs, which the
             // ladder may have stepped below the setting like on WebGPU.
-            enhancerName =
-                this._videoEnhancementAlgo === 'off'
-                    ? t('stream.enhancerOff')
-                    : { 'gl-fsr1': 'WebGL FSR1', 'gl-sgsr': 'WebGL SGSR', 'gl-nis': 'WebGL NIS' }[
-                          this._videoEnhancementAlgo
-                      ] || 'WebGL';
-            if (this._enhancerDegraded) enhancerName += ' (auto)';
+            enhancerName = passIdle
+                ? t('stream.enhancerPassthrough')
+                : this._videoEnhancementAlgo === 'off'
+                  ? t('stream.enhancerOff')
+                  : { 'gl-fsr1': 'WebGL FSR1', 'gl-sgsr': 'WebGL SGSR', 'gl-nis': 'WebGL NIS' }[
+                        this._videoEnhancementAlgo
+                    ] || 'WebGL';
+            if (this._enhancerDegraded && !passIdle) enhancerName += ' (auto)';
         } else if (NO_WEBGPU_ALGOS.includes(this._enhancerCeiling)) {
             // The renderer may have fallen back (no WebGL2 → Canvas2D), so the
             // kind decides, not the setting.
@@ -7021,7 +7031,10 @@ export class StreamView {
         const diag = this._workerDiag || this._diag.snapshot();
         // Main-thread path only: the worker applies its own ladder before
         // posting, so re-deciding here would fight it with stale numbers.
-        if (!this._useWorker) this._applyEnhancerGovernor(diag, now);
+        if (!this._useWorker) {
+            this._enhancerPassthrough = !!(this._renderer && this._renderer.passthrough);
+            this._applyEnhancerGovernor(diag, now);
+        }
         this._applyDecodeRateGovernor(diag, fps, now);
     }
 
@@ -7077,6 +7090,8 @@ export class StreamView {
             arrivalMs: diag.arrivalAvgMs,
             decodeQueue: diag.decodeQueueAvg,
             gpuBehind: this._gpuBehind,
+            // A frame copied at 1:1 ran no pass: the window is not a measurement.
+            passthrough: this._renderer.passthrough === true,
             now,
         });
         if (!algo) return;

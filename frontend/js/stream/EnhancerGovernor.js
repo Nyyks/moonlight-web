@@ -217,7 +217,8 @@ export class EnhancerGovernor {
     /**
      * Feed one observation window.
      * @param {{serviceMs: number, arrivalMs: number, now: number,
-     *           decodeQueue?: number, gpuBehind?: number|null}} obs
+     *           decodeQueue?: number, gpuBehind?: number|null,
+     *           passthrough?: boolean}} obs
      *   serviceMs per-frame cost of the render stage — the draw latency divided
      *             by how many draws overlap (PipelineDiag.renderServiceMs), NOT
      *             the raw wait: with two draws in flight each one waits about
@@ -230,6 +231,10 @@ export class EnhancerGovernor {
      *   gpuBehind share (0..1) of draws still on the GPU when the next one
      *             came (see GPU_BEHIND_DEGRADE). Absent or null — a renderer
      *             that cannot tell — counts as never behind.
+     *   passthrough true while the renderer presents the frame at 1:1 without
+     *             running the pass (VideoRenderer.passthrough): the window
+     *             measured a copy, whatever the rung. The ladder holds and its
+     *             timers restart, so no verdict spans a passage through 1:1.
      * @returns {string|null} the new algo when the level changed, else null.
      */
     update(obs) {
@@ -241,6 +246,14 @@ export class EnhancerGovernor {
         // No usable budget (stream idle, no sample yet): hold, and let the
         // sustain timers lapse rather than deciding on nothing.
         if (!(budget >= MIN_BUDGET_MS) || budget > MAX_BUDGET_MS || !(wait >= 0)) {
+            this._degradeSince = 0;
+            this._recoverSince = 0;
+            return null;
+        }
+
+        // Nothing ran: the frame was copied at 1:1. Hold, and let both timers
+        // lapse — the next window at scale starts a verdict afresh.
+        if (obs.passthrough === true) {
             this._degradeSince = 0;
             this._recoverSince = 0;
             return null;

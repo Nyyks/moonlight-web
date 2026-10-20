@@ -41,6 +41,12 @@
  *   EASU uniform = (inW, inH, outW, outH); RCAS uniform offsets are TEXEL sizes
  *   → (outW, outH, 1/outW, 1/outH).
  *
+ * At 1:1 — frame and canvas the same size on both axes (scaleRegime.js) —
+ * none of the three runs: the frame goes straight to the canvas through the
+ * 'off' copy, one pass and no inputTex, whatever pass is selected, and the
+ * pass resumes on the next frame whose size differs (upscaler-mwsr.md §5).
+ * `passthrough` says when that happened, for the overlay and the ladder.
+ *
  * Dev/setting-gated (video_enhancement). Lifecycle constraints (see plan):
  *   - A canvas in 'webgpu' context can NEVER go back to '2d' → requestAdapter/
  *     requestDevice run BEFORE getContext('webgpu') so a failure falls back to
@@ -50,6 +56,7 @@
  */
 import { VideoRenderer } from './VideoRenderer.js';
 import { nisConfig, nisCoefTexture, readNisSharpness, nisScaleInRange } from './NisTables.js';
+import { fitOutputSize, isIdentityScale } from './scaleRegime.js';
 
 // Full-screen triangle (uv 0..1, v down — matches texture sampling).
 const FULLSCREEN_VS = /* wgsl */ `
@@ -883,6 +890,8 @@ export class WebGpuRenderer extends VideoRenderer {
         this.videoCodec = '';
         /** @type {'sgsr'|'nis'|'fsr1'|'off'} Upscaler pass; 'off' blits through. */
         this._algo = 'sgsr';
+        /** The last draw copied the frame 1:1 instead of running the pass. */
+        this._passthrough = false;
         /** NIS sharpness (0..1, 0.5 neutral) and its re-read throttle. */
         this._nisSharpness = 0.5;
         this._nisKnobsMs = 0;
@@ -992,6 +1001,11 @@ export class WebGpuRenderer extends VideoRenderer {
 
     get kind() {
         return 'webgpu';
+    }
+
+    /** See VideoRenderer.passthrough: the last frame was copied 1:1, no pass run. */
+    get passthrough() {
+        return this._passthrough;
     }
 
     /** Effective algorithm name for the overlay: 'SGSR' | 'NIS' | 'FSR1' | 'Off'. */
@@ -1180,13 +1194,13 @@ export class WebGpuRenderer extends VideoRenderer {
         if (this._hdrYuv) this._buildHdrTonemapResources();
         if (this._hdrExtTonemap) this._buildHdrExtTonemapResources();
 
+        // The copy to the canvas: the 'off' pass, and every pass's 1:1 frame.
+        this._buildPassthroughResources();
         if (this._algo === 'fsr1') {
             this._buildFsr1Resources();
         } else if (this._algo === 'nis') {
             this._buildNisResources();
-        } else if (this._algo === 'off') {
-            this._buildPassthroughResources();
-        } else {
+        } else if (this._algo !== 'off') {
             this._buildSgsrResources();
         }
 
@@ -1203,7 +1217,8 @@ export class WebGpuRenderer extends VideoRenderer {
         this._rcasBindGroup = null; // FSR1 RCAS bind group (samples intermTex)
     }
 
-    // 'off' mode: a blit pipeline targeting the canvas (external → canvas, no upscaler).
+    // The plain copy to the canvas (external → canvas, no upscaler): the 'off'
+    // pass, and the frame of every other pass when it is already at 1:1.
     _buildPassthroughResources() {
         const device = this._device;
         const blitModule = device.createShaderModule({ code: BLIT_WGSL });
@@ -1353,15 +1368,20 @@ export class WebGpuRenderer extends VideoRenderer {
             ],
         });
         const mod = device.createShaderModule({ code: HDR_EXT_TONEMAP_WGSL });
-        // Like the YUV pass: 'off' has no enhancer stage, so Pass 0 IS the
-        // canvas pass and must target the canvas format.
-        const target = this._algo === 'off' ? this._format : this._interFormat;
-        this._extPipeline = device.createRenderPipeline({
-            layout: device.createPipelineLayout({ bindGroupLayouts: [this._extLayout] }),
-            vertex: { module: mod, entryPoint: 'vs' },
-            fragment: { module: mod, entryPoint: 'fs', targets: [{ format: target }] },
-            primitive: { topology: 'triangle-list' },
-        });
+        // Two targets, like the YUV pass: inputTex ahead of an enhancer pass,
+        // the canvas itself when the frame goes straight there ('off', or any
+        // pass at 1:1). One pipeline serves both when the formats agree.
+        const layout = device.createPipelineLayout({ bindGroupLayouts: [this._extLayout] });
+        const build = (format) =>
+            device.createRenderPipeline({
+                layout,
+                vertex: { module: mod, entryPoint: 'vs' },
+                fragment: { module: mod, entryPoint: 'fs', targets: [{ format }] },
+                primitive: { topology: 'triangle-list' },
+            });
+        this._extPipeline = build(this._interFormat);
+        this._extCanvasPipeline =
+            this._format === this._interFormat ? this._extPipeline : build(this._format);
     }
 
     // HDR tone-map Pass 0: 3 uint planes (Y/U/V) + dims/params uniforms → SDR.
@@ -1402,15 +1422,20 @@ export class WebGpuRenderer extends VideoRenderer {
             ],
         });
         const mod = device.createShaderModule({ code: HDR_TONEMAP_WGSL });
-        // 'off' mode has no enhancer pass: the tone map renders straight to the
-        // canvas, so it must target the canvas format instead of inputTex's.
-        const target = this._algo === 'off' ? this._format : this._interFormat;
-        this._yuvPipeline = device.createRenderPipeline({
-            layout: device.createPipelineLayout({ bindGroupLayouts: [this._yuvLayout] }),
-            vertex: { module: mod, entryPoint: 'vs' },
-            fragment: { module: mod, entryPoint: 'fs', targets: [{ format: target }] },
-            primitive: { topology: 'triangle-list' },
-        });
+        // Two targets: inputTex ahead of an enhancer pass, the canvas itself
+        // when the frame goes straight there ('off', or any pass at 1:1), whose
+        // format differs on the SDR tone-map path. One pipeline when they agree.
+        const layout = device.createPipelineLayout({ bindGroupLayouts: [this._yuvLayout] });
+        const build = (format) =>
+            device.createRenderPipeline({
+                layout,
+                vertex: { module: mod, entryPoint: 'vs' },
+                fragment: { module: mod, entryPoint: 'fs', targets: [{ format }] },
+                primitive: { topology: 'triangle-list' },
+            });
+        this._yuvPipeline = build(this._interFormat);
+        this._yuvCanvasPipeline =
+            this._format === this._interFormat ? this._yuvPipeline : build(this._format);
         // Force texture (re)creation on the next upload (device recovery rebuilds this).
         this._texY = null;
         this._yuvW = 0;
@@ -1701,11 +1726,11 @@ export class WebGpuRenderer extends VideoRenderer {
      * chosen algo's resources are built at create(), so the target's are built
      * on first use and kept — a switch back is then free.
      *
-     * Two things must be invalidated, not just the algo field:
-     *   - the enhancer bind group, whose LAYOUT differs between FSR1 and SGSR:
-     *     zeroing the cached input size forces _ensureInputTex to rebuild it;
-     *   - the HDR tone-map pipeline, whose render target is the canvas format
-     *     in 'off' mode and the intermediate format otherwise.
+     * Besides the algo field, the enhancer bind group must be invalidated: its
+     * LAYOUT differs between FSR1 and SGSR, and zeroing the cached input size
+     * forces _ensureInputTex to rebuild it. (The copy to the canvas and the HDR
+     * pass 0 exist in both of their targets from the start, so 'off' needs
+     * nothing built or rebuilt.)
      *
      * @param {string} algo 'sgsr' | 'nis' | 'fsr1' | 'off'; anything else is refused.
      * @returns {boolean} true when the renderer switched.
@@ -1716,8 +1741,7 @@ export class WebGpuRenderer extends VideoRenderer {
         if (algo !== 'sgsr' && algo !== 'nis' && algo !== 'fsr1' && algo !== 'off') return false;
 
         try {
-            if (algo === 'off' && !this._passthroughPipeline) this._buildPassthroughResources();
-            else if (algo === 'sgsr' && !this._enhancePipeline) this._buildSgsrResources();
+            if (algo === 'sgsr' && !this._enhancePipeline) this._buildSgsrResources();
             else if (algo === 'nis' && !this._nisPipeline) this._buildNisResources();
             else if (algo === 'fsr1' && !this._easuPipeline) this._buildFsr1Resources();
         } catch (e) {
@@ -1725,14 +1749,11 @@ export class WebGpuRenderer extends VideoRenderer {
             return false;
         }
 
-        const wasOff = this._algo === 'off';
         this._algo = algo;
         this._inW = 0;
         this._inH = 0;
         this._intermW = 0;
         this._intermH = 0;
-        if (this._hdrYuv && wasOff !== (algo === 'off')) this._buildHdrTonemapResources();
-        if (this._hdrExtTonemap && wasOff !== (algo === 'off')) this._buildHdrExtTonemapResources();
         console.log('[WebGpuRenderer] algo → ' + algo);
         return true;
     }
@@ -1762,23 +1783,19 @@ export class WebGpuRenderer extends VideoRenderer {
             return;
         }
 
-        // Canvas backing = frame-aspect rect fitting the output box (else frame res).
-        let cw = inW,
-            ch = inH;
-        if (this._hasOutputSize) {
-            const frameAspect = inW / inH;
-            const boxAspect = this._outW / this._outH;
-            cw = frameAspect >= boxAspect ? this._outW : Math.round(this._outH * frameAspect);
-            ch = Math.round(cw / frameAspect);
-            // Clamp to the max texture dimension (preserve aspect): bounds GPU cost
-            // when the output box is inflated by pinch-zoom.
-            const MAX_DIM = 4096;
-            if (cw > MAX_DIM || ch > MAX_DIM) {
-                const k = MAX_DIM / Math.max(cw, ch);
-                cw = Math.round(cw * k);
-                ch = Math.round(ch * k);
-            }
-        }
+        // Canvas backing = frame-aspect rect fitting the output box (else frame
+        // res), capped (scaleRegime.js). At exactly the frame size the pass has
+        // nothing to do: the frame is copied straight to the canvas, as in
+        // 'off', and the pass resumes on the next frame whose size differs.
+        const { cw, ch } = fitOutputSize(
+            inW,
+            inH,
+            this._hasOutputSize ? this._outW : 0,
+            this._hasOutputSize ? this._outH : 0,
+        );
+        const identity = isIdentityScale(inW, inH, cw, ch);
+        const direct = this._algo === 'off' || identity;
+        this._passthrough = identity && this._algo !== 'off';
         if (cw > 0 && ch > 0 && (this.canvas.width !== cw || this.canvas.height !== ch)) {
             this.canvas.width = cw;
             this.canvas.height = ch;
@@ -1842,9 +1859,10 @@ export class WebGpuRenderer extends VideoRenderer {
             const encoder = this._device.createCommandEncoder();
             const canvasTex = this.ctx.getCurrentTexture();
 
-            // 'off' mode: single pass to the canvas (linear scale, no upscaler) —
-            // either the plain external blit or the HDR YUV tone map.
-            if (this._algo === 'off') {
+            // Straight to the canvas, one pass: 'off' (linear scale, no
+            // upscaler), and every pass at 1:1 — the plain external copy, or
+            // the HDR pass 0 in its canvas-format flavour.
+            if (direct) {
                 const pass = encoder.beginRenderPass({
                     colorAttachments: [
                         {
@@ -1856,10 +1874,10 @@ export class WebGpuRenderer extends VideoRenderer {
                     ],
                 });
                 if (useYuv) {
-                    pass.setPipeline(this._yuvPipeline);
+                    pass.setPipeline(this._yuvCanvasPipeline);
                     pass.setBindGroup(0, this._yuvBindGroup);
                 } else {
-                    pass.setPipeline(useExt ? this._extPipeline : this._passthroughPipeline);
+                    pass.setPipeline(useExt ? this._extCanvasPipeline : this._passthroughPipeline);
                     pass.setBindGroup(0, blitBindGroup);
                 }
                 pass.draw(3);
@@ -1876,7 +1894,11 @@ export class WebGpuRenderer extends VideoRenderer {
                 try {
                     await this._device.queue.onSubmittedWorkDone();
                 } catch (e) {}
-                this._noteDraw(drawStart, uploadMs + (performance.now() - gpuStart), 'off');
+                this._noteDraw(
+                    drawStart,
+                    uploadMs + (performance.now() - gpuStart),
+                    (this._passthrough ? '1:1' : 'off') + (useYuv ? '+yuv' : ''),
+                );
                 return;
             }
 

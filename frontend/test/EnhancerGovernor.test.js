@@ -431,3 +431,58 @@ describe('EnhancerGovernor — WebGL2 passes and the memory of a verdict', () =>
         expect(rememberedRung('webgl', 'sgsr')).toBeNull();
     });
 });
+
+describe('EnhancerGovernor — the frame copied at 1:1', () => {
+    // At exactly the frame size the shader renderers skip the pass and copy
+    // the frame (VideoRenderer.passthrough): the window then measures a copy,
+    // whatever the rung says, so the ladder must neither step down on it nor
+    // climb back on it, and its clock starts afresh when the pass resumes.
+    function hold(gov, obs, seconds, startMs, passthrough) {
+        const steps = [];
+        let now = startMs;
+        for (let i = 0; i < seconds * 2; i++) {
+            now += 500;
+            const algo = gov.update({
+                serviceMs: obs.serviceMs,
+                arrivalMs: obs.arrivalMs,
+                passthrough,
+                now,
+            });
+            if (algo) steps.push({ algo, now });
+        }
+        return { steps, now };
+    }
+
+    it('does not step down on a contended window while nothing runs', () => {
+        const gov = new EnhancerGovernor('fsr1');
+        const { steps } = hold(gov, { serviceMs: 19.5, arrivalMs: 16.7 }, 20, 0, true);
+        expect(steps).toEqual([]);
+        expect(gov.level).toBe('fsr1');
+    });
+
+    it('does not climb back while the frame is a copy, however long that lasts', () => {
+        const gov = new EnhancerGovernor('fsr1', { startRung: 'sgsr' });
+        const { steps, now } = hold(gov, { serviceMs: 2, arrivalMs: 16.7 }, 600, 0, true);
+        expect(steps).toEqual([]);
+        expect(gov.level).toBe('sgsr');
+        // The pass back at scale, and cheap: the ordinary wait, then the climb.
+        const back = hold(gov, { serviceMs: 5, arrivalMs: 16.7 }, 16, now, false);
+        expect(back.steps.map((s) => s.algo)).toEqual(['nis']);
+    });
+
+    it('restarts its clock when the pass resumes', () => {
+        const gov = new EnhancerGovernor('fsr1', { startRung: 'sgsr' });
+        // 14 s in the clear: one more second would have been the first bet.
+        let t = hold(gov, { serviceMs: 5, arrivalMs: 16.7 }, 14, 0, false);
+        expect(t.steps).toEqual([]);
+        // A passage through 1:1…
+        t = hold(gov, { serviceMs: 2, arrivalMs: 16.7 }, 5, t.now, true);
+        expect(t.steps).toEqual([]);
+        // …then back at scale: not one window later, but 15 s later.
+        t = hold(gov, { serviceMs: 5, arrivalMs: 16.7 }, 2, t.now, false);
+        expect(t.steps).toEqual([]);
+        expect(gov.level).toBe('sgsr');
+        t = hold(gov, { serviceMs: 5, arrivalMs: 16.7 }, 14, t.now, false);
+        expect(t.steps.map((s) => s.algo)).toEqual(['nis']);
+    });
+});

@@ -275,6 +275,8 @@ function postCounters(force) {
             render: stageStats(S._renderSamples),
         },
         resolution: S._lastResolution || '',
+        // The renderer copied the last frame at 1:1, its pass idle (overlay).
+        passthrough: !!(S.renderer && S.renderer.passthrough),
         pacer: S.pacer ? S.pacer.stats : null,
         diag,
     });
@@ -295,6 +297,8 @@ function applyEnhancerGovernor(diag, now) {
         // up with, frames late.
         gpuBehind:
             typeof S.renderer.takeGpuBehind === 'function' ? S.renderer.takeGpuBehind() : null,
+        // A frame copied at 1:1 ran no pass: the window is not a measurement.
+        passthrough: S.renderer.passthrough === true,
         now,
     });
     if (!algo) return;

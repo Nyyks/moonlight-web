@@ -56,6 +56,7 @@
  */
 import { VideoRenderer } from './VideoRenderer.js';
 import { nisConfig, nisCoefTexture, readNisSharpness, nisScaleInRange } from './NisTables.js';
+import { fitOutputSize, isIdentityScale } from './scaleRegime.js';
 
 // ── Shaders ─────────────────────────────────────────────────────────────────
 
@@ -570,9 +571,10 @@ void main() {
 `;
 
 // The enhancer ladder's last rung: the picture as it is, stretched by the
-// sampler's bilinear filter. Only ever reached through setAlgo — the menu's
-// "no enhancer" is Canvas2D — so a session the ladder stepped down can climb
-// back without changing renderer.
+// sampler's bilinear filter. Reached through setAlgo — the menu's "no
+// enhancer" is Canvas2D — so a session the ladder stepped down can climb back
+// without changing renderer; and every rung's frame at 1:1, where there is
+// nothing to reconstruct (upscaler-mwsr.md §5).
 const BLIT_FS = `#version 300 es
 precision mediump float;
 uniform sampler2D uTex;
@@ -591,6 +593,8 @@ export class WebGlRenderer extends VideoRenderer {
         this.videoCodec = '';
         /** @type {string} one of WEBGL_ALGOS, or 'off' */
         this._algo = 'gl-fsr1';
+        /** The last draw copied the frame 1:1 instead of running the pass. */
+        this._passthrough = false;
         this.gl = null;
         this._outW = 0;
         this._outH = 0;
@@ -774,6 +778,11 @@ export class WebGlRenderer extends VideoRenderer {
         return 'webgl';
     }
 
+    /** See VideoRenderer.passthrough: the last frame was copied 1:1, no pass run. */
+    get passthrough() {
+        return this._passthrough;
+    }
+
     /** Effective algorithm name for the overlay. */
     get algoName() {
         if (this._algo === 'gl-nis') return 'WebGL NIS';
@@ -869,11 +878,13 @@ export class WebGlRenderer extends VideoRenderer {
         this._inW = 0;
         this._inH = 0;
 
-        // Only the pass in use is built; setAlgo builds the others on demand.
+        // Only the pass in use is built, plus the plain copy (the frame at 1:1,
+        // and the ladder's last rung); setAlgo builds the others on demand.
         // Whatever a lost context held is gone with it.
         this._easu = this._rcas = this._sgsr = this._nis = this._blit = null;
         this._intermTex = this._fbo = this._coefTex = null;
         this._buildAlgo(this._algo);
+        this._buildAlgo('off');
         gl.disable(gl.DEPTH_TEST);
         gl.disable(gl.BLEND);
         gl.disable(gl.SCISSOR_TEST);
@@ -980,21 +991,18 @@ export class WebGlRenderer extends VideoRenderer {
         }
 
         // Canvas backing = frame-aspect rect fitting the output box (same rule
-        // as WebGpuRenderer), else the frame's own size.
-        let cw = inW,
-            ch = inH;
-        if (this._hasOutputSize) {
-            const frameAspect = inW / inH;
-            const boxAspect = this._outW / this._outH;
-            cw = frameAspect >= boxAspect ? this._outW : Math.round(this._outH * frameAspect);
-            ch = Math.round(cw / frameAspect);
-            const MAX_DIM = 4096;
-            if (cw > MAX_DIM || ch > MAX_DIM) {
-                const k = MAX_DIM / Math.max(cw, ch);
-                cw = Math.round(cw * k);
-                ch = Math.round(ch * k);
-            }
-        }
+        // as WebGpuRenderer, scaleRegime.js), else the frame's own size. At
+        // exactly the frame size the pass has nothing to do: the plain copy
+        // presents the frame, and the pass resumes when the size differs.
+        const { cw, ch } = fitOutputSize(
+            inW,
+            inH,
+            this._hasOutputSize ? this._outW : 0,
+            this._hasOutputSize ? this._outH : 0,
+        );
+        const identity = isIdentityScale(inW, inH, cw, ch);
+        const pass = identity ? 'off' : this._algo;
+        this._passthrough = identity && this._algo !== 'off';
         if (cw > 0 && ch > 0 && (this.canvas.width !== cw || this.canvas.height !== ch)) {
             this.canvas.width = cw;
             this.canvas.height = ch;
@@ -1035,7 +1043,7 @@ export class WebGlRenderer extends VideoRenderer {
 
         try {
             gl.bindVertexArray(this._vao);
-            if (this._algo === 'gl-fsr1') {
+            if (pass === 'gl-fsr1') {
                 this._ensureInterm(cw, ch);
                 // Pass 1: EASU input → interm (output res).
                 gl.bindFramebuffer(gl.FRAMEBUFFER, this._fbo);
@@ -1054,7 +1062,7 @@ export class WebGlRenderer extends VideoRenderer {
                 gl.uniform1i(this._rcas.u.uTex, 0);
                 gl.uniform4f(this._rcas.u.uRes, cw, ch, 1 / cw, 1 / ch);
                 gl.drawArrays(gl.TRIANGLES, 0, 3);
-            } else if (this._algo === 'gl-sgsr') {
+            } else if (pass === 'gl-sgsr') {
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, cw, ch);
                 gl.useProgram(this._sgsr.prog);
@@ -1063,7 +1071,7 @@ export class WebGlRenderer extends VideoRenderer {
                 gl.uniform1i(this._sgsr.u.uTex, 0);
                 gl.uniform4f(this._sgsr.u.uView, 1 / inW, 1 / inH, inW, inH);
                 gl.drawArrays(gl.TRIANGLES, 0, 3);
-            } else if (this._algo === 'off') {
+            } else if (pass === 'off') {
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, cw, ch);
                 gl.useProgram(this._blit.prog);
@@ -1115,7 +1123,7 @@ export class WebGlRenderer extends VideoRenderer {
         }
 
         this._rendered++;
-        this._noteDraw(drawStart, waitMs, this._algo + ':' + path);
+        this._noteDraw(drawStart, waitMs, (this._passthrough ? '1:1' : this._algo) + ':' + path);
     }
 
     /** Record the draw split for PipelineDiag (see VideoRenderer.lastDraw). */

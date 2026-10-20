@@ -161,4 +161,16 @@ export class VideoRenderer {
     get hdrActive() {
         return false;
     }
+
+    /**
+     * True when the last draw put the frame on the canvas at exactly its own
+     * size without running the selected enhancer pass (upscaler-mwsr.md §5):
+     * the shader renderers copy such a frame instead of resampling it. The
+     * overlay then says so (« Off (1:1) »), and the enhancer ladder holds,
+     * since a window of copies says nothing about the pass. False wherever no
+     * pass exists.
+     */
+    get passthrough() {
+        return false;
+    }
 }

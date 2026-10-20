@@ -826,6 +826,7 @@
         "statLegScreen": "Écran (composition + balayage)",
         "statLegScreenValue": "non mesuré, ~½ à 1 rafraîchissement",
         "enhancerOff": "Désactivé",
+        "enhancerPassthrough": "Désactivé (1:1)",
         "iosFullscreenHint": "Pour un vrai plein écran : Partager → Sur l'écran d'accueil, puis lancez Moonlight depuis l'icône.",
         "exitFullscreenHint": "Appuyez sur {{combo}} pour quitter le plein écran",
         "volume": "Volume",
