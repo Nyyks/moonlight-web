@@ -1407,9 +1407,10 @@ texte de référence, ce chapitre dit ce qui change.
   Sur cet écran de 720 lignes le cas d'usage est la **réduction** (flux Auto jusqu'à 1440 lignes,
   §1.6) et l'agrandissement du zoom à deux doigts : les deux régimes y sont mesurés.
 - **Arc A380** : absente de la liste des adaptateurs de DualRTX le 19/10 au soir (seuls le RTX 5060 Ti,
-  le Radeon 780M et les écrans virtuels y figurent) ; à confirmer avec Bruno. Le §1.8 la comptait
-  comme troisième GPU d'ordinateur ; sans elle, les classes d'ordinateur restent NVIDIA (RTX), AMD
-  (780M, deux machines), Intel (N95) et Apple (M1).
+  le Radeon 780M et les écrans virtuels y figurent) ; Bruno a confirmé le 20/10 qu'il a dû la
+  **débrancher**, sa compatibilité sera vérifiée plus tard. Le §1.8 la comptait comme troisième GPU
+  d'ordinateur ; sans elle, les classes d'ordinateur restent NVIDIA (RTX), AMD (780M, deux machines),
+  Intel (N95) et Apple (M1) ; la classe Intel Arc attend son retour.
 
 **Ce que cela change aux critères.** C1 et C6 se lisent désormais « iPhone 13 Pro, realme Note 60,
 et `mw-arm` en WebGL2 seulement » ; la mention « démontré sur Adreno 618 et Apple, extrapolé ailleurs »

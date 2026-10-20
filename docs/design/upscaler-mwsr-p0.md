@@ -5,8 +5,9 @@
 > direct de la texture externe contre « passe 0 + RGBA » (décision n° 2 du §0), le coût des
 > dérivées d'écran (la base du vote), la dispersion des horodatages GPU par machine, et les
 > lignes de base des cinq techniques en place, chaîne telle que livrée et noyau seul.
-> Les téléphones (iPhone 13 Pro, realme Note 60), le Mac M1 et `mw-arm` restent à jouer aux
-> créneaux de Bruno : ce rapport est **ordinateur seulement**, deux GPU.
+> L'iPhone 13 Pro a été joué le 20/10 au matin, à un créneau de Bruno (§4 ter) ; le realme
+> Note 60, le Mac M1 et `mw-arm` restent à jouer à ses créneaux : ce rapport couvre **deux GPU
+> d'ordinateur et un téléphone Apple**.
 
 ## 1. L'instrument
 
@@ -43,6 +44,13 @@
 - Chrome 155.0.8059.84, sans tête (`--headless=new`), profil et drapeaux propres au labo, GPU
   choisi par `--use-adapter-luid` (les deux préférences `powerPreference` rendent le RTX sur
   cette machine ; le 780M n'est atteint que par son LUID, lu par `IDXGIFactory1`).
+- **Les téléphones** : `scaler_lab.py --serve 0.0.0.0:8766` sert le dépôt en HTTPS (certificat
+  auto-signé aux adresses du LAN : WebGPU exige un contexte sécurisé) avec des liens courts (`/1`
+  à `/6`) vers les cas de `PHONE_CASES` ; la page tourne dans le navigateur du téléphone, affiche
+  « posted » et renvoie son JSON (`post=1`) au serveur, qui l'écrit en
+  `bench-out/scaler-lab/phone-<tag>-<cas>-<horodatage>.json`. Une règle de pare-feu limitée au
+  port est ouverte pour le créneau et retirée après. Les cas `-single` soumettent une itération
+  par tampon de commandes (`pace=tick&period=0.01`) : le §4 ter dit pourquoi.
 
 Validation d'abord sur l'adaptateur logiciel (SwiftShader, règle « WARP d'abord ») : les 27
 cellules compilent, dessinent (recadrages PNG relus) et s'horodatent avant tout GPU réel.
@@ -66,9 +74,12 @@ Alignement vérifié : le bilinéaire du labo et celui de PIL sur la même entr�
 |---|---|---|---|
 | DualRTX | RTX 5060 Ti | `nvidia blackwell 0x2d04` | `shader-f16`, `subgroups`, `subgroup-size-control`, `timestamp-query`, `float32-filterable`, `bgra8unorm-storage`, `dual-source-blending`, `texture-formats-tier2` |
 | DualRTX | Radeon 780M | `amd rdna-2 0x13c0` (Chrome dit « rdna-2 » pour ce gfx1103) | la même liste que le RTX : `shader-f16`, `subgroups`, `timestamp-query`, `float32-filterable`, `bgra8unorm-storage`, `dual-source-blending`, `texture-formats-tier2` |
-| DualRTX | Arc A380 | **absente** de l'énumération DXGI le 19/10 (RTX ×3 dont deux doublons IddCx, AMD, Basic Render) | — |
+| DualRTX | Arc A380 | **débranchée** (Bruno, 20/10 ; absente de l'énumération DXGI dès le 19/10), compatibilité à vérifier à son retour | — |
+| iPhone 13 Pro | Apple A15 (GPU 5 cœurs), iOS 26.5, Chrome iOS 155 = WebKit | `apple apple apple apple` (WebKit masque fournisseur, architecture et modèle) | `shader-f16`, `timestamp-query` (lecture particulière, §4 ter), `bgra8unorm-storage`, `float16-renderable`, `float32-renderable`, `float32-blendable`, `rg11b10ufloat-renderable`, `texture-formats-tier1`, ASTC et ETC2 ; **sans** `subgroups`, `float32-filterable`, `dual-source-blending`, `texture-formats-tier2` |
 
-Décodeur WebCodecs : H.264 matériel sur les deux GPU, sortie NV12.
+Décodeur WebCodecs : H.264 matériel sur les deux GPU de DualRTX et sur l'iPhone
+(`prefer-hardware` honoré), sortie NV12 ; l'encodeur de l'iPhone étiquette ses images
+`iec61966-2-1` en pleine plage (DualRTX : `bt709`, plage limitée).
 
 ## 3. RTX 5060 Ti
 
@@ -203,9 +214,10 @@ annonçait, mesuré : 2,6 × sur le plancher.
 
 ## 4 bis. Qualité : premiers repères des noyaux livrés
 
-Mesurés sur l'adaptateur logiciel (SwiftShader : même WGSL, filtrage bilinéaire 8 bits ; à
-rejouer sur un GPU en P2, l'écart attendu est au centième de dB), ×2 de 1280×720 vers
-2560×1440, entrée = vérité réduite (Lanczos-3, linéaire), sans compression. Les chiffres se
+Mesurés d'abord sur l'adaptateur logiciel (SwiftShader : même WGSL, filtrage bilinéaire 8 bits),
+puis **rejoués sur le RTX 5060 Ti le 20/10** : les deux concordent au centième de dB, le tableau
+donne les chiffres du RTX. ×2 de 1280×720 vers 2560×1440, entrée = vérité réduite (Lanczos-3,
+linéaire), sans compression. Les chiffres se
 lisent **les uns contre les autres** : à ×2, du texte de 12 px à 720p est en grande partie
 irrécupérable (le meilleur agrandissement de PIL, Lanczos, atteint 18,1 dB sur `text`).
 
@@ -227,21 +239,158 @@ FSR1 + 0,01 ») attend FLIP, qui n'a pas encore de roue pour Python 3.14 (compil
 d'ici là, PSNR, SSIM et dépassements servent de garde-fous, et FSR1 est la référence de qualité à
 égaler, SGSR1 celle à battre sur la sonnerie.
 
+**L'étalon de Bruno.** `C:\Test\00_Background.png` (2560×1440) est l'image avec laquelle Bruno
+compare ses agrandisseurs et réducteurs en SDR : un bureau Windows avec trois fenêtres de jeu
+(course, Prince of Persia, Cyberpunk au centre), du feuillage fin, de la peau, de petites icônes
+et un panneau de texte coloré sur noir. Le labo la sert sous `/test/` ; vérité = l'image
+elle-même, à ×2 (entrée 720p) et ×1,33 (entrée 1080p), sur le RTX :
+
+| Noyau | ×2 PSNR / SSIM / dép. | ×2 tiers central PSNR / SSIM | ×1,33 PSNR / SSIM / dép. | ×1,33 tiers central PSNR / SSIM |
+|---|---|---|---|---|
+| bilinéaire (`tex-s1`) | 20,78 / 0,863 / 0 % | 31,56 / 0,928 | 23,73 / 0,934 / 0 % | 36,36 / 0,977 |
+| SGSR1 du dépôt | 20,59 / 0,853 / 6,8 % | 31,28 / 0,930 | 23,75 / 0,924 / 5,0 % | 34,55 / 0,970 |
+| SGSR1, constantes Qualcomm | 20,61 / 0,849 / 8,6 % | 31,03 / 0,925 | 23,75 / 0,921 / 6,5 % | 33,95 / 0,966 |
+| NIS | 20,15 / 0,824 / 21,7 % | 27,91 / 0,896 | 23,43 / 0,892 / 18,3 % | 30,24 / 0,942 |
+| EASU seul | 20,79 / 0,874 / 0 % | 32,38 / 0,942 | 24,01 / 0,942 / 0 % | 36,58 / 0,980 |
+| FSR1 (EASU + RCAS) | 20,79 / 0,874 / 2,0 % | 32,26 / 0,940 | 24,15 / 0,941 / 5,0 % | 35,94 / 0,976 |
+
+Sur cette image, qui ressemble à ce que le produit affiche (jeu et bureau, pas une mire),
+l'ordre change : **EASU et FSR1 sont les meilleurs partout** (SSIM 0,874 contre 0,863 au
+bilinéaire à ×2, +0,8 dB sur le tiers central, qui est la fenêtre de jeu) ; **SGSR1 passe sous le
+bilinéaire** en PSNR comme en SSIM (sa netteté sort 7-9 % des pixels de la plage locale et le
+tiers central n'y gagne rien) ; NIS est nettement le pire (−0,6 dB, 22 % de dépassements : la
+netteté livrée est trop forte pour une image de jeu). Le PSNR de l'image entière est écrasé par
+les aplats du bureau (31-36 dB au tiers central pour 20-24 sur l'entier) : les verdicts de P2 se
+liront sur le tiers central et sur SSIM en attendant FLIP, et cet étalon rejoint les contenus de
+référence de la matrice (§7.3), à côté des mires.
+
+## 4 ter. iPhone 13 Pro (Apple A15, WebKit), 20/10 au matin
+
+Créneau de Bruno de dix minutes : la page servie depuis DualRTX en HTTPS, ouverte dans
+**Chrome iOS 155.0.8059.37**, c'est-à-dire WebKit sous un autre habillage (iOS 26.5 ; Safari
+donne la même pile WebGPU). Trois cas (`x2-text` avec la chaîne du produit, joué deux fois ;
+`x075-text` ; `x2-game`), 2 tours × 6 lots de 16 itérations, 9 à 19 s de page chacun, aucune
+erreur. Les tailles sont celles du banc d'ordinateur (sortie 1440p, 3,7 Mpx) ; l'écran du
+téléphone fait 2532×1170 (3,0 Mpx) : les coûts par image à sa taille sont à lire 20 % plus bas.
+
+**Les horodatages de ce GPU ne s'additionnent pas.** `timestamp-query` est exposé et rend des
+nanosecondes, mais trois faits montrent que la durée d'une passe prise dans un tampon de seize
+itérations n'est pas son coût :
+
+- `nis` mesure 265 ms par passe alors que le lot de seize passes s'achève en 16 × 31 ms de temps
+  mur (`submit → onSubmittedWorkDone`) ;
+- la même passe `blit` (720p) mesure 0,08 ms seule, 0,7 ms devant `tex-s1`, 2,6 ms devant
+  `tex-s5` et 4,8 ms devant `tex-s9` : sa « durée » suit ce qui vient après elle ;
+- le premier tour d'une cellule légère vaut 1,5 à 13 fois le second (`blit` 1,00 → 0,08 ms,
+  `ext-s1` 3,2 → 1,1) sans que le temps mur bouge.
+
+C'est le comportement d'un GPU à tuiles dont le tileur ouvre la passe suivante pendant que le
+rendu de la précédente court encore : le début d'une passe est pris tôt, sa fin tard, et plus le
+tampon est long, plus les durées se recouvrent. Deux lectures restent justes : le **temps mur par
+itération sous contre-pression**, qui borne par le haut le coût GPU réel à horloge pleine (le GPU
+est saturé pendant le lot), et les cellules **`chain-*`**, une image par tampon de commandes, dont
+les horodatages concordent avec le temps mur de `draw()`. Les cas `-single` (une itération par
+tampon, `pace=tick&period=0.01`) ont été ajoutés au serveur pour le prochain créneau : ils rendent
+les horodatages par passe lisibles sur ce GPU.
+
+| cellule | passes | ×2 texte GPU p50 | ×2 texte mur/it | ×2 jeu GPU p50 | ×2 jeu mur/it | ×0,75 texte GPU p50 | ×0,75 texte mur/it |
+|---|---|---|---|---|---|---|---|
+| blit | 1 | 0,20 | 0,24 | 0,20 | 0,25 | 2,52 | 0,52 |
+| ext-s1 | 1 | 1,57 | 0,47 | 1,27 | 0,36 | 1,94 | 0,46 |
+| ext-s5 | 1 | 6,07 | 0,94 | 6,11 | 0,92 | 3,78 | 0,68 |
+| ext-s9 | 1 | 11,35 | 1,57 | 11,38 | 1,52 | 6,50 | 0,98 |
+| ext-l1 | 1 | 1,60 | 0,44 | 1,61 | 0,43 | 1,65 | 0,44 |
+| ext-l5 | 1 | 6,43 | 0,99 | 6,41 | 0,97 | 3,87 | 0,73 |
+| ext-s1-fw | 1 | 1,14 | 0,38 | 1,21 | 0,39 | 1,90 | 0,47 |
+| tex-s1 | 1 | 0,96 | 0,27 | 0,95 | 0,28 | 2,48 | 0,46 |
+| tex-s2 | 1 | 0,95 | 0,27 | 0,96 | 0,28 | 2,51 | 0,45 |
+| tex-s5 | 1 | 2,92 | 0,48 | 3,02 | 0,51 | 2,61 | 0,46 |
+| tex-s9 | 1 | 5,53 | 0,81 | 5,53 | 0,80 | 3,63 | 0,61 |
+| tex-s1-fw | 1 | 1,04 | 0,33 | 0,93 | 0,27 | 2,42 | 0,43 |
+| blit+tex-s1 | 2 | 1,48 | 0,44 | 1,45 | 0,44 | 4,46 | 0,59 |
+| blit+tex-s5 | 2 | 5,41 | 0,68 | 5,45 | 0,70 | 6,72 | 0,76 |
+| blit+tex-s9 | 2 | 10,29 | 0,98 | 10,23 | 0,96 | 9,43 | 0,89 |
+| sgsr-repo | 1 | 5,86 | 0,83 | 6,05 | 0,86 | 3,74 | 0,59 |
+| sgsr-src | 1 | 5,94 | 0,85 | 6,06 | 0,85 | 3,72 | 0,58 |
+| nis | 1 | 265,79 | 30,77 | 246,27 | 27,80 | 155,98 | 17,80 |
+| easu | 1 | 18,86 | 2,30 | 18,96 | 2,36 | 10,83 | 1,40 |
+| rcas | 1 | 4,83 | 0,72 | 4,86 | 0,76 | 2,54 | 0,47 |
+| fsr1 | 2 | 47,06 | 2,95 | 47,67 | 3,05 | 26,62 | 1,78 |
+| blit+sgsr-repo | 2 | 11,34 | 1,01 | 11,58 | 1,09 | 9,54 | 0,91 |
+| blit+fsr1 | 3 | 69,14 | 3,12 | 69,95 | 3,28 | 44,50 | 2,18 |
+
+GPU p50 = somme des horodatages par passe (gonflée, gardée pour mémoire) ; mur/it = temps mur par
+itération en ms, la borne. Second passage du cas ×2 texte ; le premier concorde à 12 % près sur la
+somme GPU et à 18 % sur le mur, hors `chain-sgsr` (25 % et 39 % : deux régimes d'horloge, plus bas).
+
+Chaîne du produit (`WebGpuRenderer` inchangé, un `draw()` par itération), ×2 texte, les deux
+passages :
+
+| cellule | passes | GPU p50 (passage 1) | GPU p50 (passage 2) | par passe (passage 2) | `draw()` CPU p50 | mur/it |
+|---|---|---|---|---|---|---|
+| chain-off | 1 | 0,79 | 0,85 | 0,85 | 2,12 | 2,34 |
+| chain-sgsr | 2 | 1,35 | 1,80 | 0,23 / 1,63 | 2,42-2,78 | 4,11 |
+| chain-nis | 2 | 29,85 | 31,15 | 0,26 / 30,85 | 31,6-32,9 | 32,88 |
+| chain-fsr1 | 3 | 6,12 | 5,35 | 0,22 / 2,31 / 2,82 | 4,62-4,74 | 4,59 |
+
+**Ce que l'iPhone dit** (bornes de temps mur à ×2 vers 1440p, GPU saturé) :
+
+- **Plancher** : un tap bilinéaire sur `rgba8` vers 1440p ≤ 0,27 ms ; 5 taps ≤ 0,5 ; 9 taps
+  ≤ 0,8 : 5 taps coûtent 1,8 × un tap, 9 taps 2,9 ×. Les taps ne sont pas gratuits ici,
+  contrairement au RTX.
+- **La texture externe coûte deux fois le tap RGBA** : `ext-s5` 0,92-0,94 contre `tex-s5`
+  0,48-0,51, `ext-s9` 1,52-1,57 contre 0,80 (NV12 : deux plans lus par tap, comme dans Chrome). À
+  un tap, l'écart tient dans le bruit (0,36-0,47 contre 0,27-0,28).
+- **Passe 0** : ≤ 0,24 ms à 720p. `blit+tex-s1` 0,44 ≈ `ext-s1` 0,36-0,47 (égalité) ; `blit+tex-s5`
+  0,68-0,70 contre `ext-s5` 0,92-0,94 (−25 %) ; `blit+tex-s9` 0,96-0,98 contre 1,52-1,57
+  (−38 %). Le point d'équilibre à ×2 est vers **2 à 3 taps par pixel en moyenne** ; à ×0,75 (passe
+  0 à 1440p ≈ 0,5 ms) la lecture directe garde l'avantage jusqu'à 8-9 taps (`blit+tex-s9` 0,89
+  contre `ext-s9` 0,98 ; à 1 et 5 taps les cellules légères de ce cas sont posées sur son plancher
+  de soumission, ≈ 0,45 ms, et ne se séparent pas).
+- **`fwidth`** : dans le bruit (−20 % à +19 % selon le feed et l'image, soit ≤ 0,05 ms) : bon
+  marché, comme sur NVIDIA.
+- **`textureLoad` sur l'externe** : +5 % à 5 taps, dans le bruit à 1 : comme sur AMD, pas
+  d'intérêt, `DERING_EXACT` par échantillons.
+- **Lignes de base saturées** : SGSR1 0,83-0,86 ms (3 × le bilinéaire), EASU 2,3, RCAS 0,7, FSR1
+  2,95-3,05 (11 ×), NIS 27,8-30,8 ms (**100 × le bilinéaire** : ce port est hors d'usage sur
+  Apple, où le 780M le paie 28 × et le RTX 16 × ; un tableau indexé dynamiquement ou une boucle
+  que le compilateur Metal déroule en mémoire est le suspect habituel, à regarder hors de P0, le
+  produit propose NIS sur iPhone). Chaîne du produit, à la cadence du labo (une image toutes les
+  2 à 5 ms) : bilinéaire 0,8 ms de GPU + 2,1 ms de CPU par image, SGSR1 1,35-1,8 + 2,4-2,8, FSR1
+  5,4-6,1 + 4,6-4,7, NIS 30-31 ms.
+- **Le régime d'horloge compte plus que sur ordinateur** : la même passe coûte 1,5 à 3 × plus en
+  soumissions espacées (chaîne, premier tour, cas ×0,75 plus léger) qu'au milieu d'un lot saturé.
+  Les comparaisons A/B restent valides parce que le labo entrelace les cellules (ABBA) dans le
+  même régime ; les **budgets absolus** d'un téléphone doivent se lire à la cadence du produit
+  (60 i/s, décodage compris) : une cadence `tick` pour les cellules `chain-*` manque au labo.
+- **La soumission** : `draw()` du renderer coûte 2,1 ms de CPU par image sur l'A15 (import,
+  bind group, encodage), un quart d'un budget 120 Hz : P1 (contournement 1:1) a son intérêt sur
+  le téléphone aussi.
+
+**Ce que cela change au plan.** La décision n° 2 (pas de passe 0 en SDR) **tient pour le noyau
+prévu** (un tap sur le plat, cinq sur les contours : 1,4 à 2,2 taps par pixel en moyenne, sous le
+point d'équilibre à ×2 et loin dessous en réduction) ; l'`override` « passe 0 » du §3.4 reste un
+bouton par plateforme, et P2 mesurera le noyau réel des deux côtés sur l'iPhone. `subgroups` est
+absent de WebKit : les accélérations par sous-groupes sont une option d'ordinateur, la base du
+noyau n'en dépend pas. `adapter.info` est vide sur iOS : le client ne peut choisir que sur
+`features` et `limits`. La cible C1 « plus rapide que SGSR1 sur mobile » vaut ici **≤ 0,8 ms
+saturé à 1440p** (≈ 3 × le bilinéaire), avec FSR1 à 3 ms, et le port NIS exclu de la comparaison.
+
 ## 5. Réponses de P0 et porte
 
 | Question (§6.4) | Réponse | Démontré / attendu |
 |---|---|---|
-| Externe contre passe 0 + RGBA | **Pas de passe 0 en SDR** (décision n° 2 confirmée). RTX : égalité ; 780M : la lecture directe gagne dès que l'entrée dépasse 720p ou que le noyau lit un tap sur le plat, et perd 5-7 % seulement sur du texte dense à ×2 avec cinq taps partout. Le feed `texture_2d` reste dans la même source (HDR, labo, et le repli si un mobile dit l'inverse). | démontré sur deux GPU d'ordinateur ; mobile à mesurer (iPhone, realme) |
+| Externe contre passe 0 + RGBA | **Pas de passe 0 en SDR** (décision n° 2 confirmée). RTX : égalité ; 780M : la lecture directe gagne dès que l'entrée dépasse 720p ou que le noyau lit un tap sur le plat, et perd 5-7 % seulement sur du texte dense à ×2 avec cinq taps partout. iPhone 13 Pro : un tap sur l'externe vaut deux taps RGBA, la passe 0 (≤ 0,24 ms à 720p) ne gagne qu'au-delà de 2-3 taps par pixel à ×2 et de 8 en réduction : la décision tient pour le noyau prévu, l'`override` passe 0 reste un bouton par plateforme. Le feed `texture_2d` reste dans la même source (HDR, labo, repli). | démontré sur deux GPU d'ordinateur et sur l'iPhone 13 Pro (§4 ter) ; realme à mesurer |
 | Coût des dérivées | gratuit sur NVIDIA, ≈ un deuxième échantillon sur l'iGPU AMD (+0,08 ms à 1440p), toujours bien moins qu'un gather | démontré |
-| Dispersion | ≤ 1,7 % (RTX) et ≤ 2,6 % (780M) tour à tour en `back` ; porte « < 5 % » tenue. Horodatages à la nanoseconde avec le drapeau développeur. En `tick`, bruit sur les cellules externes du RTX (p99 × 30) : les mesures de P2 se font en `back`, et le régime `tick` sert à vérifier la chaîne, pas le noyau | démontré |
-| Lignes de base | RTX : SGSR1 0,07, FSR1 0,25, NIS 0,44 ms (chaîne 0,09 / 0,26 / 0,45) ; 780M : SGSR1 2,5, FSR1 9,4, NIS 10,5 ms (chaîne 2,8 / 9,5 / 10,9), plancher bilinéaire 0,028 et 0,38 ms | démontré |
+| Dispersion | ≤ 1,7 % (RTX) et ≤ 2,6 % (780M) tour à tour en `back` ; porte « < 5 % » tenue. Horodatages à la nanoseconde avec le drapeau développeur. En `tick`, bruit sur les cellules externes du RTX (p99 × 30) : les mesures de P2 se font en `back`, et le régime `tick` sert à vérifier la chaîne, pas le noyau. iPhone : les horodatages d'un lot ne s'additionnent pas (§4 ter) ; temps mur et chaîne comme lectures, cas `-single` au prochain créneau | démontré sur ordinateur ; lecture adaptée sur Apple |
+| Lignes de base | RTX : SGSR1 0,07, FSR1 0,25, NIS 0,44 ms (chaîne 0,09 / 0,26 / 0,45) ; 780M : SGSR1 2,5, FSR1 9,4, NIS 10,5 ms (chaîne 2,8 / 9,5 / 10,9), plancher bilinéaire 0,028 et 0,38 ms ; iPhone 13 Pro, saturé : SGSR1 0,85, FSR1 3,0, NIS 28-31 ms, plancher 0,27 (chaîne du produit : 1,35-1,8 / 5,4-6,1 / 30-31 ms) | démontré |
 
 **Ce que ces chiffres changent au plan.**
 
 - Les critères C2 (« chaîne WebGPU ≤ 0,6 × FSR1 ») sont **larges** sur ordinateur : un noyau à
   1 + 4 taps coûte 0,47-1,3 ms sur le 780M contre 9,4 pour FSR1 et 2,5 pour SGSR1. La question
   de P2 n'est pas la vitesse sur ordinateur, c'est la **qualité à FSR1** (C3) et la vitesse sur
-  les téléphones (C1).
+  les téléphones (C1 : sur l'A15, ≤ 0,8 ms saturé à 1440p, §4 ter).
 - Sur le RTX, et à 60 i/s sur les deux GPU, le coût qui compte est la **soumission** (3,3-4,2 ms
   de temps mur pour 0,03-0,5 ms de GPU) : P1 (contournement 1:1) et la porte P4 (WebGPU contre
   WebGL2) portent sur ce coût-là, pas sur le shader. Rien ne change à leur contenu.
@@ -252,18 +401,23 @@ d'ici là, PSNR, SSIM et dépassements servent de garde-fous, et FSR1 est la ré
   seulement.
 
 **Porte P0** : tenue pour l'ordinateur (dispersion < 5 %, coût de l'externe connu, décision passe
-0 prise). Il manque les téléphones et le Mac, qui ne bloquent pas P1 ni P2.1 (labo sur DualRTX)
-mais entrent avant la porte P2.
+0 prise), et tenue sur l'iPhone 13 Pro pour le noyau prévu. Il manque le realme Note 60 et le Mac,
+qui ne bloquent pas P1 ni P2.1 (labo sur DualRTX) mais entrent avant la porte P2.
 
 ## 6. Ce qui reste de P0
 
-- Les deux téléphones et le Mac (créneaux de Bruno) : la page se sert depuis DualRTX
-  (`scaler_lab.py --serve 0.0.0.0:8766`, règle de pare-feu à ouvrir), l'URL imprimée s'ouvre dans
-  Safari ou Chrome, le résultat revient en `bench-out/scaler-lab/phone-*.json`. `mw-arm` en WebGL2
-  seulement (pas de WebGPU sur l'Adreno 618).
+- Le realme Note 60 et le Mac (créneaux de Bruno), et un second passage de l'iPhone avec les cas
+  `-single` (liens `/4` à `/6`) : même procédure (`scaler_lab.py --serve 0.0.0.0:8766`, règle de
+  pare-feu ouverte pour le créneau et retirée après, résultat en
+  `bench-out/scaler-lab/phone-*.json`). `mw-arm` en WebGL2 seulement (pas de WebGPU sur l'Adreno
+  618).
+- Une cadence `tick` (60 i/s) pour les cellules `chain-*`, afin de lire les budgets absolus d'un
+  téléphone à la cadence du produit (§4 ter).
 - FLIP : une roue `flip-evaluator` pour Python 3.14 (ou une réécriture numpy du LDR-FLIP),
   avant les verdicts C3/C4 de P2.
 - La version compressée des images (boucle WebCodecs → `dump` sur le feed externe) dans la
   chaîne de qualité, et la mire PQ (P3).
-- Les repères de qualité ci-dessus rejoués sur un GPU réel (une minute, `--quality` sans
-  `--swiftshader`).
+- La mire `code` a son tiers central vide (PSNR infini au centre) : décaler le texte pour que le
+  centre porte du contenu.
+- Le port NIS sur Apple (100 × le bilinéaire, §4 ter) : hors P0, à regarder avant de le proposer
+  sur iPhone.
