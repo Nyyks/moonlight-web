@@ -11,7 +11,7 @@ Class       = System
 ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
 Provider    = %ManufacturerName%
 CatalogFile = MoonlightWebVHid.cat
-DriverVer = 10/11/2026,0.1.1.0
+DriverVer = 10/19/2026,0.1.2.0
 PnpLockdown = 1
 
 [Manufacturer]
@@ -116,4 +116,3 @@ DiskName = "MoonlightWeb Virtual HID Installation Disk"
 DeviceName = "MoonlightWeb Virtual HID"
 
 WudfRdDisplayName = "Windows Driver Foundation - User-mode Driver Framework Reflector"
-

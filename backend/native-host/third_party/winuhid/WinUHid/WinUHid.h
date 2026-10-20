@@ -293,6 +293,13 @@ WINUHID_API BOOL WinUHidIsServicingEvents(PWINUHID_DEVICE Device);
 #define MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP 0x00000001
 
 //
+// IOCTL_WINUHID_SET_REPORT_DESCRIPTOR accepts the host's own mouse, one fixed
+// descriptor compared byte for byte, beside the game devices it took already
+// (19/10/2026). An older driver refuses it with ERROR_ACCESS_DENIED.
+//
+#define MOONLIGHTWEB_VHID_FIX_SYSTEM_MOUSE 0x00000002
+
+//
 // The MOONLIGHTWEB_VHID_FIX_* flags of the driver loaded when the device was
 // created or adopted; 0 for a driver older than them.
 //

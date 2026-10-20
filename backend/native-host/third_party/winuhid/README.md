@@ -40,7 +40,10 @@ as upstream's, with that fix, without it:
   since tracewpp reads it as text;
 - `WinUHid.c`, `WinUHid.h`: IOCTL_WINUHID_SET_REPORT_DESCRIPTOR refuses, with
   STATUS_ACCESS_DENIED, any descriptor the engine's `validate()` refuses
-  (`drivers/vhid/DescriptorCheck.cpp`): game devices only, as the host checks already.
+  (`drivers/vhid/DescriptorCheck.cpp`): game devices only, as the host checks already. One
+  exception, compared byte for byte: the host's own mouse (`src/input/SystemMouse.h`), which the
+  stream's worker makes on a host with no pointing device. Driver 0.1.2.0, flag
+  `MOONLIGHTWEB_VHID_FIX_SYSTEM_MOUSE`.
 - `Public.h`, `WinUHid.c`: IOCTL_MOONLIGHTWEB_VHID_GET_FIXES answers the `MOONLIGHTWEB_VHID_FIX_*`
   flags of the driver (`WinUHid.h`), today `MOONLIGHTWEB_VHID_FIX_EVENT_WAKEUP`, the fix above. A
   driver older than it fails the IOCTL as unknown: no fixes.

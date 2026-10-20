@@ -68,22 +68,35 @@ inline QString deviceName()
     return QStringLiteral("MoonlightWeb Virtual HID");
 }
 
-/// The package under backend/installer/drivers/vhid, as build.ps1 -Sign Own
-/// made it on 11/10/2026 (driver 0.1.1.0, the event wakeup fixed), pinned file
-/// by file: any other bytes, and the install refuses. A new driver means a new
-/// package there, a higher -Version, and new pins here, all printed by
-/// build.ps1. A test-signed package is never bundled.
+/// The package under backend/installer/drivers/vhid (vhid-arm64 for Windows on
+/// ARM), as build.ps1 -Sign Own made it on 19/10/2026 (driver 0.1.2.0: the
+/// host's own mouse, after the event wakeup of 0.1.1.0), pinned file by file:
+/// any other bytes, and the install refuses. A new driver means a new package
+/// there, a higher -Version, and new pins here, all printed by build.ps1. A
+/// test-signed package is never bundled.
 inline const std::vector<DriverPackage::File>& driverFiles()
 {
+#if defined(_M_ARM64)
     static const std::vector<DriverPackage::File> files = {
         {"MoonlightWebVHid.inf",
-         "05bbf4afce86520fd50b907d3848690084f241d1894a7aec9e96d519edeae410"},
+         "6be8a472c6a32949c4859c8b8ffd2ba32e19906adde415668835adfc2c60ace1"},
         {"MoonlightWebVHid.cat",
-         "918ab148e7a2505f2ef41428353985531fa3ab4fcbec75b085b078121b318e96"},
+         "d3c8478fd497dda3e0dcf63343fdf0d43b167bc48cd27c5cbea4fdd4bbb51266"},
         {"MoonlightWebVHid.dll",
-         "08d48aa909219270b9aa477e8648a71857b3142ddf995c3bbb5b21d2e118b5ff"},
+         "1c20ac5856a31e0f473327bf0336f7fbf9a7191d4fc9471c90673e66a60835ab"},
     };
     return files;
+#else
+    static const std::vector<DriverPackage::File> files = {
+        {"MoonlightWebVHid.inf",
+         "c9b5843f81fd8e3e128c90eaac76b7724760862812b97acc2f212e8f6db75544"},
+        {"MoonlightWebVHid.cat",
+         "b680ce2a6b8be715228b391e9c492f5d7e7f3e5ba068b9e805fea3800534b1db"},
+        {"MoonlightWebVHid.dll",
+         "0a603918f1b9321badfb1dceaa56fb53c3cfec749db06634d03a3bdb1f2ec1c1"},
+    };
+    return files;
+#endif
 }
 
 /// SHA-1 thumbprint of the certificate that signs the catalog, the only

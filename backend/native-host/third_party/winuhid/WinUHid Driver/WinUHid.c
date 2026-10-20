@@ -801,7 +801,8 @@ WinUHidEvtIoDeviceControl(
         status = ParseReportDescriptor(fileContext);
 #ifdef MOONLIGHTWEB_VHID
         //
-        // MoonlightWeb: only game devices, by the engine's own validate()
+        // MoonlightWeb: only game devices, by the engine's own validate(), and
+        // the host's own mouse, compared byte for byte
         //
         if (NT_SUCCESS(status) &&
             !MwHidDescriptorAllowed(fileContext->VhfConfig.ReportDescriptor, fileContext->VhfConfig.ReportDescriptorLength)) {

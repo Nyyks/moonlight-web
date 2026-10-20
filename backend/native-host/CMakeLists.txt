@@ -31,6 +31,9 @@ add_library(mw-native-host STATIC
     # The HID passthrough's descriptor, rebuilt from WebHID's collections and
     # checked before the host creates anything. Pure as well, so tested anywhere.
     src/input/HidDescriptor.cpp
+    # The host's own mouse on a Windows host with no pointing device: its one
+    # fixed descriptor and its reports. Pure, tested anywhere.
+    src/input/SystemMouse.cpp
     src/input/HidPid.cpp
     # A wheel's force feedback as the game left it, replayed to the next page.
     src/input/HidFfbJournal.cpp
@@ -569,6 +572,7 @@ if(MW_BUILD_TESTS)
         tests/test_bgra_to_i420.cpp
         tests/test_ds4_mapping.cpp
         tests/test_hid_descriptor.cpp
+        tests/test_system_mouse.cpp
         tests/test_hid_passthrough.cpp
         tests/test_hid_pid.cpp
         tests/test_hid_evdev.cpp

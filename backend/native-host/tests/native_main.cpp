@@ -103,6 +103,7 @@ void run_output_match_tests();
 void run_display_mode_hold_tests();
 void run_cursor_position_gate_tests();
 void run_pointer_presence_tests();
+void run_system_mouse_tests();
 void run_feed_header_tests();
 void run_feed_arbiter_tests();
 
@@ -199,6 +200,7 @@ int main(int argc, char** argv)
     RUN(display_mode_hold);
     RUN(cursor_position_gate);
     RUN(pointer_presence);
+    RUN(system_mouse);
     RUN(feed_header);
     RUN(feed_arbiter);
     RUN(capture);
