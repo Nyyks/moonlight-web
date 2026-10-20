@@ -66,6 +66,16 @@ class LabHandler(Handler):
             return os.path.join(self.server.lab_dir, os.path.basename(clean))
         return super().translate_path(path)
 
+    def do_GET(self):
+        # Short links for a phone: /1, /2, /3 redirect to the long case URLs.
+        target = getattr(self.server, "short", {}).get(self.path)
+        if target:
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.end_headers()
+            return
+        return super().do_GET()
+
     def _name(self):
         name = "lab"
         if "name=" in self.path:
@@ -154,6 +164,51 @@ def make_input(gt_path, in_path, size):
 
 QUALITY_CELLS = "tex-s1,sgsr-repo,sgsr-src,nis,easu,fsr1"
 
+# The phone set: the ×2 case with the product's chain, the reduction a phone
+# does most (§1.6), and a game picture; 2 rounds so that a slot holds 10 min.
+PHONE_CASES = [
+    ("x2-text", "in=1280x720&out=2560x1440&content=text&set=feed,base,chain&rounds=2&batches=6"),
+    ("x075-text", "in=2560x1440&out=1920x1080&content=text&set=feed,base&rounds=2&batches=6"),
+    ("x2-game", "in=1280x720&out=2560x1440&content=game&set=feed,base&rounds=2&batches=6"),
+    # The same three, one submission per iteration (pace=tick, no period): on a
+    # tile-based GPU (iPhone 13 Pro, 20/10) the per-pass timestamps of a long
+    # command buffer are not additive, a pass's begin is taken while the
+    # previous passes still run; one pass per command buffer reads right.
+    ("x2-text-single", "in=1280x720&out=2560x1440&content=text&set=feed,base&rounds=2&batches=6&pace=tick&period=0.01"),
+    ("x075-text-single", "in=2560x1440&out=1920x1080&content=text&set=feed,base&rounds=2&batches=6&pace=tick&period=0.01"),
+    ("x2-game-single", "in=1280x720&out=2560x1440&content=game&set=feed,base&rounds=2&batches=6&pace=tick&period=0.01"),
+]
+
+
+def local_ips():
+    import socket
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except Exception:  # noqa: BLE001
+        pass
+    return sorted(ip for ip in ips if not ip.startswith("127."))
+
+
+def ensure_cert(directory, ips):
+    """A self-signed certificate for the LAN addresses (WebGPU needs a secure
+    context; a phone's Safari accepts it after its warning). Made by openssl."""
+    cert = os.path.join(directory, "lab-cert.pem")
+    key = os.path.join(directory, "lab-key.pem")
+    if os.path.exists(cert) and os.path.exists(key) and time.time() - os.path.getmtime(cert) < 6 * 3600:
+        return cert, key
+    san = ",".join("IP:" + ip for ip in ips) + ",DNS:localhost,IP:127.0.0.1"
+    for exe in ("openssl", r"C:\Program Files\Git\mingw64\bin\openssl.exe", r"C:\Program Files\Git\usr\bin\openssl.exe"):
+        try:
+            subprocess.run([exe, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert,
+                            "-days", "2", "-subj", "/CN=mw-scaler-lab", "-addext", "subjectAltName=" + san],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return cert, key
+        except (OSError, subprocess.CalledProcessError):
+            continue
+    raise SystemExit("openssl not found: cannot make the lab's certificate")
+
 
 def md_table(tag, runs):
     lines = ["# scaler-lab — %s" % tag, ""]
@@ -191,7 +246,8 @@ def main():
     ap.add_argument("--headed", default="", help="X,Y,W,H: a shown window there instead of headless")
     ap.add_argument("--remote-cdp", type=int, default=0, help="DevTools port of an already running Chrome")
     ap.add_argument("--http-port", type=int, default=0, help="fixed port for the server (remote runs)")
-    ap.add_argument("--serve", default="", help="host:port — serve for a phone and wait for posted results")
+    ap.add_argument("--serve", default="", help="host:port — serve for a phone (HTTPS, self-signed) and wait for posted results")
+    ap.add_argument("--no-tls", action="store_true", help="--serve in plain HTTP (no WebGPU on a phone then)")
     ap.add_argument("--md", action="store_true", help="write <dir>/<tag>.md, a table of the run")
     ap.add_argument("--quality", action="append", default=[],
                     help="a content (text, ui, game, code, zone, img:<url>): its ground truth at --out, the "
@@ -214,11 +270,25 @@ def main():
         host, port = a.serve.split(":")
         server = http.server.ThreadingHTTPServer((host, int(port)), functools.partial(LabHandler, directory=REPO))
         server.lab_dir = a.dir
-        cases = case_list(a.case or DEFAULT_CASES[:1])
-        print("open on the phone (then wait for 'posted'):")
-        for name, query in cases:
-            print("  http://<this machine>:%s/scripts/bench/scaler-lab/scaler-lab.html?%s%s&post=1&tag=%s-%s" % (
-                port, query, extra, a.tag, name))
+        ips = local_ips()
+        scheme = "http"
+        if not a.no_tls:
+            import ssl
+            cert, key = ensure_cert(a.dir, ips)
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(cert, key)
+            server.socket = ctx.wrap_socket(server.socket, server_side=True)
+            scheme = "https"
+        cases = case_list(a.case or PHONE_CASES)
+        server.short = {}
+        sys.stdout.reconfigure(line_buffering=True)  # the log shows each 'posted' at once
+        print("open on the phone, one after the other (each ends with 'posted' here):")
+        for k, (name, query) in enumerate(cases, 1):
+            path = "/scripts/bench/scaler-lab/scaler-lab.html?%s%s&post=1&tag=%s-%s" % (query, extra, a.tag, name)
+            server.short["/%d" % k] = path
+            for ip in ips or ["<this machine>"]:
+                print("  %s://%s:%s/%d  ->  %s" % (scheme, ip, port, k, path))
+        sys.stdout.flush()
         server.serve_forever()
         return
 
