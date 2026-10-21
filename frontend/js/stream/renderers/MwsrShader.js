@@ -59,17 +59,23 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     /** 1: paint the vote (white = edge quad, black = flat) instead of the picture. */
     SHOW: ['u32', 0],
     /** Weight of each tap along the edge, at full coherence and strength. */
-    W_ALONG: ['f32', 0.35],
+    W_ALONG: ['f32', 0.15],
     /** Weight of each tap across the edge, negated and × sharpness. */
-    W_ACROSS: ['f32', 0.2],
+    W_ACROSS: ['f32', 0.35],
     /** Distance of the along taps, input texels. */
-    R_ALONG: ['f32', 1.0],
+    R_ALONG: ['f32', 0.5],
     /** Distance of the across taps, input texels. */
     R_ACROSS: ['f32', 1.0],
     /** The scale (output / input) from which the kernel is at full strength; 0 at 1:1. */
     S_FULL: ['f32', 1.5],
     /** The most negative weight of an across tap: the blend's divisor stays >= 1 + 2 W_MIN. */
-    W_MIN: ['f32', -0.24],
+    W_MIN: ['f32', -0.3],
+    /** 1: bound the result by the four input texels around the pixel (four loads, edge path only). */
+    DERING: ['u32', 1],
+    /** 1: on a step, a curve bounded by the two plateaus steepens the ramp instead of the unsharp mask (no overshoot); ridges keep the mask. */
+    SHAPE: ['u32', 0],
+    /** How far the curve pushes a ramp pixel toward its nearer plateau, at full coherence. */
+    K_SHAPE: ['f32', 0.5],
 });
 
 /** The defaults alone, name → value. */
@@ -118,12 +124,18 @@ const FEEDS = {
         decl: '@group(0) @binding(1) var tex : texture_2d<f32>;',
         sample: `fn S(uv : vec2f) -> vec3f {
     return textureSampleLevel(tex, samp, uv, 0.0).rgb;
+}
+fn L(c : vec2i) -> vec3f {
+    return textureLoad(tex, c, 0).rgb;
 }`,
     },
     ext: {
         decl: '@group(0) @binding(1) var tex : texture_external;',
         sample: `fn S(uv : vec2f) -> vec3f {
     return textureSampleBaseClampToEdge(tex, samp, uv).rgb;
+}
+fn L(c : vec2i) -> vec3f {
+    return textureLoad(tex, c).rgb;
 }`,
     },
 };
@@ -237,6 +249,15 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         let wT = W_ALONG * a;
         let wX = max(-W_ACROSS * u.sharp * a, W_MIN);
         R = blend(C, T1, T2, X1, X2, wT, wX);
+        if (SHAPE == 1u) {
+            // On a step the pixel sits at t on the ramp from X1 to X2: the
+            // curve pushes it toward the nearer plateau, never beyond either.
+            let d = lX2 - lX1;
+            let t = clamp((lC - lX1) / select(d, EPS, abs(d) < EPS), 0.0, 1.0);
+            let push = 4.0 * K_SHAPE * a * t * (1.0 - t) * (2.0 * t - 1.0);
+            let Rs = clamp(C + push * (X2 - X1), min(X1, X2), max(X1, X2));
+            R = mix(R, Rs, step / (step + ridge + EPS));
+        }
     } else {
         // The axis cross; its frame comes from the taps, and each pair blends
         // its along and across weights by the gradient's share along x.
@@ -258,6 +279,19 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         let wT = W_ALONG * a;
         let wX = max(-W_ACROSS * u.sharp * a, W_MIN);
         R = blend(C, B, D, A, E, mix(wT, wX, q), mix(wT, wX, 1.0 - q));
+    }
+    if (DERING == 1u) {
+        // The exact bound: the four input texels around the pixel, the
+        // footprint of its bilinear sample.
+        let dims = vec2i(textureDimensions(tex));
+        let pt = uv * vec2f(dims) - 0.5;
+        let i0 = clamp(vec2i(floor(pt)), vec2i(0), dims - vec2i(1));
+        let i1 = min(i0 + vec2i(1), dims - vec2i(1));
+        let q00 = L(i0);
+        let q10 = L(vec2i(i1.x, i0.y));
+        let q01 = L(vec2i(i0.x, i1.y));
+        let q11 = L(i1);
+        R = clamp(R, min(min(q00, q10), min(q01, q11)), max(max(q00, q10), max(q01, q11)));
     }
     return vec4f(R, 1.0);
 }
