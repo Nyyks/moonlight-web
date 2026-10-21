@@ -17,23 +17,39 @@
 
 /**
  * MwsrShader — the texts of `mwsr`, MoonlightWeb's own upscaler
- * (docs/design/upscaler-mwsr.md, §3): one WGSL source specialised by
- * `override` constants, the input feed substituted in its preamble. The GLSL
- * ES 3.00 twin (plan §3.6, phase P4) will be generated from the same table of
- * constants, so that the two texts cannot drift apart.
+ * (docs/design/upscaler-mwsr.md, §3 and §4): one WGSL source per mode,
+ * specialised by `override` constants, the input feed substituted in its
+ * preamble. The GLSL ES 3.00 twin (plan §3.6, phase P4) will be generated from
+ * the same table of constants, so that the two texts cannot drift apart.
  *
- * The kernel, per output pixel (plan §3.2):
+ * Two modes (plan §4.3), chosen per frame by mwsrRegime():
+ *
+ * `up` — the kernel, per output pixel (plan §3.2):
  *   1. one bilinear sample C at the pixel's position in the input, its luma;
  *   2. the vote: the screen derivatives of that luma, scaled to luma per input
  *      texel, decide per 2×2 quad whether the pixel sits on an edge; a flat
  *      quad returns C — one sample, a dozen operations;
  *   3. on an edge, four more bilinear samples, laid along and across the edge
- *      the derivatives measure: the
- *      along pair smooths the staircase, the across pair sharpens the ramp;
+ *      the derivatives measure: the along pair smooths the staircase, the
+ *      across pair sharpens the ramp;
  *   4. a coherence term (a step or a ridge across, against all the variation
  *      around) doses both, so that grain, texture and compression blocks are
  *      left alone; the whole fades to C near 1:1;
- *   5. the result is bounded by the min and max of the five samples.
+ *   5. the result is bounded by the min and max of the five samples, then by
+ *      the four input texels around the pixel.
+ *   With CHROMA444 (4:4:4 streams, plan §4.2) the vote, the coherence and the
+ *   weights are taken per channel, so that a border between two colours of one
+ *   luma is seen and sharpened too.
+ *
+ * `down` — the surface filter: a k×k grid of bilinear samples spread over the
+ *   output pixel's footprint in the input (k = 2, 3 or 4 by the scale, the
+ *   grid's span R_DOWN with it), averaged in linear light (LINEAR_LIGHT: the
+ *   decisive term, +2.5 to +12 dB against the host's Lanczos in the lab, P3).
+ *   No vote, no sharpening: a reduction sharpens by itself.
+ *
+ * HDR (plan §4.1): the renderer's `linear` feed is sRGB-encoded past 1.0
+ * (1.0 = reference white); both modes are per channel, bounded by their own
+ * samples and clamp nothing to 1.0, so they run on it unchanged.
  *
  * Written from scratch (plan §10.2). Ideas taken, and credited: bilinear taps
  * instead of gathers (Atyuwen's mobile EASU, Jimenez, MJP); the early out on
@@ -49,7 +65,8 @@
 /**
  * The pipeline-overridable constants, with their type and the default the
  * WGSL text declares. A renderer sets them at pipeline creation
- * (`fragment.constants`), the laboratory per cell (`mwsr:orient=0;...`).
+ * (`fragment.constants`), the laboratory per cell (`mwsr:dering=0;...`).
+ * Every text declares them all; each mode reads its own.
  */
 export const MWSR_OVERRIDE_SPEC = Object.freeze({
     /** 1: paint the vote (white = edge quad, black = flat) instead of the picture. */
@@ -68,6 +85,12 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     W_MIN: ['f32', -0.3],
     /** 1: bound the result by the four input texels around the pixel (four loads, edge path only). */
     DERING: ['u32', 1],
+    /** 1: the vote, the coherence and the weights per channel (4:4:4 streams); 0: from the luma, shared by the channels. */
+    CHROMA444: ['u32', 0],
+    /** Reduction: the span of the tap grid, as a fraction of the pixel's footprint in the input (mwsrRegime() sets it by the grid). */
+    R_DOWN: ['f32', 1.0],
+    /** Reduction: 0 average the encoded values; 1 in gamma-2 light (square, square root); 2 in sRGB linear light (≤ 0.35 dB better, 15 pow per pixel). */
+    LINEAR_LIGHT: ['u32', 1],
 });
 
 /** The defaults alone, name → value. */
@@ -89,6 +112,40 @@ export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.0 });
 
 /** Number of f32 in the uniform block: texel.xy, scale.xy, tau, sharp, pad.xy. */
 export const MWSR_UNIFORM_FLOATS = 8;
+
+/**
+ * The reduction's tap grids, by the smallest scale (output / input) they
+ * serve: [minimum scale, taps, R_DOWN]. A 2×2 grid of bilinear samples spread
+ * over the footprint is the exact box average at ×0.5 (plan §4.3); below ×0.5
+ * the 3×3 grid, spread a quarter wider than the footprint, took +2.7 dB on
+ * text and 40 % off the moiré of the zone plate in the lab (P3, journal J12);
+ * the 4×4 grid below ×0.25 is the plan's, unmeasured.
+ */
+export const MWSR_DOWN_TAPS = Object.freeze([
+    [0.5, 4, 1.0],
+    [0.25, 9, 1.25],
+    [0, 16, 1.25],
+]);
+
+/**
+ * Which text a frame of inW×inH drawn at outW×outH takes: 'copy' at exactly
+ * 1:1 (the renderer copies, plan §5), 'down' with its grid and span below 1 on
+ * either axis, 'up' otherwise.
+ * @param {number} inW
+ * @param {number} inH
+ * @param {number} outW
+ * @param {number} outH
+ * @returns {{mode: 'copy'|'up'|'down', taps: number, rDown: number}}
+ */
+export function mwsrRegime(inW, inH, outW, outH) {
+    if (inW === outW && inH === outH) return { mode: 'copy', taps: 0, rDown: 0 };
+    const s = Math.min(outW / inW, outH / inH);
+    if (s >= 1) return { mode: 'up', taps: 5, rDown: 0 };
+    for (const [min, taps, rDown] of MWSR_DOWN_TAPS)
+        if (s >= min) return { mode: 'down', taps, rDown };
+    const [, taps, rDown] = MWSR_DOWN_TAPS[MWSR_DOWN_TAPS.length - 1];
+    return { mode: 'down', taps, rDown };
+}
 
 /**
  * The uniform block for an input of inW×inH drawn at outW×outH.
@@ -132,22 +189,9 @@ fn L(c : vec2i) -> vec3f {
     },
 };
 
-/**
- * The WGSL text of the kernel: a full-screen triangle (`vs`) and the fragment
- * stage (`fs`); bindings 0 sampler (linear, clamp to edge), 1 the feed, 2 the
- * uniform block of mwsrUniforms(). Explicit LOD and clamp-to-edge sampling
- * only, so the samples may sit in the non-uniform branch; the derivatives are
- * taken before it, in uniform control flow, as WGSL requires.
- * @param {{feed?: 'tex'|'ext', half?: boolean}} [opts] 'tex' reads a
- *   texture_2d<f32>: the product's path, after its pass 0 (the external
- *   texture's two planes per sample made 'ext' lose to pass 0 + kernel on
- *   the RTX, the 780M and the M1 alike, P2.3; 'ext' stays for the lab).
- *   `half` runs the edge path's arithmetic in f16 (`enable f16`: the device
- *   must have 'shader-f16'; worth 9-10 % on the 780M, nothing on NVIDIA); the
- *   vote, the frame and the bound stay in f32.
- * @returns {string}
- */
-export function mwsrWgsl({ feed = 'tex', half = false } = {}) {
+// The part every text shares: the vertex stage, the uniform block, the
+// bindings, the feed, the overrides and the luma.
+function preamble(feed, half) {
     const f = FEEDS[feed];
     if (!f) throw new Error('mwsr: feed ' + feed + '?');
     const prelude = half ? 'enable f16;\n\n' : '';
@@ -199,15 +243,29 @@ fn luma(c : vec3f) -> f32 {
 fn lumah(c : h3) -> hf {
     return dot(c, h3(LUMA));
 }
+`;
+}
 
+// The `up` fragment stage: the kernel of plan §3.2.
+const UP_FS = `
 // Five samples blended in the frame of an edge: the centre, a pair along it
 // (weight wT each, smoothing) and a pair across it (weight wX each, negative:
-// sharpening), the result bounded by the five.
-fn blend(C : h3, T1 : h3, T2 : h3, X1 : h3, X2 : h3, wT : hf, wX : hf) -> h3 {
+// sharpening), per channel, the result bounded by the five.
+fn blend(C : h3, T1 : h3, T2 : h3, X1 : h3, X2 : h3, wT : h3, wX : h3) -> h3 {
     let R = (C + wT * (T1 + T2) + wX * (X1 + X2)) / (1.0 + 2.0 * (wT + wX));
     let lo = min(min(C, T1), min(T2, min(X1, X2)));
     let hi = max(max(C, T1), max(T2, max(X1, X2)));
     return clamp(R, lo, hi);
+}
+
+// A step (|X2 - X1|) or a ridge (|X1 + X2 - 2C|) across the edge, against
+// all the variation around: 1 on a clean edge or line, near 0 on texture,
+// grain and compression blocks.
+fn coherence(c : hf, t1 : hf, t2 : hf, x1 : hf, x2 : hf) -> hf {
+    let step = abs(x2 - x1);
+    let ridge = abs(x1 + x2 - 2.0 * c);
+    let variation = abs(x2 - c) + abs(c - x1) + abs(t2 - c) + abs(c - t1) + EPS_H;
+    return max(step, ridge) / variation;
 }
 
 @fragment
@@ -215,11 +273,19 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let uv = in.uv;
     let C = S(uv);
     let lC = luma(C);
-    // The vote: the screen derivatives of the bilinear luma, scaled to luma
-    // per input texel; coarse, so the whole quad takes the same branch.
-    let gx = dpdxCoarse(lC) * u.scale.x;
-    let gy = dpdyCoarse(lC) * u.scale.y;
-    let flat = abs(gx) + abs(gy) < u.tau;
+    // The vote: the screen derivatives of the bilinear sample, scaled to a
+    // change per input texel; coarse, so the whole quad takes the same branch.
+    // From the luma, or (CHROMA444) from the channel with the steepest ramp,
+    // so that a border between two colours of one luma is an edge too.
+    let dx = dpdxCoarse(C) * u.scale.x;
+    let dy = dpdyCoarse(C) * u.scale.y;
+    let m = abs(dx) + abs(dy);
+    let rg = m.g > m.r;
+    let b = m.b > max(m.r, m.g);
+    let c444 = CHROMA444 == 1u;
+    let gx = select(dot(dx, LUMA), select(select(dx.r, dx.g, rg), dx.b, b), c444);
+    let gy = select(dot(dy, LUMA), select(select(dy.r, dy.g, rg), dy.b, b), c444);
+    let flat = select(abs(gx) + abs(gy), max(m.r, max(m.g, m.b)), c444) < u.tau;
     if (SHOW == 1u) {
         return vec4f(vec3f(select(1.0, 0.0, flat)), 1.0);
     }
@@ -245,15 +311,16 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let lT2 = lumah(T2);
     let lX1 = lumah(X1);
     let lX2 = lumah(X2);
-    // Coherence: a step (|X2 - X1|) or a ridge (|X1 + X2 - 2C|) across,
-    // against all the variation around: 1 on a clean edge or line, near
-    // 0 on texture, grain and compression blocks.
-    let step = abs(lX2 - lX1);
-    let ridge = abs(lX1 + lX2 - 2.0 * lCh);
-    let variation = abs(lX2 - lCh) + abs(lCh - lX1) + abs(lT2 - lCh) + abs(lCh - lT1) + EPS_H;
-    let a = max(step, ridge) / variation * hf(strength);
+    var a : h3;
+    if (CHROMA444 == 1u) {
+        a = h3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+               coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+               coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * hf(strength);
+    } else {
+        a = h3(coherence(lCh, lT1, lT2, lX1, lX2) * hf(strength));
+    }
     let wT = hf(W_ALONG) * a;
-    let wX = max(-hf(W_ACROSS) * hf(u.sharp) * a, hf(W_MIN));
+    let wX = max(-hf(W_ACROSS) * hf(u.sharp) * a, h3(hf(W_MIN)));
     var R = vec3f(blend(Ch, T1, T2, X1, X2, wT, wX));
     if (DERING == 1u) {
         // The exact bound: the four input texels around the pixel, the
@@ -271,4 +338,86 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     return vec4f(R, 1.0);
 }
 `;
+
+// The `down` fragment stage: a k×k grid of bilinear samples over the pixel's
+// footprint, averaged (plan §4.3), unrolled here so that the text holds no loop.
+function downFs(taps) {
+    const k = Math.round(Math.sqrt(taps));
+    if (![2, 3, 4].includes(k) || k * k !== taps) throw new Error('mwsr: down taps ' + taps + '?');
+    const offs = [];
+    for (let i = 0; i < k; i++) offs.push((i + 0.5) / k - 0.5);
+    const lines = [];
+    for (const oy of offs)
+        for (const ox of offs)
+            lines.push(
+                `    acc += dec(S(uv + vec2f(${wgslNumber('f32', ox)}, ${wgslNumber('f32', oy)}) * span));`,
+            );
+    return `
+// The sRGB transfer, both ways, for LINEAR_LIGHT 2; past 1.0 (HDR) the same
+// formula continues, as the renderer's HDR pass 0 encodes it.
+fn srgbToLin(c : vec3f) -> vec3f {
+    let lo = c / 12.92;
+    let hi = pow((max(c, vec3f(0.0)) + 0.055) / 1.055, vec3f(2.4));
+    return select(hi, lo, c <= vec3f(0.04045));
+}
+
+fn linToSrgb(c : vec3f) -> vec3f {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3f(0.0031308));
+}
+
+fn dec(c : vec3f) -> vec3f {
+    if (LINEAR_LIGHT == 1u) {
+        return c * c;
+    }
+    if (LINEAR_LIGHT == 2u) {
+        return srgbToLin(c);
+    }
+    return c;
+}
+
+fn enc(c : vec3f) -> vec3f {
+    if (LINEAR_LIGHT == 1u) {
+        return sqrt(max(c, vec3f(0.0)));
+    }
+    if (LINEAR_LIGHT == 2u) {
+        return linToSrgb(c);
+    }
+    return c;
+}
+
+@fragment
+fn fs(in : VSOut) -> @location(0) vec4f {
+    let uv = in.uv;
+    // The pixel's footprint in the input, 1 / scale texels per axis, spanned
+    // by the grid (R_DOWN 1); ${k}×${k} samples at its ${k}×${k} centres.
+    let span = u.texel / u.scale * R_DOWN;
+    var acc = vec3f(0.0);
+${lines.join('\n')}
+    return vec4f(enc(acc * ${wgslNumber('f32', 1 / taps)}), 1.0);
+}
+`;
+}
+
+/**
+ * The WGSL text of one mode: a full-screen triangle (`vs`) and the fragment
+ * stage (`fs`); bindings 0 sampler (linear, clamp to edge), 1 the feed, 2 the
+ * uniform block of mwsrUniforms(). Explicit LOD and clamp-to-edge sampling
+ * only, so the samples may sit in the non-uniform branch; the derivatives are
+ * taken before it, in uniform control flow, as WGSL requires.
+ * @param {{feed?: 'tex'|'ext', half?: boolean, mode?: 'up'|'down', taps?: number}} [opts]
+ *   'tex' reads a texture_2d<f32>: the product's path, after its pass 0 (the
+ *   external texture's two planes per sample made 'ext' lose to pass 0 +
+ *   kernel on the RTX, the 780M and the M1 alike, P2.3; 'ext' stays for the
+ *   lab). `half` runs the up mode's edge path in f16 (`enable f16`: the device
+ *   must have 'shader-f16'; worth 9-10 % on the 780M, nothing on NVIDIA); the
+ *   vote, the frame, the bound and the down mode stay in f32. `mode` 'down'
+ *   is the reduction with `taps` samples (4, 9 or 16; see mwsrRegime()).
+ * @returns {string}
+ */
+export function mwsrWgsl({ feed = 'tex', half = false, mode = 'up', taps = 4 } = {}) {
+    if (mode === 'up') return preamble(feed, half) + UP_FS;
+    if (mode === 'down') return preamble(feed, false) + downFs(taps);
+    throw new Error('mwsr: mode ' + mode + '?');
 }
