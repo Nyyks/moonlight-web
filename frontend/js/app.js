@@ -4271,10 +4271,24 @@ export const MoonlightApp = {
      * relaunch. Tearing the live stream down here to apply the step anyway is
      * what used to leave every resume without a picture.
      */
-    _failStandby(reason) {
-        if (!this._standbyView) return;
-        this._dualSupported = false;
+    async _failStandby(reason) {
+        const sv = this._standbyView;
+        if (!sv) return;
+        // Unless its worker crashed: that says nothing of the host, which
+        // stays free to run two sessions.
+        const host = this._lastStreamHost;
+        const crashed =
+            sv.streamId && host
+                ? (await BackendClient.streamState(host.uuid, sv.streamId)) === 'crashed'
+                : false;
+        if (this._standbyView !== sv) return;
         this._restoreLiveQuality();
+        if (crashed) {
+            console.warn('[MW] The standby stream worker crashed — the host keeps two sessions');
+            this._abortStandby(reason + ' (worker crashed)');
+            return;
+        }
+        this._dualSupported = false;
         console.warn('[MW] Standby never showed a picture — this host is kept to one session');
         this._abortStandby(reason, { dualFailed: true });
     },

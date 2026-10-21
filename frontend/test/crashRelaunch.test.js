@@ -503,3 +503,46 @@ describe('the veil', () => {
         }
     });
 });
+
+describe('a standby whose worker crashed', () => {
+    beforeEach(() => {
+        saveApp();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        MoonlightApp._lastStreamHost = { uuid: 'host-1' };
+        MoonlightApp._lastStreamingSettings = { stream_height: 1080 };
+        MoonlightApp._degradeOverrides = {};
+        MoonlightApp._noteLiveQuality();
+        MoonlightApp._dualSupported = true;
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+        Object.assign(MoonlightApp, saved);
+    });
+
+    it('does not keep the host to one session', async () => {
+        vi.spyOn(BackendClient, 'streamState').mockResolvedValue('crashed');
+        const standby = { streamId: 'standby-1', quit: vi.fn(async () => {}) };
+        MoonlightApp._standbyView = standby;
+        await MoonlightApp._failStandby('connect failed: standby transport closed');
+        expect(MoonlightApp._dualSupported).toBe(true);
+        expect(MoonlightApp._standbyView).toBe(null);
+        expect(standby.quit).toHaveBeenCalledWith({
+            silent: true,
+            retire: true,
+            dualFailed: false,
+        });
+    });
+
+    it('a standby that streamed and showed nothing still does', async () => {
+        vi.spyOn(BackendClient, 'streamState').mockResolvedValue('live');
+        const standby = { streamId: 'standby-1', quit: vi.fn(async () => {}) };
+        MoonlightApp._standbyView = standby;
+        await MoonlightApp._failStandby('timeout');
+        expect(MoonlightApp._dualSupported).toBe(false);
+        expect(standby.quit).toHaveBeenCalledWith({
+            silent: true,
+            retire: true,
+            dualFailed: true,
+        });
+    });
+});
