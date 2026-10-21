@@ -69,10 +69,10 @@ P1_CASES = [
 
 
 # The P2 set (--p2; upscaler-mwsr.md §3, §6, criteria C1-C2): the mwsr kernel
-# next to the floor (one and five bilinear taps), its two orientations, with
-# and without the branch, on the external texture, and the shipped kernels;
+# next to the floor (one, five and nine bilinear taps), with and without the
+# exact bound and the branch, on the external texture, and the shipped kernels;
 # three pictures at ×2, text at ×1.33.
-P2_CELLS = ("tex-s1,tex-s5,tex-s9,mwsr,mwsr:dering=0,mwsr:early=0,mwsr:orient=0,"
+P2_CELLS = ("tex-s1,tex-s5,tex-s9,mwsr,mwsr:dering=0,mwsr:early=0,"
             "ext-s1,ext-s5,ext-mwsr,ext-mwsr:dering=0,sgsr-repo,fsr1,nis")
 P2_CASES = [
     ("x2-text", "in=1280x720&out=2560x1440&content=text&cells=%s&rounds=3" % P2_CELLS),

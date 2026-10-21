@@ -66,10 +66,10 @@ const CELL_SETS = {
   ],
   chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1"],
   // The mwsr kernel (plan §3.2): `mwsr[:key=val;key=val…]` sets its
-  // overrides (orient, early, show, walong, wacross, ralong, racross, sfull)
+  // overrides (early, show, walong, wacross, ralong, racross, sfull, wmin, dering)
   // and uniforms (tau, sharp); `ext-mwsr` reads the external texture (no
   // pass 0), `blit+mwsr` pays the pass 0 first.
-  mwsr: ["mwsr", "mwsr:orient=0", "mwsr:early=0", "ext-mwsr"],
+  mwsr: ["mwsr", "mwsr:dering=0", "mwsr:early=0", "ext-mwsr"],
 };
 
 const VS = /* wgsl */ `
@@ -1012,7 +1012,6 @@ export async function runLab(p, log = () => {}) {
   // The mwsr kernel, one pass to `out`; the cell's options become overrides
   // (pipeline constants) and uniforms. The override defaults are the text's.
   const MWSR_KEYS = {
-    orient: "ORIENT",
     early: "EARLY_OUT",
     show: "SHOW",
     walong: "W_ALONG",
@@ -1022,10 +1021,6 @@ export async function runLab(p, log = () => {}) {
     sfull: "S_FULL",
     wmin: "W_MIN",
     dering: "DERING",
-    shape: "SHAPE",
-    tier: "TIER",
-    wcorner: "W_CORNER",
-    kshape: "K_SHAPE",
   };
   const mwsrPass = (name, feed, opts, srcView) => {
     const over = {};
