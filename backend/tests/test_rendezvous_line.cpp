@@ -13,6 +13,10 @@
  * that path, so they run whatever Qt the suite loads; the race's sections run
  * only on a Qt that can pin the line, and say so when they are skipped.
  *
+ * How a dead line is noticed: the keep-alive cadence and the pong wait; a line
+ * whose pongs stop is rebuilt as a drop, never doubting the claim; a wall clock
+ * that jumps ahead, as it does when the machine wakes, earns a ping at once.
+ *
  * Behind production's Caddy, a restart of the introduction server reaches the
  * host as a TLS close_notify on a TCP connection that stays open. Qt reports it
  * through errorOccurred and then never emits disconnected, so the line looked
@@ -30,6 +34,7 @@
 
 #include <QAbstractSocket>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QHostAddress>
 #include <QHostInfo>
@@ -37,6 +42,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QVersionNumber>
 #include <QWebSocket>
 #include <QWebSocketServer>
@@ -115,6 +121,47 @@ struct HostStandIn
     }
 };
 
+/// A stand-in that completes the WebSocket upgrade and then goes deaf: it
+/// reads everything and answers nothing, the pings included. What a line looks
+/// like from the host once the path under it is cut, or the NAT entry gone,
+/// while the socket still says connected.
+struct DeafServer
+{
+    QTcpServer server;
+    int lines = 0;
+
+    bool listen()
+    {
+        QObject::connect(&server, &QTcpServer::newConnection, [this]() {
+            while (QTcpSocket* s = server.nextPendingConnection()) {
+                s->setParent(&server);
+                QObject::connect(s, &QTcpSocket::readyRead, [this, s]() {
+                    if (s->property("upgraded").toBool()) {
+                        s->readAll(); // pings and all: unanswered
+                        return;
+                    }
+                    if (!s->peek(64 * 1024).contains("\r\n\r\n")) return;
+                    QByteArray key;
+                    for (const QByteArray& line : s->readAll().split('\n')) {
+                        if (line.toLower().startsWith("sec-websocket-key:"))
+                            key = line.mid(line.indexOf(':') + 1).trimmed();
+                    }
+                    const QByteArray accept =
+                        QCryptographicHash::hash(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+                                                 QCryptographicHash::Sha1)
+                            .toBase64();
+                    s->write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                             "Connection: Upgrade\r\nSec-WebSocket-Accept: " +
+                             accept + "\r\n\r\n");
+                    s->setProperty("upgraded", true);
+                    ++lines;
+                });
+            }
+        });
+        return server.listen(QHostAddress::LocalHost, 0);
+    }
+};
+
 /// What the Qt this suite runs on does with a named line.
 bool qtCanPinLine()
 {
@@ -162,7 +209,7 @@ void run_rendezvous_line_tests()
             Q_ARG(QAbstractSocket::SocketError, QAbstractSocket::RemoteHostClosedError));
         CHECK(invoked);
 
-        // Down at once, not at the next ping (45 s) plus the pong wait (20 s).
+        // Down at once, not at the next ping (20 s) plus the pong wait (15 s).
         CHECK(waitFor([&]() { return !client.isOnline() && dropped == 1; }, 1000));
 
         // Back within the first retry, 1 to 2 s with its jitter: the bench
@@ -272,6 +319,117 @@ void run_rendezvous_line_tests()
         CHECK(!client.isOnline());
 
         client.stop();
+    }
+
+    SECTION("RendezvousClient — the keep-alive: a ping every 20 s, the pong given 15 s; a line "
+            "that answers is left alone");
+    {
+        QWebSocketServer server(QStringLiteral("rdv-test"), QWebSocketServer::NonSecureMode);
+        CHECK(server.listen(QHostAddress::LocalHost, 0));
+        int lines = 0;
+        QObject::connect(&server, &QWebSocketServer::newConnection, [&]() {
+            while (QWebSocket* ws = server.nextPendingConnection()) {
+                ++lines;
+                ws->setParent(&server); // Qt answers the pings by itself
+            }
+        });
+        qputenv("MW_RENDEZVOUS_URL",
+                QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()).toUtf8());
+
+        AppSettings settings;
+        claimedIdentity(settings);
+
+        RendezvousClient client(&settings);
+        // What production runs with: 35 s at worst to notice a silent cut.
+        CHECK_EQ(client.keepAliveMs(), 20 * 1000);
+        CHECK_EQ(client.pongTimeoutMs(), 15 * 1000);
+
+        // Sped up: pings every 50 ms, each answered on loopback at once.
+        client.setKeepAliveMs(50);
+        client.start();
+        CHECK(waitFor([&]() { return client.isOnline() && lines == 1; }, 3000));
+        CHECK(waitFor([&]() { return client.pingsSent() >= 10; }, 3000));
+        // Every pong came back: nothing was rebuilt.
+        CHECK(client.isOnline());
+        CHECK_EQ(lines, 1);
+
+        client.stop();
+        waitFor([&]() { return !client.isOnline(); }, 1000);
+    }
+
+    SECTION("RendezvousClient — a line whose pongs stop is rebuilt at the pong wait, as a drop: "
+            "the claim is never doubted");
+    {
+        DeafServer deaf;
+        CHECK(deaf.listen());
+        qputenv("MW_RENDEZVOUS_URL",
+                QStringLiteral("http://127.0.0.1:%1").arg(deaf.server.serverPort()).toUtf8());
+
+        AppSettings settings;
+        claimedIdentity(settings);
+
+        RendezvousClient client(&settings);
+        client.setKeepAliveMs(100);
+        client.setPongTimeoutMs(100);
+        int drops = 0;
+        QObject::connect(&client, &RendezvousClient::onlineChanged, [&](bool online) {
+            if (!online) ++drops;
+        });
+        client.start();
+        CHECK(waitFor([&]() { return client.isOnline() && deaf.lines == 1; }, 3000));
+
+        // The first ping goes unanswered: down at the keep-alive plus the pong
+        // wait, 200 ms here, where nothing else would ever have noticed.
+        QElapsedTimer sinceUp;
+        sinceUp.start();
+        CHECK(waitFor([&]() { return drops == 1; }, 2000));
+        CHECK(sinceUp.elapsed() < 1500);
+        CHECK(client.pingsSent() >= 1);
+
+        // Back within the first retry, 1 to 2 s, and dropped the same way
+        // again, and again. A line that was up and went is a drop, not a
+        // refusal: none of it counts toward the re-claim.
+        CHECK(waitFor([&]() { return deaf.lines == 2; }, 4000));
+        CHECK(waitFor([&]() { return drops == 2; }, 2000));
+        CHECK(waitFor([&]() { return deaf.lines == 3; }, 4000));
+        CHECK(settings.rendezvousClaimed());
+
+        client.stop();
+    }
+
+    SECTION("RendezvousClient — a wall clock that jumps ahead (the machine slept) earns a ping "
+            "at once, not at the next keep-alive");
+    {
+        QWebSocketServer server(QStringLiteral("rdv-test"), QWebSocketServer::NonSecureMode);
+        CHECK(server.listen(QHostAddress::LocalHost, 0));
+        QObject::connect(&server, &QWebSocketServer::newConnection, [&]() {
+            while (QWebSocket* ws = server.nextPendingConnection())
+                ws->setParent(&server);
+        });
+        qputenv("MW_RENDEZVOUS_URL",
+                QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()).toUtf8());
+
+        AppSettings settings;
+        claimedIdentity(settings);
+
+        RendezvousClient client(&settings);
+        client.setKeepAliveMs(60 * 1000); // no ping of its own within this test
+        client.setClockWatch(50, 200);    // a tick every 50 ms, a jump is 200 ms or more
+        client.start();
+        CHECK(waitFor([&]() { return client.isOnline(); }, 3000));
+
+        // Ticks on time: nothing to see, nothing pinged.
+        waitFor([]() { return false; }, 300);
+        CHECK_EQ(client.pingsSent(), 0);
+
+        // The process stands still, as a sleeping machine's does, while the
+        // wall clock runs on. The first tick after sees the jump.
+        QThread::msleep(400);
+        CHECK(waitFor([&]() { return client.pingsSent() == 1; }, 500));
+        CHECK(client.isOnline());
+
+        client.stop();
+        waitFor([&]() { return !client.isOnline(); }, 1000);
     }
 
     SECTION("RendezvousClient — an attempt that never comes up is cut at the open timeout, "

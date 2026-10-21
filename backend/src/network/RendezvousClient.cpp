@@ -24,6 +24,7 @@
 
 #include <iterator>
 
+#include <QDateTime>
 #include <QHostInfo>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -56,13 +57,32 @@ constexpr int kProto = 1;
 
 // Our own ping cadence. The server pings too (Qt answers those by itself), but
 // its pings only prove the line is alive to the SERVER. This one is how WE find
-// out, which is what decides when to reconnect.
-constexpr int kKeepAliveMs = 45 * 1000;
+// out, which is what decides when to reconnect. With the pong wait below, a
+// line cut in silence is noticed within 35 s at worst; it was 65 s at 45 + 20.
+// At a thousand hosts this is 50 pings a second for the server, a few
+// kilobytes each way, and for a host on Wi-Fi one radio wake-up every 20 s for
+// a frame of a hundred bytes. The server, for its part, closes a line that has
+// sent nothing for 105 s: every ping of ours re-arms that, so a live line is
+// never mistaken for a mute one.
+constexpr int kKeepAliveMs = 20 * 1000;
 
 // A pong must come back within this. Generous on purpose: a home connection
 // stalling for a few seconds is ordinary, and tearing down a working line costs
-// more than waiting.
-constexpr int kPongTimeoutMs = 20 * 1000;
+// more than waiting. 15 s of queue on the uplink is more than any stream in
+// progress produces.
+constexpr int kPongTimeoutMs = 15 * 1000;
+
+// The clock watch: a coarse tick, and how far ahead the wall clock must have
+// jumped between two ticks for the process to have been asleep. A machine
+// that sleeps, or an app the OS naps, stops its timers with it; on waking,
+// the line may be long gone (the server closes a mute line after 105 s) while
+// the keep-alive timer, resumed where it stopped, is still up to 20 s away
+// from its next ping. A tick that finds the clock far ahead pings at once. The
+// wall clock rather than a monotonic one: the monotonic clocks of Linux and
+// macOS stand still during a suspend, the wall clock is set again from the
+// RTC on resume.
+constexpr int kClockTickMs = 5 * 1000;
+constexpr int kClockJumpMs = 30 * 1000;
 
 // One attempt to bring the line up, openLine() to connected, may take this
 // long: name lookup, the address race, TLS and the upgrade. A healthy one takes
@@ -115,12 +135,16 @@ RendezvousClient::RendezvousClient(AppSettings* settings, QObject* parent)
     , m_Net(new QNetworkAccessManager(this))
     , m_Race(new AddressRace(this))
     , m_OpenTimeoutMs(kOpenTimeoutMs)
+    , m_KeepAliveMs(kKeepAliveMs)
+    , m_PongTimeoutMs(kPongTimeoutMs)
+    , m_ClockJumpMs(kClockJumpMs)
     , m_PinLine(canPinLine(QVersionNumber::fromString(QLatin1String(qVersion()))))
 {
     m_RetryTimer.setSingleShot(true);
-    m_KeepAliveTimer.setInterval(kKeepAliveMs);
+    m_KeepAliveTimer.setInterval(m_KeepAliveMs);
     m_Watchdog.setSingleShot(true);
-    m_Watchdog.setInterval(kPongTimeoutMs);
+    m_Watchdog.setInterval(m_PongTimeoutMs);
+    m_ClockTick.setInterval(kClockTickMs);
     m_OpenTimer.setSingleShot(true);
 
     connect(&m_RetryTimer, &QTimer::timeout, this, [this]() {
@@ -132,6 +156,7 @@ RendezvousClient::RendezvousClient(AppSettings* settings, QObject* parent)
     });
     connect(&m_KeepAliveTimer, &QTimer::timeout, this, &RendezvousClient::onKeepAlive);
     connect(&m_Watchdog, &QTimer::timeout, this, &RendezvousClient::onWatchdog);
+    connect(&m_ClockTick, &QTimer::timeout, this, &RendezvousClient::onClockTick);
     connect(&m_OpenTimer, &QTimer::timeout, this, &RendezvousClient::onOpenTimeout);
     connect(m_Race, &AddressRace::won, this, &RendezvousClient::onRaceWon);
     connect(m_Race, &AddressRace::lost, this, &RendezvousClient::onRaceLost);
@@ -196,6 +221,9 @@ void RendezvousClient::start()
         qInfo() << "[RDV] Qt" << qVersion()
                 << "cannot open the line on an address (QTBUG-141396) - it goes by name";
 
+    m_LastTickMs = QDateTime::currentMSecsSinceEpoch();
+    m_ClockTick.start();
+
     ensureIdentity();
     if (m_Settings->rendezvousClaimed())
         openLine();
@@ -209,6 +237,7 @@ void RendezvousClient::stop()
     m_RetryTimer.stop();
     m_KeepAliveTimer.stop();
     m_Watchdog.stop();
+    m_ClockTick.stop();
     // A deliberate stop is not an attempt that failed: nothing is counted.
     abandonAttempt();
     m_Socket.close(QWebSocketProtocol::CloseCodeNormal, QStringLiteral("shutting down"));
@@ -236,6 +265,24 @@ bool RendezvousClient::canPinLine(const QVersionNumber& qt)
 void RendezvousClient::forceLineByName()
 {
     m_PinLine = false;
+}
+
+void RendezvousClient::setKeepAliveMs(int ms)
+{
+    m_KeepAliveMs = qMax(1, ms);
+    m_KeepAliveTimer.setInterval(m_KeepAliveMs);
+}
+
+void RendezvousClient::setPongTimeoutMs(int ms)
+{
+    m_PongTimeoutMs = qMax(1, ms);
+    m_Watchdog.setInterval(m_PongTimeoutMs);
+}
+
+void RendezvousClient::setClockWatch(int tickMs, int jumpMs)
+{
+    m_ClockTick.setInterval(qMax(1, tickMs));
+    m_ClockJumpMs = qMax(1, jumpMs);
 }
 
 void RendezvousClient::ensureIdentity()
@@ -631,9 +678,9 @@ void RendezvousClient::onSocketError(QAbstractSocket::SocketError error)
     // restart of the introduction server reaches us as a TLS close_notify on a
     // TCP connection that stays open: Qt reports "The TLS/SSL connection has
     // been closed" and never emits disconnected. The line then looked up until
-    // the next ping and its missing pong, 45 + 20 s at worst — 31 s and 63 s
-    // on the staging bench of 16/10/2026, where every machine on it was
-    // unreachable for new visitors the whole time.
+    // the next ping and its missing pong, 45 + 20 s at worst at the time —
+    // 31 s and 63 s on the staging bench of 16/10/2026, where every machine on
+    // it was unreachable for new visitors the whole time.
     //
     // Aborted on the next turn of the loop rather than here, inside the
     // socket's own error emission. Only a CONNECTED socket is touched: one
@@ -654,6 +701,7 @@ void RendezvousClient::onKeepAlive()
     // idle session somewhere between 30 s and 2 minutes), and give the watchdog
     // something to wait for.
     m_Socket.ping();
+    ++m_PingsSent;
     m_Watchdog.start();
 }
 
@@ -669,8 +717,29 @@ void RendezvousClient::onWatchdog()
     // No pong came back. The socket may still look connected — a NAT entry
     // dropped upstream leaves exactly this state — so close it and rebuild
     // rather than trust it.
-    qWarning() << "[RDV] no pong within" << (kPongTimeoutMs / 1000) << "s — rebuilding the line";
+    qWarning() << "[RDV] no pong within" << (m_PongTimeoutMs / 1000) << "s — rebuilding the line";
     m_Socket.abort();
+}
+
+void RendezvousClient::onClockTick()
+{
+    // The gap is what the wall clock advanced beyond the tick itself. Timers do
+    // not run while the machine sleeps, so the first tick after a wake-up
+    // carries the whole sleep in it; a timer that merely fired late carries a
+    // few milliseconds.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 gap = now - m_LastTickMs - m_ClockTick.interval();
+    m_LastTickMs = now;
+    if (gap < m_ClockJumpMs) return;
+    qInfo() << "[RDV] the clock jumped" << (gap / 1000) << "s ahead (sleep?)";
+
+    // Only a line that believes itself up needs the proof: an attempt in
+    // progress has its own bound, a pending retry fires on its own, and a ping
+    // already waiting for its pong will be judged by the watchdog, late or not.
+    if (m_Socket.state() != QAbstractSocket::ConnectedState || m_Watchdog.isActive()) return;
+    qInfo() << "[RDV] pinging the line now rather than at the next keep-alive";
+    onKeepAlive();
+    m_KeepAliveTimer.start();
 }
 
 void RendezvousClient::scheduleRetry(const char* why)

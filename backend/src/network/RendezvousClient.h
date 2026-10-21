@@ -73,6 +73,15 @@ class QHostInfo;
  * past it the attempt counts as a failure like a refusal would, and the family
  * that had won the race is not the one to lead with next time.
  *
+ * Noticing a dead line
+ * --------------------
+ * A line cut in silence, a NAT entry dropped upstream, a Wi-Fi gone away: the
+ * socket still looks connected. The client pings every 20 s and gives the pong
+ * 15 s, so such a cut is noticed within 35 s at worst, and the line is rebuilt.
+ * A machine that sleeps stops those timers with it: a coarse clock watch sees
+ * the wall clock jump at wake-up and pings at once, rather than when the
+ * keep-alive timer, resumed where it stopped, would have got round to it.
+ *
  * Threading: Qt main thread only, like the rest of the network layer.
  */
 class RendezvousClient : public QObject
@@ -123,6 +132,23 @@ public:
     /// does. Tests only.
     void forceLineByName();
 
+    /// The keep-alive: how often the line is pinged once up, and how long the
+    /// pong is given before the line is rebuilt. The defaults suit production;
+    /// tests shorten them.
+    void setKeepAliveMs(int ms);
+    void setPongTimeoutMs(int ms);
+    int keepAliveMs() const { return m_KeepAliveMs; }
+    int pongTimeoutMs() const { return m_PongTimeoutMs; }
+
+    /// The clock watch: how often the wall clock is looked at, and how far
+    /// ahead it must have jumped between two looks for the process to count as
+    /// having slept. Tests only.
+    void setClockWatch(int tickMs, int jumpMs);
+
+    /// How many pings this client has sent since it was created. For tests and
+    /// diagnostics.
+    int pingsSent() const { return m_PingsSent; }
+
 signals:
     /// A browser arrived and the server opened a session for it.
     void sessionOpened(const QString& sessionId);
@@ -155,6 +181,7 @@ private slots:
     void onPong(quint64 elapsed, const QByteArray& payload);
     void onKeepAlive();
     void onWatchdog();
+    void onClockTick();
     void onOpenTimeout();
     void onRaceWon(const QHostAddress& address, qint64 elapsedMs);
     void onRaceLost(qint64 elapsedMs);
@@ -187,8 +214,14 @@ private:
     QTimer m_RetryTimer;     // reconnect / re-claim backoff
     QTimer m_KeepAliveTimer; // our own ping, so a dead line is noticed
     QTimer m_Watchdog;       // fires when a pong never came back
+    QTimer m_ClockTick;      // the clock watch, start() to stop()
     QTimer m_OpenTimer;      // bounds one attempt, openLine() to connected
     int m_OpenTimeoutMs;
+    int m_KeepAliveMs;
+    int m_PongTimeoutMs;
+    int m_ClockJumpMs;
+    qint64 m_LastTickMs = 0; // the wall clock at the last tick
+    int m_PingsSent = 0;
 
     /// Whether a named line is raced and opened on the winning address, or
     /// goes by name: canPinLine() of the Qt loaded at run time.
