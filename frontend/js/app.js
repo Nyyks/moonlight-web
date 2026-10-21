@@ -643,6 +643,13 @@ export const MoonlightApp = {
                         view.refresh();
                     }
                 };
+                // The link went quiet: the same question, early (_onLiveLinkStall).
+                streamView.onLinkStall = async () => {
+                    if (!streamView.streamId) return;
+                    const state = await BackendClient.playerStreamState(streamView.streamId);
+                    if (state === 'crashed' && this.streamView === streamView)
+                        streamView._handOffLinkLoss();
+                };
                 // The link went once connected. As the owner's (_onLiveLinkLost):
                 // a worker that crashed under it is rejoined behind the veil, on
                 // the same rung and with the same cookie; anything else ends as
@@ -3337,6 +3344,9 @@ export const MoonlightApp = {
         // onLinkLost: the link went once connected → ask the host why, and
         // start the stream again if its worker crashed (_onLiveLinkLost).
         sv.onLinkLost = () => this._onLiveLinkLost(sv);
+        // onLinkStall: nothing came over the link for a moment → ask the host
+        // at once whether the worker crashed (_onLiveLinkStall).
+        sv.onLinkStall = () => this._onLiveLinkStall(sv);
         // onCongestion: sustained congestion detected mid-stream → relaunch with
         // a degraded session-only profile (bitrate −30% steps, resolution rungs,
         // media transport, 60 fps cap). See _onStreamCongested().
@@ -3605,6 +3615,22 @@ export const MoonlightApp = {
         this._reconnectOf = sv.streamId;
         console.warn('[MW] The stream worker on the host crashed — starting the stream again');
         this._relaunchTransport(this._transportIndex || 0);
+    },
+
+    /**
+     * Nothing has come over the live view's link for a moment while it still
+     * counts as up (StreamView._checkLinkStall). The host knows of a crashed
+     * worker within a tenth of a second, ICE takes some 8 s to call the link
+     * dead: a crash heard now is handed to _onLiveLinkLost at once. Anything
+     * else changes nothing — a stalling link carries on, or ends as it does.
+     */
+    async _onLiveLinkStall(sv) {
+        const host = this._lastStreamHost;
+        if (!sv.streamId || !host) return;
+        const state = await BackendClient.streamState(host.uuid, sv.streamId);
+        if (state !== 'crashed' || sv !== this.streamView) return;
+        console.warn('[MW] The link went quiet: the host says its stream worker crashed');
+        sv._handOffLinkLoss();
     },
 
     /**

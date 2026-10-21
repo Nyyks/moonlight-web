@@ -40,6 +40,15 @@ export const CRASH_RELAUNCH_WINDOW_MS = 5 * 60 * 1000;
 export const STREAM_STATE_TIMEOUT_MS = 1500;
 /** When the host still says "live", how long before it is asked again. */
 export const LIVE_RECHECK_MS = 1000;
+/**
+ * Nothing at all received for this long (frames, the host's stats every
+ * second, pongs) while the link still counts as up: the page asks the host
+ * whether the worker crashed. ICE takes some 8 s to call the link dead; the
+ * host knows of a crash within a tenth of a second.
+ */
+export const LINK_STALL_MS = 1500;
+/** At most one such question per this long, through a stall that lasts. */
+export const LINK_STALL_PROBE_MS = 2000;
 
 /**
  * The host's answer, asked a second time when it is still "live". A link

@@ -127,6 +127,7 @@ import { VsyncGrid } from '../stream/VsyncGrid.js';
 import { CadenceStepper, autostepEnabled, stepMemory } from '../stream/CadenceStepper.js';
 import { LatencyProbe } from '../stream/LatencyProbe.js';
 import { InputUplink } from '../stream/InputUplink.js';
+import { LINK_STALL_MS, LINK_STALL_PROBE_MS } from '../stream/CrashRelaunch.js';
 import { t } from '../i18n/i18n.js';
 import { VdGpuApartWatch, takeVdGpuApartNotice } from '../util/vdGpuApartNotice.js';
 
@@ -937,6 +938,14 @@ export class StreamView {
          *  host how the stream ended: it starts it again when the worker
          *  crashed, and calls _linkLostDefault() for everything else. */
         this.onLinkLost = null;
+        /** Callback invoked when nothing has come over the link for a moment
+         *  while it still counts as up (_checkLinkStall): MoonlightApp asks
+         *  the host whether the worker crashed, rather than wait for ICE. */
+        this.onLinkStall = null;
+        // When anything last came over the link, and when the host was last
+        // asked about a stall (_checkLinkStall).
+        this._lastRxAt = 0;
+        this._lastStallProbeAt = -Infinity;
         /** Callback invoked on SUSTAINED network congestion (IDR storms, backend
          *  SCTP backpressure drops, PLI storms). MoonlightApp reacts by
          *  relaunching the stream with a degraded session-only profile
@@ -5002,6 +5011,23 @@ export class StreamView {
         return true;
     }
 
+    /**
+     * Nothing has come over the link for LINK_STALL_MS (frames, the host's
+     * stats every second, pongs) while it still counts as up: ask MoonlightApp
+     * to check with the host (onLinkStall), at most every LINK_STALL_PROBE_MS.
+     * A worker that crashed takes the link down with it, and ICE needs some
+     * 8 s to say so; the host knows within a tenth of a second.
+     */
+    _checkLinkStall(now = performance.now()) {
+        if (!this._firstFrameRendered || this._standby || this._quitting) return;
+        if (this._manualQuitting || this._takenOver || this._linkLossHandedOff) return;
+        if (typeof this.onLinkStall !== 'function' || !(this._lastRxAt > 0)) return;
+        if (now - this._lastRxAt < LINK_STALL_MS) return;
+        if (now - this._lastStallProbeAt < LINK_STALL_PROBE_MS) return;
+        this._lastStallProbeAt = now;
+        this.onLinkStall();
+    }
+
     /** How a lost link has always ended: the banners, then quit() in 3 s. */
     _linkLostDefault() {
         if (this._quitting || this._manualQuitting || this._takenOver) return;
@@ -5053,6 +5079,8 @@ export class StreamView {
                 const seq = this._pingSeq++;
                 this.webrtc.send({ type: 'ping', seq, ts: performance.now() });
             }, 2000);
+            if (this._stallWatch) clearInterval(this._stallWatch);
+            this._stallWatch = setInterval(() => this._checkLinkStall(), 250);
 
             // Held-input heartbeat (see _sendInputState). The first beat is
             // forced — even with nothing held — because it doubles as the
@@ -7249,6 +7277,7 @@ export class StreamView {
     // ── Stats message handler (ping/pong + periodic backend stats) ─────────
 
     _handleStatsMessage(msg) {
+        this._lastRxAt = performance.now();
         if (typeof msg.type === 'string' && msg.type.startsWith('hid')) {
             this._ensureHidPassthrough()?.handleMessage(msg);
             if (msg.type === 'hidcaps') this._offerHid();
@@ -7482,6 +7511,7 @@ export class StreamView {
         // browser's begins. Stamped on the absolute clock so the decode worker,
         // which has its own time origin, can measure the hop to decode().
         const arrivalAbs = performance.timeOrigin + performance.now();
+        this._lastRxAt = arrivalAbs - performance.timeOrigin;
         // Stop processing frames once quit() has started.  The DC may still
         // deliver queued messages during the async HTTP /quit call.
         if (this._quitting) return;
@@ -12281,6 +12311,10 @@ export class StreamView {
             clearInterval(this._pingInterval);
             this._pingInterval = null;
         }
+        if (this._stallWatch) {
+            clearInterval(this._stallWatch);
+            this._stallWatch = null;
+        }
         if (this._inputStateInterval) {
             clearInterval(this._inputStateInterval);
             this._inputStateInterval = null;
@@ -12668,6 +12702,10 @@ export class StreamView {
         if (this._pingInterval) {
             clearInterval(this._pingInterval);
             this._pingInterval = null;
+        }
+        if (this._stallWatch) {
+            clearInterval(this._stallWatch);
+            this._stallWatch = null;
         }
         if (this._inputStateInterval) {
             clearInterval(this._inputStateInterval);

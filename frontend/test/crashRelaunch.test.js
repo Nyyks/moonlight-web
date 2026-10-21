@@ -14,6 +14,8 @@ import { t } from '../js/i18n/i18n.js';
 import {
     CRASH_RELAUNCH_MAX,
     CRASH_RELAUNCH_WINDOW_MS,
+    LINK_STALL_MS,
+    LINK_STALL_PROBE_MS,
     LIVE_RECHECK_MS,
     recordCrashRelaunch,
     settledStreamState,
@@ -384,6 +386,109 @@ describe('MoonlightApp: the host says how the stream ended', () => {
         await MoonlightApp._onLiveLinkLost(old);
         expect(old._linkLostDefault).not.toHaveBeenCalled();
         expect(relaunch).not.toHaveBeenCalled();
+    });
+});
+
+const NOW = 1e6;
+
+/** A StreamView reduced to what the stall watch reads. */
+function stallView(overrides = {}) {
+    return {
+        _firstFrameRendered: true,
+        _standby: false,
+        _quitting: false,
+        _manualQuitting: false,
+        _takenOver: false,
+        _linkLossHandedOff: false,
+        // A page well into its life, as when a stream runs.
+        _lastRxAt: NOW,
+        _lastStallProbeAt: -Infinity,
+        onLinkStall: vi.fn(),
+        _checkLinkStall: StreamView.prototype._checkLinkStall,
+        ...overrides,
+    };
+}
+
+describe('StreamView: a link gone quiet', () => {
+    it('asks once nothing has come for a moment, and not before', () => {
+        const sv = stallView();
+        sv._checkLinkStall(NOW);
+        expect(sv.onLinkStall).not.toHaveBeenCalled();
+        sv._lastRxAt = NOW - LINK_STALL_MS - 10;
+        sv._checkLinkStall(NOW);
+        expect(sv.onLinkStall).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks again only after a while, through a stall that lasts', () => {
+        const sv = stallView({ _lastRxAt: NOW - 10 * LINK_STALL_MS });
+        sv._checkLinkStall(NOW);
+        sv._checkLinkStall(NOW);
+        expect(sv.onLinkStall).toHaveBeenCalledTimes(1);
+        sv._lastStallProbeAt = NOW - LINK_STALL_PROBE_MS - 10;
+        sv._checkLinkStall(NOW);
+        expect(sv.onLinkStall).toHaveBeenCalledTimes(2);
+    });
+
+    it('stays quiet before the first frame, on a standby, and once the ending is under way', () => {
+        const quiet = NOW - 10 * LINK_STALL_MS;
+        for (const flags of [
+            { _firstFrameRendered: false },
+            { _standby: true },
+            { _quitting: true },
+            { _manualQuitting: true },
+            { _takenOver: true },
+            { _linkLossHandedOff: true },
+            { _lastRxAt: 0 },
+            { onLinkStall: null },
+        ]) {
+            const sv = stallView({ _lastRxAt: quiet, ...flags });
+            const probe = sv.onLinkStall;
+            sv._checkLinkStall(NOW);
+            if (probe) expect(probe, JSON.stringify(flags)).not.toHaveBeenCalled();
+        }
+    });
+});
+
+describe('MoonlightApp: a quiet link and the host', () => {
+    beforeEach(() => {
+        saveApp();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        MoonlightApp._lastStreamHost = { uuid: 'host-1' };
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+        Object.assign(MoonlightApp, saved);
+    });
+
+    it('a crash heard early ends the wait for ICE', async () => {
+        const state = vi.spyOn(BackendClient, 'streamState').mockResolvedValue('crashed');
+        const sv = { streamId: 'stream-1', _handOffLinkLoss: vi.fn() };
+        MoonlightApp.streamView = sv;
+        await MoonlightApp._onLiveLinkStall(sv);
+        expect(state).toHaveBeenCalledWith('host-1', 'stream-1');
+        expect(sv._handOffLinkLoss).toHaveBeenCalledTimes(1);
+    });
+
+    it('a link that is merely slow carries on', async () => {
+        for (const answer of ['live', 'ended', 'stopped', 'unknown']) {
+            vi.spyOn(BackendClient, 'streamState').mockResolvedValue(answer);
+            const sv = { streamId: 'stream-1', _handOffLinkLoss: vi.fn() };
+            MoonlightApp.streamView = sv;
+            await MoonlightApp._onLiveLinkStall(sv);
+            expect(sv._handOffLinkLoss, answer).not.toHaveBeenCalled();
+        }
+    });
+
+    it('asks nothing without a stream id, and nothing for a view already replaced', async () => {
+        const state = vi.spyOn(BackendClient, 'streamState').mockResolvedValue('crashed');
+        const noId = { streamId: '', _handOffLinkLoss: vi.fn() };
+        MoonlightApp.streamView = noId;
+        await MoonlightApp._onLiveLinkStall(noId);
+        expect(state).not.toHaveBeenCalled();
+        const old = { streamId: 'stream-1', _handOffLinkLoss: vi.fn() };
+        MoonlightApp.streamView = { streamId: 'stream-2' };
+        await MoonlightApp._onLiveLinkStall(old);
+        expect(old._handOffLinkLoss).not.toHaveBeenCalled();
     });
 });
 
