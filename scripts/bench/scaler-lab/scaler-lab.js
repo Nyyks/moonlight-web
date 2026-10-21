@@ -486,16 +486,20 @@ function drawCode(ctx, w, h) {
   const lh = Math.round(px * 1.45);
   let y = px * 2;
   let n = 0;
+  // Two columns: the lines are short, and with one column the central third
+  // of the picture (where the metrics also look) held no text at all (P0 §6).
   while (y < h - px) {
     const line = lines[n % lines.length];
-    let x = px;
-    ctx.fillStyle = "#858585";
-    ctx.fillText(String(n + 1).padStart(3), x, y);
-    x += px * 3;
-    for (const [kind, text] of line) {
-      ctx.fillStyle = colors[kind];
-      ctx.fillText(text, x, y);
-      x += ctx.measureText(text).width;
+    for (const x0 of [px, Math.round(w * 0.5)]) {
+      let x = x0;
+      ctx.fillStyle = "#858585";
+      ctx.fillText(String(n + 1).padStart(3), x, y);
+      x += px * 3;
+      for (const [kind, text] of line) {
+        ctx.fillStyle = colors[kind];
+        ctx.fillText(text, x, y);
+        x += ctx.measureText(text).width;
+      }
     }
     y += lh;
     n++;
@@ -1017,6 +1021,9 @@ export async function runLab(p, log = () => {}) {
     racross: "R_ACROSS",
     sfull: "S_FULL",
     wmin: "W_MIN",
+    dering: "DERING",
+    shape: "SHAPE",
+    kshape: "K_SHAPE",
   };
   const mwsrPass = (name, feed, opts, srcView) => {
     const over = {};

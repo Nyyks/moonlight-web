@@ -72,12 +72,14 @@ P1_CASES = [
 # next to the floor (one and five bilinear taps), its two orientations, with
 # and without the branch, on the external texture, and the shipped kernels;
 # three pictures at ×2, text at ×1.33.
-P2_CELLS = "tex-s1,tex-s5,mwsr,mwsr:orient=0,mwsr:early=0,ext-s1,ext-mwsr,sgsr-repo,fsr1,nis"
+P2_CELLS = ("tex-s1,tex-s5,tex-s9,mwsr,mwsr:dering=0,mwsr:early=0,mwsr:orient=0,"
+            "ext-s1,ext-s5,ext-mwsr,ext-mwsr:dering=0,sgsr-repo,fsr1,nis")
 P2_CASES = [
     ("x2-text", "in=1280x720&out=2560x1440&content=text&cells=%s&rounds=3" % P2_CELLS),
     ("x2-ui", "in=1280x720&out=2560x1440&content=ui&cells=%s&rounds=3" % P2_CELLS),
     ("x2-game", "in=1280x720&out=2560x1440&content=game&cells=%s&rounds=3" % P2_CELLS),
     ("x133-text", "in=1920x1080&out=2560x1440&content=text&cells=%s&rounds=3" % P2_CELLS),
+    ("x133-game", "in=1920x1080&out=2560x1440&content=game&cells=%s&rounds=3" % P2_CELLS),
 ]
 
 
