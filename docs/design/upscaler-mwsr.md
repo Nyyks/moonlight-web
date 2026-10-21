@@ -1299,7 +1299,7 @@ upscalers spatiaux.
 - [~] Chaîne Python : PSNR, SSIM, dépassements faits (`metrics.py`) ; FLIP attend une roue Python 3.14 ; SSIMULACRA 2, scintillement et défilement en P2 s'ils servent
 - [~] Relevé `adapter.features` / `adapter.info` : DualRTX (RTX, 780M) fait ; téléphones et Mac aux créneaux de Bruno ; `mw-arm` sans WebGPU
 - [x] Essai décisif externe contre blit + RGBA (N = 1, 5, 9, chargements, dérivées) : RTX et 780M
-- [~] Lignes de base : DualRTX fait (l'Arc A380 n'est plus énumérée) ; `mw-arm` (WebGL2), Mac M1, iPhone 13 Pro, realme Note 60 à jouer ; Smooth2D (Canvas2D) non mesuré, hors WebGPU
+- [~] Lignes de base : DualRTX fait (l'Arc A380 n'est plus énumérée) ; iPhone 13 Pro fait (20/10) ; **Mac M1 Pro fait (21/10, rapport P0 §4 quater, avec le noyau `mwsr` : C1 provisoirement tenue sur Apple, passe 0 à garder sur ce GPU)** ; `mw-arm` (WebGL2) et realme Note 60 à jouer ; Smooth2D (Canvas2D) non mesuré, hors WebGPU
 - [x] Rapport P0 et porte : tenue pour l'ordinateur (dispersion ≤ 2,6 %, pas de passe 0 en SDR)
 
 **P1 — Contournement 1:1** (code le 20/10/2026, commit `36edf6ec`)

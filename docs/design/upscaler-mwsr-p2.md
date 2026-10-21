@@ -143,6 +143,15 @@ décodeur ; FSR1 = EASU → intermédiaire → RCAS (deux passes, sans sa passe 
 6. Les axes (`ORIENT 0`) coûtent la même chose que le repère des dérivées : le choix s'est fait sur
    la qualité seule (§1.3).
 
+**Mac M1 Pro, le même matin** (créneau de Bruno, rapport P0 §4 quater pour le tableau complet) :
+noyau seul à ×2 vers 1440p, temps mur par itération sous contre-pression, `mwsr` **0,26 ms sur
+`text`, 0,15 sur `game`** (plancher 0,13 ; SGSR1 0,37 ; FSR1 1,27 ; NIS 2,6) : × 0,72 et × 0,42 de
+SGSR1, **C1 provisoirement tenue sur Apple**. La sortie anticipée y vaut +60 % sur le texte et
+× 2,7 sur `game` ; la borne exacte un quantum de 65 µs. Mais **la texture externe y coûte** :
+`ext-mwsr` 0,61 ms sur `text` contre `blit` + noyau ≈ 0,42 — sur Apple la passe 0 reste le bon
+chemin tant que les contours sont nombreux, et l'`override` « passe 0 » (§3.4) devient un vrai choix
+par plateforme pour P2.3.
+
 ### 1.5 Ce que P2.1 laisse à P2.2 et P2.3
 
 - **P2.2** : la reconstruction à ×2 (SSIM) — `TIER` qualité avec les quatre diagonales et une
