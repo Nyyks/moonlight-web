@@ -2271,6 +2271,35 @@ on the Mac (load 2-4).
   at 08:13: 0 to 2 freezes. The client's load and the Wi-Fi of that hour
   cannot be told apart from these passes.
 
+**G (`ovfgood=1`) on an iPhone in 5G**, 21/10, 13:14-13:49 and 14:36-14:53.
+Bruno's iPhone, Wi-Fi off, through the N95's stream.dev link, host on
+`5ed6e69a`; Bruno launched and quit each 3-minute pass himself, the key
+alternated on the host between passes. Ten passes; the four comparable pairs
+are the ones at his home (pass 1 on foot outside, pass 2 in a car, the rest
+at home), the first three minutes of each.
+
+| Settings | Arm | Freezes | Longest | Frozen time | Chunks sent again |
+|---|---|---|---|---|---|
+| 1080p60, 15 Mbit/s | no key | 15, 10 | 5.1 s, 4.7 s | 32.3 s, 10.3 s | 187, 276 |
+| 1080p60, 15 Mbit/s | `ovfgood=1` | 6, 7 | 3.3 s, 2.1 s | 7.5 s, 8.8 s | 82, 183 |
+| 3436×1208, 30 Mbit/s | no key | 8, 6 | 43.7 s, 102.5 s | 65.8 s, 144 s | 6, 0 |
+| 3436×1208, 30 Mbit/s | `ovfgood=1` | 4, 22 | 11.3 s, 8.4 s | 17.0 s, 40.6 s | 0, 0 |
+
+- The 5G overflows without retransmitting: at 30 Mbit/s, 0 chunks sent again
+  in three passes of four, and yet the stream froze for 44 and 102 s at a
+  stretch without the key — nothing told the governor. With the key, 68 and
+  74 shed frames counted as overuse and 2 to 4 "send buffer overflowed" cuts
+  a pass kept the freezes to 11 and 8 s at most.
+- In four pairs of four the key shortened the longest freeze and the time
+  frozen; the number of freezes in three of four (22 short ones in the last
+  pass, against 6 long ones).
+- The link itself is the problem: 150 to 280 chunks sent again a pass at
+  15 Mbit/s, 6 to 15 freezes per 3 minutes, and the governor at its
+  3000 kbps floor in every pass; 4 to 5 Mbit/s carried. Nothing wrong on the
+  host.
+- **On by default since 21/10** (Bruno's decision), `ovfgood=0` the bench's
+  "before"; the v0.4.1 acceptance bench checks the cable and the Wi-Fi.
+
 **`rxbuf=1` under an equal client load**, 12:20-12:49. The same bench, on
 `cf7fcedb`'s exe and page alone, with every one of DualRTX's 24 logical
 cores busy at normal priority for each pass. Two arms alternated 3 times. The
@@ -2457,7 +2486,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `flood=`, `floodsize=`, `floodchannel=` | useless traffic on channel 3 | |
 | `pace=<n>`, `paceburst=<KB>` | pacing of a frame's chunks | `b2b52486` |
 | `retrcut=<‰>` | governor cuts on SCTP retransmissions; **3 by default on Windows**, 0 off | `e0324f4e`, `55dd9cde` |
-| `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; off unless said; neutral on the Mac, 20/10) | `352a30ad` |
+| `ovfgood=0\|1` | a frame the relay sheds off a backed-up send buffer is overuse and lowers the governor's last good rate to one cut under it (Windows; neutral on the Mac's Wi-Fi, 20/10; on an iPhone in 5G the longest freeze fell in four pairs of four, 21/10); **on by default** since 21/10, `ovfgood=0` takes it out | `352a30ad`, default (21/10) |
 | `rxbuf=0\|1` | a silent video section in the offer (H.264 and VP8), so Chrome raises its UDP receive buffer from 64 to 256 KB (0 chunks sent again in 6 passes on the cable, at rest and under load; kept by every browser tried, 20/10); **on by default** since 20/10, `rxbuf=0` takes it out; GameStream sessions too since `5ed6e69a` | `844f1db2`, `ece69487`, default `ef94fce5`, GameStream `5ed6e69a` |
 | `sctpbuf=<KB>` | usrsctp's real send buffer (via `maxMessageSize`) | `dc7f9c72` |
 | `linkhold=<ms>` | hold the picture after a backlog that long (Windows) | `dc7f9c72`, `a511bdd3` |

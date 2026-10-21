@@ -242,8 +242,10 @@ void run_cadence_choice_tests()
         CHECK_EQ(t.describe(), std::string("retrcut=5"));
     }
 
-    // ovfgood= (plan « Gels du lien », G): off unless said, 0 and 1 named.
-    SECTION("ovfgood= — off unless said, both values named");
+    // ovfgood= (plan « Gels du lien », G): the engine's own unless said, 0 and
+    // 1 named; and the rule the session applies: on, unless the key says 0
+    // (21/10/2026, the iPhone's 5G).
+    SECTION("ovfgood= — the engine's own unless said, both values named");
     {
         EncoderTuning t;
         CHECK_EQ(t.overflowGood, -1);
@@ -253,6 +255,13 @@ void run_cadence_choice_tests()
         CHECK_EQ(t.describe(), std::string("ovfgood=0"));
         t.overflowGood = 1;
         CHECK_EQ(t.describe(), std::string("ovfgood=1"));
+    }
+
+    SECTION("ovfgood= — shed frames lower the good rate unless the key says 0");
+    {
+        CHECK(mw::native::overflowLowersGoodByDefault(-1));
+        CHECK(!mw::native::overflowLowersGoodByDefault(0));
+        CHECK(mw::native::overflowLowersGoodByDefault(1));
     }
 
     // rxbuf= (plan « Gels du lien », point 1): the silent video section is the

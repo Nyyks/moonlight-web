@@ -353,7 +353,7 @@ public:
     void noteEviction() { m_Evictions.fetch_add(1, std::memory_order_relaxed); }
     /// The relay shed a frame off a send buffer backed up past its tolerance
     /// ("link not draining"). Carried by the next reportLink() as
-    /// LinkFeedback::overflows, which the governor reads under ovfgood= only.
+    /// LinkFeedback::overflows, which the governor reads unless ovfgood=0.
     void noteOverflow() { m_Overflows.fetch_add(1, std::memory_order_relaxed); }
 
     /// The client's screen changed mid-session (a `clientrefresh` message):

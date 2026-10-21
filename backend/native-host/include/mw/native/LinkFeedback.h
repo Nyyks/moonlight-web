@@ -66,7 +66,8 @@ struct LinkFeedback
     /// had stayed backed up past its tolerance (SendBacklog: "link not
     /// draining"). Filled by the host. They never got a frame number, so the
     /// receiver sees no gap: the link overflowed at the rate in force, which
-    /// only the bench's ovfgood= tells the governor (plan « Gels du lien », G).
+    /// the governor takes as overuse unless the bench's ovfgood=0 says not to
+    /// (plan « Gels du lien », G).
     int overflows = 0;
 
     /// The receiver's first report after its page was hidden or frozen. The

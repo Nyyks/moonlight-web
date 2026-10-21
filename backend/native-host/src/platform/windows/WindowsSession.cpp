@@ -2314,11 +2314,15 @@ private:
             log::info("[native] rate governor: also cuts at " +
                       std::to_string(governor.retransCut()) +
                       " SCTP chunks retransmitted in a thousand (retrcut=)");
-        // ovfgood= (plan « Gels du lien », G): a shed frame lowers the good rate.
-        governor.setOverflowLowersGood(m_Config.tuning.overflowGood > 0);
+        // A shed frame lowers the good rate: the product's rule since
+        // 21/10/2026 (plan « Gels du lien », G; overflowLowersGoodByDefault),
+        // ovfgood=0 the bench's "before".
+        governor.setOverflowLowersGood(overflowLowersGoodByDefault(m_Config.tuning.overflowGood));
         if (governor.overflowLowersGood())
             log::info("[native] rate governor: a frame shed off the send buffer lowers the "
-                      "link's last good rate (bench ovfgood=1)");
+                      "link's last good rate (ovfgood=0 takes it out)");
+        else
+            log::info("[native] rate governor: shed frames move nothing (bench ovfgood=0)");
         // The session's account of the link, however the loop ends: what the
         // encoder was given on average, and why it was cut (the A/B of
         // ovfgood=; the moves themselves are logged ten at most, then every

@@ -525,7 +525,8 @@ struct EncoderTuning
     /// A frame the relay sheds off a backed-up send buffer is overuse to the
     /// rate governor, and lowers the link's last good rate to one cut under
     /// the rate it overflowed at (plan « Gels du lien », G; Windows host).
-    /// -1, the product: off until measured; 0 off; 1 on.
+    /// -1, the product: on since 21/10/2026 (overflowLowersGoodByDefault);
+    /// 0 off, the bench's "before"; 1 on.
     int overflowGood = -1;
     /// usrsctp's send buffer, in KB, really (plan Wi-Fi W2 C). 0, the product:
     /// 256 KiB whatever the bitrate, since libdatachannel raises the buffer to
@@ -799,6 +800,23 @@ inline bool nameLinkDropsByDefault(VideoPipeline pipeline, EncoderApi encoder,
         return encoder == EncoderApi::Nvenc || encoder == EncoderApi::Amf;
     if (pipeline == VideoPipeline::D3d12) return encoder12 == EncoderTuning::Encoder12::Nvenc;
     return false;
+}
+
+/// EncoderTuning::overflowGood as the session applies it: whether the relay's
+/// shed frames lower the link's last good rate (RateGovernor::
+/// setOverflowLowersGood). On unless the key says 0 (Bruno, 21/10/2026, plan
+/// « Gels du lien », G). Measured on an iPhone in 5G at home, four pairs of
+/// 3-minute passes alternated with and without: a 5G link overflows without
+/// retransmitting (0 SCTP retransmissions in three passes of four at
+/// 30 Mbit/s), and only the shed frames say so. Without the key the stream
+/// stayed frozen 44 and 102 s at a stretch; with it the longest freeze was
+/// 11 and 8 s, and the time frozen fell in four pairs of four (3.3/2.1/11/8 s
+/// against 5.1/4.7/44/102 s for the longest). On the cable and the house
+/// Wi-Fi the governor cuts on retransmissions first, and the rule has nothing
+/// to do: it costs nothing there.
+inline bool overflowLowersGoodByDefault(int overflowGood)
+{
+    return overflowGood != 0;
 }
 
 /// A client whose decoder falls silent under the encoder's reference repairs

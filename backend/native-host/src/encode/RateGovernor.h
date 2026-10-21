@@ -84,8 +84,9 @@ namespace mw::native::encode {
 ///    kProbeGraceMs of its last step, says the link really narrowed. The
 ///    good rate falls back to where the climb started, so the next climb is
 ///    a slow one: the rate can overshoot once, not oscillate.
-///  - **A queue that overflowed** (the bench's `ovfgood=1`, off otherwise):
-///    a frame the relay shed off a backed-up send buffer is overuse, and the
+///  - **A queue that overflowed** (the product's rule since 21/10/2026,
+///    `ovfgood=0` the bench's "before" — overflowLowersGoodByDefault): a
+///    frame the relay shed off a backed-up send buffer is overuse, and the
 ///    good rate falls to one cut under the rate it overflowed at, however
 ///    long ago the climb ended. Seen on an N95 host on 19/10/2026: back at
 ///    30 Mbit/s in 1.5 s at 15:19:05, the buffer overflowed 7.4 s later —
@@ -189,7 +190,7 @@ public:
         const bool retransOver = m_RetransCut > 0 && fb.retransPermille >= m_RetransCut;
         const bool retransQuiet = m_RetransCut <= 0 || fb.retransPermille * 2 < m_RetransCut;
         if (retransOver) m_RetransOveruses++;
-        // The relay's shed frames, only under ovfgood= (setOverflowLowersGood).
+        // The relay's shed frames, while the rule is on (setOverflowLowersGood).
         const bool overflowed = m_OverflowLowersGood && fb.overflows > 0;
         const bool overuse = fb.owdRiseMs >= kOveruseMs || fb.gaps > 0 || fb.evictions > 0 ||
                              retransOver || overflowed;
@@ -283,13 +284,14 @@ public:
     /// the rest.
     int retransOveruses() const { return m_RetransOveruses; }
 
-    /// `ovfgood=1` (plan « Gels du lien », G): the relay's shed frames
+    /// Plan « Gels du lien », G: the relay's shed frames
     /// (LinkFeedback::overflows) are overuse, and lower the good rate to one
     /// cut under the rate they overflowed at. Off, where it starts, the
-    /// governor does not read them at all.
+    /// governor does not read them at all; the session turns it on unless the
+    /// bench's ovfgood=0 says otherwise (overflowLowersGoodByDefault).
     void setOverflowLowersGood(bool on) { m_OverflowLowersGood = on; }
     bool overflowLowersGood() const { return m_OverflowLowersGood; }
-    /// Reports that carried shed frames, under ovfgood=1.
+    /// Reports that carried shed frames, while the rule is on.
     int overflows() const { return m_Overflows; }
 
     /// The target's mean since start(), weighted by how long each value

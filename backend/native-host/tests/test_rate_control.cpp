@@ -745,7 +745,7 @@ void run_rate_control_tests()
         CHECK_EQ(g.targetKbps(), 5250);
     }
 
-    SECTION("RateGovernor — shed frames move nothing without ovfgood=");
+    SECTION("RateGovernor — shed frames move nothing while the rule is off (ovfgood=0)");
     {
         RateGovernor g;
         g.start(30000, 0);
@@ -762,7 +762,7 @@ void run_rate_control_tests()
         CHECK_EQ(g.overflows(), 0);
     }
 
-    SECTION("RateGovernor — ovfgood=: a queue that overflowed lowers the good rate");
+    SECTION("RateGovernor — the product's rule: a queue that overflowed lowers the good rate");
     {
         // The N95 of 19/10/2026: 30 Mbit/s proven, then the send buffer
         // overflowed at that rate long after the last climb.
