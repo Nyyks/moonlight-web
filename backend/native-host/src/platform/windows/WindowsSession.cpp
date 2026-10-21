@@ -552,6 +552,9 @@ public:
         });
         sink->setAllowElevated(m_Config.allowElevatedInput);
         if (m_Config.tuning.clickTrace) sink->setClickTrace(&m_ClickTrace);
+        // On a host with no pointing device, a mouse of its own: the pointer,
+        // and a device for games (SystemMouse.h). Mouse Keys when it cannot.
+        sink->setVirtualMouse(m_Config.tuning.virtualMouse);
         std::string inputError;
         if (sink->start(inputError)) {
             std::lock_guard<std::mutex> lock(m_InputMutex);
@@ -3668,9 +3671,20 @@ private:
     /// Mouse Keys on while this host has no pointing device, so that Windows
     /// draws the pointer at all — see PointerPresence. Every loop wake-up; it
     /// looks once a second, and on a host with a mouse it never does more than
-    /// look.
+    /// look. Not while the input's own mouse shows the pointer (SystemMouse.h):
+    /// Mouse Keys are the fallback, for a host where it could not be made.
     void keepPointerShown()
     {
+        bool ownMouse = false;
+        {
+            std::lock_guard<std::mutex> lock(m_InputMutex);
+            ownMouse = m_Input && m_Input->showsPointer();
+        }
+        if (ownMouse) {
+            // Turned on while Windows had not listed it yet: they go back.
+            if (m_PointerPresence.engaged()) releasePointerKeys();
+            return;
+        }
         PointerPresence::Step step = m_PointerPresence.poll(steadyNowUs());
         if (step == PointerPresence::Step::Lost) {
             log::info(

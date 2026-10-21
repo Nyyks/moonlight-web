@@ -30,6 +30,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <cwctype>
+#include <iterator>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -529,6 +531,52 @@ bool contains(const capture::DesktopRect& rect, const POINT& p)
     return p.x >= rect.left && p.x < rect.right && p.y >= rect.top && p.y < rect.bottom;
 }
 
+/// The mice Windows lists for Raw Input, a mouse made through VHF told apart:
+/// one made with no hardware ids, as ours are (VhidDevice.cpp), enumerates
+/// under HID_DEVICE_SYSTEM_VHF, which no mouse plugged into the host does.
+/// Mouse Keys are no device and are not counted.
+struct MiceListed
+{
+    int physical = 0;
+    int virtualHid = 0;
+};
+
+MiceListed listMice()
+{
+    MiceListed mice;
+    std::vector<RAWINPUTDEVICELIST> list;
+    UINT count = 0;
+    // A device that comes or goes between the two calls leaves the second one
+    // short of room: asked again.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (::GetRawInputDeviceList(nullptr, &count, sizeof(RAWINPUTDEVICELIST)) != 0) return mice;
+        if (count == 0) return mice;
+        list.resize(count);
+        const UINT got = ::GetRawInputDeviceList(list.data(), &count, sizeof(RAWINPUTDEVICELIST));
+        if (got == static_cast<UINT>(-1)) {
+            list.clear();
+            continue;
+        }
+        list.resize(got);
+        break;
+    }
+    for (const RAWINPUTDEVICELIST& device : list) {
+        if (device.dwType != RIM_TYPEMOUSE) continue;
+        wchar_t name[512] = {};
+        UINT chars = static_cast<UINT>(std::size(name) - 1);
+        const bool named = ::GetRawInputDeviceInfoW(device.hDevice, RIDI_DEVICENAME, name,
+                                                    &chars) != static_cast<UINT>(-1);
+        std::wstring upper(name);
+        for (wchar_t& c : upper)
+            c = static_cast<wchar_t>(std::towupper(c));
+        if (named && upper.find(L"HID_DEVICE_SYSTEM_VHF") != std::wstring::npos)
+            ++mice.virtualHid;
+        else
+            ++mice.physical;
+    }
+    return mice;
+}
+
 } // namespace
 
 Win32Input::Win32Input(const capture::DesktopRect& displayRect, VigemGamepad::RumbleSink onRumble)
@@ -587,6 +635,9 @@ bool Win32Input::start(std::string& error)
     // Settled BEFORE m_Started, which is what opens inject() to callers: the
     // other order lets the first events through on the caller's thread while
     // this is still false, and those are the ones that would miss the desktop.
+    // Before m_Started as well: the first relative move may come at once.
+    startVirtualMouse();
+
     m_Follow = platform::runningAsSystem();
     if (m_Follow) {
         m_FollowerQuit = false;
@@ -631,6 +682,12 @@ void Win32Input::stop()
     // would sit in the Windows game controller list forever, and the next game
     // to start would see a controller nobody is holding.
     m_Gamepad.reset();
+    // After the release above, which went through it for what it held: the
+    // host has no pointing device again, as before the stream.
+    if (m_Mouse) {
+        m_Mouse.reset();
+        log::info("[native] input: our mouse let go of");
+    }
     const uint64_t gated = m_Gated.load(std::memory_order_relaxed);
     log::info("[native] input: " + std::to_string(m_Injected.load(std::memory_order_relaxed)) +
               " event(s) injected this session" +
@@ -650,6 +707,12 @@ void Win32Input::forgetHeld()
         buttons = m_HeldButtons.size();
         m_HeldKeys.clear();
         m_HeldButtons.clear();
+        // Our mouse is told, unlike SendInput: a device keeps its buttons
+        // across the switch, and its next report would release them anyway.
+        if (m_MouseButtons) {
+            m_MouseButtons = 0;
+            sendThroughMouseLocked(0, 0, 0, 0);
+        }
     }
     if (keys || buttons)
         log::info("[native] input: the desktop switched while " + std::to_string(keys) +
@@ -660,10 +723,17 @@ void Win32Input::releaseAll()
 {
     std::set<int> keys;
     std::set<int> buttons;
+    uint8_t mouseButtons = 0;
     {
         std::lock_guard<std::mutex> lock(m_HeldMutex);
         keys.swap(m_HeldKeys);
         buttons.swap(m_HeldButtons);
+        // What our mouse holds goes up through it, in one report.
+        mouseButtons = m_MouseButtons;
+        if (mouseButtons) {
+            m_MouseButtons = 0;
+            sendThroughMouseLocked(0, 0, 0, 0);
+        }
     }
 
     if (keys.empty() && buttons.empty()) return;
@@ -678,7 +748,7 @@ void Win32Input::releaseAll()
     // deduplicating path would look at them, decide these buttons are already
     // up, and release nothing at all.
     for (int button : buttons)
-        sendMouseButton(button, false);
+        if (!(mouseButtons & systemmouse::buttonBit(button))) sendMouseButton(button, false);
 
     log::info("[native] input: released " + std::to_string(keys.size()) + " key(s) and " +
               std::to_string(buttons.size()) + " button(s) at session end");
@@ -1047,11 +1117,21 @@ void Win32Input::injectMouseMove(int deltaX, int deltaY)
     // should not touch the host's mouse until the viewer does.
     bringCursorOntoDisplay();
 
+    // Through our mouse when there is one: a game reading Raw Input by device
+    // sees it move. A placement above went through SendInput all the same,
+    // and lands first.
+    m_Relative = true;
+    if (m_Mouse) {
+        std::lock_guard<std::mutex> lock(m_HeldMutex);
+        if (sendThroughMouseLocked(deltaX, deltaY, 0, 0)) return;
+    }
+
     // Relative motion passes through the pointer speed and acceleration the
     // host has configured, exactly as a local mouse would. That is the right
     // default — a game reading raw input bypasses it anyway, and a desktop user
     // expects their own settings — but it does mean two hosts with different
-    // pointer settings feel different for the same client movement.
+    // pointer settings feel different for the same client movement. Our
+    // mouse's reports go through the same settings.
     INPUT input = {};
     input.type = INPUT_MOUSE;
     input.mi.dx = deltaX;
@@ -1321,6 +1401,14 @@ void Win32Input::injectMousePosition(const InputEvent& event)
         const int64_t width = m_DisplayRect.width();
         if (RecentreDetector::isReentryJump(verdict.deltaX, verdict.deltaY, width)) return;
         if (verdict.deltaX == 0 && verdict.deltaY == 0) return;
+        // Nothing is placed any more: the buttons may go through our mouse.
+        m_Relative = true;
+        if (m_Mouse) {
+            std::lock_guard<std::mutex> lock(m_HeldMutex);
+            if (sendThroughMouseLocked(static_cast<int>(verdict.deltaX),
+                                       static_cast<int>(verdict.deltaY), 0, 0))
+                return;
+        }
         INPUT input = {};
         input.type = INPUT_MOUSE;
         input.mi.dx = static_cast<LONG>(verdict.deltaX);
@@ -1334,6 +1422,12 @@ void Win32Input::injectMousePosition(const InputEvent& event)
     LONG absY = 0;
     if (!desktopToAbsolute(x, y, absX, absY)) return;
 
+    // A placement: the clicks that follow go through SendInput behind it.
+    if (m_Relative) {
+        m_Relative = false;
+        m_WheelNotches.reset();
+        m_PanNotches.reset();
+    }
     INPUT input = {};
     input.type = INPUT_MOUSE;
     input.mi.dx = absX;
@@ -1365,14 +1459,26 @@ void Win32Input::injectMouseButton(int button, bool down)
     else
         m_HeldButtons.erase(button);
 
-    if (!m_ClickTrace || !down) {
+    // Through our mouse while the viewer moves relatively; released the way it
+    // was pressed, whatever the viewer does in between.
+    const uint8_t bit = systemmouse::buttonBit(button);
+    const bool throughMouse = m_Mouse && (down ? m_Relative : (m_MouseButtons & bit) != 0);
+    const int64_t startUs = m_ClickTrace && down ? steadyNowUs() : 0;
+    if (throughMouse) {
+        m_MouseButtons = static_cast<uint8_t>(down ? m_MouseButtons | bit : m_MouseButtons & ~bit);
+        // Refused: the mouse is let go of with what it held, and a press goes
+        // the old way. A release has nothing left to do — Windows let go of
+        // the device's buttons with it.
+        if (!sendThroughMouseLocked(0, 0, 0, 0) && down) {
+            m_HeldButtons.insert(button);
+            sendMouseButton(button, true);
+        }
+    } else {
         sendMouseButton(button, down);
-        return;
     }
-    const int64_t startUs = steadyNowUs();
-    sendMouseButton(button, down);
-    m_ClickTrace->press(m_Follow ? m_PressQueuedUs.load(std::memory_order_relaxed) : 0, startUs,
-                        steadyNowUs());
+    if (startUs)
+        m_ClickTrace->press(m_Follow ? m_PressQueuedUs.load(std::memory_order_relaxed) : 0, startUs,
+                            steadyNowUs());
 }
 
 void Win32Input::sendMouseButton(int button, bool down)
@@ -1401,6 +1507,17 @@ void Win32Input::sendMouseButton(int button, bool down)
 void Win32Input::injectScroll(int amount, bool horizontal)
 {
     if (amount == 0) return;
+
+    // Through our mouse while the viewer moves relatively, in whole notches:
+    // a report carries no less.
+    if (m_Mouse && m_Relative) {
+        const int notches = (horizontal ? m_PanNotches : m_WheelNotches).take(amount);
+        if (notches == 0) return;
+        std::lock_guard<std::mutex> lock(m_HeldMutex);
+        if (sendThroughMouseLocked(0, 0, horizontal ? 0 : notches, horizontal ? notches : 0))
+            return;
+        amount = notches * systemmouse::kNotch;
+    }
 
     // Already in 120-unit notches: the relay quantizes high-resolution wheel
     // deltas upstream, for every transport, so re-scaling here would apply the
@@ -1437,6 +1554,87 @@ void Win32Input::syncLockKeys(const InputEvent& event)
         INPUT tap[2] = {down, up};
         sendBatch(tap, 2);
     }
+}
+
+void Win32Input::startVirtualMouse()
+{
+    if (m_MouseMode == 0) return;
+    if (m_MouseMode < 0 && listMice().physical > 0) return; // the host has one of its own
+
+    auto device = makeVirtualHid(false);
+    // No name: DirectInput's OEMName (VhidDevice.cpp) is for game controllers.
+    VirtualHidIdentity identity;
+    identity.descriptor = systemmouse::descriptor();
+    std::string why;
+    if (!device || !device->create(identity, why)) {
+        log::info("[native] input: no mouse of our own (" + why +
+                  ": a driver older than 0.1.2.0, none, or a worker that is not elevated) — "
+                  "SendInput as before, and Mouse Keys show the pointer");
+        return;
+    }
+    m_Mouse = std::move(device);
+    m_MouseMadeUs = steadyNowUs();
+    m_MouseLookedUs = 0;
+    m_MouseListed = false;
+    m_MouseUnlistedSaid = false;
+    log::info(std::string("[native] input: ") +
+              (m_MouseMode > 0 ? "a mouse of our own made beside the host's (vmouse=1)"
+                               : "no pointing device on this host — a mouse of our own made") +
+              ": Windows shows the pointer, games read a device; absolute positions stay "
+              "SendInput");
+}
+
+bool Win32Input::sendThroughMouseLocked(int dx, int dy, int notches, int panNotches)
+{
+    if (!m_Mouse) return false;
+    for (const systemmouse::Report& report :
+         systemmouse::reports(m_MouseButtons, dx, dy, notches, panNotches)) {
+        if (!m_Mouse->input(report.data(), report.size())) {
+            dropVirtualMouseLocked();
+            return false;
+        }
+    }
+    return true;
+}
+
+void Win32Input::dropVirtualMouseLocked()
+{
+    log::warning("[native] input: our mouse refused a report (error " +
+                 std::to_string(::GetLastError()) + ") — let go of, SendInput from here on");
+    // Windows releases a device's buttons when the device goes.
+    for (int button = 1; button <= 5; ++button)
+        if (m_MouseButtons & systemmouse::buttonBit(button)) m_HeldButtons.erase(button);
+    m_MouseButtons = 0;
+    m_Mouse.reset();
+}
+
+/// Whether our mouse is what shows the pointer: made, and listed by Windows —
+/// or made a moment ago, the time Windows takes to list a device, so the
+/// stream's first second does not turn Mouse Keys on for nothing. Listed
+/// means any mouse made through VHF, another stream's as well: either shows
+/// the pointer. Looked at four times a second at most.
+bool Win32Input::showsPointer()
+{
+    if (!m_Mouse) return false;
+    constexpr int64_t kLookEveryUs = 250 * 1000;
+    constexpr int64_t kGraceUs = 3 * 1000 * 1000;
+    const int64_t nowUs = steadyNowUs();
+    if (m_MouseLookedUs == 0 || nowUs - m_MouseLookedUs >= kLookEveryUs) {
+        m_MouseLookedUs = nowUs;
+        const bool listed = listMice().virtualHid > 0;
+        if (listed && !m_MouseListed && !m_MouseUnlistedSaid)
+            log::info("[native] input: Windows lists our mouse, " +
+                      std::to_string((nowUs - m_MouseMadeUs) / 1000) + " ms after it was made");
+        m_MouseListed = listed;
+    }
+    if (m_MouseListed) return true;
+    if (nowUs - m_MouseMadeUs < kGraceUs) return true;
+    if (!m_MouseUnlistedSaid) {
+        m_MouseUnlistedSaid = true;
+        log::warning("[native] input: Windows does not list our mouse 3 s after it was made — "
+                     "Mouse Keys show the pointer");
+    }
+    return false;
 }
 
 } // namespace mw::native::input

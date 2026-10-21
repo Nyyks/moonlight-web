@@ -448,6 +448,12 @@ struct EncoderTuning
     /// « attente », A0; see src/core/ClickTrace.h). false, the product:
     /// nothing kept.
     bool clickTrace = false;
+    /// The host's own mouse (Windows host, plan « souris HID virtuelle »;
+    /// src/input/SystemMouse.h). -1, the product: made when the host has no
+    /// pointing device of its own; 0: never, Mouse Keys alone show the
+    /// pointer; 1: always, beside a real mouse too (the bench's: Raw Input and
+    /// latency measured either way on one host).
+    int virtualMouse = -1;
     /// The admission window after a press (plan « inputadmit », 13/10/2026;
     /// src/core/InputAdmit.h): for a moment after each press, every present
     /// the cadence gate skips goes out all the same, the gate's grid
@@ -616,9 +622,10 @@ struct EncoderTuning
                paceMultiple == 0 && paceBurstKb == 0 && retransCutPermille < 0 &&
                sctpBufferKb == 0 && linkHoldMs == 0 && sctpMaxBurst < 0 && sctpScheduler < 0 &&
                sctpMtu == 0 && !audioLog && audioFrameMs == 0 && audioGraceUs < 0 && !clickTrace &&
-               inputAdmit < 0 && inputAdmitMs == 0 && inputAdmitBurst == 0 && inputAdmitRate == 0 &&
-               inputAdmitMax == 0 && inputAdmitGapUs < 0 && cadenceLock < 0 && vddMatch < 0 &&
-               vddMatchMaxHz == 0 && sckQueueDepth == 0 && sckMinIntervalUs < 0;
+               virtualMouse < 0 && inputAdmit < 0 && inputAdmitMs == 0 && inputAdmitBurst == 0 &&
+               inputAdmitRate == 0 && inputAdmitMax == 0 && inputAdmitGapUs < 0 &&
+               cadenceLock < 0 && vddMatch < 0 && vddMatchMaxHz == 0 && sckQueueDepth == 0 &&
+               sckMinIntervalUs < 0;
     }
 
     /// One line naming every field that is NOT at its default, for the log and
@@ -744,6 +751,7 @@ struct EncoderTuning
         if (audioFrameMs > 0) add("audioframe=" + std::to_string(audioFrameMs));
         if (audioGraceUs >= 0) add("audiograce=" + std::to_string(audioGraceUs) + "us");
         if (clickTrace) add("clicktrace=1");
+        if (virtualMouse >= 0) add("vmouse=" + std::to_string(virtualMouse));
         if (inputAdmit >= 0) add("inputadmit=" + std::to_string(inputAdmit));
         if (inputAdmitMs > 0) add("inputadmitms=" + std::to_string(inputAdmitMs));
         if (inputAdmitBurst > 0) add("inputadmitburst=" + std::to_string(inputAdmitBurst));

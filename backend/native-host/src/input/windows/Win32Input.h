@@ -20,6 +20,8 @@
 #include "../../capture/windows/IWindowsCapture.h"
 #include "../IInputSink.h"
 #include "../RecentreDetector.h"
+#include "../SystemMouse.h"
+#include "../VirtualHid.h"
 #include "../../core/ClickTrace.h"
 #include "VigemGamepad.h"
 
@@ -83,6 +85,14 @@ public:
     /// start(), or not at all.
     void setClickTrace(ClickTrace* trace) { m_ClickTrace = trace; }
 
+    /// The host's own mouse (input/SystemMouse.h), made by start() through the
+    /// "MoonlightWeb Virtual HID" driver: -1 (the product) when the host has
+    /// no pointing device of its own, 0 never, 1 always — beside a real mouse
+    /// too, for the bench (EncoderTuning::virtualMouse). Before start().
+    void setVirtualMouse(int mode) { m_MouseMode = mode; }
+
+    bool showsPointer() override;
+
 private:
     /// The body of releaseBlock, on its own thread — see the .cpp.
     void runRelease(void* blockerWindow);
@@ -120,6 +130,48 @@ private:
     void sendMouseButton(int button, bool down);
     void injectScroll(int amount, bool horizontal);
     void syncLockKeys(const InputEvent& event);
+
+    // ── The host's own mouse ────────────────────────────────────────────────
+    //
+    // On a host with no pointing device, a mouse of our own, made through the
+    // driver (porte S1: one fixed descriptor, input/SystemMouse.h). Windows
+    // then shows its pointer, and games that read Raw Input by device get one.
+    //
+    // What goes through it: relative moves, and — while the viewer moves the
+    // pointer relatively (gaming mode, a game that re-centres) — the buttons
+    // and the wheels. An absolute position stays SendInput, which has no
+    // device to say it: a report travels the HID stack and lands after a
+    // SendInput sent at the same moment, so a click right after a placement
+    // goes the same way as the placement, or it would land before it. A
+    // button is released the way it was pressed.
+    //
+    // Made in start() when it can be (a worker elevated or SYSTEM, the driver
+    // 0.1.2.0 or later); when it cannot, everything is SendInput as before
+    // and Mouse Keys show the pointer (PointerPresence).
+
+    /// Makes it, per m_MouseMode. Said in the log either way.
+    void startVirtualMouse();
+    /// One movement through it, with the buttons it holds. Under m_HeldMutex.
+    /// False when the device refused it — then it is let go of, and the
+    /// caller does it through SendInput instead.
+    bool sendThroughMouseLocked(int dx, int dy, int notches, int panNotches);
+    /// The device let go of, after a refusal: what it held is released with it.
+    void dropVirtualMouseLocked();
+
+    int m_MouseMode = -1;
+    std::unique_ptr<IVirtualHid> m_Mouse;
+    /// Its buttons down (systemmouse::buttonBit). Under m_HeldMutex.
+    uint8_t m_MouseButtons = 0;
+    /// Whether the viewer's last motion was relative: buttons and wheels go
+    /// through the device then. Input-thread only.
+    bool m_Relative = false;
+    systemmouse::Notches m_WheelNotches;
+    systemmouse::Notches m_PanNotches;
+    /// When it was made, and whether Windows lists it yet — see showsPointer().
+    int64_t m_MouseMadeUs = 0;
+    int64_t m_MouseLookedUs = 0;
+    bool m_MouseListed = false;
+    bool m_MouseUnlistedSaid = false;
 
     /// Release everything still recorded as held. Called by stop().
     void releaseAll();

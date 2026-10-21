@@ -269,6 +269,9 @@ const char* const kUsage =
     "                    each wake-up of the capture with the OS's and the compositor's\n"
     "                    stamps, a CSV next to the log when the session ends (Windows\n"
     "                    and macOS hosts; plan attente, A0 and AM0)\n"
+    "  vmouse=0|1        the host's own mouse (Windows host): 1 made beside a real one too,\n"
+    "                    0 never, Mouse Keys alone; the product: made when the host has\n"
+    "                    no pointing device (plan souris HID virtuelle)\n"
     "  inputadmit=0|1    for a moment after each press, every present the cadence gate\n"
     "                    skips goes out all the same, its grid untouched; 1 for every\n"
     "                    client, 0 for none; the product: a client whose tearing is\n"
@@ -628,6 +631,10 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
         tuning.clickTrace = v == 1;
+    } else if (key == "vmouse") {
+        const int v = value.toInt(&ok);
+        ok = ok && (v == 0 || v == 1);
+        tuning.virtualMouse = v;
     } else if (key == "inputadmit") {
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
