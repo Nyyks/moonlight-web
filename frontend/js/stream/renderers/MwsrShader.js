@@ -42,9 +42,18 @@
  *   luma is seen and sharpened too.
  *
  * `down` — the surface filter: a k×k grid of bilinear samples spread over the
- *   output pixel's footprint in the input (k = 2, 3 or 4 by the scale, the
- *   grid's span R_DOWN with it), averaged in linear light (LINEAR_LIGHT: the
- *   decisive term, +2.5 to +12 dB against the host's Lanczos in the lab, P3).
+ *   output pixel's footprint in the input (k by the scale, the grid's span
+ *   R_DOWN with it), averaged in linear light: the decisive term, +2.5 to
+ *   +12 dB against the host's Lanczos in the lab (P3). The light is best made
+ *   by the hardware: read through an `-srgb` view and drawn into one, the
+ *   sampler decodes before it filters and the target encodes on write
+ *   (LINEAR_LIGHT 0: free, exact). Then one bilinear sample is the whole
+ *   filter between ×0.5 and 1:1 (k = 1: the exact box at ×0.5; at ×0.75, +4 dB
+ *   and half the FLIP of the gamma-space bilinear, at its cost, J15), and the
+ *   3×3 and 4×4 grids serve below ×0.5 with five times less aliasing energy
+ *   than in software light (J15). Without the views (an rgba16float feed)
+ *   LINEAR_LIGHT 1 decodes each sample by a square (2: exact sRGB, three times
+ *   the cost on the 780M) and the 2×2 grid serves between ×0.5 and 1:1 (J12).
  *   No vote, no sharpening: a reduction sharpens by itself.
  *
  * HDR (plan §4.1): the renderer's `linear` feed is sRGB-encoded past 1.0
@@ -114,12 +123,13 @@ export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.0 });
 export const MWSR_UNIFORM_FLOATS = 8;
 
 /**
- * The reduction's tap grids, by the smallest scale (output / input) they
- * serve: [minimum scale, taps, R_DOWN]. A 2×2 grid of bilinear samples spread
- * over the footprint is the exact box average at ×0.5 (plan §4.3); below ×0.5
- * the 3×3 grid, spread a quarter wider than the footprint, took +2.7 dB on
- * text and 40 % off the moiré of the zone plate in the lab (P3, journal J12);
- * the 4×4 grid below ×0.25 is the plan's, unmeasured.
+ * The reduction's tap grids when the light is software's (LINEAR_LIGHT 1 or
+ * 2), by the smallest scale (output / input) they serve: [minimum scale, taps,
+ * R_DOWN]. A 2×2 grid of bilinear samples spread over the footprint is the
+ * exact box average at ×0.5 (plan §4.3); below ×0.5 the 3×3 grid, spread a
+ * quarter wider than the footprint, took +2.7 dB on text and 40 % off the
+ * moiré of the zone plate in the lab (P3, journal J12); the 4×4 grid below
+ * ×0.25 is the plan's, unmeasured.
  */
 export const MWSR_DOWN_TAPS = Object.freeze([
     [0.5, 4, 1.0],
@@ -128,23 +138,45 @@ export const MWSR_DOWN_TAPS = Object.freeze([
 ]);
 
 /**
+ * The grids through sRGB views (the sampler decodes, the target encodes,
+ * LINEAR_LIGHT 0): one bilinear sample is the filter down to ×0.5, where it is
+ * the exact box average, at the cost of the renderer's plain copy (J15: at
+ * ×0.75, 30.2 dB against the host's Lanczos-2 on text and half the FLIP of
+ * the gamma-space bilinear, where the 2×2 grids reach 27 to 29 dB); below
+ * ×0.5 the same 3×3 and 4×4 grids as above.
+ */
+export const MWSR_DOWN_TAPS_SRGB = Object.freeze([
+    [0.5, 1, 1.0],
+    [0.25, 9, 1.25],
+    [0, 16, 1.25],
+]);
+
+/**
  * Which text a frame of inW×inH drawn at outW×outH takes: 'copy' at exactly
- * 1:1 (the renderer copies, plan §5), 'down' with its grid and span below 1 on
- * either axis, 'up' otherwise.
+ * 1:1 (the renderer copies, plan §5), 'down' with its grid, its span and its
+ * light below 1 on either axis, 'up' otherwise. `srgb`: the renderer reads the
+ * input through an `-srgb` view and draws into one (SDR: `viewFormats` on the
+ * pass-0 texture and on the canvas), so the hardware makes the linear light
+ * (linearLight 0, the LINEAR_LIGHT override) and one sample is the filter
+ * down to ×0.5; otherwise the light is software's (linearLight 1) and the 2×2
+ * grid serves there.
  * @param {number} inW
  * @param {number} inH
  * @param {number} outW
  * @param {number} outH
- * @returns {{mode: 'copy'|'up'|'down', taps: number, rDown: number}}
+ * @param {{srgb?: boolean}} [opts]
+ * @returns {{mode: 'copy'|'up'|'down', taps: number, rDown: number, linearLight: number}}
  */
-export function mwsrRegime(inW, inH, outW, outH) {
-    if (inW === outW && inH === outH) return { mode: 'copy', taps: 0, rDown: 0 };
+export function mwsrRegime(inW, inH, outW, outH, { srgb = false } = {}) {
+    if (inW === outW && inH === outH) return { mode: 'copy', taps: 0, rDown: 0, linearLight: 0 };
     const s = Math.min(outW / inW, outH / inH);
-    if (s >= 1) return { mode: 'up', taps: 5, rDown: 0 };
-    for (const [min, taps, rDown] of MWSR_DOWN_TAPS)
-        if (s >= min) return { mode: 'down', taps, rDown };
-    const [, taps, rDown] = MWSR_DOWN_TAPS[MWSR_DOWN_TAPS.length - 1];
-    return { mode: 'down', taps, rDown };
+    if (s >= 1) return { mode: 'up', taps: 5, rDown: 0, linearLight: 0 };
+    const table = srgb ? MWSR_DOWN_TAPS_SRGB : MWSR_DOWN_TAPS;
+    const linearLight = srgb ? 0 : 1;
+    for (const [min, taps, rDown] of table)
+        if (s >= min) return { mode: 'down', taps, rDown, linearLight };
+    const [, taps, rDown] = table[table.length - 1];
+    return { mode: 'down', taps, rDown, linearLight };
 }
 
 /**
@@ -343,7 +375,8 @@ fn fs(in : VSOut) -> @location(0) vec4f {
 // footprint, averaged (plan §4.3), unrolled here so that the text holds no loop.
 function downFs(taps) {
     const k = Math.round(Math.sqrt(taps));
-    if (![2, 3, 4].includes(k) || k * k !== taps) throw new Error('mwsr: down taps ' + taps + '?');
+    if (![1, 2, 3, 4].includes(k) || k * k !== taps)
+        throw new Error('mwsr: down taps ' + taps + '?');
     const offs = [];
     for (let i = 0; i < k; i++) offs.push((i + 0.5) / k - 0.5);
     const lines = [];
@@ -413,7 +446,7 @@ ${lines.join('\n')}
  *   lab). `half` runs the up mode's edge path in f16 (`enable f16`: the device
  *   must have 'shader-f16'; worth 9-10 % on the 780M, nothing on NVIDIA); the
  *   vote, the frame, the bound and the down mode stay in f32. `mode` 'down'
- *   is the reduction with `taps` samples (4, 9 or 16; see mwsrRegime()).
+ *   is the reduction with `taps` samples (1, 4, 9 or 16; see mwsrRegime()).
  * @returns {string}
  */
 export function mwsrWgsl({ feed = 'tex', half = false, mode = 'up', taps = 4 } = {}) {

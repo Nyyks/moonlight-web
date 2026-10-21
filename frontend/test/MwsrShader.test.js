@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     MWSR_CONSTANTS,
     MWSR_DOWN_TAPS,
+    MWSR_DOWN_TAPS_SRGB,
     MWSR_OVERRIDES,
     MWSR_OVERRIDE_SPEC,
     MWSR_UNIFORM_FLOATS,
@@ -76,7 +77,7 @@ describe('the mwsr shader text', () => {
         expect(mwsrWgsl({ mode: 'down', half: true })).toBe(down);
     });
 
-    it('reduces with an unrolled grid of 4, 9 or 16 samples over the footprint', () => {
+    it('reduces with an unrolled grid of 4, 9 or 16 samples over the footprint, or one sample', () => {
         for (const taps of [4, 9, 16]) {
             const text = mwsrWgsl({ mode: 'down', taps });
             expect(text.match(/acc \+= dec\(S\(uv \+ vec2f\(/g)).toHaveLength(taps);
@@ -89,21 +90,37 @@ describe('the mwsr shader text', () => {
         expect(down).toBe(mwsrWgsl({ mode: 'down', taps: 4 }));
         expect(down).toContain('acc += dec(S(uv + vec2f(-0.25, -0.25) * span));');
         expect(down).toContain('acc += dec(S(uv + vec2f(0.25, 0.25) * span));');
-        for (const taps of [1, 5, 8, 25]) expect(() => mwsrWgsl({ mode: 'down', taps })).toThrow(/taps/);
+        for (const taps of [0, 2, 5, 8, 25]) expect(() => mwsrWgsl({ mode: 'down', taps })).toThrow(/taps/);
+        // one sample through sRGB views: the hardware's bilinear in linear light
+        const one = mwsrWgsl({ mode: 'down', taps: 1 });
+        expect(one.match(/acc \+= dec\(S\(uv \+ vec2f\(/g)).toHaveLength(1);
+        expect(one).toContain('acc += dec(S(uv + vec2f(0.0, 0.0) * span));');
+        expect(one).toContain('enc(acc * 1.0)');
     });
 
-    it('picks the mode, the grid and its span by the scale', () => {
-        expect(mwsrRegime(1920, 1080, 1920, 1080)).toEqual({ mode: 'copy', taps: 0, rDown: 0 });
+    it('picks the mode, the grid, its span and its light by the scale and the views', () => {
+        const soft = { linearLight: 1 };
+        expect(mwsrRegime(1920, 1080, 1920, 1080)).toEqual({ mode: 'copy', taps: 0, rDown: 0, linearLight: 0 });
         expect(mwsrRegime(1280, 720, 2560, 1440).mode).toBe('up');
         expect(mwsrRegime(1920, 1080, 2560, 1440).mode).toBe('up');
-        expect(mwsrRegime(2560, 1440, 1920, 1080)).toEqual({ mode: 'down', taps: 4, rDown: 1 });
-        expect(mwsrRegime(2560, 1440, 1280, 720)).toEqual({ mode: 'down', taps: 4, rDown: 1 });
-        expect(mwsrRegime(3840, 2160, 1280, 720)).toEqual({ mode: 'down', taps: 9, rDown: 1.25 });
-        expect(mwsrRegime(3840, 2160, 640, 360)).toEqual({ mode: 'down', taps: 16, rDown: 1.25 });
+        expect(mwsrRegime(2560, 1440, 1920, 1080)).toEqual({ mode: 'down', taps: 4, rDown: 1, ...soft });
+        expect(mwsrRegime(2560, 1440, 1280, 720)).toEqual({ mode: 'down', taps: 4, rDown: 1, ...soft });
+        expect(mwsrRegime(3840, 2160, 1280, 720)).toEqual({ mode: 'down', taps: 9, rDown: 1.25, ...soft });
+        expect(mwsrRegime(3840, 2160, 640, 360)).toEqual({ mode: 'down', taps: 16, rDown: 1.25, ...soft });
+        // through sRGB views the hardware makes the light: one sample down to ×0.5
+        const srgb = { srgb: true };
+        const hw = { linearLight: 0 };
+        expect(mwsrRegime(1920, 1080, 1920, 1080, srgb).mode).toBe('copy');
+        expect(mwsrRegime(1280, 720, 2560, 1440, srgb).mode).toBe('up');
+        expect(mwsrRegime(2560, 1440, 1920, 1080, srgb)).toEqual({ mode: 'down', taps: 1, rDown: 1, ...hw });
+        expect(mwsrRegime(2560, 1440, 1280, 720, srgb)).toEqual({ mode: 'down', taps: 1, rDown: 1, ...hw });
+        expect(mwsrRegime(3840, 2160, 1280, 720, srgb)).toEqual({ mode: 'down', taps: 9, rDown: 1.25, ...hw });
+        expect(mwsrRegime(3840, 2160, 640, 360, srgb)).toEqual({ mode: 'down', taps: 16, rDown: 1.25, ...hw });
         // the smaller axis decides, and a 1.001 × 0.999 box is a reduction
         expect(mwsrRegime(1000, 1000, 1001, 999).mode).toBe('down');
         expect(mwsrRegime(1000, 1000, 1001, 1000).mode).toBe('up');
-        for (const [, taps] of MWSR_DOWN_TAPS) expect(() => mwsrWgsl({ mode: 'down', taps })).not.toThrow();
+        for (const table of [MWSR_DOWN_TAPS, MWSR_DOWN_TAPS_SRGB])
+            for (const [, taps] of table) expect(() => mwsrWgsl({ mode: 'down', taps })).not.toThrow();
         expect(MWSR_OVERRIDES.LINEAR_LIGHT).toBe(1);
     });
 
