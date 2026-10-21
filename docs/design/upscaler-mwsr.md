@@ -715,7 +715,9 @@ séparable (deux écritures plein écran coûtent plus que quatre taps de plus s
 
 - **Temporel** (SGSR2, FSR2, ASR) : il faut profondeur, vecteurs de mouvement et jitter de
   caméra ; un client qui ne possède que des images décodées, déjà tone-mappées, anti-aliasées et
-  compressées ne peut que les falsifier (fantômes à chaque mouvement). Écarté.
+  compressées ne peut que les falsifier (fantômes à chaque mouvement). Écarté pour la résolution ;
+  une mémoire de *stabilisation* sans vecteurs (question de Bruno du 21/10) est traitée au §14 :
+  étude courte, hors v0.4.1, derrière une porte chiffrée.
 - **Neuronal** (FSRCNN, ESPCN, Anime4K « upscale ») : plusieurs passes et des milliers
   d'opérations par pixel ; aucune donnée publique ne les place sous la milliseconde sur un iGPU à
   1440p. Écarté pour la v0.4.1, noté au §12 comme piste de labo si le harnais existe.
@@ -1340,6 +1342,10 @@ upscalers spatiaux.
 **P6 — Défauts, documentation, release**
 - [ ] Bascule de `auto` par classe d'appareil (ou non) ; `README.next.md` ; wiki ; notes de release ; mémoires [`medium`]
 
+**Hors v0.4.1 — étude optionnelle (§14, proposée le 21/10/2026, à la décision de Bruno)**
+- [ ] P7.0 Mode séquence du labo et expérience décisive de la mémoire temporelle : panoramique sous-pixel des images de référence, arrêt, coupure, passés par la boucle WebCodecs à deux débits ; FLIP et PSNR par image, scintillement, traînée, avec et sans histoire ; porte go/no-go du §14.3 [`high`]
+- [ ] P7.1 (si go) noyau `mwsr` avec histoire adaptative au mouvement, cran `mwsr-t` des deux renderers, campagne allégée, A/B de Bruno à faible débit [`xhigh`]
+
 **Dépendances à demander tôt** : un téléphone Android de prêt (Snapdragon 8 Gen 1 ou plus, et
 un Mali si possible) ; les créneaux Mac et iPhone pour P0 et P5 ; `malioc` installé sur DualRTX.
 
@@ -1423,3 +1429,99 @@ depuis le serveur du labo sur le LAN.
 **Départ.** P0 a commencé la nuit du 19 au 20/10/2026 : ce plan copié dans `docs/design/`, la page de
 laboratoire `scripts/bench/scaler-lab/`, les lignes de base sur DualRTX (SwiftShader d'abord, puis le
 780M et le RTX), le rapport P0 dans `docs/design/upscaler-mwsr-p0.md`.
+
+---
+
+## 14. Question du 21/10/2026 : une mémoire des images précédentes ?
+
+Question de Bruno, posée à la fin de P2.3 : « est-ce possible de fonctionner avec une empreinte
+mémoire des anciennes images tant que c'est dans la continuité de la même scène ? Ça pourrait gagner
+en netteté ? À ne pas faire tout de suite, mais à prévoir comme plan si c'est réaliste. »
+
+**Réponse courte.** Possible, sans image de retard, pour une texture de plus et un coût de l'ordre
+d'une passe 0 ; mais ce qu'une telle mémoire peut rendre dans notre situation est de la **stabilité**
+(moins de fourmillement des contours en mouvement lent, moins de respiration de la compression), pas
+de la **résolution**. La netteté par accumulation demande des échantillons décalés au sous-pixel et
+recalés exactement, ce que le flux ne porte pas. Réaliste comme **étude courte, hors v0.4.1**, avec
+une porte chiffrée avant toute ligne dans le renderer (§14.3).
+
+### 14.1 D'où viendrait la netteté, et pourquoi elle n'y est presque pas
+
+Trois régimes :
+
+- **Contenu fixe** (menus, texte, cartes, HUD) : l'encodeur l'envoie en blocs « skip », les images
+  décodées sont identiques au pixel près : il n'y a rien à accumuler. Après une coupure, le contrôle
+  de débit raffine les blocs fixes pendant quelques images : l'image courante y est meilleure que
+  l'histoire, qui devient un passif.
+- **Mouvement lent** (panoramique, défilement) : le seul régime où des phases sous-pixel différentes
+  de la même scène existent dans des images successives — pour les contours que le rastériseur a
+  échantillonnés autrement (arêtes, traits fins), pas pour les textures mipmappées, déjà limitées à
+  la fréquence du rendu, ni au-delà de ce que l'hôte a rendu : le flux est rendu à sa résolution, le
+  détail au-dessus de sa Nyquist n'existe nulle part. Les récolter demande de recaler l'histoire au
+  dixième de pixel. DLSS, FSR2 et SGSR2 le font avec les vecteurs exacts du moteur et une gigue
+  délibérée qui couvre toutes les phases ; nous n'avons ni l'un ni l'autre : WebCodecs n'expose pas
+  les vecteurs du codec, et l'hôte capture un bureau, il n'en a pas davantage. Un flot estimé côté
+  client (recherche de blocs par tuile, raffinement sous-pixel) recale un panoramique, pas les objets,
+  le HUD, les particules ni les transparences : là, le rejet de l'histoire ramène à l'image seule. Et
+  le recalage approché, plus le rééchantillonnage bilinéaire de l'histoire à chaque image, adoucit au
+  lieu d'affûter — c'est pourquoi tout TAA finit par une passe de netteté.
+- **Mouvement rapide, coupures, effets** : l'histoire est rejetée ; aucun gain, et le fantôme si on se
+  trompe.
+
+Ce qui existe sans vecteurs est un réseau de neurones sur tensor cores (RTX Video Super Resolution :
+plusieurs millisecondes sur une RTX de bureau), hors de portée d'un shader d'une milliseconde sur un
+iGPU, et hors du chemin WebCodecs → canvas du client. Les deux voies vers une vraie super-résolution
+temporelle passeraient par l'hôte — exporter les vecteurs de l'encodeur matériel (NVENC le permet en
+mode estimation seule ; des vecteurs par bloc, choisis pour le débit, pas pour la vérité), ou gigoter
+la réduction côté hôte (incompatible avec la compression : le contenu fixe cesse d'être « skip ») —
+et ne relèvent pas de ce plan.
+
+### 14.2 Ce qu'une mémoire donnerait vraiment
+
+Un filtre récursif adaptatif au mouvement, **avant** l'agrandissement : `H' = mix(C, H, α)` là où
+`|C − H|` est sous un seuil et où `H` tient dans la borne 2×2 de l'image courante (celle que
+`DERING 1` calcule déjà), `H' = C` ailleurs ; réinitialisation à la coupure (différence globale).
+Ce qu'on en attend, à mesurer :
+
+- moins de fourmillement et de rampement des contours affûtés par `mwsr` pendant les mouvements lents ;
+- moins de respiration des blocs et de bruit de moustique autour des contours lents, surtout aux
+  faibles débits (Internet, 10-20 Mbit/s) ;
+- par ricochet, une netteté (`sharp`, `W_ACROSS`) qu'on peut monter d'un cran sur une entrée plus
+  propre sans amplifier le bruit.
+
+Ce qu'on n'en attend pas : un gain de PSNR ou de FLIP sur le fixe (la sortie y est l'entrée), un gain
+de résolution en mouvement.
+
+**Coût.** Pas d'image de retard : le filtre est récursif, la sortie de l'image t ne dépend que de t et
+de la mémoire ; la règle « latence d'abord » tient. GPU : une lecture et une écriture de texture à la
+résolution d'entrée, de l'ordre de la passe 0 (+0,13 ms sur le 780M en P2.3), à fusionner avec elle ;
+une estimation de mouvement par tuile ajouterait une petite passe compute. Mémoire : une texture
+RGBA8 à la résolution d'entrée (8 Mo à 1080p, 33 Mo en 4K) ; accumuler à la résolution de sortie,
+seule voie vers un gain de résolution, coûterait 66 Mo en 16F à 4K, hors budget sur téléphone.
+Renderers WebGPU et WebGL2 seulement (une texture persistante) ; Canvas2D exclu ; le contournement
+1:1 reste une copie (le filtre y serait un cran à part, plus un « off »).
+
+**Risques.** Les traînées sur ce qui bouge, le défaut que les joueurs reprochent à tous les
+traitements de téléviseur ; le HUD fixe sur fond mobile et les transparences ; la coupure non
+détectée ; un cran de plus à l'échelle du gouverneur ; le HDR à filtrer en lumière linéaire.
+
+### 14.3 L'étude proposée (P7, hors v0.4.1, après P4)
+
+Porte avant toute ligne dans le renderer : **une session de labo**, SwiftShader puis le RTX.
+
+1. Mode séquence du labo : la page dessine un panoramique sous-pixel de ses images de référence
+   (0,3 à 2 px par image, puis un arrêt, puis une coupure), réduit chaque image à la résolution du
+   flux et passe la séquence par la boucle WebCodecs existante (`makeFrames` : 60 i/s, 20 Mbit/s,
+   `realtime`, encodeur matériel) à deux débits ; la vérité terrain de chaque image est connue.
+2. Mesures par image : FLIP et PSNR contre la référence, `mwsr` seul contre `mwsr` avec histoire (α et
+   seuil balayés) ; scintillement (différence de sortie image à image là où la référence est fixe) ;
+   traînée (erreur sur les cinq images après la coupure et sur le bord d'un objet mobile).
+3. **Go** si l'histoire gagne, sur les séquences lentes, FLIP − 0,005 ou + 0,3 dB *et* divise le
+   scintillement par deux, sans traînée mesurable au-delà de `mwsr` seul sur les rapides (seuils à
+   fixer par Bruno) ; sinon fermé en une session, et le §3.5 reste tel quel.
+
+Si go : P7.1, le noyau avec histoire (table, journal, comme P2.2), puis le cran `mwsr-t` dans les deux
+renderers (comme P4), une campagne allégée (780M, M1, iPhone) et l'A/B de Bruno en Internet à faible
+débit : trois à quatre sessions, effort `xhigh`. Attendu honnête : un gain de stabilité mesurable sur
+les panoramiques lents et les faibles débits, un gain de résolution nul ; si l'étude dit autrement,
+tant mieux, c'est pour cela qu'on mesure.
