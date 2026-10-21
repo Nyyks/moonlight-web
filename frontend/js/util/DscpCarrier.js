@@ -27,9 +27,11 @@
  * - `notrack`: the stream's audio transceiver answers sendrecv, with no track,
  *   and its sender takes `networkPriority: 'high'` (EF). Chrome sets the socket
  *   right away; no RTP leaves;
- * - `track`: the same, plus a track of silence from an AudioContext with no
- *   source (no microphone, no permission, nothing audible), so RTP packets put
- *   the mark back within 20 ms when something else took it off.
+ * - `track`: the same, plus a track of zeros from an AudioContext: a constant
+ *   source at 0 into a stream destination (no microphone, no permission, nothing
+ *   audible), so RTP packets put the mark back within 20 ms when something else
+ *   took it off. The source is needed: a destination with nothing connected
+ *   renders no sample at all, and Chrome then sends no RTP (bench, 21/10).
  *
  * The host must offer the sound sendrecv for either (MW_DSCP_CARRIER=1 on the
  * host, a bench key too); against a sendonly offer the answer stays recvonly and
@@ -127,8 +129,14 @@ export async function armDscpCarrier(pc, mode) {
         if (mode === 'track') {
             const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
             const ctx = new AC();
-            // No source: the destination renders zeros, nothing reaches a speaker.
+            // Zeros into the destination, never into ctx.destination: nothing reaches a speaker.
             const dest = ctx.createMediaStreamDestination();
+            if (typeof ctx.createConstantSource === 'function') {
+                const zero = ctx.createConstantSource();
+                zero.offset.value = 0;
+                zero.connect(dest);
+                zero.start();
+            }
             await t.sender.replaceTrack(dest.stream.getAudioTracks()[0]);
             if (ctx.state !== 'running') await ctx.resume().catch(() => {});
             context = ctx.state;

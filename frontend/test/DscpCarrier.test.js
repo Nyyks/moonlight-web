@@ -126,17 +126,23 @@ describe('armDscpCarrier', () => {
         info.mockRestore();
     });
 
-    it('track: a silent track from an AudioContext with no source', async () => {
+    it('track: a track of zeros, a constant source at 0 feeding the destination only', async () => {
         const info = vi.spyOn(console, 'info').mockImplementation(() => {});
         const track = { kind: 'audio' };
+        const dest = { stream: { getAudioTracks: () => [track] } };
+        const zero = { offset: { value: 1 }, connect: vi.fn(), start: vi.fn() };
         const created = [];
         globalThis.AudioContext = class {
             constructor() {
                 this.state = 'running';
+                this.destination = { speaker: true };
                 created.push(this);
             }
             createMediaStreamDestination() {
-                return { stream: { getAudioTracks: () => [track] } };
+                return dest;
+            }
+            createConstantSource() {
+                return zero;
             }
             close() {
                 return Promise.resolve();
@@ -146,6 +152,11 @@ describe('armDscpCarrier', () => {
         const r = await armDscpCarrier(pcWith([t]), 'track');
         expect(r).toMatchObject({ armed: true, context: 'running' });
         expect(created).toHaveLength(1);
+        // Without a source the destination renders nothing and Chrome sends no RTP (bench, 21/10).
+        expect(zero.offset.value).toBe(0);
+        expect(zero.connect).toHaveBeenCalledTimes(1);
+        expect(zero.connect).toHaveBeenCalledWith(dest);
+        expect(zero.start).toHaveBeenCalled();
         expect(t.sender.replaceTrack).toHaveBeenCalledWith(track);
         expect(t.sender.getParameters().encodings[0].networkPriority).toBe('high');
         delete globalThis.AudioContext;
