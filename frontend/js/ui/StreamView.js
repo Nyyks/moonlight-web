@@ -70,6 +70,7 @@ import {
     IS_TV,
     IS_APPLE,
     IS_GECKO,
+    IS_IOS,
     IS_WEBKIT,
     SUPPORTS_CANVAS_TEARING,
     decoderRidesOutGaps,
@@ -86,6 +87,7 @@ import { RemotePointer } from '../stream/RemotePointer.js';
 import {
     createVideoRenderer,
     geckoPresentsOnPlainWebGl,
+    iosPresentsOnPlainWebGl,
     NO_WEBGPU_ALGOS,
     plainPicture,
     presentsOnVsync,
@@ -878,16 +880,20 @@ export class StreamView {
         }
         this._videoEnhancementAlgo = algo;
         // Firefox: the plain picture on WebGL2, its 2D canvas copies each
-        // frame on the main thread (geckoPresentsOnPlainWebGl).
-        this._plainWebGl = geckoPresentsOnPlainWebGl({
+        // frame on the main thread (geckoPresentsOnPlainWebGl). iOS: the same,
+        // its 2D canvas blurs under the pinch zoom (iosPresentsOnPlainWebGl).
+        const plainChoice = {
             gecko: IS_GECKO,
+            ios: IS_IOS,
             hdr: this._hdrMode !== 'none',
             algo,
             webgpu: this._wantWebGpu,
             sink: this._useVideoSink || this._forceVideoSink,
             forceCanvas2d,
             devCanvas2d,
-        });
+        };
+        this._plainWebGl =
+            geckoPresentsOnPlainWebGl(plainChoice) || iosPresentsOnPlainWebGl(plainChoice);
         // The plain picture on the main-thread canvas path: the one the
         // renderer fallback may move between Canvas2D and WebGL2 when its draw
         // stops fitting a frame (RendererFallback), and the one a previous

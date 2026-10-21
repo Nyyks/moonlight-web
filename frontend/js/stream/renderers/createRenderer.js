@@ -61,6 +61,22 @@ export function geckoPresentsOnPlainWebGl(s) {
 }
 
 /**
+ * iOS and iPadOS present the plain SDR stream on WebGL2 too, for the pinch zoom.
+ *
+ * WebKit shows a 2D canvas at its box's size on the glass whatever its backing
+ * holds: zoomed by the CSS transform, a 1440p frame on a phone was reduced to
+ * the ~1179 px of the box first and that reduction magnified, so text went to
+ * mush at 2× (iPhone, 1440p stream, 20/10/2026) where the enhancer, on WebGL,
+ * stayed sharp. A WebGL canvas is shown from its own backing, and the renderer
+ * grows that backing with the zoom step (StreamView._outputZoomScale).
+ * @param {{ios: boolean, hdr: boolean, algo: string, webgpu: boolean,
+ *          sink: boolean, forceCanvas2d?: boolean, devCanvas2d?: boolean}} s
+ */
+export function iosPresentsOnPlainWebGl(s) {
+    return s.ios === true && plainPicture(s);
+}
+
+/**
  * The plain picture: the one stream that may go on either Canvas2D or WebGL2
  * with nothing to lose (geckoPresentsOnPlainWebGl, RendererFallback). An
  * enhancer already runs on WebGL or WebGPU, HDR has its own routing, and the
@@ -133,8 +149,9 @@ export async function createVideoRenderer(canvas, opts) {
             console.warn('[Renderer] WebGL init failed, falling back to Canvas2D: ' + e.message);
         }
     }
-    // Firefox's plain copy (geckoPresentsOnPlainWebGl): the same WebGL
-    // renderer with no pass, and the same safe fallback.
+    // The plain copy of Firefox and iOS (geckoPresentsOnPlainWebGl,
+    // iosPresentsOnPlainWebGl): the same WebGL renderer with no pass, and the
+    // same safe fallback.
     if (opts.plainWebGl) {
         try {
             return await WebGlRenderer.create(canvas, { ...opts, algo: 'off' });

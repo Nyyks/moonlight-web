@@ -24,6 +24,7 @@ vi.mock('../js/stream/renderers/WebGlRenderer.js', () => ({
 import {
     createVideoRenderer,
     geckoPresentsOnPlainWebGl,
+    iosPresentsOnPlainWebGl,
     plainPicture,
     presentsOnVsync,
 } from '../js/stream/renderers/createRenderer.js';
@@ -126,6 +127,24 @@ describe('geckoPresentsOnPlainWebGl', () => {
 });
 
 /** The picture RendererFallback may move between Canvas2D and WebGL2. */
+describe('iosPresentsOnPlainWebGl', () => {
+    const ios = { ios: true, hdr: false, algo: 'off', webgpu: false, sink: false };
+
+    it('moves the plain SDR picture to WebGL on iOS, where the zoom stays sharp', () => {
+        expect(iosPresentsOnPlainWebGl(ios)).toBe(true);
+    });
+
+    it('leaves every other device, and every other choice, as it was', () => {
+        expect(iosPresentsOnPlainWebGl({ ...ios, ios: false })).toBe(false);
+        expect(iosPresentsOnPlainWebGl({ ...ios, hdr: true })).toBe(false);
+        expect(iosPresentsOnPlainWebGl({ ...ios, algo: 'gl-sgsr' })).toBe(false);
+        expect(iosPresentsOnPlainWebGl({ ...ios, webgpu: true })).toBe(false);
+        expect(iosPresentsOnPlainWebGl({ ...ios, sink: true })).toBe(false);
+        expect(iosPresentsOnPlainWebGl({ ...ios, forceCanvas2d: true })).toBe(false);
+        expect(iosPresentsOnPlainWebGl({ ...ios, devCanvas2d: true })).toBe(false);
+    });
+});
+
 describe('plainPicture', () => {
     const plain = { hdr: false, algo: 'off', webgpu: false, sink: false };
 
