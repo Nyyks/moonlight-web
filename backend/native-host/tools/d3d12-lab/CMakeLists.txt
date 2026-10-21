@@ -24,6 +24,7 @@ add_executable(mw-d3d12-lab
     src/ComputeConvert.cpp
     src/Queues.cpp
     src/Interop.cpp
+    src/Dda11on12.cpp
     src/HevcHeaders.cpp
     src/LabD3d12.cpp
     src/Encode.cpp

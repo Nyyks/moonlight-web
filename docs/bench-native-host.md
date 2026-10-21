@@ -7486,6 +7486,69 @@ l'image coûte 0,2 à 0,4 ms à dessiner en 1080p120, en fenêtre comme en plein
 écran : le rendu par défaut reste le bon. Si une machine le trouve lent, le
 client passe seul en WebGL et s'en souvient.
 
+## 8y. Les lags du N95 sous charge : la duplication attend le planificateur (21/10/2026)
+
+- **Le but** : Bruno voit des lags de plusieurs secondes depuis le N95 (Intel
+  UHD, 4 cœurs, sans HAGS) quand Chrome joue un clip 1080p60 à côté de Steam.
+  Trouver où le temps part dans l'hôte, puis choisir la parade.
+- **Le cadre** : le N95 en hôte (D3D12 VE, HEVC 30 Mbit/s, 60 i/s), clip
+  1080p60 en fenêtre à gauche, Steam à droite, le pointeur en aller-retour
+  entre les deux ; client headless de DualRTX sur l'AMD (jamais sur le GPU
+  qui encode), 60 s par passe. Build `7c71a814` : la trace du clic prend une
+  ligne par image (`clicktrace=1`, étapes `signal`, `list`, `record`,
+  `execute`, `hold`, `release`, `encode`, plus `gputiming=1`), et le banc écrit
+  `<csv>.click-trace.csv`. Dépouillement `lags_trace.py --worst`.
+- **Ce que la trace dit** (passe chargée, p99 / max en ms) : attente d'une
+  conversion sautée 0,2 / 0,6 ; attente de la file GPU ≤ 2,6 ; conversion sur
+  le GPU 1,8 en moyenne ; encodage 6 / 13. Et : `signal` (Signal de la fence A
+  + Flush du contexte D3D11 de la capture) **20 / 95** ; `hold` (le Wait de la
+  fence B) **13 / 49** ; `release` (ReleaseFrame) **10 / 44** ; acquisition
+  **13 / 91**. Sans les fences (`ddasync=none`), `hold` tombe à 0 mais le Flush
+  reste à 18 / 66 et `release` monte à 17 / 82.
+- **Le diagnostic** : le temps part dans les appels synchrones du runtime
+  D3D11/DXGI sur le fil de capture, ceux qui soumettent les paquets de la
+  duplication (keyed mutex pris et rendu, Flush) au planificateur WDDM,
+  plusieurs fois par image ; derrière Chrome, Steam et DWM sur le nœud 3D,
+  chaque soumission peut bloquer de 10 à 90 ms. La file GLOBAL_REALTIME de la
+  conversion, elle, n'attend pas. L'hypothèse d'une attente CPU de conversion
+  sautée est réfutée (0,2 ms). `pregate=1` (la porte de cadence avant la
+  conversion, −7 % de conversions) est non concluante : mieux sur une paire,
+  pire sur l'autre ; clé laissée éteinte. `pipelined=1` et `ddasync=none` ne
+  changent rien.
+- **Essai A, réfuté** : la duplication sur un device `D3D11On12CreateDevice`
+  porté par la file DIRECT de la chaîne, sa surface sortie par
+  `UnwrapUnderlyingResource` (sonde `mw-d3d12-lab dda11on12`, bras témoin =
+  la duplication du produit avec ses fences, dans le même processus).
+  `DuplicateOutput1` accepte, puis **chaque `AcquireNextFrame` répond
+  `DXGI_ERROR_ACCESS_LOST` d'emblée**, sur la RTX 5060 Ti comme sur l'UHD du
+  N95, que le device porte notre file ou une file à lui : la surface partagée
+  du compositeur n'est pas accessible à un device 11on12.
+- **Essai B, mesuré** : Desktop Duplication contre Windows.Graphics.Capture
+  sous la même charge, exe de banc en session console (classe REALTIME),
+  70 s, `MW_CAPTURE=wgc` dans la tâche seulement.
+
+  | capture | chaîne | envoyées | convert p99 / max | total p99 / max | trous > 50 ms / pire | `hold` p99 / max |
+  |---|---|---|---|---|---|---|
+  | DDA | D3D12 VE, fences A/B | 3565 (35,7 i/s) | 10,2 / 106 ms | 88 / 1007 ms | **94 / 1019 ms** | 13 / 208 ms |
+  | WGC | D3D11 + oneVPL | 4220 (43,1 i/s) | 2,8 / 7,2 ms | 34 / 869 ms | **15 / 204 ms** | 4,8 / 17 ms |
+
+  Sous la même charge, WGC n'a pas les blocages de la duplication : DWM copie
+  dans le pool de WGC et notre côté ne soumet aucun paquet d'acquisition ni de
+  libération par image. Réserve : la passe WGC tourne en D3D11 + oneVPL, dont
+  l'encodage est plus lent (p99 19 ms), parce que la chaîne D3D12 ne prend pas
+  WGC à ce jour.
+- **La suite** : la chaîne D3D12 nourrie par WGC, l'encodeur VE gardé, la
+  duplication en repli (réglage, et repli automatique quand WGC ne démarre
+  pas) ; défaut à trancher au banc d'acceptation de la v0.4.1.
+- Données : `scratchpad\bench\lags\`, `bench\n95-17\{dda,wgc}.{csv,click-trace.csv}`,
+  `dda11on12-{dualrtx,n95}.json` (session « N95 Freezes » du 21/10).
+
+**Concrètement, pour l'utilisateur** : rien ne change encore. Sur un mini-PC
+Intel sans HAGS, un clip vidéo et un jeu à côté du flux font attendre la
+capture de l'hôte 10 à 90 ms par image, d'où les à-coups ; la conversion et
+l'encodeur n'y sont pour rien. La parade mesurée est une autre capture
+(Windows.Graphics.Capture) devant la même chaîne, à venir.
+
 ## 9. Pour l'A/B
 
 Le banc encode vers un puits ; l'A/B se fait sur un vrai flux. Une session

@@ -22,6 +22,7 @@
 
 #include "Caps.h"
 #include "Encode.h"
+#include "Dda11on12.h"
 #include "Interop.h"
 #include "Queues.h"
 #include "Scale.h"
@@ -42,6 +43,8 @@ void usage()
         "  queues  where the conversion waits: D3D11, D3D12 DIRECT and COMPUTE, by priority,\n"
         "          and the driver's Video Process (Intel's SFC)\n"
         "  interop what the DDA handshake costs, and what reading without it does\n"
+        "  dda11on12  Desktop Duplication on a D3D11On12 device carried by the chain's queue,\n"
+        "          against the product's duplication and its fences (essai A, 21/10/2026)\n"
         "  encode  D3D12 Video Encode HEVC with the product's rate control\n"
         "  vendors NVENC and AMF fed D3D12 pictures\n"
         "  scale   the Lanczos-2 resample, timed, the product's way and three cheaper ones\n"
@@ -84,6 +87,13 @@ int wmain(int argc, wchar_t** argv)
             return 0;
         }
         return lab::runInterop(argc - 2, argv + 2);
+    }
+    if (command == L"dda11on12") {
+        if (help) {
+            lab::dda11on12Usage();
+            return 0;
+        }
+        return lab::runDda11on12(argc - 2, argv + 2);
     }
     if (command == L"encode") {
         if (help) {
