@@ -2350,10 +2350,18 @@ l'utilisateur, et l'écran sécurisé hors de sa portée pour ce stream. Journal
 « capture=wgc: the worker runs on the user's token ». Rien ne change sans la
 clé.
 
-**Ce qui reste à mesurer (jour 3)** : l'A/B `capture=dda` / `capture=wgc` avec
-la chaîne complète sur le N95 sous charge, la latence au repos sur DualRTX, et
-WGC à 60 i/s sur un écran à 120 Hz (la duplication en donne 120) — la valeur
-par défaut `auto` ne bouge pas avant le banc d'acceptation.
+**Mesuré le 22/10 (jour 3, banc §8y.3).** Au repos sur DualRTX (NVENC fed D3D12
+pictures, 1440p), la chaîne marche derrière WGC avec la même latence hôte que
+derrière la duplication (3,0-3,3 ms présent → bitstream), mais **WGC ne livre
+que ~56 images/s sur un écran 120 Hz** quel que soit le contenu (la duplication
+en voit 106-120) et la porte calée est perdue. Sur le N95 sous charge, avec la
+chaîne complète, **WGC ne réduit pas les à-coups** : p99 présent → bitstream
+doublé en D3D12 (35-36 ms contre 17-20), autant de trous > 50 ms (19-20 contre
+10-18), parce que sa copie et son Flush attendent le même planificateur que les
+appels de la duplication. **Le défaut reste `auto`, la duplication** ;
+`capture=wgc` reste une clé de banc, et le worker au jeton de l'utilisateur ne
+sert qu'à elle. Le 15 contre 94 trous du 21/10 opposait deux chaînes (WGC en
+D3D11, la duplication en D3D12), pas deux captures.
 
 ## 18. oneVPL : audit sans matériel (04/09/2026)
 

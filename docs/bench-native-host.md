@@ -7617,6 +7617,65 @@ l'encodeur n'y sont pour rien. La parade mesurée est une autre capture
 - Pas de banc ce jour : l'A/B `capture=dda` / `capture=wgc` avec la chaîne
   complète est le jour 3 (N95 sous charge, DualRTX au repos, WGC à 120 Hz).
 
+### 8y.3 Route B, jour 3 : l'A/B avec la chaîne complète (22/10/2026, 01:20 →)
+
+- **DualRTX au repos, 01:20-01:29** (écran secondaire 2560×1440 à 119,88 Hz,
+  une animation canvas à une image par rafraîchissement dans un Chrome sans
+  GPU, `--native-bench` 1440p HEVC 60 i/s 30 Mbit/s, `pipeline=d3d12`,
+  `strict12=1`, NVENC fed D3D12 pictures, classe HIGH, 2 × 15 s par bras) :
+  **la chaîne D3D12 marche derrière WGC** (« capture Windows.Graphics.Capture »,
+  « DIRECT conversion → NVENC (D3D12) HEVC », bordure coupée, 852-856 images
+  encodées, signal / tenue / libération < 0,2 ms au p99). Présent → bitstream
+  moyen : dda 3,10 / 2,96 ms, wgc 3,24 / 3,26 (p99 3,4-3,9 des deux côtés) —
+  latence hôte égale. Ce que WGC coûte : **~57 présentations/s sur un écran
+  120 Hz** là où la duplication en voit 106 (le flux 60 i/s tombe à 56,3 /
+  56,0 i/s, 39-46 timeouts par passe), et la porte calée (`cadencelock`) reste
+  coupée sous WGC.
+- **WGC à 120 Hz, sonde `mw-d3d12-lab wgc` (2 × 10 s)** : écran secondaire
+  (animation) dda 1045 / 1026 images, copy 558 / 561 ; écran principal
+  (120,00 Hz, présente de lui-même) dda 1201 / 1201, copy 564 / 561 —
+  **WGC livre ~56 images/s sur un écran 120 Hz quel que soit le contenu**
+  (attente moyenne 17,5 ms par image contre 7,9-9,2 pour la duplication) :
+  la duplication reste le bon défaut sur les écrans rapides.
+- **N95 sous charge, 01:31-01:38** (Display 1, 1080p60 ; le clip 1080p60 en
+  fenêtre à gauche, le déplaceur ; exe de banc dans la session console de
+  max, élevée, REALTIME ; `--native-bench` 1080p HEVC 60 i/s 30 Mbit/s,
+  `pipeline=d3d12`, `strict12=1`, Intel Video Encode, 70 s par passe, bras
+  alternés) : **sous WGC la chaîne D3D12 n'est pas meilleure que sous la
+  duplication.** Présent → bitstream moyen / p99 : dda 7,34 / 24,6 puis 6,55 /
+  22,5 ms, wgc 7,92 / 45,1 puis 8,07 / 49,2 ; total p99 dda 20,5 / 16,9 contre
+  wgc 34,9 / 36,2 ; trous > 50 ms entre bitstreams dda 18 / 14 (pire 308 /
+  192 ms), wgc 20 / 19 (pire 165 / 188). Par étape au p99 : signal (A + Flush)
+  dda 9,0 / 9,2 contre wgc 15,8 / 17,0 ms ; tenue (Wait B) 3,9 / 1,8 contre
+  8,8 / 9,4 ; libération 0,7 / 0,4 contre 2,4 / 2,7 ; encodage 6,1-6,7 et
+  conversion GPU 1,7-2,5 ms partout. La copie de WGC et son Flush attendent
+  le planificateur comme les appels de la duplication (ce que la sonde du
+  jour 1 laissait voir), et la tenue s'allonge. Le 15 contre 94 trous du
+  21/10 (§8y) opposait WGC **en D3D11 + oneVPL** à la duplication en D3D12 :
+  deux chaînes, pas deux captures — départagé par les passes D3D11 ci-dessous.
+- **N95 sous charge, chaîne D3D11 (oneVPL), 01:39-01:42, une passe par bras** :
+  dda 7,97 / 12,3 / 20,5 ms (moy / p95 / p99), total p99 17,1, **10 trous
+  > 50 ms** (pire 164) ; wgc 13,96 / 32,8 / 73,7, total p99 54,9, 20 trous
+  (pire 522, un encodage oneVPL de 521 ms, acquire p99 29 ms). Le 15 contre
+  94 du 21/10 ne se reproduit pas : WGC fait 19-20 trous dans les deux
+  chaînes, la duplication 10-18.
+- **Verdict de la route B** : avec la chaîne complète, Windows.Graphics.Capture
+  ne réduit pas les à-coups du N95 sous charge — sa copie et son Flush
+  attendent le même planificateur que les appels de la duplication, la tenue
+  s'allonge, la porte calée est perdue, et un écran 120 Hz n'en reçoit que
+  56 images/s. **Le défaut reste `capture=auto`, la duplication** ;
+  `capture=wgc` reste une clé de banc, le worker au jeton de l'utilisateur
+  avec elle. Ce que le banc laisse : la chaîne D3D11 sous la duplication a
+  fait le moins de trous (10 contre 14-18 en D3D12) pour un encodage plus
+  lent (6,5 contre 4,5 ms de moyenne) — moins d'appels du runtime par image
+  sur cet iGPU sans HAGS ; à mesurer sur plus de passes avant d'en tirer un
+  défaut sous charge.
+
+**Concrètement, pour l'utilisateur** : rien ne change. L'autre capture ne
+supprime pas les à-coups d'un mini-PC Intel chargé ; elle coûte même un peu
+plus. La piste qui reste est de demander moins au pilote par image sur ces
+machines.
+
 ## 9. Pour l'A/B
 
 Le banc encode vers un puits ; l'A/B se fait sur un vrai flux. Une session
