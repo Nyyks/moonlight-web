@@ -304,3 +304,90 @@ sur les axes, la courbe bornée et les coins sont retirés du texte : J2, J4, J5
 partout**, au plus serré sur `zone` (+0,009). Dépassements 0 % (hors bords à ×3). SSIM ≥ FSR1 − 0,005
 tenu partout sauf l'étalon ×2 (−0,006) et `game` (−0,005, limite) ; PSNR : au-dessus de FSR1 sur
 `game` ×2, l'étalon ×1,33 et le texte ×1,33, en dessous de 0,15-0,45 dB ailleurs à ×2.
+
+## 2026-10-21 — P2.3 ouverte (go de Bruno) : J9, la texture externe contre la passe 0 sur le Mac
+
+Créneau éclair sur le Mac M1 Pro (« commence par le Mac, Léo arrive »), cinq cas en 30 s, temps
+mur par image sous contre-pression (ms), ×2 → 1440p sauf dit :
+
+| chaîne | `text` | `game` | `ui` | `text` ×1,33 |
+|---|---|---|---|---|
+| passe 0 seule (`blit`) | 0,10 | 0,09 | 0,12 | 0,24 |
+| noyau seul sur RGBA (`mwsr`) | 0,25 | 0,16 | 0,16 | 0,23 |
+| **passe 0 + noyau (`blit+mwsr`)** | **0,32** | **0,195** | **0,195** | **0,295** |
+| texture externe (`ext-mwsr`) | 0,56 | 0,21 | 0,27 | 0,57 |
+| externe sans borne exacte | 0,51 | 0,20 | 0,22 | 0,38 |
+| externe sans sortie anticipée | 1,12 | 1,09 | 1,07 | 1,12 |
+| passe 0 + SGSR1 (chaîne livrée) | 0,43 | 0,39 | 0,26 | 0,40 |
+| passe 0 + FSR1 (chaîne livrée) | 1,30 | 1,31 | 1,21 | 1,33 |
+
+**Verdict.** Sur Apple, **la passe 0 gagne partout** (−8 % sur `game`, −26 % sur `ui`, −43 % sur le
+texte, −48 % à ×1,33) : chaque échantillon de la texture externe y lit deux plans, et le chemin
+contour en fait jusqu'à neuf. La décision n° 2 du plan (« pas de passe 0 en SDR ») ne tient que là où
+l'échantillon externe ne coûte rien de plus que l'échantillon RGBA (NVIDIA, P0). La chaîne
+passe 0 + `mwsr` vaut 0,5 à 0,75 × la chaîne SGSR1 livrée et 0,25 × FSR1 : **C1 tenue en chaîne sur
+Apple**. Sans sortie anticipée, l'externe coûte 1,1 ms : la branche est vitale sur ce feed. À
+confirmer sur le 780M et le RTX avec `blit+mwsr` dans les mêmes cellules ; si le gain de l'externe y
+reste de l'ordre de 0,01 ms, **la passe 0 partout** est la règle la plus simple (un seul module, le
+même chemin que le HDR et que le contournement 1:1).
+
+## 2026-10-21 — P2.3, le code des couches (avant les passes 780M et RTX)
+
+Ajouté au texte, à mesurer dès que DualRTX est rendue (« à toi » de 59) :
+
+- **`DERING 2`** : la borne exacte par **quatre échantillons aux centres des texels** (un sampler
+  linéaire rend le texel exactement là) au lieu de quatre `textureLoad` — pour la texture externe,
+  où le chargement coûte deux plans et une conversion par texel (P0 : `ext-l` > `ext-s` sur AMD et
+  Apple). Mêmes pixels que `DERING 1` par construction.
+- **`half`** (option du module, pas un `override` : `enable f16` doit ouvrir le texte) : le chemin
+  contour en f16 — lumas, cohérence, poids, mélange (`alias hf`, `alias h3`, `EPS_H 0,001` pour
+  rester hors des dénormalisés) ; le vote, le repère et la borne restent en f32 ; le labo exige
+  `f16=1` (fonctionnalité `shader-f16` demandée au device) et refuse la cellule sans elle.
+- `QUAD_UNIFORM` : rien à écrire, la branche est uniforme par quad par construction (dérivées
+  grossières) ; `subgroupAny` n'y ajouterait rien.
+- `EARLY_OUT 0` reste jusqu'aux chiffres du 780M, puis sort du texte (perdant partout jusqu'ici).
+
+Cellules `--p2` : `mwsr`, `mwsr:dering=0`, `mwsr:dering=2`, `mwsr:half=1`, `mwsr:early=0`,
+`blit+mwsr`, `ext-mwsr`, `ext-mwsr:dering=0`, `ext-mwsr:dering=2`, les planchers et les références,
+avec `f16=1` ; cinq cas. **Hypothèses H10** : (a) `DERING 2` ramène la borne sur l'externe au prix de
+quatre échantillons (RTX : 0,096 → ~0,07 ; 780M : à voir) ; (b) `half` gagne peu sur ce noyau
+(≤ 5 %, chemin borné par la texture) ; (c) sur le 780M comme sur le RTX, passe 0 + noyau et externe
+sont à ± 0,02 ms, et la passe 0 partout est la règle.
+
+## 2026-10-21 — J10, les couches sur le 780M et le RTX ; la décision « passe 0 partout »
+
+Passes `--p2` du 21/10 (10:05-10:20), noyau seul (`tex`) et chaînes, GPU p50 en ms, ×2 → 1440p :
+
+| cellule | 780M `text` | 780M `ui` | 780M `game` | 780M `text` ×1,33 | RTX `text` | RTX `ui` | RTX `game` | RTX `text` ×1,33 |
+|---|---|---|---|---|---|---|---|---|
+| plancher (`tex-s1`) | 0,385 | 0,366 | 0,365 | 0,381 | 0,028 | 0,028 | 0,028 | 0,028 |
+| **`mwsr`** (table) | **1,408** | **0,652** | **0,577** | **1,233** | **0,051** | **0,029** | **0,028** | **0,046** |
+| `mwsr:dering=0` | 1,107 | 0,548 | 0,496 | 0,995 | 0,039 | 0,028 | 0,028 | 0,036 |
+| `mwsr:dering=2` (borne par échantillons) | 1,506 | 0,659 | 0,581 | 1,309 | 0,054 | 0,029 | 0,028 | 0,048 |
+| **`mwsr:half=1`** (f16) | **1,270** | **0,590** | **0,523** | **1,125** | 0,053 | 0,029 | 0,028 | 0,047 |
+| `mwsr:early=0` (sans branche) | 2,542 | 2,542 | 2,540 | 2,548 | 0,086 | 0,086 | 0,086 | 0,086 |
+| **passe 0 + `mwsr`** | **1,534** | **0,761** | **0,737** | **1,510** | **0,060** | **0,037** | **0,037** | **0,068** |
+| texture externe (`ext-mwsr`) | 2,361 | 0,983 | 0,920 | 2,073 | 0,096 | 0,048 | 0,043 | 0,088 |
+| externe sans borne | 1,649 | 0,816 | 0,785 | 1,490 | 0,065 | 0,035 | 0,033 | 0,062 |
+| externe, borne par échantillons | 2,404 | 1,037 | 0,971 | 2,154 | 0,097 | 0,047 | 0,043 | 0,088 |
+| SGSR1 (noyau seul) | 2,476 | 1,116 | 2,477 | 2,131 | 0,073 | 0,039 | 0,066 | 0,066 |
+| FSR1 | 9,32 | 9,35 | 9,36 | 9,37 | 0,247 | 0,243 | 0,246 | 0,247 |
+
+Qualité sur le RTX (`--quality`, `f16=1`) : `half=1` et `dering=2` rendent **les mêmes pixels** que le
+f32 au centième (texte 17,41 / 0,841 / FLIP 0,072 ; étalon 20,75 / 0,871 / 0,051).
+
+**Verdicts H10.** (a) **La borne par échantillons ne gagne rien** (780M : +7 % sur le texte ; RTX :
+égal ; externe : égal) : le surcoût de la texture externe est dans ses échantillons eux-mêmes (deux
+plans), pas dans les chargements — `DERING 2` sort du texte. (b) **f16 vaut 9-10 % sur le 780M**,
+rien sur le RTX (−4 %) : le module `half` est à prendre quand `shader-f16` est là, hors NVIDIA
+(Apple et Adreno/Mali à mesurer, l'attendu est du même ordre ou mieux). (c) **La passe 0 gagne
+partout** : 780M −20 à −35 % (1,53 contre 2,36 sur le texte), RTX −12 à −37 % (0,060 contre 0,096),
+M1 −8 à −48 % (J9). La décision n° 2 du plan (« pas de passe 0 en SDR ») tenait pour un noyau à un ou
+deux fetches par pixel ; avec cinq échantillons et quatre texels sur un tiers des pixels, les deux
+plans de la NV12 coûtent plus que la copie RGBA qu'ils évitent. **Décision : passe 0 partout** —
+`mwsr` lit `texture_2d` après la passe 0 existante du renderer, comme les autres enhancers et comme
+le HDR ; un seul module, un seul bind group layout, le contournement 1:1 inchangé. Le feed `ext`
+reste dans le générateur pour le labo (une future classe de GPU pourrait le remesurer). `EARLY_OUT 0`
+sort du texte (perdant partout : 780M 2,54 = `tex-s9`, RTX 0,086, M1 ×2,7). Chaînes sur le 780M :
+passe 0 + `mwsr` 1,53 contre passe 0 + SGSR1 ≈ 2,6-2,8 (P0) et passe 0 + FSR1 9,5 : **C2 tenue**
+(× 0,16 de FSR1) ; avec `half` ≈ 1,38.

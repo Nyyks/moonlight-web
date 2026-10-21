@@ -226,3 +226,52 @@ FSR1 sur `game` ×2 (+0,3 dB), l'étalon ×1,33 (+0,8) et le texte ×1,33 (+0,05
   jumeau (le WGSL est fixé, ils ne le changeront plus).
 - **À P5** : l'œil de Bruno sur l'étalon à ×2, là où FLIP met `mwsr` à +0,006 de FSR1 et à 0 % de
   dépassements contre 2 %.
+
+## 3. P2.3 — les couches et les feeds (en cours, 21/10/2026)
+
+### 3.1 Apple : la passe 0 reste
+
+Créneau éclair sur le Mac M1 Pro au matin du 21/10 (journal J9) : la chaîne **passe 0 + noyau sur
+RGBA** bat la lecture directe de la texture externe sur les quatre cas (texte ×2 : 0,32 ms contre
+0,56 ; jeu 0,195 contre 0,213 ; interface 0,195 contre 0,265 ; texte ×1,33 : 0,295 contre 0,566),
+même sans la borne exacte (0,51). Sans sortie anticipée l'externe monte à 1,1 ms. La chaîne
+passe 0 + `mwsr` vaut 0,5 à 0,75 fois la chaîne SGSR1 livrée et un quart de FSR1 : **C1 tenue en
+chaîne sur Apple**. La décision n° 2 du plan (§0, « pas de passe 0 en SDR ») devient donc un choix par
+plateforme ; sur Apple, passe 0. Le 780M et le RTX sont remesurés avec `blit+mwsr` dans les mêmes
+cellules avant de dire si « passe 0 partout » est la règle (elle serait la plus simple : un module, un
+chemin commun au HDR et au contournement 1:1).
+
+### 3.2 Le 780M et le RTX : la passe 0 partout, f16 sur AMD
+
+Passes du 21/10 au matin (journal J10 ; les deux GPU en Chrome sans tête, adaptateur épinglé). Noyau
+seul à ×2 vers 1440p, GPU p50 : **780M** `mwsr` 1,41 ms sur `text`, 0,65 sur `ui`, 0,58 sur `game`
+(plancher 0,38 ; SGSR1 2,48 / 1,12 / 2,48 ; FSR1 9,3) ; **RTX** inchangé depuis P2.1.
+
+| question | 780M | RTX | M1 (§3.1) | verdict |
+|---|---|---|---|---|
+| passe 0 + noyau contre texture externe, `text` | 1,53 contre 2,36 | 0,060 contre 0,096 | 0,32 contre 0,56 | **passe 0 partout** |
+| … `game` | 0,74 contre 0,92 | 0,037 contre 0,043 | 0,195 contre 0,213 | idem |
+| borne par échantillons contre `textureLoad` | +7 % | égal | — | sans objet, retirée |
+| f16 sur le chemin contour | **−9 à −10 %** | −4 % | à mesurer | module `half` hors NVIDIA |
+| sans sortie anticipée | 2,54 (×1,8 à ×4,4) | 0,086 (×1,7 à ×3) | ×2,7 à ×7 | la branche est le texte |
+
+Les pixels de `half` et de la borne par échantillons sont ceux du f32 au centième de dB et de FLIP
+(contrôle sur le RTX). **La décision n° 2 du plan est renversée par la mesure** : « pas de passe 0 en
+SDR » valait pour un noyau à un ou deux fetches par pixel (P0) ; avec cinq échantillons et quatre
+texels sur un tiers des pixels, les deux plans de la NV12 coûtent plus que la copie RGBA qu'ils
+évitent, sur les trois classes de GPU mesurées. `mwsr` lit donc `texture_2d` après la passe 0 que le
+renderer a déjà : un seul module, un seul bind group layout, le même chemin que le HDR et que le
+contournement 1:1 ; le feed externe reste dans le générateur pour le labo seulement. Chaîne sur le
+780M : passe 0 + `mwsr` 1,53 ms contre ≈ 2,7 pour passe 0 + SGSR1 et 9,5 pour passe 0 + FSR1 (× 0,16 :
+C2 tenue avec marge), 1,38 avec `half`.
+
+### 3.3 Ce que P2.3 laisse
+
+- `QUAD_UNIFORM` : rien à écrire, la branche est uniforme par quad par construction.
+- Le texte ne porte plus que `SHOW`, `W_ALONG`, `W_ACROSS`, `R_ALONG`, `R_ACROSS`, `S_FULL`,
+  `W_MIN`, `DERING` et l'option de module `half` ; `DERING 0` reste le cran « performance » d'un GPU
+  faible (−21 % sur le texte du 780M, au prix des dépassements de l'empreinte 2×2).
+- Au realme Note 60 (Mali-G57, créneau de Bruno) : `half`, `DERING 0`, et la part du chemin contour
+  sous le coût d'un GPU d'entrée de gamme ; à l'iPhone : `half` et la chaîne avec passe 0.
+- P2.4 (compute par tuiles) : sans objet sur ordinateur, où le noyau est au plancher d'une passe
+  (0,03-0,05 ms), et impossible sans copie sur mobile (§3.4) : proposée à l'abandon.
