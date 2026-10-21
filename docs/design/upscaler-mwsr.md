@@ -134,7 +134,9 @@ perdu). Un invité a un budget fixe (8 ms) et pas de remontée.
 Points d'intégration : la place de `mwsr` dans `ENHANCER_LADDER` (en dessous de `sgsr` s'il est
 moins cher, ce qui est l'objectif ; sinon au-dessus), `ladderRung` / `rendererAlgo` pour le préfixe
 `gl-`, et, si les requêtes d'horodatage entrent, un quatrième signal de coût GPU réel sur WebGPU
-(aujourd'hui `gpuBehind` y est nul).
+(aujourd'hui `gpuBehind` y est nul). *[P4, 21/10 : `mwsr` est entré entre `sgsr` et `off` (moins cher
+que SGSR1 sur tout GPU mesuré) ; la mémoire range des noms, rien à migrer ; `auto` le prend derrière le
+drapeau `mw_mwsr` jusqu'à P6.]*
 
 ### 1.4 Les réglages, le menu, les chaînes
 
@@ -747,7 +749,13 @@ WebGL2 ? le même shader avec repli, sans alourdir le compute ? ») :
   depuis une seule table : pas de mini-langage, mais une garantie que les chiffres sont les mêmes.
 - **Un test de conformité** (P4) rend les deux textes sur les mêmes images (labo, §6) et exige
   une différence maximale de 2/255 par canal en SDR ; au-delà, c'est un bug de port, pas une
-  tolérance.
+  tolérance. *[P4, 21/10 : tenu là où aucune dérivée n'intervient (réduction : 1/255). Sur le noyau,
+  la ligne de référence des dérivées d'écran « coarse » est le choix de l'implémentation et diffère
+  entre les espaces fenêtre de GL (y vers le haut, `dFdy` = −`dpdy`) et de WebGPU : les jumeaux ne
+  peuvent pas être identiques au pixel sur un contour (17 % des pixels du texte au-delà de 2/255, autant
+  d'un côté que de l'autre de la bilinéaire). Le critère devient « même qualité face à la vérité
+  terrain » : FLIP 0,071 / 0,019 / 0,029 des deux côtés, PSNR à 0,025 dB. Rapport
+  `upscaler-mwsr-p4.md` §3, journal J18.]*
 - **Qui tourne où** : la saveur WebGL2 reste la production SDR tant que la porte P4 n'a pas
   tranché WebGPU contre WebGL2 avec le nouveau shader sur chaque classe d'appareil (le wiki 15.3
   l'a laissé ouvert) ; WebGPU porte le HDR et, si P4 le confirme, le plein écran.
@@ -1074,7 +1082,7 @@ cran de l'échelle et une option du menu debug, ce qui est déjà utile.
 | C8 | HDR `linear` | temps ajouté par le shader ≤ FSR1 `linear` ; maximum conservé ; aucun pixel au-delà du maximum local d'entrée ; ΔE borné (seuil fixé en P0 sur FSR1 lui-même) ; regard de Bruno sur le M27Q en HDR | DualRTX, Mac | HDR |
 | C9 | 4:4:4 | FLIP sur les canaux de chroma de la mire de texte coloré : meilleur que SGSR1, ≥ FSR1 | DualRTX (NVENC) | 4:4:4 |
 | C10 | Réduction ×0,75 et ×0,5 | énergie d'aliasing (zone-plate, traits fins, métrique de défilement) ≤ Smooth2D ; PSNR à 1 dB du Lanczos-2 de l'hôte ; coût ≤ bilinéaire + 30 % | labo, téléphone 1080p | downscale |
-| C11 | Conformité des jumeaux | écart maximal WGSL / GLSL ≤ 2/255 par canal | labo | — |
+| C11 | Conformité des jumeaux | écart maximal WGSL / GLSL ≤ 2/255 par canal *[P4 : reformulé — ≤ 2/255 sur 99,9 % des pixels et ≤ 4 au plus là où aucune dérivée n'intervient (réduction : 1/255 mesuré) ; noyau : même qualité face à la vérité terrain (FLIP à 0,002, PSNR à 0,1 dB ; mesuré 0,000 et 0,025) ; la chaîne WebGPU identique au noyau (0/255). Rapport P4 §3]* | labo | — |
 | C12 | Robustesse | aucun NaN ni noir sur image plate (divisions protégées), reprise après `device.lost`, Safari et Firefox sans erreur de compilation, empreintes dorées stables sur WebGPU logiciel | labo, CI | — |
 
 Ce qui est **non mesurable dans ce parc** et sera dit tel quel dans le rapport : Adreno 7xx et
@@ -1341,13 +1349,13 @@ upscalers spatiaux.
 - [x] Coût des cellules sRGB confirmé au RTX et au 780M (14:33) : les vues ne coûtent rien, l'échantillon unique = le plancher, la 3×3 à travers les vues = la 3×3 calculée ; et sur le realme (J16) l'échantillon unique = le plancher
 - [ ] Porte P3 : lecture du rapport `upscaler-mwsr-p3.md` par Bruno (C8-C10 tenus au labo ; regard HDR sur le M27Q en P5) [`high`]
 
-**P4 — Intégration et jumeau WebGL2**
-- [ ] `mwsr` dans `WebGpuRenderer` : pipelines par `override`, deux modes, bind groups en cache, uniformes au changement ; vues `-srgb` (`viewFormats` sur la texture de la passe 0 et sur le canvas SDR, à l'essai) liées en mode `down`, `mwsrRegime(…, { srgb })`, repli sur la table calculée ; `CHROMA444` sur `_yuv444` ; `half` hors NVIDIA [`medium`]
-- [ ] `gl-mwsr` dans `WebGlRenderer` ; module de constantes partagées ; test de conformité [`medium`]
-- [ ] `createRenderer`, `NO_WEBGPU_ALGOS`, `ENHANCER_LADDER` et migration de `mw_enhancer_rung`, `pickAutoEnhancer` derrière un drapeau [`medium`]
-- [ ] Menu debug, i18n (en, fr, zh), overlay, worker (`algo`, `chroma444`) [`low`]
-- [ ] Validation statique des shaders en CI ; job Playwright + WebGPU logiciel (non bloquant d'abord) [`medium`]
-- [ ] Porte WebGPU contre WebGL2 avec le nouveau shader, par classe d'appareil [`high`]
+**P4 — Intégration et jumeau WebGL2** (rapport `upscaler-mwsr-p4.md`, 21/10/2026, Fable `max`)
+- [x] `mwsr` dans `WebGpuRenderer` (`e965e9f9`, journal J17) : un pipeline par régime (`mwsrRegimes()`), tous à la création ; vues `-srgb` sur le canvas SDR et la texture de la passe 0, liées en mode `down`, repli lumière logicielle si refus ou HDR ; `CHROMA444` depuis `yuv444` (StreamView, worker) ; `half` hors NVIDIA ; `chain-mwsr` du labo = empreinte du noyau et de `mwsr:srgb=1` sur les neuf cas dorés
+- [x] `gl-mwsr` dans `WebGlRenderer` (`031805ab`, J18) : `mwsrGlsl()` depuis les mêmes tables ; conformité : `dFdy` = −`dpdy`, ligne de référence des dérivées propre à l'implémentation → C11 reformulé (réduction 1/255 ; noyau : même qualité, FLIP 0,071/0,019/0,029 des deux côtés) ; `scaler_lab.py --conformity` en deux Chromes (`--swiftshader`, `--webgl-swiftshader`), `--page-timeout`
+- [x] `createRenderer` (via `WEBGL_ALGOS`), `ENHANCER_LADDER` (`mwsr` entre `sgsr` et `off`, mémoire sans migration), `pickAutoEnhancer` et le HDR d'`auto` derrière `localStorage.mw_mwsr = '1'` (`83aedfad`)
+- [x] Menu debug (deux saveurs), i18n (en, fr, zh), overlay (`MWSR`, `WebGL MWSR`), worker (`yuv444`) (`83aedfad`)
+- [x] CI : job `scaler-lab` non bloquant (conformité sur SwiftShader, les deux côtés ; chaque texte compile) (`48bb8213`) ; pas de validation statique possible sous Node (notée au rapport §4)
+- [ ] Porte WebGPU contre WebGL2 avec le nouveau shader, par classe d'appareil : RTX et 780M au go de 59 (`chain-mwsr` / `chain-gl-mwsr`, le mur par draw ; horodatages WebGL2 à brancher au besoin), Mac, iPhone, realme et `mw-arm` aux créneaux de Bruno ; le drapeau `mw_mwsr` sur la `--dev` (overlay, menu, 1:1) [`high`]
 
 **P5 — Campagne**
 - [ ] Matrice du §7.3 (DualRTX complet ; étoile ailleurs) [`xhigh`]

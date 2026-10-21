@@ -3,7 +3,8 @@ its own: scaler-lab.html, case after case, each case a query of scaler-lab.js.
 
     python scaler_lab.py --tag rtx [--case NAME:QUERY ...] [--power low-power]
                          [--chrome-arg=--use-adapter-luid=0,<low>] [--headed X,Y,W,H]
-                         [--swiftshader] [--serve 0.0.0.0:8766]
+                         [--swiftshader | --webgl-swiftshader] [--serve 0.0.0.0:8766]
+                         [--conformity] [--golden | --golden-check] [--page-timeout S]
 
 Without --case, the P0 set below: the feed experiment (§6.4: N bilinear taps
 on the external texture against pass 0 + N on RGBA) and the baselines of the
@@ -18,7 +19,14 @@ shaders compile and draw there). --serve keeps the server up on an address a
 phone can reach, and prints the URL to open there: the page then posts its
 result back (post=1), to <dir>/phone-<name>.json.
 
-Needs `pip install websocket-client`.
+--conformity (p4_flows.py) holds the product's two renderers to the kernel:
+on the software adapters WebGL2 on ANGLE's SwiftShader switches WebGPU off,
+so it runs once per side (--swiftshader, then --webgl-swiftshader) and
+compares the dumps on disk. --page-timeout fails a page that hangs, with its
+log, instead of waiting on it forever. Off the bench machine Chrome is found
+through MW_CHROME or the PATH.
+
+Needs `pip install websocket-client numpy pillow scikit-image`.
 """
 import argparse
 import functools

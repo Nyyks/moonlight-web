@@ -733,3 +733,65 @@ la machine du critère** (« téléphone 1080p ») ; la grille 2×2 coûte 3,2 �
 Mali ce sont les échantillons, pas l'arithmétique), `ll=2` 7,7 ×. (f) Le mur par `draw()` de la chaîne
 `off` (22 ms pour 4 ms de GPU) dit le coût CPU du chemin du renderer sur ce SoC (Unisoc T612) : à
 regarder en P5 sur le flux réel, hors shader.
+
+## 2026-10-21 — J17, P4.1 : la clé `mwsr` du `WebGpuRenderer`, et la chaîne du produit dans les dorés
+
+Intégration (commit `e965e9f9`) : un pipeline par régime (`mwsrRegimes()`), tous à la création ;
+`viewFormats` `-srgb` sur le canvas SDR (`ctx.configure`, dans un `try` : repli lumière logicielle) et
+sur `_inputTex` ; la réduction lit la vue sRGB de l'entrée et dessine dans celle du canvas, le noyau les
+vues ordinaires ; `half` demandé à la création du device hors NVIDIA ; `CHROMA444` depuis `yuv444`
+(StreamView, worker). Labo : cellule `chain-mwsr` (le renderer du produit sur un `OffscreenCanvas`) ;
+captures et dumps des chaînes par `transferToImageBitmap` → `copyExternalImageToTexture` vers la
+texture de sortie ; avec `codec=none` les chaînes reçoivent des `VideoFrame` RGBA faites des mires (les
+texels exacts de la texture d'entrée du labo) ; `dump=all` n'exclut plus les chaînes.
+
+Dorés (SwiftShader, `--golden`, 22 s les neuf cas) : `chain-mwsr` = `mwsr` au bit près sur les six cas
+d'agrandissement (texte, jeu, code ; 720p et 1080p → 1440p) et = `mwsr:srgb=1` sur les trois cas à
+×0,5 ; les empreintes des autres cellules inchangées (`mwsrRegimes()` n'a pas touché au texte).
+Trois tours pour y arriver : la chaîne ne tournait pas (« no VideoFrame » : les mires ne faisaient pas
+d'images sans codec), puis n'était pas dumpée (`dump=all` filtrait les chaînes). Verdict H17 : **le
+produit fait ce que la cellule faisait**, vues sRGB comprises ; le coût des vues a été confirmé au GPU
+en J15.
+
+## 2026-10-21 — J18, P4.2 : le jumeau GLSL (`gl-mwsr`) et la conformité des jumeaux (C11)
+
+`mwsrGlsl()` depuis les mêmes tables (overrides en constantes, deux `vec4` d'uniformes, `mediump` sur
+le chemin contour), `WebGlRenderer` sous `gl-mwsr`. Au labo : `chain-gl-<passe>` (jeu `glchain`) ;
+mais forcer ANGLE sur SwiftShader (`--use-gl=angle --use-angle=swiftshader`) éteint WebGPU dans ce
+Chrome (`requestAdapter` rend `null`, avec ou sans `--ignore-gpu-blocklist`,
+`--use-webgpu-adapter=swiftshader`), et sans ce forçage WebGL partait sur le GPU par défaut de la
+machine (interdit sans go) et, de plus, **pendait** : une promesse jamais résolue a retenu le pilote dix
+minutes (`Runtime.evaluate` avec `awaitPromise`). D'où : un mode `gl=1` de la page (WebGL2 seul, dumps
+par un canvas 2D, mêmes noms de fichiers), `--webgl-swiftshader` au pilote (un second Chrome), le flux
+`--conformity` qui compare ce qui est sur le disque, et le chien de garde `--page-timeout` (le journal
+de la page, le cas échoue).
+
+Premier passage (texte ×2, GLSL contre `mwsr`) : 27,7 dB, 28 % des pixels différents, max 221/255 ;
+à ×0,5 : un bloc de 30×30 à 174/255. Trois causes :
+
+1. **le signe de `dFdy`** : fenêtre GL y vers le haut → `dFdy` = −`dpdy` ; sans la négation la normale
+   est en miroir et les taps le long / en travers s'échangent sur les diagonales. Corrigé : 34,3 dB,
+   25 % différents, 17 % au-delà de 2/255, max 76 ;
+2. **l'image dumpée** : la chaîne dessinait l'image du clip où en était le curseur (le carré mobile).
+   Corrigé (première image) : la réduction passe à ≤ 1/255 (texte, code), 3/255 sur 0,009 % de la
+   zone-plate ;
+3. **la ligne de référence des dérivées coarse** : plats concordants (0,6 % différents, vote au
+   seuil), contours différents à 44 % mais autant d'un côté que de l'autre de la bilinéaire (écart
+   moyen à la bilinéaire 20,55 contre 20,54/255). Essai `mwsr:fine=1` (`dpdxFine`/`dpdyFine`) : coarse
+   contre fine = 13,4 % des pixels au-delà de 2/255, max 83 ; GL contre fine 13,1 %, contre coarse
+   16,9 % : le GL n'est ni l'un ni l'autre — la ligne du quad que prend une dérivée coarse est le choix
+   de l'implémentation et diffère entre les deux espaces fenêtre. Inhérent, pas un bug de port.
+
+Verdict H18 : **C11 reformulé**, tenu sous sa nouvelle forme. Pixels : chaîne WebGPU identique (0/255,
+neuf cas) ; jumeau GLSL ≤ 2/255 sur 99,9 % des pixels et ≤ 4 au plus là où aucune dérivée n'intervient
+(réduction : 1/255 ; zone-plate 3/255 sur 0,009 % = précision sous-texel des échantillonneurs).
+Qualité face à la vérité terrain (`--quality`, ×2) :
+
+| contenu | `mwsr` WGSL : PSNR / SSIM / FLIP | `gl-mwsr` GLSL | bilinéaire | FSR1 |
+|---|---|---|---|---|
+| texte | 17,41 / 0,8415 / 0,071 | 17,44 / 0,8425 / 0,071 | 16,99 / 0,816 / 0,090 | 17,57 / 0,845 / 0,068 |
+| jeu | 35,84 / 0,8816 / 0,019 | 35,84 / 0,8816 / 0,019 | 35,01 / 0,880 / 0,020 | 35,55 / 0,887 / 0,017 |
+| code | 26,95 / 0,9555 / 0,029 | 26,96 / 0,9559 / 0,029 | 26,96 / 0,953 / 0,034 | 27,35 / 0,951 / 0,024 |
+
+0 % de dépassement des deux côtés ; le jumeau vaut le noyau à 0,000 FLIP et 0,025 dB près. Le job CI
+`scaler-lab` (non bloquant) rejoue les deux côtés sur un runner hébergé.

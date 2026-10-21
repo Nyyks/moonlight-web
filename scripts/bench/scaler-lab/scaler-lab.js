@@ -80,7 +80,8 @@ const CELL_SETS = {
   // taps=1|4|9|16 (the reduction's grid) and srgb=1 (SDR only: the input
   // read and the output written through `-srgb` views, the sampler decoding
   // and the target encoding; the regime of the views: one sample down to x0.5,
-  // LINEAR_LIGHT 0, unless taps or ll say otherwise); `ext-mwsr` reads the
+  // LINEAR_LIGHT 0, unless taps or ll say otherwise), fine=1 (dpdxFine and
+  // dpdyFine in the vote: the quad's other row, J18); `ext-mwsr` reads the
   // external texture (no pass 0), `blit+mwsr` pays the pass 0 first;
   // `tex-s1-srgb` is the bilinear floor through the same views.
   mwsr: ["mwsr", "mwsr:dering=0", "mwsr:half=1", "blit+mwsr"],
