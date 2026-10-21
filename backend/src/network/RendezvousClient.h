@@ -25,6 +25,7 @@
 #include <QString>
 #include <QTimer>
 #include <QUrlQuery>
+#include <QVersionNumber>
 #include <QWebSocket>
 
 class AddressRace;
@@ -56,14 +57,21 @@ class QHostInfo;
  *
  * Reaching the server
  * -------------------
- * The line is not opened by name. The name is resolved, its addresses are
- * raced (AddressRace), and the line is opened on the one that answered first,
- * carrying the name where the server and the certificate expect it. An IPv6
- * that silently drops packets then costs a quarter of a second instead of the
- * 21 to 30 s Qt spends on it before trying the IPv4. Each attempt, from
- * openLine() to connected, is bounded by an open timeout: past it the attempt
- * counts as a failure like a refusal would, and the family that had won the
- * race is not the one to lead with next time.
+ * Where Qt allows it, the line is not opened by name. The name is resolved,
+ * its addresses are raced (AddressRace), and the line is opened on the one
+ * that answered first, carrying the name where the server and the certificate
+ * expect it. An IPv6 that silently drops packets then costs a quarter of a
+ * second instead of the 21 to 30 s Qt spends on it before trying the IPv4.
+ *
+ * Qt allows it from 6.10.3 and 6.11.1 on (canPinLine()). Before, and in
+ * 6.11.0, QWebSocket loses the name on the way to an address (QTBUG-141396),
+ * and the server refuses the line. There it goes by name, as it always did,
+ * and Qt walks the addresses itself. The Qt that decides is the one loaded at
+ * run time: a build against 6.10.3 runs on the 6.11.0 libraries as well.
+ *
+ * Each attempt, from openLine() to connected, is bounded by an open timeout:
+ * past it the attempt counts as a failure like a refusal would, and the family
+ * that had won the race is not the one to lead with next time.
  *
  * Threading: Qt main thread only, like the rest of the network layer.
  */
@@ -103,7 +111,17 @@ public:
     /// How long one attempt to bring the line up may take, from openLine() to
     /// connected: name lookup, the race, TLS and the upgrade. The claim's
     /// transfer timeout follows it. The default suits production; tests shorten it.
+    /// A line that goes by name keeps its own, longer bound: Qt's walk through
+    /// the addresses must have the time to reach the second one.
     void setOpenTimeoutMs(int ms);
+
+    /// Whether QWebSocket, in the Qt version `qt`, carries the name to a line
+    /// opened on an address: the TLS server name and the one Host header.
+    static bool canPinLine(const QVersionNumber& qt);
+
+    /// Open the line by name whatever Qt is loaded, as a Qt without the fix
+    /// does. Tests only.
+    void forceLineByName();
 
 signals:
     /// A browser arrived and the server opened a session for it.
@@ -171,6 +189,10 @@ private:
     QTimer m_Watchdog;       // fires when a pong never came back
     QTimer m_OpenTimer;      // bounds one attempt, openLine() to connected
     int m_OpenTimeoutMs;
+
+    /// Whether a named line is raced and opened on the winning address, or
+    /// goes by name: canPinLine() of the Qt loaded at run time.
+    bool m_PinLine;
 
     /// The attempt in progress, if any: true from openLine() until the line is
     /// up or attemptFailed() has counted it. Attempts are numbered so that a

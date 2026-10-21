@@ -73,6 +73,13 @@ constexpr int kPongTimeoutMs = 20 * 1000;
 // missing pong is given.
 constexpr int kOpenTimeoutMs = 15 * 1000;
 
+// The same bound for a line that goes by name, on a Qt that cannot open it on
+// an address (canPinLine()). Qt then walks the addresses itself, one after the
+// other, and gives a silent one 21 s on Windows and 30 s on Linux before it
+// tries the next. With the 15 s above, an IPv6 that drops packets would cut
+// every attempt before the IPv4 was reached, and the line would never come up.
+constexpr int kNamedOpenTimeoutMs = 45 * 1000;
+
 // Backoff bounds. Capped so a machine left running overnight still recovers
 // promptly once the server returns.
 constexpr int kRetryBaseMs = 2 * 1000;
@@ -108,6 +115,7 @@ RendezvousClient::RendezvousClient(AppSettings* settings, QObject* parent)
     , m_Net(new QNetworkAccessManager(this))
     , m_Race(new AddressRace(this))
     , m_OpenTimeoutMs(kOpenTimeoutMs)
+    , m_PinLine(canPinLine(QVersionNumber::fromString(QLatin1String(qVersion()))))
 {
     m_RetryTimer.setSingleShot(true);
     m_KeepAliveTimer.setInterval(kKeepAliveMs);
@@ -180,6 +188,14 @@ void RendezvousClient::start()
     m_Halted = false;
     m_LastError.clear();
 
+    // Said once: it is the Qt loaded at run time that decides, and it decides
+    // how long an IPv6 that drops packets holds every attempt.
+    if (m_PinLine)
+        qInfo() << "[RDV] Qt" << qVersion() << "- the line opens on the address that wins the race";
+    else
+        qInfo() << "[RDV] Qt" << qVersion()
+                << "cannot open the line on an address (QTBUG-141396) - it goes by name";
+
     ensureIdentity();
     if (m_Settings->rendezvousClaimed())
         openLine();
@@ -202,6 +218,24 @@ void RendezvousClient::stop()
 void RendezvousClient::setOpenTimeoutMs(int ms)
 {
     m_OpenTimeoutMs = qMax(1, ms);
+}
+
+bool RendezvousClient::canPinLine(const QVersionNumber& qt)
+{
+    // QTBUG-141396. Until its fix, QWebSocket ignores the request's
+    // peerVerifyName, and adds the request's raw Host header after the one it
+    // takes from the URL instead of replacing it. On a line opened on an
+    // address, the TLS handshake then names no server, and Caddy ends it
+    // ("tlsv1 alert internal error"). Given the name some other way, the
+    // request still carries two Host headers, and Go answers 400. The fix is in
+    // 6.10.3, 6.11.1 and 6.12.0; 6.11.0 and everything up to 6.10.2 lack it.
+    if (qt >= QVersionNumber(6, 11, 1)) return true;
+    return qt >= QVersionNumber(6, 10, 3) && qt < QVersionNumber(6, 11, 0);
+}
+
+void RendezvousClient::forceLineByName()
+{
+    m_PinLine = false;
 }
 
 void RendezvousClient::ensureIdentity()
@@ -370,15 +404,18 @@ void RendezvousClient::openLine()
     // whichever the open timeout lets happen first.
     ++m_Attempt;
     m_Opening = true;
-    m_OpenTimer.start(m_OpenTimeoutMs);
 
     // A URL that names an address has nothing to race: the test stand-in, or a
-    // server pinned by hand.
-    if (!QHostAddress(url.host()).isNull()) {
+    // server pinned by hand. A name this Qt cannot carry to an address goes by
+    // name, and Qt walks its addresses itself, on the longer bound.
+    const bool literal = !QHostAddress(url.host()).isNull();
+    if (literal || !m_PinLine) {
+        m_OpenTimer.start(literal ? m_OpenTimeoutMs : kNamedOpenTimeoutMs);
         m_Socket.open(m_LineRequest);
         return;
     }
 
+    m_OpenTimer.start(m_OpenTimeoutMs);
     const int attempt = m_Attempt;
     m_Lookup = QHostInfo::lookupHost(
         url.host(), this, [this, attempt](const QHostInfo& info) { onResolved(attempt, info); });
@@ -432,6 +469,7 @@ void RendezvousClient::openLineOn(const QHostAddress& address)
     // against the name, and Qt would take both from the URL, which now names an
     // address. Both are set to exactly what the URL by name would have sent:
     // the authority as written, with the port only where the URL spells one.
+    // Only a Qt with the fix for QTBUG-141396 passes them on (canPinLine()).
     const QUrl named = m_LineRequest.url();
     const quint16 port = quint16(named.port(named.scheme() == QLatin1String("wss") ? 443 : 80));
     const QString literal = address.protocol() == QAbstractSocket::IPv6Protocol
@@ -456,7 +494,7 @@ void RendezvousClient::openLineOn(const QHostAddress& address)
 void RendezvousClient::onOpenTimeout()
 {
     if (!m_Opening) return;
-    qWarning() << "[RDV] the line did not come up within" << m_OpenTimeoutMs
+    qWarning() << "[RDV] the line did not come up within" << m_OpenTimer.interval()
                << "ms - abandoning this attempt";
 
     // A family that won the race and then stalled is not the one to lead with

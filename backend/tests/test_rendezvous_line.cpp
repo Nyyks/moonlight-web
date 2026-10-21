@@ -7,6 +7,12 @@
  * server; an attempt that never comes up is cut at the open timeout, counts
  * toward the re-claim, and the next one leads with the other address family.
  *
+ * Which Qt may open the line on an address at all (QTBUG-141396): on the others
+ * it goes by name, with one connection, the name in Host, and a bound long
+ * enough for Qt's own walk through the addresses. The by-name sections force
+ * that path, so they run whatever Qt the suite loads; the race's sections run
+ * only on a Qt that can pin the line, and say so when they are skipped.
+ *
  * Behind production's Caddy, a restart of the introduction server reaches the
  * host as a TLS close_notify on a TCP connection that stays open. Qt reports it
  * through errorOccurred and then never emits disconnected, so the line looked
@@ -31,6 +37,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QVersionNumber>
 #include <QWebSocket>
 #include <QWebSocketServer>
 
@@ -73,6 +80,46 @@ struct MuteServer
         return server.listen(address, port);
     }
 };
+
+/// A stand-in that takes the line and keeps the Host it was asked for. Every
+/// TCP connection is counted before the WebSocket server sees it, so a race's
+/// probe shows up as one connection more than the line itself.
+struct HostStandIn
+{
+    QTcpServer tcp;
+    QWebSocketServer ws{QStringLiteral("rdv-test"), QWebSocketServer::NonSecureMode};
+    int connections = 0;
+    int lines = 0;
+    QByteArray hostHeader;
+    QHostAddress peer;
+
+    bool listen()
+    {
+        QObject::connect(&tcp, &QTcpServer::newConnection, [this]() {
+            while (QTcpSocket* s = tcp.nextPendingConnection()) {
+                ++connections;
+                ws.handleConnection(s);
+            }
+        });
+        QObject::connect(&ws, &QWebSocketServer::newConnection, [this]() {
+            while (QWebSocket* line = ws.nextPendingConnection()) {
+                ++lines;
+                hostHeader = line->request().rawHeader("Host");
+                peer = line->peerAddress();
+                line->setParent(&ws);
+            }
+        });
+        // "localhost" resolves to ::1 and 127.0.0.1 on most machines: both
+        // families answer.
+        return tcp.listen(QHostAddress::Any, 0);
+    }
+};
+
+/// What the Qt this suite runs on does with a named line.
+bool qtCanPinLine()
+{
+    return RendezvousClient::canPinLine(QVersionNumber::fromString(QLatin1String(qVersion())));
+}
 
 } // namespace
 
@@ -126,26 +173,38 @@ void run_rendezvous_line_tests()
         waitFor([&]() { return dropped == 2; }, 1000);
     }
 
-    SECTION("RendezvousClient — a name is raced, and the line opens on the address that answered");
+    SECTION("RendezvousClient — only a Qt with the fix for QTBUG-141396 opens the line on an "
+            "address");
     {
-        // "localhost" is the one name every machine resolves without a network,
-        // to ::1 and 127.0.0.1 on most. The stand-in listens on both, and keeps
-        // the Host it was asked for.
-        QWebSocketServer server(QStringLiteral("rdv-test"), QWebSocketServer::NonSecureMode);
-        CHECK(server.listen(QHostAddress::Any, 0));
-        int lines = 0;
-        QByteArray hostHeader;
-        QHostAddress peer;
-        QObject::connect(&server, &QWebSocketServer::newConnection, [&]() {
-            while (QWebSocket* ws = server.nextPendingConnection()) {
-                ++lines;
-                hostHeader = ws->request().rawHeader("Host");
-                peer = ws->peerAddress();
-                ws->setParent(&server);
-            }
-        });
+        const auto pins = [](int major, int minor, int patch) {
+            return RendezvousClient::canPinLine(QVersionNumber(major, minor, patch));
+        };
+        CHECK(!pins(6, 2, 4)); // Ubuntu 22.04
+        CHECK(!pins(6, 4, 2)); // Debian 12, Ubuntu 24.04
+        CHECK(!pins(6, 8, 2)); // Debian 13, the Docker image
+        CHECK(!pins(6, 10, 2));
+        CHECK(pins(6, 10, 3));
+        CHECK(pins(6, 10, 4));
+        CHECK(!pins(6, 11, 0)); // the fix came to the 6.11 branch after it
+        CHECK(pins(6, 11, 1));
+        CHECK(pins(6, 11, 2));
+        CHECK(pins(6, 12, 0));
+        CHECK(!RendezvousClient::canPinLine(QVersionNumber()));
+        std::fprintf(stderr, "  (this suite runs on Qt %s: the line %s)\n", qVersion(),
+                     qtCanPinLine() ? "is raced" : "goes by name");
+    }
 
-        const QString authority = QStringLiteral("localhost:%1").arg(server.serverPort());
+    SECTION("RendezvousClient — a name is raced, and the line opens on the address that answered");
+    if (!qtCanPinLine()) {
+        std::fprintf(stderr,
+                     "  (skipped: Qt %s cannot pin the line; the by-name section "
+                     "below is what it runs)\n",
+                     qVersion());
+    } else {
+        // "localhost" is the one name every machine resolves without a network.
+        HostStandIn server;
+        CHECK(server.listen());
+        const QString authority = QStringLiteral("localhost:%1").arg(server.tcp.serverPort());
         qputenv("MW_RENDEZVOUS_URL", (QStringLiteral("http://") + authority).toUtf8());
 
         AppSettings settings;
@@ -155,15 +214,64 @@ void run_rendezvous_line_tests()
         QElapsedTimer opening;
         opening.start();
         client.start();
-        CHECK(waitFor([&]() { return client.isOnline() && lines == 1; }, 5000));
+        CHECK(waitFor([&]() { return client.isOnline() && server.lines == 1; }, 5000));
         // Lookup, race and open on loopback: well under the stagger.
         CHECK(opening.elapsed() < 2000);
-        // The line was opened on an address, and the server still saw the name.
-        CHECK(peer.isLoopback());
-        CHECK_EQ(QString::fromLatin1(hostHeader), authority);
+        // The race's probe, then the line on the address it named...
+        CHECK_EQ(server.connections, 2);
+        CHECK(server.peer.isLoopback());
+        // ...and the server still saw the name, once.
+        CHECK_EQ(QString::fromLatin1(server.hostHeader), authority);
 
         client.stop();
         waitFor([&]() { return !client.isOnline(); }, 1000);
+    }
+
+    SECTION("RendezvousClient — on a Qt that cannot pin the line, it goes by name");
+    {
+        HostStandIn server;
+        CHECK(server.listen());
+        const QString authority = QStringLiteral("localhost:%1").arg(server.tcp.serverPort());
+        qputenv("MW_RENDEZVOUS_URL", (QStringLiteral("http://") + authority).toUtf8());
+
+        AppSettings settings;
+        claimedIdentity(settings);
+
+        RendezvousClient client(&settings);
+        client.forceLineByName();
+        client.start();
+        CHECK(waitFor([&]() { return client.isOnline() && server.lines == 1; }, 5000));
+        // No probe: Qt opened the line by name, and the Host is the URL's own.
+        CHECK_EQ(server.connections, 1);
+        CHECK_EQ(QString::fromLatin1(server.hostHeader), authority);
+
+        client.stop();
+        waitFor([&]() { return !client.isOnline(); }, 1000);
+    }
+
+    SECTION("RendezvousClient — a line by name is not cut at the bound of a line on an address");
+    {
+        // Qt's own walk gives a silent address 21 to 30 s before the next one:
+        // the bound that suits a raced line would cut it every time.
+        MuteServer mute;
+        CHECK(mute.listen(QHostAddress::Any));
+        qputenv("MW_RENDEZVOUS_URL",
+                QStringLiteral("http://localhost:%1").arg(mute.server.serverPort()).toUtf8());
+
+        AppSettings settings;
+        claimedIdentity(settings);
+
+        RendezvousClient client(&settings);
+        client.forceLineByName();
+        client.setOpenTimeoutMs(300);
+        client.start();
+        CHECK(waitFor([&]() { return mute.accepted == 1; }, 3000));
+        // Cut at 300 ms, a second attempt would follow within the first retry,
+        // 1 to 2 s after the cut.
+        CHECK(!waitFor([&]() { return mute.accepted > 1; }, 3000));
+        CHECK(!client.isOnline());
+
+        client.stop();
     }
 
     SECTION("RendezvousClient — an attempt that never comes up is cut at the open timeout, "
@@ -218,7 +326,10 @@ void run_rendezvous_line_tests()
         MuteServer mute6;
         const bool staged = has4 && has6 && mute4.listen(QHostAddress::LocalHost) &&
                             mute6.listen(QHostAddress::LocalHostIPv6, mute4.server.serverPort());
-        if (!staged) {
+        if (!qtCanPinLine()) {
+            std::fprintf(stderr, "  (skipped: Qt %s cannot pin the line, nothing is raced)\n",
+                         qVersion());
+        } else if (!staged) {
             std::fprintf(stderr, "  (skipped: localhost is not dual-stack here)\n");
         } else {
             qputenv("MW_RENDEZVOUS_URL",
