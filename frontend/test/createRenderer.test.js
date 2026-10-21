@@ -18,7 +18,7 @@ vi.mock('../js/stream/renderers/VideoElementRenderer.js', () => ({
 }));
 vi.mock('../js/stream/renderers/WebGlRenderer.js', () => ({
     WebGlRenderer: { create: vi.fn(async () => ({ kind: 'webgl' })) },
-    WEBGL_ALGOS: ['gl-fsr1', 'gl-sgsr', 'gl-nis'],
+    WEBGL_ALGOS: ['gl-fsr1', 'gl-sgsr', 'gl-nis', 'gl-mwsr'],
 }));
 
 import {
@@ -99,6 +99,14 @@ describe('createVideoRenderer', () => {
         const r = await createVideoRenderer(canvas, { algo: 'off' });
         expect(r.kind).toBe('canvas2d');
         expect(WebGlRenderer.create).not.toHaveBeenCalled();
+    });
+
+    it("routes the WebGL2 twin of MoonlightWeb's upscaler to WebGL, like the three ports", async () => {
+        vi.stubGlobal('navigator', { gpu: {} });
+        const r = await createVideoRenderer(canvas, { algo: 'gl-mwsr', webgpu: false });
+        expect(r.kind).toBe('webgl');
+        expect(WebGlRenderer.create.mock.calls[0][1].algo).toBe('gl-mwsr');
+        expect(WebGpuRenderer.create).not.toHaveBeenCalled();
     });
 });
 

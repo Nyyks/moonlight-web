@@ -51,12 +51,13 @@ function run(gov, costByLevel, seconds, startMs = 0, arrivalMs = 16.7) {
     return { steps, now };
 }
 
-// Cost of one draw per level, in ms, down the ladder fsr1 → nis → sgsr → off.
-// Under a call the GPU is contended and FSR1 (3 passes) no longer fits a
-// 16.7ms frame; NIS (one pass, heavier taps) does, and so does SGSR below it.
-const CONTENDED = { fsr1: 19.5, nis: 12, sgsr: 9, off: 3 };
+// Cost of one draw per level, in ms, down the ladder fsr1 → nis → sgsr → mwsr
+// → off. Under a call the GPU is contended and FSR1 (3 passes) no longer fits
+// a 16.7ms frame; NIS (one pass, heavier taps) does, and so do SGSR and mwsr
+// (MoonlightWeb's own, about half of SGSR) below it.
+const CONTENDED = { fsr1: 19.5, nis: 12, sgsr: 9, mwsr: 5, off: 3 };
 // Recovery needs the running level under 0.4 × 16.7 = 6.7ms.
-const IDLE = { fsr1: 10.3, nis: 6, sgsr: 5, off: 2 };
+const IDLE = { fsr1: 10.3, nis: 6, sgsr: 5, mwsr: 3, off: 2 };
 
 /** Same cadence as feed(), with a decode-queue depth on every window. */
 function feedQueued(gov, obs, seconds, startMs = 0) {
@@ -111,8 +112,27 @@ describe('EnhancerGovernor', () => {
     it('walks the whole ladder down but stops at off', () => {
         const gov = new EnhancerGovernor('fsr1');
         const steps = feed(gov, { serviceMs: 40, arrivalMs: 16.7 }, 60);
-        expect(steps.map((s) => s.algo)).toEqual(['nis', 'sgsr', 'off']);
+        expect(steps.map((s) => s.algo)).toEqual(['nis', 'sgsr', 'mwsr', 'off']);
         expect(gov.level).toBe('off');
+    });
+
+    it('has mwsr one rung under SGSR, in both flavours, and reads an older memory as before', () => {
+        // Cheaper than SGSR1 for FSR1's sharpness (upscaler-mwsr.md): a session
+        // stepped down keeps a sharp picture one rung longer.
+        const gov = new EnhancerGovernor('sgsr');
+        const steps = feed(gov, { serviceMs: 40, arrivalMs: 16.7 }, 20);
+        expect(steps.map((s) => s.algo)).toEqual(['mwsr', 'off']);
+        expect(new EnhancerGovernor('mwsr').level).toBe('mwsr');
+        expect(ladderRung('gl-mwsr')).toBe('mwsr');
+        expect(rendererAlgo('mwsr', 'webgl')).toBe('gl-mwsr');
+        expect(rendererAlgo('mwsr', 'webgpu')).toBe('mwsr');
+        // A verdict kept before the rung existed names its rungs: still read.
+        localStorage.setItem(
+            'mw_enhancer_rung',
+            JSON.stringify({ webgl: { ceiling: 'sgsr', rung: 'off', recoverAfterMs: 30000 } }),
+        );
+        expect(rememberedRung('webgl', 'sgsr')).toEqual({ rung: 'off', recoverAfterMs: 30000 });
+        localStorage.removeItem('mw_enhancer_rung');
     });
 
     it('needs the verdict to hold — a single busy window changes nothing', () => {
@@ -195,7 +215,7 @@ describe('EnhancerGovernor — invited player profile', () => {
     it('drops SGSR once it costs more than 8ms past the warm-up', () => {
         const gov = new EnhancerGovernor('sgsr', PLAYER);
         const steps = feed(gov, { serviceMs: 9, arrivalMs: 16.7 }, 20);
-        expect(steps.map((s) => s.algo)).toEqual(['off']);
+        expect(steps.map((s) => s.algo)).toEqual(['mwsr', 'off']);
         expect(gov.degraded).toBe(true);
     });
 
@@ -212,7 +232,7 @@ describe('EnhancerGovernor — invited player profile', () => {
         // 11ms is under 0.8 x 16.7, so the owner's governor holds — but the
         // player was promised 8ms.
         const steps = feed(gov, { serviceMs: 11, arrivalMs: 16.7 }, 20);
-        expect(steps.map((s) => s.algo)).toEqual(['off']);
+        expect(steps.map((s) => s.algo)).toEqual(['mwsr', 'off']);
 
         const owner = new EnhancerGovernor('sgsr');
         expect(feed(owner, { serviceMs: 11, arrivalMs: 16.7 }, 20)).toEqual([]);
@@ -304,7 +324,7 @@ describe('EnhancerGovernor — a starved decoder behind a cheap draw', () => {
  */
 describe('EnhancerGovernor — a GPU that keeps up, frames late', () => {
     // Share of draws still on the GPU at the next one, per running level.
-    const BEHIND = { fsr1: 1.0, nis: 0.9, sgsr: 0.0, off: 0.0 };
+    const BEHIND = { fsr1: 1.0, nis: 0.9, sgsr: 0.0, mwsr: 0.0, off: 0.0 };
 
     function runGpu(gov, behindByLevel, seconds, startMs = 0) {
         const steps = [];
@@ -395,8 +415,10 @@ describe('EnhancerGovernor — WebGL2 passes and the memory of a verdict', () =>
 
     it('climbs back from a remembered start when the decoder is clear', () => {
         const gov = new EnhancerGovernor('sgsr', { startRung: 'off' });
-        const steps = feedQueued(gov, CLEAR, 30);
-        expect(steps.map((s) => s.algo)).toEqual(['sgsr']);
+        // One bet at a time, 15 s apart: mwsr first, the setting after it.
+        expect(feedQueued(gov, CLEAR, 30).map((s) => s.algo)).toEqual(['mwsr']);
+        expect(gov.degraded).toBe(true);
+        expect(feedQueued(gov, CLEAR, 30, 30000).map((s) => s.algo)).toEqual(['sgsr']);
         expect(gov.degraded).toBe(false);
     });
 
@@ -404,14 +426,14 @@ describe('EnhancerGovernor — WebGL2 passes and the memory of a verdict', () =>
         const gov = new EnhancerGovernor('sgsr', { startRung: 'off', recoverAfterMs: 60000 });
         expect(gov.recoverAfterMs).toBe(60000);
         expect(feedQueued(gov, CLEAR, 50)).toEqual([]);
-        expect(feedQueued(gov, CLEAR, 20, 50000).map((s) => s.algo)).toEqual(['sgsr']);
+        expect(feedQueued(gov, CLEAR, 20, 50000).map((s) => s.algo)).toEqual(['mwsr']);
     });
 
     it('remembers a step down and forgets it back at the setting', () => {
         expect(rememberedRung('webgl', 'sgsr')).toBeNull();
         const gov = new EnhancerGovernor('sgsr');
         const down = feedQueued(gov, STARVED, 10);
-        expect(down.map((s) => s.algo)).toEqual(['off']);
+        expect(down.map((s) => s.algo)).toEqual(['mwsr', 'off']);
         rememberRung('webgl', gov.ceiling, gov.level, gov.recoverAfterMs);
         expect(rememberedRung('webgl', 'sgsr')).toEqual({ rung: 'off', recoverAfterMs: 15000 });
         // Another renderer, another setting: nothing carried over.

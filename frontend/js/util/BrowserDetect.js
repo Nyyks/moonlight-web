@@ -408,6 +408,21 @@ export function isSnapdragonGpu() {
 }
 
 /**
+ * Dev flag, no UI, main thread only: localStorage.mw_mwsr = '1' makes 'auto'
+ * pick MoonlightWeb's own upscaler, `mwsr` (docs/design/upscaler-mwsr.md), on
+ * every device and in both flavours. P4 of that plan integrates the shader
+ * behind this flag; P6 decides the default per device class on P5's campaign.
+ * Off, or where storage is refused, nothing changes.
+ */
+export function mwsrPreferred() {
+    try {
+        return localStorage.getItem('mw_mwsr') === '1';
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
  * Pick the auto Video-Enhancement upscaler for this device: 'fsr1' (sharper,
  * three passes) on a desktop, 'sgsr' (one light pass) on a phone or tablet —
  * and 'sgsr' on ANY Snapdragon, a Windows-on-ARM laptop included. SGSR is
@@ -416,9 +431,11 @@ export function isSnapdragonGpu() {
  * Decided 03/09/2026 with the SDR matrix: otherwise the platform class is the
  * whole rule — a phone's GPU budget is spent on the decode, whatever its core
  * count. Which API runs it (WebGL2 in SDR, WebGPU in HDR) is StreamView's call.
- * @returns {'fsr1'|'sgsr'}
+ * Behind the mw_mwsr flag (mwsrPreferred), 'mwsr' everywhere.
+ * @returns {'fsr1'|'sgsr'|'mwsr'}
  */
 export function pickAutoEnhancer() {
+    if (mwsrPreferred()) return 'mwsr';
     if (isSnapdragonGpu()) return 'sgsr';
     return PLATFORM_TYPE === 'desktop' ? 'fsr1' : 'sgsr';
 }

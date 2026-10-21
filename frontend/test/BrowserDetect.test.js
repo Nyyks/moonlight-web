@@ -14,6 +14,7 @@ import {
     noteDecoderRefusesReferenceRepairs,
     physicalScreenSize,
     pickAutoEnhancer,
+    mwsrPreferred,
     PLATFORM_TYPE,
 } from '../js/util/BrowserDetect.js';
 
@@ -268,6 +269,18 @@ describe('BrowserDetect — enhancer choice + module constants', () => {
     it('PLATFORM_TYPE is a known value and desktop picks fsr1', () => {
         expect(['mobile', 'tablet', 'desktop']).toContain(PLATFORM_TYPE);
         expect(pickAutoEnhancer()).toBe('fsr1'); // jsdom default UA → desktop
+    });
+
+    it("the mw_mwsr dev flag makes auto pick MoonlightWeb's own upscaler", () => {
+        expect(mwsrPreferred()).toBe(false);
+        localStorage.setItem('mw_mwsr', '1');
+        try {
+            expect(mwsrPreferred()).toBe(true);
+            expect(pickAutoEnhancer()).toBe('mwsr');
+        } finally {
+            localStorage.removeItem('mw_mwsr');
+        }
+        expect(pickAutoEnhancer()).toBe('fsr1');
     });
 
     it('a beefy 1080p+ Android phone still picks sgsr (re-imported with a stubbed UA)', async () => {

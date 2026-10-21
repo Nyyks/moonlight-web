@@ -33,8 +33,8 @@
  * rate the pipeline has to sustain. Costing 10ms is fine at 22fps (45ms apart)
  * and fine at 60fps (16.7ms apart); costing 19.5ms at 60fps is not.
  *
- * The ladder only ever goes DOWN from what the user picked (fsr1 → nis → sgsr → off)
- * and climbs back when the pressure is gone. Recovery is deliberately shy: the
+ * The ladder only ever goes DOWN from what the user picked (fsr1 → nis → sgsr →
+ * mwsr → off) and climbs back when the pressure is gone. Recovery is deliberately shy: the
  * cost at the level above cannot be measured from the level below, so a restore
  * is a bet. Each undone bet doubles the wait before the next one, which turns a
  * long call into one failed attempt instead of a flip-flop every 15 seconds.
@@ -48,9 +48,14 @@
 
 /**
  * Descending cost order — the only direction this ladder is walked. The menu
- * calls them Quality (FSR1), Balanced (NIS) and Performance (SGSR1).
+ * calls them Quality (FSR1), Balanced (NIS) and Performance (SGSR1); `mwsr`
+ * is MoonlightWeb's own (docs/design/upscaler-mwsr.md), below SGSR1 because
+ * it costs less on every GPU measured (0.4 to 0.8 × SGSR1, P0 to P3) for
+ * FSR1's sharpness, so a session stepped down keeps a sharp picture one rung
+ * longer. The memory (rememberRung) stores names, so the rung slid in needs
+ * no migration; 'auto' only picks it behind the mw_mwsr flag until P6.
  */
-export const ENHANCER_LADDER = ['fsr1', 'nis', 'sgsr', 'off'];
+export const ENHANCER_LADDER = ['fsr1', 'nis', 'sgsr', 'mwsr', 'off'];
 
 /** A renderer's pass as a rung of the ladder: 'gl-sgsr' is 'sgsr'. */
 export function ladderRung(algo) {

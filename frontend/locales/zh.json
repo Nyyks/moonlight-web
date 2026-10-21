@@ -490,6 +490,8 @@
         "algoBalGpu": "均衡（NIS WebGPU）",
         "algoQualGl": "画质（FSR1 WebGL2）",
         "algoQualGpu": "画质（FSR1 WebGPU）",
+        "algoMwsrGl": "MoonlightWeb（mwsr WebGL2）",
+        "algoMwsrGpu": "MoonlightWeb（mwsr WebGPU）",
         "language": "语言",
         "languageDesc": "界面语言。更改后页面将重新加载。",
         "controllers": "手柄",

@@ -75,6 +75,7 @@ import {
     SUPPORTS_CANVAS_TEARING,
     decoderRidesOutGaps,
     isSnapdragonGpu,
+    mwsrPreferred,
     noteDecoderCannotRideOut,
     noteDecoderRefusesReferenceRepairs,
     pickAutoEnhancer,
@@ -677,9 +678,12 @@ export class StreamView {
         // is unavailable. Forwarded to the worker too (no localStorage there).
         //
         // The menu (debug builds) offers each upscaler in two flavours: on
-        // WebGPU ('sgsr', 'nis', 'fsr1') and on WebGL2 ('gl-sgsr', 'gl-nis',
-        // 'gl-fsr1'), plus 'smooth2d' (Canvas2D resampling at display size).
-        // None of the latter ask for WebGPU; createVideoRenderer routes them.
+        // WebGPU ('sgsr', 'nis', 'fsr1', 'mwsr') and on WebGL2 ('gl-sgsr',
+        // 'gl-nis', 'gl-fsr1', 'gl-mwsr'), plus 'smooth2d' (Canvas2D
+        // resampling at display size). None of the latter ask for WebGPU;
+        // createVideoRenderer routes them. 'mwsr' is MoonlightWeb's own
+        // (docs/design/upscaler-mwsr.md); 'auto' takes it, in both flavours,
+        // behind the mw_mwsr dev flag until P6 decides the default.
         //
         // The production matrix (decided 03/09/2026), 'auto' being the only
         // value a release build ever saves:
@@ -733,8 +737,9 @@ export class StreamView {
                         '[StreamView] Enhancer: none on a TV — its <video> shows every frame',
                     );
                     sel = 'off';
-                } else if (hdr) sel = isSnapdragonGpu() ? 'sgsr' : 'fsr1';
-                else sel = 'gl-' + pickAutoEnhancer();
+                } else if (hdr) {
+                    sel = mwsrPreferred() ? 'mwsr' : isSnapdragonGpu() ? 'sgsr' : 'fsr1';
+                } else sel = 'gl-' + pickAutoEnhancer();
             }
             // HDR has no WebGL2 or Canvas2D presentation in Chrome (no HDR
             // surface for either), so with HDR on every upscaler runs in its
@@ -742,7 +747,12 @@ export class StreamView {
             // present the result. Smooth2D has no shader to move: it becomes
             // the plain WebGPU blit.
             if (hdr && NO_WEBGPU_ALGOS.includes(sel)) {
-                const toGpu = { 'gl-sgsr': 'sgsr', 'gl-nis': 'nis', 'gl-fsr1': 'fsr1' };
+                const toGpu = {
+                    'gl-sgsr': 'sgsr',
+                    'gl-nis': 'nis',
+                    'gl-fsr1': 'fsr1',
+                    'gl-mwsr': 'mwsr',
+                };
                 const moved = toGpu[sel] || 'off';
                 console.log('[StreamView] HDR: enhancer ' + sel + ' → ' + moved + ' on WebGPU');
                 sel = moved;
@@ -754,7 +764,7 @@ export class StreamView {
                 algo = sel;
             } else {
                 wantWebGpu = true;
-                algo = sel === 'nis' || sel === 'fsr1' ? sel : 'sgsr';
+                algo = sel === 'nis' || sel === 'fsr1' || sel === 'mwsr' ? sel : 'sgsr';
             }
         }
         // Whether the user enabled the Enhancer (used to flag it OFF in the overlay
@@ -6431,8 +6441,9 @@ export class StreamView {
                 ? t('stream.enhancerPassthrough')
                 : this._videoEnhancementAlgo === 'off'
                   ? t('stream.enhancerOff')
-                  : { fsr1: 'FSR1', nis: 'NIS', sgsr: 'SGSR' }[this._videoEnhancementAlgo] ||
-                    'SGSR';
+                  : { fsr1: 'FSR1', nis: 'NIS', sgsr: 'SGSR', mwsr: 'MWSR' }[
+                        this._videoEnhancementAlgo
+                    ] || 'SGSR';
             // Stepped down by the governor: say so, otherwise the card reads as
             // if the user's setting silently changed.
             if (this._enhancerDegraded && !passIdle) enhancerName += ' (auto)';
@@ -6443,9 +6454,12 @@ export class StreamView {
                 ? t('stream.enhancerPassthrough')
                 : this._videoEnhancementAlgo === 'off'
                   ? t('stream.enhancerOff')
-                  : { 'gl-fsr1': 'WebGL FSR1', 'gl-sgsr': 'WebGL SGSR', 'gl-nis': 'WebGL NIS' }[
-                        this._videoEnhancementAlgo
-                    ] || 'WebGL';
+                  : {
+                        'gl-fsr1': 'WebGL FSR1',
+                        'gl-sgsr': 'WebGL SGSR',
+                        'gl-nis': 'WebGL NIS',
+                        'gl-mwsr': 'WebGL MWSR',
+                    }[this._videoEnhancementAlgo] || 'WebGL';
             if (this._enhancerDegraded && !passIdle) enhancerName += ' (auto)';
         } else if (NO_WEBGPU_ALGOS.includes(this._enhancerCeiling)) {
             // The renderer may have fallen back (no WebGL2 → Canvas2D), so the

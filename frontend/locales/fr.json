@@ -490,6 +490,8 @@
         "algoBalGpu": "Équilibré (NIS WebGPU)",
         "algoQualGl": "Qualité (FSR1 WebGL2)",
         "algoQualGpu": "Qualité (FSR1 WebGPU)",
+        "algoMwsrGl": "MoonlightWeb (mwsr WebGL2)",
+        "algoMwsrGpu": "MoonlightWeb (mwsr WebGPU)",
         "language": "Langue",
         "languageDesc": "Langue de l'interface. La page se recharge lors du changement.",
         "controllers": "Manettes",

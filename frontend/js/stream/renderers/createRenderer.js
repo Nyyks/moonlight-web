@@ -32,11 +32,11 @@ import { VideoElementRenderer } from './VideoElementRenderer.js';
 import { videoSinkCtor } from './videoSink.js';
 
 /**
- * Enhancer choices that run WITHOUT WebGPU: the three WebGL2 shaders and
- * 'smooth2d' (Canvas2D drawing at the display size with its best resampling
- * filter). The caller keeps opts.webgpu false for all of them; anything not in
- * this list ('sgsr' / 'nis' / 'fsr1' / 'off') is handled by the WebGPU or
- * Canvas2D path.
+ * Enhancer choices that run WITHOUT WebGPU: the WebGL2 shaders (WEBGL_ALGOS:
+ * the three ports and 'gl-mwsr', MoonlightWeb's own) and 'smooth2d' (Canvas2D
+ * drawing at the display size with its best resampling filter). The caller
+ * keeps opts.webgpu false for all of them; anything not in this list ('sgsr' /
+ * 'nis' / 'fsr1' / 'mwsr' / 'off') is handled by the WebGPU or Canvas2D path.
  */
 export const NO_WEBGPU_ALGOS = ['smooth2d', ...WEBGL_ALGOS];
 

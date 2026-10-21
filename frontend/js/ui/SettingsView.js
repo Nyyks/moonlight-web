@@ -129,6 +129,11 @@ const ENHANCER_CHOICES = [
     { value: 'nis', key: 'settings.algoBalGpu', gpu: true },
     { value: 'gl-fsr1', key: 'settings.algoQualGl', gpu: false },
     { value: 'fsr1', key: 'settings.algoQualGpu', gpu: true },
+    // MoonlightWeb's own upscaler (docs/design/upscaler-mwsr.md): FSR1's
+    // sharpness for less than SGSR1's cost, in both flavours; 'auto' takes it
+    // behind the mw_mwsr dev flag until P6 decides the default.
+    { value: 'gl-mwsr', key: 'settings.algoMwsrGl', gpu: false },
+    { value: 'mwsr', key: 'settings.algoMwsrGpu', gpu: true },
 ];
 
 export class SettingsView {
