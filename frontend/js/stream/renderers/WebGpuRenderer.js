@@ -16,11 +16,30 @@
  */
 
 /**
- * WebGpuRenderer — WebGPU output path (feature On). SGSRv1 (C4), FSR1 (C6) and NIS.
+ * WebGpuRenderer — WebGPU output path (feature On). SGSRv1 (C4), FSR1 (C6), NIS
+ * and mwsr.
  *
  * Common Pass 0 (blit): importExternalTexture(frame) → inputTex (rgba8unorm,
  * frame res). A texture_external can only be read with textureSampleBaseClampToEdge,
- * but the enhancers need textureGather → materialize the frame first.
+ * but the enhancers need textureGather → materialize the frame first. (mwsr
+ * needs no gather; it keeps the pass 0 because the external texture costs two
+ * fetches a sample, which lost to pass 0 + kernel on every GPU measured,
+ * upscaler-mwsr-p2.md §3.)
+ *
+ * mwsr (algo 'mwsr'): 2 passes — Pass 0 blit, Pass 1 mwsr inputTex → canvas.
+ *   MoonlightWeb's own upscaler (MwsrShader.js, docs/design/upscaler-mwsr.md).
+ *   One pipeline per regime, all built at creation and specialised by
+ *   override: the `up` kernel (CHROMA444 on a 4:4:4 stream) and the reduction
+ *   grids; mwsrRegime() picks one per frame from the frame and canvas sizes,
+ *   the uniforms are rewritten when those change. In SDR the reduction reads
+ *   inputTex through its `-srgb` view and draws into the canvas' `-srgb` view:
+ *   the sampler decodes before it filters and the target encodes on write, so
+ *   the average is taken in linear light for free (P3, journal J15) — both
+ *   textures are created with those view formats, and the reduction falls back
+ *   to the software light (LINEAR_LIGHT 1, the 2×2 grid) where the browser
+ *   refuses them or the canvas is float (HDR). The f16 module (`half`) runs
+ *   where the adapter has shader-f16 and is not NVIDIA's: 9-10 % off the
+ *   kernel on the 780M for the same pixels, nothing on the RTX (P2.3).
  *
  * SGSRv1 (algo 'sgsr'): 2 passes — Pass 0 blit, Pass 1 SGSR inputTex → canvas.
  *   Port (Qualcomm, BSD-3-Clause) from sgsr1.h, mode 1, luma = GREEN, EdgeThreshold
@@ -52,11 +71,19 @@
  *     requestDevice run BEFORE getContext('webgpu') so a failure falls back to
  *     Canvas2D.
  *   - External texture expires each task → its blit bind group is per-frame.
- *   - Perceptual space: non-srgb formats only.
+ *   - Perceptual space: the textures stay non-srgb; only mwsr's reduction
+ *     binds the `-srgb` views of inputTex and of the canvas (above).
  */
 import { VideoRenderer } from './VideoRenderer.js';
 import { nisConfig, nisCoefTexture, readNisSharpness, nisScaleInRange } from './NisTables.js';
 import { fitOutputSize, isIdentityScale } from './scaleRegime.js';
+import {
+    MWSR_UNIFORM_FLOATS,
+    mwsrRegime,
+    mwsrRegimes,
+    mwsrUniforms,
+    mwsrWgsl,
+} from './MwsrShader.js';
 
 // Full-screen triangle (uv 0..1, v down — matches texture sampling).
 const FULLSCREEN_VS = /* wgsl */ `
@@ -888,10 +915,16 @@ export class WebGpuRenderer extends VideoRenderer {
         // only construction path and overwrites all of them before returning.
         /** @type {string} 'h264' | 'hevc' | 'av1'. */
         this.videoCodec = '';
-        /** @type {'sgsr'|'nis'|'fsr1'|'off'} Upscaler pass; 'off' blits through. */
+        /** @type {'sgsr'|'nis'|'fsr1'|'mwsr'|'off'} Upscaler pass; 'off' blits through. */
         this._algo = 'sgsr';
         /** The last draw copied the frame 1:1 instead of running the pass. */
         this._passthrough = false;
+        /** 4:4:4 stream: mwsr votes and sharpens per channel (CHROMA444). */
+        this._yuv444 = false;
+        /** mwsr's f16 module: shader-f16 granted (asked for off NVIDIA). */
+        this._mwsrHalf = false;
+        /** SDR: inputTex and the canvas carry `-srgb` view formats (mwsr's reduction). */
+        this._srgbViews = false;
         /** NIS sharpness (0..1, 0.5 neutral) and its re-read throttle. */
         this._nisSharpness = 0.5;
         this._nisKnobsMs = 0;
@@ -917,14 +950,21 @@ export class WebGpuRenderer extends VideoRenderer {
         // ── Steps that may fail on unsupported platforms — BEFORE getContext ──
         const adapter = await navigator.gpu.requestAdapter();
         if (!adapter) throw new Error('WebGPU requestAdapter returned null');
-        const device = await adapter.requestDevice();
+        const device = await WebGpuRenderer._requestDevice(adapter);
 
         const r = new WebGpuRenderer();
         r.canvas = canvas;
         r.videoCodec = opts.videoCodec;
         // 'off' = WebGPU pass-through (blit only, no upscaler); sgsr is the safe default.
         r._algo =
-            opts.algo === 'fsr1' || opts.algo === 'nis' || opts.algo === 'off' ? opts.algo : 'sgsr';
+            opts.algo === 'fsr1' ||
+            opts.algo === 'nis' ||
+            opts.algo === 'mwsr' ||
+            opts.algo === 'off'
+                ? opts.algo
+                : 'sgsr';
+        r._yuv444 = opts.yuv444 === true;
+        r._mwsrHalf = device.features.has('shader-f16');
         // HDR: rgba16float canvas in extended tone-mapping mode (values > 1.0
         // map to the display's HDR headroom). Gated on opts.hdr; _configure()
         // self-downgrades to SDR if the browser rejects the HDR canvas config.
@@ -990,9 +1030,36 @@ export class WebGpuRenderer extends VideoRenderer {
                 ' hdrLinear=' +
                 r._hdrLinear +
                 ' hdrExtTonemap=' +
-                r._hdrExtTonemap,
+                r._hdrExtTonemap +
+                ' half=' +
+                r._mwsrHalf +
+                ' srgbViews=' +
+                r._srgbViews +
+                ' yuv444=' +
+                r._yuv444,
         );
         return r;
+    }
+
+    /**
+     * The device, with shader-f16 where the adapter has it and is not
+     * NVIDIA's: mwsr's f16 module took 9-10 % off the kernel on the 780M for
+     * the same pixels and nothing on the RTX (upscaler-mwsr-p2.md §3), and a
+     * feature granted costs nothing to the other passes. A device refused with
+     * it is asked for bare; the kernel then runs in f32.
+     * @param {GPUAdapter} adapter
+     * @returns {Promise<GPUDevice>}
+     */
+    static async _requestDevice(adapter) {
+        const vendor = String((adapter.info && adapter.info.vendor) || '').toLowerCase();
+        if (adapter.features.has('shader-f16') && vendor !== 'nvidia') {
+            try {
+                return await adapter.requestDevice({ requiredFeatures: ['shader-f16'] });
+            } catch (e) {
+                console.warn('[WebGpuRenderer] shader-f16 refused, f32 kernel: ' + e.message);
+            }
+        }
+        return await adapter.requestDevice();
     }
 
     get ready() {
@@ -1008,10 +1075,11 @@ export class WebGpuRenderer extends VideoRenderer {
         return this._passthrough;
     }
 
-    /** Effective algorithm name for the overlay: 'SGSR' | 'NIS' | 'FSR1' | 'Off'. */
+    /** Effective algorithm name for the overlay: 'SGSR' | 'NIS' | 'FSR1' | 'MWSR' | 'Off'. */
     get algoName() {
         if (this._algo === 'fsr1') return 'FSR1';
         if (this._algo === 'nis') return 'NIS';
+        if (this._algo === 'mwsr') return 'MWSR';
         if (this._algo === 'off') return 'Off';
         return 'SGSR';
     }
@@ -1131,6 +1199,9 @@ export class WebGpuRenderer extends VideoRenderer {
                     colorSpace: 'display-p3',
                     toneMapping: { mode: 'extended' },
                 });
+                // No sRGB view of a float canvas: the reduction averages in
+                // software light there.
+                this._srgbViews = false;
                 return;
             } catch (e) {
                 console.warn(
@@ -1149,18 +1220,34 @@ export class WebGpuRenderer extends VideoRenderer {
                 }
             }
         }
-        // Standard 8-bit sRGB canvas (SDR).
+        // Standard 8-bit sRGB canvas (SDR). Its `-srgb` view format is declared
+        // for mwsr's reduction, which draws its linear-light average through
+        // that view (the texels stored are the same sRGB bytes as ever, so the
+        // probe and the other passes see no difference). A browser that
+        // refuses the view formats gets the plain configuration, and the
+        // reduction its software light.
         this._format = navigator.gpu.getPreferredCanvasFormat();
         this._interFormat = 'rgba8unorm';
         this._importColorSpace = 'srgb';
-        this.ctx.configure({
+        const config = {
             device: this._device,
             format: this._format,
             // COPY_SRC: the click-to-photon probe copies three texels out.
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
             alphaMode: 'opaque',
             colorSpace: 'srgb',
-        });
+        };
+        try {
+            this.ctx.configure({ ...config, viewFormats: [this._format + '-srgb'] });
+            this._srgbViews = true;
+        } catch (e) {
+            console.warn(
+                '[WebGpuRenderer] sRGB view formats refused, reduction in software light: ' +
+                    e.message,
+            );
+            this._srgbViews = false;
+            this.ctx.configure(config);
+        }
     }
 
     _buildResources() {
@@ -1196,10 +1283,15 @@ export class WebGpuRenderer extends VideoRenderer {
 
         // The copy to the canvas: the 'off' pass, and every pass's 1:1 frame.
         this._buildPassthroughResources();
+        // mwsr's pipelines belong to this device: a recovered one builds anew.
+        this._mwsrLayout = null;
+        this._mwsrPipelines = null;
         if (this._algo === 'fsr1') {
             this._buildFsr1Resources();
         } else if (this._algo === 'nis') {
             this._buildNisResources();
+        } else if (this._algo === 'mwsr') {
+            this._buildMwsrResources();
         } else if (this._algo !== 'off') {
             this._buildSgsrResources();
         }
@@ -1215,6 +1307,71 @@ export class WebGpuRenderer extends VideoRenderer {
         this._intermH = 0;
         this._enhanceBindGroup = null; // SGSR / EASU bind group (samples inputTex)
         this._rcasBindGroup = null; // FSR1 RCAS bind group (samples intermTex)
+        this._inputTexViewSrgb = null; // inputTex through its `-srgb` view (mwsr's reduction)
+        this._mwsrBindGroup = null; // mwsr: the plain view (the kernel)
+        this._mwsrBindGroupSrgb = null; // mwsr: the sRGB view (the reduction)
+    }
+
+    // mwsr (MwsrShader.js): the uniform block, the layout both modes share
+    // (sampler, inputTex, uniforms) and one pipeline per regime, all built
+    // here so that nothing compiles while the stream runs (plan §4.3).
+    _buildMwsrResources() {
+        const device = this._device;
+        this._mwsrUniform = device.createBuffer({
+            size: MWSR_UNIFORM_FLOATS * 4,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        this._mwsrUniKey = '';
+        this._mwsrLayout = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+                {
+                    binding: 1,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: 'float' },
+                },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: {} },
+            ],
+        });
+        this._mwsrPipelineLayout = device.createPipelineLayout({
+            bindGroupLayouts: [this._mwsrLayout],
+        });
+        this._mwsrPipelines = new Map();
+        for (const reg of mwsrRegimes({ srgb: this._srgbViews })) this._mwsrPipeline(reg);
+    }
+
+    /**
+     * The pipeline of one mwsr regime (mwsrRegime), specialised by override:
+     * the kernel with CHROMA444 on a 4:4:4 stream; a reduction grid with its
+     * span and its light, drawing into the canvas' `-srgb` view where there
+     * is one. Built once per device, kept in a map by regime.
+     * @param {{mode: 'up'|'down', taps: number, rDown: number, linearLight: number}} reg
+     * @returns {GPURenderPipeline}
+     */
+    _mwsrPipeline(reg) {
+        const key = reg.mode === 'up' ? 'up' : 'down' + reg.taps;
+        let pipeline = this._mwsrPipelines.get(key);
+        if (pipeline) return pipeline;
+        const srgb = reg.mode === 'down' && this._srgbViews;
+        const module = this._device.createShaderModule({
+            code: mwsrWgsl({ feed: 'tex', half: this._mwsrHalf, mode: reg.mode, taps: reg.taps }),
+        });
+        pipeline = this._device.createRenderPipeline({
+            layout: this._mwsrPipelineLayout,
+            vertex: { module, entryPoint: 'vs' },
+            fragment: {
+                module,
+                entryPoint: 'fs',
+                constants:
+                    reg.mode === 'up'
+                        ? { CHROMA444: this._yuv444 ? 1 : 0 }
+                        : { R_DOWN: reg.rDown, LINEAR_LIGHT: reg.linearLight },
+                targets: [{ format: srgb ? this._format + '-srgb' : this._format }],
+            },
+            primitive: { topology: 'triangle-list' },
+        });
+        this._mwsrPipelines.set(key, pipeline);
+        return pipeline;
     }
 
     // The plain copy to the canvas (external → canvas, no upscaler): the 'off'
@@ -1627,8 +1784,13 @@ export class WebGpuRenderer extends VideoRenderer {
             size: { width: inW, height: inH },
             format: this._interFormat,
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+            // The `-srgb` view mwsr's reduction reads through (SDR).
+            viewFormats: this._srgbViews ? [this._interFormat + '-srgb'] : [],
         });
         this._inputTexView = this._inputTex.createView();
+        this._inputTexViewSrgb = this._srgbViews
+            ? this._inputTex.createView({ format: this._interFormat + '-srgb' })
+            : null;
         this._inW = inW;
         this._inH = inH;
 
@@ -1651,6 +1813,23 @@ export class WebGpuRenderer extends VideoRenderer {
                     { binding: 3, resource: { buffer: this._nisUniform } },
                 ],
             });
+        } else if (this._algo === 'mwsr') {
+            // Two bind groups, kept with the texture: the plain view for the
+            // kernel, the sRGB view for the reduction (one and the same without
+            // the views).
+            const mk = (view) =>
+                this._device.createBindGroup({
+                    layout: this._mwsrLayout,
+                    entries: [
+                        { binding: 0, resource: this._sampler },
+                        { binding: 1, resource: view },
+                        { binding: 2, resource: { buffer: this._mwsrUniform } },
+                    ],
+                });
+            this._mwsrBindGroup = mk(this._inputTexView);
+            this._mwsrBindGroupSrgb = this._inputTexViewSrgb
+                ? mk(this._inputTexViewSrgb)
+                : this._mwsrBindGroup;
         } else {
             this._enhanceBindGroup = this._device.createBindGroup({
                 layout: this._enhanceLayout,
@@ -1703,7 +1882,8 @@ export class WebGpuRenderer extends VideoRenderer {
             const adapter = await navigator.gpu.requestAdapter();
             if (!adapter) throw new Error('no adapter on recovery');
             this._adapter = adapter;
-            this._device = await adapter.requestDevice();
+            this._device = await WebGpuRenderer._requestDevice(adapter);
+            this._mwsrHalf = this._device.features.has('shader-f16');
             this._armDeviceLost();
             this._configure();
             this._buildResources(); // resets size-dependent textures (recreated on next draw)
@@ -1732,18 +1912,26 @@ export class WebGpuRenderer extends VideoRenderer {
      * pass 0 exist in both of their targets from the start, so 'off' needs
      * nothing built or rebuilt.)
      *
-     * @param {string} algo 'sgsr' | 'nis' | 'fsr1' | 'off'; anything else is refused.
+     * @param {string} algo 'sgsr' | 'nis' | 'fsr1' | 'mwsr' | 'off'; anything else is refused.
      * @returns {boolean} true when the renderer switched.
      */
     setAlgo(algo) {
         if (algo === this._algo) return false;
         if (!this._ready || !this._device) return false;
-        if (algo !== 'sgsr' && algo !== 'nis' && algo !== 'fsr1' && algo !== 'off') return false;
+        if (
+            algo !== 'sgsr' &&
+            algo !== 'nis' &&
+            algo !== 'fsr1' &&
+            algo !== 'mwsr' &&
+            algo !== 'off'
+        )
+            return false;
 
         try {
             if (algo === 'sgsr' && !this._enhancePipeline) this._buildSgsrResources();
             else if (algo === 'nis' && !this._nisPipeline) this._buildNisResources();
             else if (algo === 'fsr1' && !this._easuPipeline) this._buildFsr1Resources();
+            else if (algo === 'mwsr' && !this._mwsrLayout) this._buildMwsrResources();
         } catch (e) {
             console.error('[WebGpuRenderer] setAlgo(' + algo + ') failed: ' + e.message);
             return false;
@@ -2024,6 +2212,39 @@ export class WebGpuRenderer extends VideoRenderer {
                 });
                 p1.setPipeline(this._nisPipeline);
                 p1.setBindGroup(0, this._enhanceBindGroup);
+                p1.draw(3);
+                p1.end();
+            } else if (this._algo === 'mwsr') {
+                // The regime by the frame and canvas sizes — never 'copy', the
+                // 1:1 frame went straight to the canvas above. The reduction
+                // reads and draws through the sRGB views when the canvas has
+                // them; the kernel works in gamma, on the plain views.
+                const reg = mwsrRegime(inW, inH, cw, ch, { srgb: this._srgbViews });
+                const srgb = reg.mode === 'down' && this._srgbViews;
+                const uniKey = inW + 'x' + inH + '>' + cw + 'x' + ch;
+                if (this._mwsrUniKey !== uniKey) {
+                    this._mwsrUniKey = uniKey;
+                    this._device.queue.writeBuffer(
+                        this._mwsrUniform,
+                        0,
+                        mwsrUniforms(inW, inH, cw, ch),
+                    );
+                }
+                // Pass 1: mwsr inputTex → canvas.
+                const p1 = encoder.beginRenderPass({
+                    colorAttachments: [
+                        {
+                            view: srgb
+                                ? canvasTex.createView({ format: this._format + '-srgb' })
+                                : canvasTex.createView(),
+                            loadOp: 'clear',
+                            storeOp: 'store',
+                            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        },
+                    ],
+                });
+                p1.setPipeline(this._mwsrPipeline(reg));
+                p1.setBindGroup(0, srgb ? this._mwsrBindGroupSrgb : this._mwsrBindGroup);
                 p1.draw(3);
                 p1.end();
             } else {

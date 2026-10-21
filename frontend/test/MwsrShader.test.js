@@ -7,6 +7,7 @@ import {
     MWSR_OVERRIDE_SPEC,
     MWSR_UNIFORM_FLOATS,
     mwsrRegime,
+    mwsrRegimes,
     mwsrUniforms,
     mwsrWgsl,
 } from '../js/stream/renderers/MwsrShader.js';
@@ -122,6 +123,22 @@ describe('the mwsr shader text', () => {
         for (const table of [MWSR_DOWN_TAPS, MWSR_DOWN_TAPS_SRGB])
             for (const [, taps] of table) expect(() => mwsrWgsl({ mode: 'down', taps })).not.toThrow();
         expect(MWSR_OVERRIDES.LINEAR_LIGHT).toBe(1);
+    });
+
+    it('lists every regime a renderer builds its pipelines for', () => {
+        for (const srgb of [false, true]) {
+            const regs = mwsrRegimes({ srgb });
+            const table = srgb ? MWSR_DOWN_TAPS_SRGB : MWSR_DOWN_TAPS;
+            expect(regs[0]).toEqual({ mode: 'up', taps: 5, rDown: 0, linearLight: 0 });
+            expect(regs.slice(1)).toEqual(
+                table.map(([, taps, rDown]) => ({ mode: 'down', taps, rDown, linearLight: srgb ? 0 : 1 })),
+            );
+            // every answer of mwsrRegime() at scale is one of them
+            for (const s of [0.1, 0.2, 0.3, 0.49, 0.5, 0.75, 0.99, 1.33, 2, 3])
+                expect(regs).toContainEqual(mwsrRegime(100, 100, Math.round(100 * s), Math.round(100 * s), { srgb }));
+            expect(regs).not.toContainEqual(mwsrRegime(100, 100, 100, 100, { srgb }));
+        }
+        expect(mwsrRegimes()).toEqual(mwsrRegimes({ srgb: false }));
     });
 
     it('uses no gather, no discard, no loop, no dynamic indexing (plan §3.4)', () => {

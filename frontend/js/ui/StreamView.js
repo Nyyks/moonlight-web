@@ -2598,6 +2598,8 @@ export class StreamView {
                     algo: this._videoEnhancementAlgo,
                     ceiling: this._enhancerCeiling,
                     enhancerProfile: this._governorProfile(),
+                    // 4:4:4 negotiated: mwsr reconstructs the chroma too.
+                    yuv444: this._yuv444,
                     hdr: this._hdrEnabled,
                     pacing: this._pacingEnabled,
                     frameSize: this._frameSize,
@@ -2620,6 +2622,7 @@ export class StreamView {
                 webgpu: this._wantWebGpu,
                 algo: this._videoEnhancementAlgo,
                 ceiling: this._enhancerCeiling,
+                yuv444: this._yuv444,
                 plainWebGl: this._plainWebGl,
                 hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                 hdrTonemap: this._hdrTonemap,
@@ -5245,6 +5248,8 @@ export class StreamView {
                         webgpu: this._wantWebGpu,
                         algo: this._videoEnhancementAlgo,
                         ceiling: this._enhancerCeiling,
+                        // 4:4:4 negotiated: mwsr reconstructs the chroma too.
+                        yuv444: this._yuv444,
                         plainWebGl: this._plainWebGl,
                         hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                         hdrTonemap: this._hdrTonemap,

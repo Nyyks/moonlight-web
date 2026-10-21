@@ -1079,6 +1079,7 @@ self.onmessage = (e) => {
                 webgpu: !!m.webgpu,
                 algo: m.algo,
                 ceiling: m.ceiling,
+                yuv444: !!m.yuv444,
                 hdr: !!m.hdr,
             }).then((r) => {
                 S.renderer = r;

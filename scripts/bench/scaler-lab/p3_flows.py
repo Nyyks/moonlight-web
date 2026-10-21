@@ -275,8 +275,10 @@ def p3_cases(a):
 # ── golden fingerprints (plan §8.2) ─────────────────────────────────────────
 
 GOLDEN_FILE = os.path.join(HERE, "golden.json")
-GOLDEN_UP = "tex-s1,mwsr,mwsr:dering=0,mwsr:c444=1"
-GOLDEN_DOWN = "tex-s1,mwsr,mwsr:srgb=1,mwsr:taps=9,mwsr:ll=2"
+# chain-mwsr is the product's renderer with the key (P4): its picture must be
+# the kernel's at scale and the sRGB-view reduction's below 1:1.
+GOLDEN_UP = "tex-s1,mwsr,mwsr:dering=0,mwsr:c444=1,chain-mwsr"
+GOLDEN_DOWN = "tex-s1,mwsr,mwsr:srgb=1,mwsr:taps=9,mwsr:ll=2,chain-mwsr"
 GOLDEN_CASES = [
     ("text", "1280x720", "2560x1440", GOLDEN_UP),
     ("game", "1280x720", "2560x1440", GOLDEN_UP),

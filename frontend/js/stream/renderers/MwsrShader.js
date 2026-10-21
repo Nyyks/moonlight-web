@@ -180,6 +180,24 @@ export function mwsrRegime(inW, inH, outW, outH, { srgb = false } = {}) {
 }
 
 /**
+ * Every regime mwsrRegime() can answer a renderer with — the `up` kernel and
+ * each grid of the reduction's table, through sRGB views or not — so that the
+ * renderer builds all of its pipelines at creation and compiles nothing while
+ * the stream runs (plan §4.3: the pinch zoom and the quality ladder change the
+ * scale from one frame to the next).
+ * @param {{srgb?: boolean}} [opts]
+ * @returns {Array<{mode: 'up'|'down', taps: number, rDown: number, linearLight: number}>}
+ */
+export function mwsrRegimes({ srgb = false } = {}) {
+    const table = srgb ? MWSR_DOWN_TAPS_SRGB : MWSR_DOWN_TAPS;
+    const linearLight = srgb ? 0 : 1;
+    return [
+        { mode: 'up', taps: 5, rDown: 0, linearLight: 0 },
+        ...table.map(([, taps, rDown]) => ({ mode: 'down', taps, rDown, linearLight })),
+    ];
+}
+
+/**
  * The uniform block for an input of inW×inH drawn at outW×outH.
  * @param {number} inW
  * @param {number} inH

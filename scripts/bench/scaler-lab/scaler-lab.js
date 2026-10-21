@@ -68,7 +68,7 @@ const CELL_SETS = {
     "blit+sgsr-repo",
     "blit+fsr1",
   ],
-  chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1"],
+  chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1", "chain-mwsr"],
   // The mwsr kernel (plan §3.2, §4.3): `mwsr[:key=val;key=val…]` sets its
   // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering,
   // c444, rdown, ll), the uniforms (tau, sharp), half=1 (the f16
@@ -714,7 +714,7 @@ export async function runLab(p, log = () => {}) {
   // once more and its whole output posted as PNG (for metrics.py).
   const dumpList =
     p.dump === "all"
-      ? cellNames.filter((c) => !c.startsWith("chain"))
+      ? cellNames.slice() // chain cells too (SDR), see the dump loop
       : p.dump === "base"
         ? ["tex-s1", "sgsr-repo", "sgsr-src", "nis", "easu", "fsr1", "mwsr"].filter(
             (c) => cellNames.includes(c),
@@ -785,6 +785,22 @@ export async function runLab(p, log = () => {}) {
       errors.push("frames: " + e.message);
       log("frames failed: " + e.message);
     }
+  } else if (needExt && pictures.length) {
+    // codec=none: RGBA frames straight from the pictures, the exact texels
+    // of the lab's input texture — the product's chain renders the same
+    // picture as the kernel cells, so the two can be fingerprinted together
+    // (the golden set).
+    frames = pictures.map(
+      (pic, k) => new VideoFrame(pic, { timestamp: k * 16667, duration: 16667 }),
+    );
+    frameInfo = {
+      codec: "none",
+      format: frames[0].format,
+      coded: frames[0].codedWidth + "x" + frames[0].codedHeight,
+      display: frames[0].displayWidth + "x" + frames[0].displayHeight,
+      frames: frames.length,
+    };
+    log("frames: " + JSON.stringify(frameInfo));
   }
 
   const mkTex = (w, h, fmt, usage, viewFormats = []) =>
@@ -1412,6 +1428,26 @@ export async function runLab(p, log = () => {}) {
     };
   }
 
+  // The picture the product's renderer presented, into outTex, so that a
+  // chain cell has a shot and a dump like the others (SDR: the canvas is
+  // 8-bit): the OffscreenCanvas' bitmap, copied in without conversion.
+  async function chainToOut(cell) {
+    const r = renderers.get(cell.algo);
+    if (!r) throw new Error(cell.name + ": no renderer");
+    const bmp = r.canvas.transferToImageBitmap();
+    try {
+      if (bmp.width !== outW || bmp.height !== outH)
+        throw new Error(cell.name + ": canvas " + bmp.width + "x" + bmp.height);
+      device.queue.copyExternalImageToTexture(
+        { source: bmp },
+        { texture: outTex },
+        { width: outW, height: outH },
+      );
+    } finally {
+      bmp.close();
+    }
+  }
+
   async function measure(cell, iters, stamp) {
     if (cell.feed === "chain") return runChain(cell, iters, stamp);
     if (cell.feed === "cpu") {
@@ -1571,9 +1607,10 @@ export async function runLab(p, log = () => {}) {
   if (wantShots && !hdr) {
     shots = {};
     for (const c of cells) {
-      if (!c || c.feed === "chain") continue;
+      if (!c) continue;
       try {
         await measure(c, 1, false);
+        if (c.feed === "chain") await chainToOut(c);
         shots[c.name] = await crop(device, outTex, format, outW, outH);
       } catch (e) {
         errors.push("[shot " + c.name + "] " + e.message);
@@ -1582,9 +1619,10 @@ export async function runLab(p, log = () => {}) {
   }
   const dumped = [];
   for (const c of cells) {
-    if (!c || c.feed === "chain" || !dumpList.includes(c.name)) continue;
+    if (!c || !dumpList.includes(c.name) || (c.feed === "chain" && hdr)) continue;
     try {
       await measure(c, 1, false);
+      if (c.feed === "chain") await chainToOut(c);
       const name = (p.tag || "lab") + "-" + c.name.replace(/[^\w.+-]/g, "_");
       if (hdr) {
         const bytes = await readHalf(device, outTex, outW, outH);
