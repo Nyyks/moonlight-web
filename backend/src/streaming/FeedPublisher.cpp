@@ -119,13 +119,18 @@ public:
         m_Server->setSocketOptions(QLocalServer::UserAccessOption);
         // A socket file left by a feed that died (Unix); a no-op on Windows.
         QLocalServer::removeServer(name);
+        // Before listen(): on Windows, a guest that reaches the pipe while it
+        // opens is announced from inside listen(), and never again (the cold
+        // join of 21/10: its hello sat unread until it gave up).
+        QObject::connect(m_Server, &QLocalServer::newConnection, this, [this]() { accept(); });
         if (!m_Server->listen(name)) {
             if (error) *error = m_Server->errorString();
             delete m_Server;
             m_Server = nullptr;
             return false;
         }
-        QObject::connect(m_Server, &QLocalServer::newConnection, this, [this]() { accept(); });
+        // Whatever came in before the signal was wired, all the same.
+        accept();
         return true;
     }
 

@@ -19,7 +19,9 @@
 #include <QThread>
 
 #include <atomic>
+#include <cstdio>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -311,5 +313,56 @@ void run_feed_ipc_tests()
         stuck.abort();
         CHECK(waitFor([&]() { return pub.subscribers() == 0; }));
         pub.stop();
+    }
+
+    SECTION("Feed pipe — a guest that connects while the feed opens its pipe is let in");
+    {
+        // The cold join (21/10): the first guest's arrival launches the feed
+        // and the guest's worker at once, and they meet within milliseconds.
+        // A client that reached the pipe during listen() was announced before
+        // anyone listened for it, and its hello was never read.
+        const int kRounds = 200;
+        int lost = 0;
+        for (int round = 0; round < kRounds; ++round) {
+            const QString name = feedpipe::newName(QStringLiteral("test"));
+            const QByteArray token = feedpipe::newToken();
+            FeedPublisher pub(name, token);
+            std::atomic<bool> giveUp{false};
+            // Knocking from before the pipe exists, so it gets in the moment
+            // the pipe is made.
+            std::thread knocker([&]() {
+                QLocalSocket client;
+                while (!giveUp.load()) {
+                    client.connectToServer(name);
+                    if (client.state() == QLocalSocket::ConnectedState ||
+                        client.waitForConnected(0))
+                        break;
+                    client.abort();
+                }
+                if (client.state() != QLocalSocket::ConnectedState) return;
+                const QByteArray json = QByteArrayLiteral("{\"type\":\"hello\",\"token\":\"") +
+                                        token + QByteArrayLiteral("\",\"slot\":2}");
+                mw::native::feed::Header h;
+                h.kind = mw::native::feed::Kind::Control;
+                const std::vector<uint8_t> hello =
+                    mw::native::feed::message(h, reinterpret_cast<const uint8_t*>(json.constData()),
+                                              static_cast<size_t>(json.size()));
+                client.write(reinterpret_cast<const char*>(hello.data()),
+                             static_cast<qint64>(hello.size()));
+                client.waitForBytesWritten(2000);
+                while (!giveUp.load())
+                    QThread::msleep(1);
+                client.abort();
+            });
+            QThread::msleep(1);
+            CHECK(pub.start());
+            const bool in = waitFor([&]() { return pub.subscribers() == 1; }, 500);
+            if (!in) ++lost;
+            giveUp = true;
+            knocker.join();
+            pub.stop();
+        }
+        std::fprintf(stderr, "  guests lost while the pipe opened: %d of %d\n", lost, kRounds);
+        CHECK_EQ(lost, 0);
     }
 }
