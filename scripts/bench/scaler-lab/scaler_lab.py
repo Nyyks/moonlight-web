@@ -5,6 +5,7 @@ its own: scaler-lab.html, case after case, each case a query of scaler-lab.js.
                          [--chrome-arg=--use-adapter-luid=0,<low>] [--headed X,Y,W,H]
                          [--swiftshader | --webgl-swiftshader] [--serve 0.0.0.0:8766]
                          [--conformity] [--golden | --golden-check] [--page-timeout S]
+                         [--p4 | --p4-table TAG] [--gl] [--screen WxH]
 
 Without --case, the P0 set below: the feed experiment (§6.4: N bilinear taps
 on the external texture against pass 0 + N on RGBA) and the baselines of the
@@ -18,6 +19,12 @@ renderer), cross-origin isolated. --swiftshader runs the software adapter
 shaders compile and draw there). --serve keeps the server up on an address a
 phone can reach, and prints the URL to open there: the page then posts its
 result back (post=1), to <dir>/phone-<name>.json.
+
+--p4 (p4_flows.py) is the P4 gate's set: the product's chain in WebGPU and
+in WebGL2 on the same pictures, saturated and at 60 Hz; --p4-table TAG reads
+a run's files and writes <dir>/<TAG>-gate.md with the verdict's figures. With
+--serve, --p4 gives a phone the same links (--gl: the WebGL2 page alone, for
+a device without WebGPU; --screen WxH adds the cases at the device's size).
 
 --conformity (p4_flows.py) holds the product's two renderers to the kernel:
 on the software adapters WebGL2 on ANGLE's SwiftShader switches WebGPU off,
@@ -176,8 +183,13 @@ def chain_note(c):
     """A chain cell's extras: the draws that were the renderer's 1:1 copy, the
     pass count of each draw, and the GPU total by pass count (flip=1)."""
     seq = c.get("passSeq") or {}
-    parts = ["1:1 copies %s/%s" % (c.get("copies"), sum(seq.values())),
-             "passes %s" % json.dumps(seq, sort_keys=True)]
+    parts = []
+    if c.get("submit") or c.get("done"):
+        s, d = c.get("submit") or {}, c.get("done") or {}
+        parts.append("submit p50 %s p99 %s / done p50 %s p99 %s" % (
+            fmt(s.get("p50"), 1), fmt(s.get("p99"), 1), fmt(d.get("p50"), 1), fmt(d.get("p99"), 1)))
+    parts += ["1:1 copies %s/%s" % (c.get("copies"), sum(seq.values())),
+              "passes %s" % json.dumps(seq, sort_keys=True)]
     for k, g in sorted((c.get("byPasses") or {}).items()):
         parts.append("%s-pass p50 %s" % (k, fmt((g or {}).get("p50"), 1)))
     return " / ".join(parts)
@@ -318,6 +330,10 @@ def main():
                     help="P3, C8: an HDR mire (ramp, text, game) on the rgba16float feed, judged in linear light")
     ap.add_argument("--golden", action="store_true", help="write golden.json (the software adapter: add --swiftshader)")
     ap.add_argument("--golden-check", action="store_true", help="compare the run with golden.json; exit 1 on a difference")
+    ap.add_argument("--p4", action="store_true", help="the P4 gate's set: both chains, saturated and at 60 Hz (p4_flows.py)")
+    ap.add_argument("--p4-table", action="append", default=[], help="TAG: the gate's table of that run's files (no Chrome)")
+    ap.add_argument("--gl", action="store_true", help="the WebGL2 page alone (gl=1) on this device's own GPU: a device without WebGPU")
+    ap.add_argument("--screen", default="", help="WxH: with --p4, the gate's cases at the device's own size too")
     ap.add_argument("--conformity", action="store_true",
                     help="the twins against the kernel cells on the golden cases (C11: 2/255); exit 1 beyond")
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab"))
@@ -344,8 +360,17 @@ def main():
         extra += "&fallback=1&soft=1"
     if a.webgl_swiftshader:
         extra += "&gl=1&soft=1"
+    if a.gl:
+        extra += "&gl=1"
     if a.extra:
         extra += "&" + a.extra.lstrip("&")
+
+    if a.p4_table:
+        sys.path.insert(0, HERE)
+        import p4_flows
+        for tag in a.p4_table:
+            p4_flows.gate_table(a, tag)
+        return
 
     if a.serve:
         host, port = a.serve.split(":")
@@ -360,7 +385,12 @@ def main():
             ctx.load_cert_chain(cert, key)
             server.socket = ctx.wrap_socket(server.socket, server_side=True)
             scheme = "https"
-        cases = case_list(a.case or PHONE_CASES)
+        if a.p4 and not a.case:
+            sys.path.insert(0, HERE)
+            import p4_flows
+            cases = p4_flows.gate_cases(a)
+        else:
+            cases = case_list(a.case or PHONE_CASES)
         server.short = {}
         sys.stdout.reconfigure(line_buffering=True)  # the log shows each 'posted' at once
         print("open on the phone, one after the other (each ends with 'posted' here):")
@@ -552,6 +582,10 @@ def main():
             sys.path.insert(0, HERE)
             import p3_flows
             cases = p3_flows.p3_cases(a)
+        elif a.p4 and not a.case:
+            sys.path.insert(0, HERE)
+            import p4_flows
+            cases = p4_flows.gate_cases(a)
         else:
             cases = case_list(a.case or (P1_CASES if a.p1 else P2_CASES if a.p2 else None))
         for name, query in cases:

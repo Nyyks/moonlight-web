@@ -24,6 +24,14 @@ reduced inputs), then `--webgl-swiftshader --conformity` (the WebGL2 chain on
 those inputs), each run dumping its cells under the same names and comparing
 every pair whose two dumps are on disk. On a GPU (one Chrome for both) a single
 run does it all. Called from scaler_lab.py with its `run_page`.
+
+The gate itself (plan §9, P4: "which flavour in SDR, by device class") is the
+--p4 set below: the product's chain in both renderers on the same pictures,
+`off` (the plain copy), the shipped SGSR1 and FSR1 and `mwsr`, saturated and
+at 60 Hz, at ×2 (text, game, interface), ×1.33 and ×0.67; per draw the
+main-thread time (`submit`), the time to the GPU's completion (`done`) and
+the GPU's own time where it can be read. --p4-table turns a run's files into
+the gate's table and its figures.
 """
 import os
 import re
@@ -77,6 +85,12 @@ def conformity(a, run_page):
     gl_side = getattr(a, "webgl_swiftshader", False)
     bad = 0
     adapter = None
+    # The WebGPU chain cannot run where the browser refuses to import a video
+    # frame into WebGPU (Chrome on Linux with the forced software adapter, CI
+    # 39661997273: "Failed to import texture from video" on every frame, the
+    # kernel cells sound). A platform limit, not a conformity problem: the
+    # chain's pairs are then not applicable and the rest is judged.
+    na = set()
 
     def page(query, key):
         nonlocal bad, adapter
@@ -87,11 +101,19 @@ def conformity(a, run_page):
             return None
         adapter = (res.get("adapter") or {}).get("name", adapter)  # a gt=1 page names none
         # what the renderers said: the chain's kind and GPU, every console warning
-        for line in str(res.get("pageLog", "")).splitlines():
+        log = str(res.get("pageLog", ""))
+        for line in log.splitlines():
             if line.startswith("chain ") or line.startswith("console."):
                 print("   ", key, "|", line[:200])
-        if res.get("errors"):
-            print(key, "errors:", res["errors"][:5])
+        errors = list(res.get("errors") or [])
+        if "importExternalTexture" in log or any("importExternalTexture" in e for e in errors):
+            for e in errors:
+                if e.startswith("[chain-") or e.startswith("[dump chain-"):
+                    na.add(e.split("]")[0].replace("[dump ", "[").strip("[]"))
+            errors = [e for e in errors if not (e.startswith("[chain-") or e.startswith("[dump chain-"))]
+            print(key, "WebGPU chain not applicable on this adapter: importExternalTexture refused")
+        if errors:
+            print(key, "errors:", errors[:5])
             bad += 1
         return res
 
@@ -110,7 +132,7 @@ def conformity(a, run_page):
             size_in, size_out, content, ",".join(cells), p3_flows.QUICK, base), key)
         if res is None:
             continue
-        missing = [c for c in cells if not os.path.exists(dump_path(a, base, c))]
+        missing = [c for c in cells if not os.path.exists(dump_path(a, base, c)) and c not in na]
         if missing:
             print(key, "not dumped:", missing)
             bad += 1
@@ -137,12 +159,14 @@ def conformity(a, run_page):
             QUALITY_IN, QUALITY_OUT, base, ",".join(cells), p3_flows.QUICK, base), base)
         if res is None:
             continue
-        missing = [c for c in cells if not os.path.exists(dump_path(a, base, c))]
+        missing = [c for c in cells if not os.path.exists(dump_path(a, base, c)) and c not in na]
         if missing:
             print(base, "not dumped:", missing)
             bad += 1
         sys.stdout.flush()
     print("side %s (%s) rendered; comparing the dumps on disk" % ("WebGL2" if gl_side else "WebGPU", adapter))
+    if na:
+        print("not applicable on this adapter (video import refused):", sorted(na))
 
     # ── the pixel table ──
     rows = []
@@ -178,7 +202,7 @@ def conformity(a, run_page):
                 "exact" if worst == 0 else metrics.fmt(psnr, 1),
                 ("OK" if ok else "OUT OF TOLERANCE") if held else "reported (derivatives)"))
     if pending:
-        print("  %d pixel pair(s) pending: the other side has not run yet" % pending)
+        print("  %d pixel pair(s) pending: the other side has not run yet, or not applicable here" % pending)
 
     # ── the quality table ──
     qrows = []
@@ -216,7 +240,8 @@ def conformity(a, run_page):
             "OK" if ok else "NOT THE SAME QUALITY"))
     if qpending:
         print("  %d quality case(s) pending: the other side has not run yet" % qpending)
-    print("conformity: %s" % ("OK" if not bad else "%d problem(s)" % bad))
+    print("conformity: %s%s" % ("OK" if not bad else "%d problem(s)" % bad,
+                                 " (WebGPU chain not applicable on this adapter)" if na else ""))
 
     if a.md and (rows or qrows):
         path = os.path.join(a.dir, a.tag + "-conformity.md")
@@ -245,3 +270,182 @@ def conformity(a, run_page):
                         "OK" if ok else "**not the same**"))
         print("wrote", path)
     return 1 if bad else 0
+
+
+# ── the gate (--p4) ──────────────────────────────────────────────────────
+
+GATE_GPU = "chain-off,chain-sgsr,chain-fsr1,chain-mwsr"
+GATE_GL = "chain-gl-off,chain-gl-sgsr,chain-gl-fsr1,chain-gl-mwsr"
+# (name, input, output, content): the SDR production cases of a desktop screen
+GATE_SIZES = [
+    ("x2-text", "1280x720", "2560x1440", "text"),
+    ("x2-game", "1280x720", "2560x1440", "game"),
+    ("x2-ui", "1280x720", "2560x1440", "ui"),
+    ("x133-text", "1920x1080", "2560x1440", "text"),
+    ("x067-text", "3840x2160", "2560x1440", "text"),
+]
+# 2 rounds (ABBA) of 24 draws per chain, one warm-up: ~10 s a page on a GPU
+GATE_RUN = "&rounds=2&batches=6&batch=16&warm=1"
+# The verdict's cases (upscale: the SDR production of a desktop) and its margins:
+# a flavour wins when its `done` p50 is under 0.9 × the other's on every one of
+# them and its main-thread p50 is not worse by more than a fifth or a quarter
+# of a millisecond (the p99 of 48 draws is their maximum: a stall of one
+# frame, reported, not judged); otherwise the two are equal and the production
+# flavour (WebGL2 in SDR) stays.
+GATE_VERDICT_CASES = ["x2-text", "x2-game", "x133-text"]
+GATE_WIN, GATE_MAIN, GATE_MAIN_MS = 0.9, 1.2, 0.25
+
+
+def gate_cells(a):
+    if getattr(a, "swiftshader", False):
+        return GATE_GPU
+    if getattr(a, "webgl_swiftshader", False) or getattr(a, "gl", False):
+        return GATE_GL
+    return GATE_GPU + "," + GATE_GL
+
+
+def gate_sizes(a):
+    sizes = list(GATE_SIZES)
+    screen = getattr(a, "screen", "")
+    if screen:
+        w, h = (int(x) for x in screen.lower().split("x"))
+
+        def at(f):
+            return "%dx%d" % (int(w * f) // 8 * 8, int(h * f) // 8 * 8)
+        sizes += [
+            ("screen-x2-text", at(0.5), screen, "text"),
+            ("screen-x2-game", at(0.5), screen, "game"),
+            ("screen-x133-text", at(0.75), screen, "text"),
+            ("screen-x067-text", at(1.5), screen, "text"),
+        ]
+    return sizes
+
+
+def gate_cases(a):
+    cells = gate_cells(a)
+    out = []
+    for name, i, o, content in gate_sizes(a):
+        q = "in=%s&out=%s&content=%s&cells=%s%s" % (i, o, content, cells, GATE_RUN)
+        out.append((name, q))
+        out.append((name + "-tick", q + "&pace=tick"))
+    return out
+
+
+def _gate_files(a, tag):
+    """case name -> the run's result (a desktop run's <tag>-<case>.json, or the
+    latest phone-<tag>-<case>-<time>.json a phone posted)."""
+    import glob
+    import json
+    found = {}
+    for name, _ in gate_cases(a):
+        p = os.path.join(a.dir, "%s-%s.json" % (tag, name))
+        posted = sorted(glob.glob(os.path.join(a.dir, "phone-%s-%s-*.json" % (tag, name))))
+        if posted:
+            p = posted[-1]
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                found[name] = json.load(f)
+    return found
+
+
+def _st(c, key, q):
+    v = (c.get(key) or {}).get(q)
+    return v if isinstance(v, (int, float)) else None
+
+
+def gate_table(a, tag):
+    """The gate's table of one run: per case and regime, each chain's submit,
+    done and GPU figures; the WebGPU/WebGL2 ratios of each pass; the verdict
+    of GATE_VERDICT_CASES. Printed, and written to <dir>/<tag>-gate.md."""
+    runs = _gate_files(a, tag)
+    if not runs:
+        print(tag, ": no result file in", a.dir)
+        return
+    first = next(iter(runs.values()))
+    adapter = (first.get("adapter") or {}).get("name", "?")
+    ua = first.get("userAgent", "")
+    lines = ["# Porte P4 — %s" % tag, "", "Adapter: %s" % adapter, "", "UA: `%s`" % ua, ""]
+    lines += ["`submit` = the draw's main-thread time (WebGPU: encode and submit; WebGL2: the GL calls); "
+              "`done` = from the draw's start to the GPU's completion (WebGPU: `draw()` itself, which waits "
+              "for `onSubmittedWorkDone`; WebGL2: `draw()` then a fence polled to its signal, Chrome's `finish()` being a flush); `gpu` = the GPU's own time "
+              "(WebGPU: the stamped passes, pass 0 and the kernel; WebGL2: `EXT_disjoint_timer_query_webgl2` "
+              "around the draw, upload included). Milliseconds, p50 and p99 over the draws.", ""]
+    lines += ["| case | regime | chain | submit p50 | submit p99 | done p50 | done p99 | gpu p50 | 1:1 copies | errors |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+    print("%-18s %-5s %-14s %9s %9s %9s %9s %9s" % ("case", "pace", "chain", "submit50", "submit99", "done50", "done99", "gpu50"))
+    ratios = {}  # (case, regime, pass) -> (submit, done, gpu) ratios WebGPU / WebGL2
+    for name, res in runs.items():
+        if "error" in res:
+            lines.append("| %s | | ERROR %s | | | | | | | |" % (name, res["error"][:120]))
+            print(name, "ERROR", res["error"][:200])
+            continue
+        case, regime = (name[:-5], "tick") if name.endswith("-tick") else (name, "back")
+        cells = {c["name"]: c for c in res.get("cells", [])}
+        errs = len(res.get("errors") or [])
+        if not cells:
+            first_err = (res.get("errors") or ["no cell"])[0][:160]
+            lines.append("| %s | %s | no result | | | | | | | %s |" % (case, regime, first_err))
+            print("%-18s %-5s no result: %s" % (case, regime, first_err))
+        for cname, c in cells.items():
+            seq = c.get("passSeq") or {}
+            row = (name, regime, cname, _st(c, "submit", "p50"), _st(c, "submit", "p99"),
+                   _st(c, "done", "p50"), _st(c, "done", "p99"), _st(c, "gpu", "p50"))
+            lines.append("| %s | %s | `%s` | %s | %s | %s | %s | %s | %s/%s | %s |" % (
+                case, regime, cname, metrics.fmt(row[3]), metrics.fmt(row[4]), metrics.fmt(row[5]),
+                metrics.fmt(row[6]), metrics.fmt(row[7]), c.get("copies"), sum(seq.values()) if seq else "-",
+                errs or ""))
+            print("%-18s %-5s %-14s %9s %9s %9s %9s %9s" % (
+                case, regime, cname, metrics.fmt(row[3]), metrics.fmt(row[4]), metrics.fmt(row[5]),
+                metrics.fmt(row[6]), metrics.fmt(row[7])))
+        for p in ("off", "sgsr", "fsr1", "mwsr"):
+            g, w = cells.get("chain-" + p), cells.get("chain-gl-" + p)
+            if g is None or w is None:
+                continue
+
+            def ratio(key, q):
+                x, y = _st(g, key, q), _st(w, key, q)
+                return x / y if x is not None and y else None
+            sg, sw = _st(g, "submit", "p50"), _st(w, "submit", "p50")
+            ratios[(case, regime, p)] = (ratio("submit", "p50"), ratio("done", "p50"), ratio("gpu", "p50"),
+                                         None if sg is None or sw is None else sg - sw)
+    if ratios:
+        lines += ["", "## WebGPU / WebGL2, per pass", "",
+                  "| case | regime | pass | submit p50 | done p50 | gpu p50 |", "|---|---|---|---|---|---|"]
+        print("%-12s %-5s %-5s %10s %10s %10s" % ("case", "pace", "pass", "submit50", "done50", "gpu50"))
+        for (case, regime, p), (rs, rd, rg, _) in sorted(ratios.items()):
+            f = lambda v: "-" if v is None else "%.2f" % v  # noqa: E731
+            lines.append("| %s | %s | `%s` | %s | %s | %s |" % (case, regime, p, f(rs), f(rd), f(rg)))
+            print("%-12s %-5s %-5s %10s %10s %10s" % (case, regime, p, f(rs), f(rd), f(rg)))
+    # the verdict: mwsr, at 60 Hz, on the upscale cases
+    verdict = []
+    for regime in ("tick", "back"):
+        rows = [ratios.get((c, regime, "mwsr")) for c in GATE_VERDICT_CASES]
+        if any(r is None or r[1] is None for r in rows):
+            verdict.append("%s: incomplete (%d of %d cases)" % (regime, sum(r is not None for r in rows), len(rows)))
+            continue
+        dones = [r[1] for r in rows]
+        mains = [r[0] for r in rows if r[0] is not None]
+        diffs = [r[3] for r in rows if r[3] is not None]  # WebGPU's main thread minus WebGL2's, ms
+        gpu_main_ok = all(m <= GATE_MAIN or d <= GATE_MAIN_MS for m, d in zip(mains, diffs))
+        gl_main_ok = all(m >= 1 / GATE_MAIN or -d <= GATE_MAIN_MS for m, d in zip(mains, diffs))
+        if all(d <= GATE_WIN for d in dones) and gpu_main_ok:
+            v = "WebGPU (done %.2f-%.2f × WebGL2, main thread p50 %s)" % (
+                min(dones), max(dones), "/".join("%.2f" % m for m in mains))
+        elif all(d >= 1 / GATE_WIN for d in dones) and gl_main_ok:
+            v = "WebGL2 (WebGPU's done %.2f-%.2f × WebGL2's, main thread p50 %s)" % (
+                min(dones), max(dones), "/".join("%.2f" % m for m in mains))
+        else:
+            v = "equal within the margins (done %.2f-%.2f ×, main thread p50 %s): the production flavour stays" % (
+                min(dones), max(dones), "/".join("%.2f" % m for m in mains))
+        verdict.append("%s: %s" % (regime, v))
+    red = ratios.get(("x067-text", "tick", "mwsr"))
+    if red and red[1] is not None:
+        verdict.append("reduction ×0.67 at 60 Hz: WebGPU's done %.2f × WebGL2's (sRGB views against the 2×2 grid)" % red[1])
+    lines += ["", "## Verdict (`mwsr`, cases %s; a flavour wins under %.2f × on `done` with its main thread p50 within %.1f × or %.2f ms)" % (
+        ", ".join(GATE_VERDICT_CASES), GATE_WIN, GATE_MAIN, GATE_MAIN_MS), ""] + ["- " + v for v in verdict] + [""]
+    for v in verdict:
+        print("verdict:", v)
+    path = os.path.join(a.dir, tag + "-gate.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print("wrote", path)

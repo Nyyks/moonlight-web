@@ -145,6 +145,11 @@ jobs:
           MW_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: python scripts/bench/scaler-lab/scaler_lab.py --tag ci --swiftshader --page-timeout 240 --conformity
       - name: WebGL2 side (the GLSL twin) and the comparison
+        # The twin's conformity is judged even when the WebGPU side failed:
+        # on a runner whose software adapter refuses to import a video frame
+        # (CI 39661997273) the WebGPU chain is not applicable, the kernel
+        # cells and the WebGL2 twin still are.
+        if: always()
         env:
           MW_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: python scripts/bench/scaler-lab/scaler_lab.py --tag ci --webgl-swiftshader --page-timeout 240 --conformity --md

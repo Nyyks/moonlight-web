@@ -71,7 +71,10 @@ const CELL_SETS = {
   ],
   chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1", "chain-mwsr"],
   // The product's WebGL2 renderer, the same way (`chain-gl-<pass>`, `chain-gl-off`
-  // its plain copy): wall time per draw and the picture, no GPU stamps.
+  // its plain copy): the draw's main-thread time, the time to the GPU's
+  // completion (gl.finish(), as the WebGPU draw() waits for its work), the
+  // GPU's own time by EXT_disjoint_timer_query_webgl2 where the browser has
+  // it, and the picture.
   glchain: ["chain-gl-off", "chain-gl-sgsr", "chain-gl-nis", "chain-gl-fsr1", "chain-gl-mwsr"],
   // The mwsr kernel (plan §3.2, §4.3): `mwsr[:key=val;key=val…]` sets its
   // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering,
@@ -571,7 +574,12 @@ async function makePicture(kind, w, h, k) {
 async function makeFrames(pictures, codec, log) {
   const w = pictures[0].width;
   const h = pictures[0].height;
-  const codecString = codec === "hevc" ? "hvc1.1.6.L120.B0" : "avc1.640032";
+  // H.264 High at the level the picture needs: 5.0 holds 1440p60 (22080
+  // macroblocks), 4K60 needs 5.1 (36864); the encoder refuses a level too
+  // small for the frame ("no encoder"), as the 4K reduction case did.
+  const mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
+  const codecString =
+    codec === "hevc" ? "hvc1.1.6.L120.B0" : mbs > 22080 ? "avc1.640033" : "avc1.640032";
   const chunks = [];
   const encConfig = {
     codec: codecString,
@@ -681,6 +689,61 @@ function makeRgbaFrames(pictures) {
   return { frames, info };
 }
 
+// The WebGL2 renderer's GPU timer, when the browser exposes it (Chrome on a
+// desktop or Android GPU; not WebKit, not every software renderer): one
+// TIME_ELAPSED query around each draw, read after the batch.
+function glTimer(r) {
+  if (!r.gl) return null;
+  if (r.__tq === undefined)
+    r.__tq = r.gl.getExtension("EXT_disjoint_timer_query_webgl2") || null;
+  return r.__tq;
+}
+
+// A task boundary without setTimeout's clamping: Chrome refreshes a WebGL
+// sync's or query's cached status once per task.
+function nextTask() {
+  return new Promise((res) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => res();
+    ch.port2.postMessage(0);
+  });
+}
+
+// The GPU's completion of what was drawn. Chrome's gl.finish() is a flush on
+// purpose ("Intentionally a flush, not a finish"), so the lab sets a fence and
+// polls its status task by task — what the product's renderer reads to know
+// whether the GPU is behind.
+async function glDone(gl) {
+  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (!sync) return;
+  gl.flush();
+  const t = performance.now();
+  for (;;) {
+    await nextTask();
+    if (gl.getSyncParameter(sync, gl.SYNC_STATUS) === gl.SIGNALED) break;
+    if (performance.now() - t > 5000) break;
+  }
+  gl.deleteSync(sync);
+}
+
+async function readGlQueries(gl, tq, queries) {
+  const qs = queries.filter(Boolean);
+  const t = performance.now();
+  // results arrive a task later at the earliest
+  while (performance.now() - t < 3000) {
+    await nextTask();
+    if (qs.every((q) => gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE))) break;
+  }
+  const disjoint = gl.getParameter(tq.GPU_DISJOINT_EXT);
+  const out = queries.map((q) =>
+    q && !disjoint && gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)
+      ? Number(gl.getQueryParameter(q, gl.QUERY_RESULT)) / 1e6
+      : null,
+  );
+  for (const q of qs) gl.deleteQuery(q);
+  return out;
+}
+
 // gl=1: a Chrome without WebGPU (ANGLE on SwiftShader, the driver's
 // --webgl-swiftshader; forcing it switches WebGPU off, so the two twins cannot
 // share a Chrome on the software adapters). Only the chain-gl-* cells: the
@@ -689,7 +752,7 @@ function makeRgbaFrames(pictures) {
 // give it, so that the conformity flow compares the two sides from two runs.
 async function runGlLab(p, log, ctx) {
   const { inW, inH, outW, outH, content, codec, cellNames, dumpList } = ctx;
-  const { batch, batches, warm, rounds } = ctx;
+  const { batch, batches, warm, rounds, pace, period } = ctx;
   const errors = [];
   const bad = cellNames.filter((c) => !c.startsWith("chain-gl-"));
   if (bad.length) throw new Error("gl=1 runs chain-gl-* cells only, not " + bad.join(","));
@@ -721,17 +784,38 @@ async function runGlLab(p, log, ctx) {
   }
   let cursor = 0;
   const nextFrame = () => frames[cursor++ % frames.length];
-  async function draws(r, n) {
+  async function draws(r, n, timed) {
     const walls = [];
+    const dones = [];
+    const queries = [];
+    const tq = timed ? glTimer(r) : null;
     let copies = 0;
+    const start = performance.now();
     for (let i = 0; i < n; i++) {
+      if (pace === "tick") {
+        const due = start + i * period;
+        const now = performance.now();
+        if (due > now) await new Promise((res) => setTimeout(res, due - now));
+      }
       const f = nextFrame().clone();
+      let q = null;
+      if (tq) {
+        q = r.gl.createQuery();
+        r.gl.beginQuery(tq.TIME_ELAPSED_EXT, q);
+      }
       const t0 = performance.now();
       await r.draw(f);
-      walls.push(performance.now() - t0);
+      const t1 = performance.now();
+      if (tq) r.gl.endQuery(tq.TIME_ELAPSED_EXT);
+      // draw() only queues: the GPU's completion, as the WebGPU draw() waits
+      await glDone(r.gl);
+      walls.push(t1 - t0);
+      dones.push(performance.now() - t0);
+      queries.push(q);
       if (r.passthrough === true) copies++;
     }
-    return { walls, copies };
+    const gpu = tq ? (await readGlQueries(r.gl, tq, queries)).filter((v) => v !== null) : [];
+    return { walls, dones, gpu, copies };
   }
   const t0 = performance.now();
   const out = [];
@@ -739,28 +823,38 @@ async function runGlLab(p, log, ctx) {
     const algo = name.slice(6);
     try {
       const r = await renderer(algo);
-      if (warm > 0) await draws(r, 4 * warm);
+      if (warm > 0) await draws(r, 4 * warm, false);
       const walls = [];
+      const dones = [];
+      const gpu = [];
       let copies = 0;
       for (let b = 0; b < batches * rounds; b++) {
-        const d = await draws(r, batch);
+        const d = await draws(r, batch, true);
         walls.push(...d.walls);
+        dones.push(...d.dones);
+        gpu.push(...d.gpu);
         copies += d.copies;
       }
       const w = stats(walls);
-      log(`${name.padEnd(16)} wall/draw p50 ${w.p50.toFixed(3)} p99 ${w.p99.toFixed(3)} ms`);
+      const dn = stats(dones);
+      const g = stats(gpu);
+      log(
+        `${name.padEnd(16)} draw p50 ${w.p50.toFixed(3)} p99 ${w.p99.toFixed(3)} | done p50 ${dn.p50.toFixed(3)} p99 ${dn.p99.toFixed(3)} | gpu ${g ? "p50 " + g.p50.toFixed(3) : "no timer"} ms`,
+      );
       out.push({
         name,
         feed: "chain",
         algo,
-        passes: 0,
-        gpu: null,
-        perPass: [],
+        passes: g ? 1 : 0,
+        gpu: g,
+        perPass: g ? [g.p50] : [],
         disp: null,
         wall: w,
         wallPerIter: w.mean,
         iters: walls.length,
         draws: walls,
+        submit: w,
+        done: dn,
         copies,
         passSeq: {},
       });
@@ -775,7 +869,7 @@ async function runGlLab(p, log, ctx) {
     try {
       const r = await renderer(name.slice(6));
       cursor = 0; // the clip's first frame: the kernel cells' picture
-      await draws(r, 1);
+      await draws(r, 1, false);
       const bmp = r.canvas.transferToImageBitmap();
       const cv = new OffscreenCanvas(bmp.width, bmp.height);
       cv.getContext("2d").drawImage(bmp, 0, 0);
@@ -803,8 +897,8 @@ async function runGlLab(p, log, ctx) {
       out: `${outW}x${outH}`,
       content,
       codec,
-      pace: "back",
-      period: 0,
+      pace,
+      period,
       batch,
       batches,
       warm,
@@ -914,7 +1008,7 @@ async function runLabInner(p, log) {
   if (p.gl === "1")
     return runGlLab(p, log, {
       inW, inH, outW, outH, content, codec, cellNames, dumpList,
-      batch, batches, warm, rounds,
+      batch, batches, warm, rounds, pace, period,
     });
 
   if (!navigator.gpu) throw new Error("no WebGPU (navigator.gpu)");
@@ -1604,7 +1698,11 @@ async function runLabInner(p, log) {
     const r = await chainRenderer(cell.algo);
     const times = [];
     const walls = [];
+    const submits = [];
+    const dones = [];
     const passSeq = [];
+    const queries = [];
+    const tq = stamp ? glTimer(r) : null;
     let copies = 0;
     const start = performance.now();
     for (let i = 0; i < iters; i++) {
@@ -1620,9 +1718,23 @@ async function runLabInner(p, log) {
       HOOK.active = stamp;
       HOOK.q = 0;
       const f = nextFrame().clone();
+      let q = null;
+      if (tq) {
+        q = r.gl.createQuery();
+        r.gl.beginQuery(tq.TIME_ELAPSED_EXT, q);
+      }
       const t0 = performance.now();
       await r.draw(f);
-      walls.push(performance.now() - t0);
+      const t1 = performance.now();
+      if (tq) r.gl.endQuery(tq.TIME_ELAPSED_EXT);
+      // WebGL2's draw() only queues; the GPU's completion is waited for
+      // here, as the WebGPU renderer's draw() waits for onSubmittedWorkDone:
+      // `done` is the same quantity on both sides, `submit` the main thread's.
+      if (r.gl) await glDone(r.gl);
+      walls.push(t1 - t0);
+      submits.push(r.gl ? t1 - t0 : r.lastDraw.submitMs);
+      dones.push(performance.now() - t0);
+      queries.push(q);
       HOOK.active = false;
       if (r.passthrough === true) copies++;
       let np = 0;
@@ -1639,6 +1751,15 @@ async function runLabInner(p, log) {
       passSeq.push(np);
     }
     if (flip) r.setOutputSize(outW, outH);
+    if (tq) {
+      // the WebGL2 renderer's GPU time per draw, as one pass each
+      const ms = await readGlQueries(r.gl, tq, queries);
+      ms.forEach((v, i) => {
+        if (v === null) return;
+        times.push([v]);
+        passSeq[i] = 1;
+      });
+    }
     return {
       wall: walls.reduce((a, b) => a + b, 0),
       iterTimes: stamp && times.length ? times : null,
@@ -1646,6 +1767,8 @@ async function runLabInner(p, log) {
       copies,
       iters,
       draws: walls,
+      submits,
+      dones,
     };
   }
 
@@ -1786,7 +1909,7 @@ async function runLabInner(p, log) {
       let n = 0;
       const nb = cell.feed === "chain" ? 1 : batches;
       for (let b = 0; b < nb; b++) {
-        const m = await measure(cell, iters, hasTs);
+        const m = await measure(cell, iters, hasTs || cell.feed === "chain");
         wallMs += m.wall;
         n += m.iters;
         if (m.iterTimes) {
@@ -1813,6 +1936,8 @@ async function runLabInner(p, log) {
           }
         }
         if (m.draws) (cell.draws ||= []).push(...m.draws);
+        if (m.submits) (cell.submits ||= []).push(...m.submits);
+        if (m.dones) (cell.dones ||= []).push(...m.dones);
         if (m.passSeq) (cell.passSeq ||= []).push(...m.passSeq);
         if (m.copies !== undefined) cell.copies = (cell.copies || 0) + m.copies;
       }
@@ -1867,6 +1992,9 @@ async function runLabInner(p, log) {
           : null,
       wallPerIter,
       draw: r.cell.draws ? stats(r.cell.draws) : null,
+      // the chain: the draw's main-thread time and the time to the GPU's completion
+      submit: r.cell.submits ? stats(r.cell.submits) : null,
+      done: r.cell.dones ? stats(r.cell.dones) : null,
       // the chain: how many draws had which pass count, how many were the
       // renderer's 1:1 copy, and the GPU total by pass count (flip=1)
       passSeq: r.cell.passSeq
