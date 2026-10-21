@@ -111,10 +111,10 @@ class LabHandler(Handler):
             name = self.path.split("name=", 1)[1].split("&", 1)[0]
         return "".join(c for c in urllib.request.unquote(name) if c.isalnum() or c in "-_.")
 
-    def _save_png(self):
+    def _save_png(self, ext=".png"):
         n = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(n)
-        out = os.path.join(self.server.lab_dir, self._name() + ".png")
+        out = os.path.join(self.server.lab_dir, self._name() + ext)
         with open(out, "wb") as f:
             f.write(body)
         self.send_response(204)
@@ -128,6 +128,8 @@ class LabHandler(Handler):
     def do_POST(self):
         if self.path.startswith("/__png"):
             return self._save_png()
+        if self.path.startswith("/__bin"):
+            return self._save_png(".f16")
         if not self.path.startswith("/__result"):
             self.send_error(404)
             return
@@ -288,6 +290,15 @@ def main():
     ap.add_argument("--p1", action="store_true", help="the P1 set (the chain at 1:1, the passage 1:1 <-> x2) instead of P0's")
     ap.add_argument("--p2", action="store_true", help="the P2 set (the mwsr kernel against the floor and the shipped kernels)")
     ap.add_argument("--quality-cells", default="", help="the cells of --quality instead of %s (mwsr variants…)" % QUALITY_CELLS)
+    ap.add_argument("--p3", action="store_true", help="the P3 timing set (HDR feed, reduction, 4:4:4 options)")
+    ap.add_argument("--reduce-quality", action="append", default=[],
+                    help="P3, C10: a content at --in, reduced to --out by the cells, against its Lanczos-2 in linear light")
+    ap.add_argument("--c444-quality", action="append", default=[],
+                    help="P3, C9: a content's ground truth at --out, the cells on its 4:4:4 input and on its 4:2:0 self")
+    ap.add_argument("--hdr-quality", action="append", default=[],
+                    help="P3, C8: an HDR mire (ramp, text, game) on the rgba16float feed, judged in linear light")
+    ap.add_argument("--golden", action="store_true", help="write golden.json (the software adapter: add --swiftshader)")
+    ap.add_argument("--golden-check", action="store_true", help="compare the run with golden.json; exit 1 on a difference")
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab"))
     ap.add_argument("--chrome-arg", action="append", default=[])
     ap.add_argument("--headed", default="", help="X,Y,W,H: a shown window there instead of headless")
@@ -396,6 +407,21 @@ def main():
             res["url"] = url
             return res
 
+        if a.reduce_quality or a.c444_quality or a.hdr_quality or a.golden or a.golden_check:
+            sys.path.insert(0, HERE)
+            import p3_flows
+            if a.reduce_quality:
+                p3_flows.reduce_quality(a, run_page, a.reduce_quality)
+            if a.c444_quality:
+                p3_flows.c444_quality(a, run_page, a.c444_quality)
+            if a.hdr_quality:
+                p3_flows.hdr_quality(a, run_page, a.hdr_quality)
+            if a.golden or a.golden_check:
+                code = p3_flows.golden(a, run_page, a.golden_check)
+                if code:
+                    sys.exit(code)
+            return
+
         if a.quality:
             sys.path.insert(0, HERE)
             import metrics
@@ -440,7 +466,12 @@ def main():
                 sys.stdout.flush()
             return
 
-        cases = case_list(a.case or (P1_CASES if a.p1 else P2_CASES if a.p2 else None))
+        if a.p3 and not a.case:
+            sys.path.insert(0, HERE)
+            import p3_flows
+            cases = p3_flows.p3_cases(a)
+        else:
+            cases = case_list(a.case or (P1_CASES if a.p1 else P2_CASES if a.p2 else None))
         for name, query in cases:
             t0 = time.time()
             res = run_page(query)

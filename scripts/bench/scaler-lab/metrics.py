@@ -16,6 +16,11 @@ little; a kernel that rings on text overshoots a lot.
 
 Also: the same figures on the central third of the picture (where the bench
 pictures put their text), and the SSIM of the luma alone.
+
+P3 adds chroma() — the PSNR of the Cb and Cr planes (BT.709) and the CIEDE2000
+difference, for the 4:4:4 mire (C9) — and zone_metrics() for the zone plate
+reduced (C10): the energy left where the plate's frequency exceeds the output's
+Nyquist (aliasing), and the PSNR of the thin lines.
 """
 import argparse
 import json
@@ -75,6 +80,53 @@ def load(path):
 
 def luma(a):
     return 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+
+
+def psnr(a, b):
+    return float(peak_signal_noise_ratio(a, b, data_range=1.0))
+
+
+def chroma(gt, out):
+    """PSNR of the Cb and Cr planes (BT.709, full range, on the encoded
+    values) and the CIEDE2000 colour difference, mean and p99."""
+    from skimage.color import deltaE_ciede2000, rgb2lab
+
+    def cbcr(a):
+        y = luma(a)
+        return (a[..., 2] - y) / 1.8556, (a[..., 0] - y) / 1.5748
+
+    cb1, cr1 = cbcr(gt)
+    cb2, cr2 = cbcr(out)
+    de = deltaE_ciede2000(rgb2lab(gt), rgb2lab(out))
+    return {
+        "psnrCb": float(peak_signal_noise_ratio(cb1, cb2, data_range=1.0)),
+        "psnrCr": float(peak_signal_noise_ratio(cr1, cr2, data_range=1.0)),
+        "dE00": float(de.mean()),
+        "dE00p99": float(np.percentile(de, 99)),
+    }
+
+
+def zone_metrics(gt, out, in_w, in_h):
+    """The zone plate of the lab's `zone` picture (left half; Nyquist at the
+    edge of the plate) reduced from in_w×in_h: `alias` is the RMS error to the
+    reference in the ring whose input frequency exceeds the output's Nyquist
+    (a clean reduction leaves it flat), `flat` the RMS around the mean there
+    (the moiré itself), `linesPsnr` the PSNR of the right half (thin lines)."""
+    oh, ow = out.shape[:2]
+    s = ow / in_w
+    half_in = in_w // 2
+    cx, cy = (half_in / 2) * s, (in_h / 2) * s
+    R = max(half_in / 2, in_h / 2) * s
+    yy, xx = np.mgrid[0:oh, 0:ow]
+    r = np.hypot(xx + 0.5 - cx, yy + 0.5 - cy)
+    ring = (xx < half_in * s) & (r > 1.1 * s * R) & (r < R)
+    lo, lg = luma(out)[ring], luma(gt)[ring]
+    xr = int(half_in * s)
+    return {
+        "alias": float(np.sqrt(np.mean((lo - lg) ** 2))) if ring.any() else None,
+        "flat": float(np.sqrt(np.mean((lo - lo.mean()) ** 2))) if ring.any() else None,
+        "linesPsnr": psnr(gt[:, xr:], out[:, xr:]),
+    }
 
 
 def overshoot(out, inp, tol=2.0 / 255.0):

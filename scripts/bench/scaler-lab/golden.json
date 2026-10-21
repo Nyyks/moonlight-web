@@ -1,0 +1,194 @@
+{
+ "adapter": "google swiftshader 0xc0de SwiftShader Device (Subzero)",
+ "cases": {
+  "code 1280x720->2560x1440": {
+   "mwsr": {
+    "mean": 0.138654,
+    "psnrVsBilinear": 35.663,
+    "sha256": "6828130d98d149327c597f14c720212a5d4c274e6731b9381d5d0dcf6b54ffd8"
+   },
+   "mwsr_c444_1": {
+    "mean": 0.138704,
+    "psnrVsBilinear": 35.458,
+    "sha256": "574ade6925c39077e9630edcd134c5380c81bdc6ee09e6810e0c51f49154b550"
+   },
+   "mwsr_dering_0": {
+    "mean": 0.138657,
+    "psnrVsBilinear": 35.66,
+    "sha256": "a28243007549fca30bb74121568a7a120e666349ad2fb9c480e8b2f80656b0d0"
+   },
+   "tex-s1": {
+    "mean": 0.139525,
+    "sha256": "68fc0af111f51af7faf06c415f292a284b706778a36061e9863c469d181ab7e4"
+   }
+  },
+  "code 1920x1080->2560x1440": {
+   "mwsr": {
+    "mean": 0.136659,
+    "psnrVsBilinear": 40.159,
+    "sha256": "9ccbf00c7cc6adb214a1473970eff624e22eb7170225c9f657d358b53d9d1821"
+   },
+   "mwsr_c444_1": {
+    "mean": 0.136663,
+    "psnrVsBilinear": 40.024,
+    "sha256": "c9ac0a2b8efc754cad880f4fefe90fff808cbaa1602590b5e39678274a559918"
+   },
+   "mwsr_dering_0": {
+    "mean": 0.136661,
+    "psnrVsBilinear": 40.147,
+    "sha256": "87d6a5ba0dcae4b022b9ffca5676d4fc0e270bec99bd80f6486ca27fbebbf568"
+   },
+   "tex-s1": {
+    "mean": 0.136796,
+    "sha256": "cec7708657a64c8049b8d0a9290bdcd29cd52716234c03ca78c5cc355ab0f32a"
+   }
+  },
+  "code 2560x1440->1280x720": {
+   "mwsr": {
+    "mean": 0.141391,
+    "psnrVsBilinear": 37.547,
+    "sha256": "0267c70b2867acf9df18dd9d6092b6c33f22c2670bc916b9339b54809644615e"
+   },
+   "mwsr_ll_2": {
+    "mean": 0.141807,
+    "psnrVsBilinear": 36.131,
+    "sha256": "4e879b2d39f3980913c9de1fdc2c2da7e9bbd7b271e8484fb7c2d3a8ed5297bf"
+   },
+   "mwsr_taps_9": {
+    "mean": 0.14088,
+    "psnrVsBilinear": 37.261,
+    "sha256": "671eb9413c1f330fc7ec3630f456019267adf00f0a525c893c7c8061dadbb9e0"
+   },
+   "tex-s1": {
+    "mean": 0.138983,
+    "sha256": "8344114f4dfd66a8f9cd1f64991ba4fea4dbd6ec75157129cceea077e9051c34"
+   }
+  },
+  "game 1280x720->2560x1440": {
+   "mwsr": {
+    "mean": 0.375965,
+    "psnrVsBilinear": 42.314,
+    "sha256": "e355f44b332e28e1e06570d17cf67ed258a5d96f67cbbc6ee01005e836a9a90d"
+   },
+   "mwsr_c444_1": {
+    "mean": 0.375969,
+    "psnrVsBilinear": 42.309,
+    "sha256": "859601163eb097614e6846993d3f99848bd626a2f56b679fb29d2382f91434b5"
+   },
+   "mwsr_dering_0": {
+    "mean": 0.375965,
+    "psnrVsBilinear": 42.309,
+    "sha256": "e4b5c46b4494f6bf3b70999e7132df4ecc7d99f750e00119b907c175bc162349"
+   },
+   "tex-s1": {
+    "mean": 0.375964,
+    "sha256": "c3f9d8ae9e30c1d0329a7229134a37e5523a8dd246a285bacde65c637433fbb5"
+   }
+  },
+  "game 1920x1080->2560x1440": {
+   "mwsr": {
+    "mean": 0.37592,
+    "psnrVsBilinear": 48.697,
+    "sha256": "f65155e6eb5f6f9442e35d6de5437f0d46294ccc2ab7426066529baa15ceb10a"
+   },
+   "mwsr_c444_1": {
+    "mean": 0.375921,
+    "psnrVsBilinear": 48.609,
+    "sha256": "ccf0c08d80b318e569b36aad0b4377ba4ec780e67a20b1a72810a765f367c6a5"
+   },
+   "mwsr_dering_0": {
+    "mean": 0.37592,
+    "psnrVsBilinear": 48.672,
+    "sha256": "2dfa54b3485043830b263e615d6a4d30d95f3773d02c9e23a7cbf25388e1a0f2"
+   },
+   "tex-s1": {
+    "mean": 0.375924,
+    "sha256": "503f81caab52de44cb7ec153d62004f9b98df642c0fcfbf16fe4f2b0d72da086"
+   }
+  },
+  "text 1280x720->2560x1440": {
+   "mwsr": {
+    "mean": 0.892551,
+    "psnrVsBilinear": 27.113,
+    "sha256": "af8daa707a0b3da8cd22e4b315edc238af07ff9ee0f6438eb948db8927a9eee5"
+   },
+   "mwsr_c444_1": {
+    "mean": 0.892643,
+    "psnrVsBilinear": 26.966,
+    "sha256": "82fdbe80fb925923b0363819956d47fa1f4ebd3635b5f391889aed2b86648cf6"
+   },
+   "mwsr_dering_0": {
+    "mean": 0.89252,
+    "psnrVsBilinear": 27.103,
+    "sha256": "a08029fc86f38a7f043b5a5f3dc58332b2a9415818a6ca8c0bce61da1c6a36dc"
+   },
+   "tex-s1": {
+    "mean": 0.888722,
+    "sha256": "877a78d614185752fb418743ff66345b406a38c63db01ea87317d7b7d6a9c88d"
+   }
+  },
+  "text 1920x1080->2560x1440": {
+   "mwsr": {
+    "mean": 0.911577,
+    "psnrVsBilinear": 31.682,
+    "sha256": "765e33b4af9d194495fc882fdc03c42176b67378502f049f1f14f58eac11f00d"
+   },
+   "mwsr_c444_1": {
+    "mean": 0.911713,
+    "psnrVsBilinear": 31.667,
+    "sha256": "0b3edacb80374a3ef02488baad599e603d1536112ff89da0bafd0e2b9c2d4617"
+   },
+   "mwsr_dering_0": {
+    "mean": 0.911574,
+    "psnrVsBilinear": 31.661,
+    "sha256": "5292dfc2a09611175e02fc2b49b276b9502c4bfd4ce1525a4acf510e629ca6ae"
+   },
+   "tex-s1": {
+    "mean": 0.91082,
+    "sha256": "22da12b5615296fdeff19c2ac4e482901da1c263f7eb1d7ab4030e29f70a0d1f"
+   }
+  },
+  "text 2560x1440->1280x720": {
+   "mwsr": {
+    "mean": 0.931239,
+    "psnrVsBilinear": 27.155,
+    "sha256": "10b630637ea3515fbd0d2187c8dce07c4620ab1c45579b0341e82672319b4819"
+   },
+   "mwsr_ll_2": {
+    "mean": 0.934022,
+    "psnrVsBilinear": 25.782,
+    "sha256": "3b3f77fbe37d342758d612ada2359e6b3830aec38999845f3af77c890119e499"
+   },
+   "mwsr_taps_9": {
+    "mean": 0.925753,
+    "psnrVsBilinear": 28.163,
+    "sha256": "e283d5abd8cf5ce26535bcfcb0e141f147859dfb41f9433db5fa89dad7a78dfe"
+   },
+   "tex-s1": {
+    "mean": 0.915506,
+    "sha256": "c34dc99305b287034cca7aa6696cb819e54c5f9a5be697c716cbe759101645a3"
+   }
+  },
+  "zone 2560x1440->1280x720": {
+   "mwsr": {
+    "mean": 0.55991,
+    "psnrVsBilinear": 21.337,
+    "sha256": "e90e940456cdfacf17ff5f548f5c4e2f38e6a66e23463b4b428284540c8fbd37"
+   },
+   "mwsr_ll_2": {
+    "mean": 0.570161,
+    "psnrVsBilinear": 19.997,
+    "sha256": "f4224df8faca3710406613be58f7a3c6d0e6f050269c8a79f79df3f542bbdd82"
+   },
+   "mwsr_taps_9": {
+    "mean": 0.526575,
+    "psnrVsBilinear": 23.913,
+    "sha256": "a56f9846df3ea1477c74769c39c19ea07e8807a1ec1097f221fa4af40845ef37"
+   },
+   "tex-s1": {
+    "mean": 0.49915,
+    "sha256": "74057f60c95da20ea08e1d66ec76c48acff4b88f3d71956456c43318c5044d4c"
+   }
+  }
+ }
+}

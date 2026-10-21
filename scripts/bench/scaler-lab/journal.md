@@ -391,3 +391,158 @@ reste dans le générateur pour le labo (une future classe de GPU pourrait le re
 sort du texte (perdant partout : 780M 2,54 = `tex-s9`, RTX 0,086, M1 ×2,7). Chaînes sur le 780M :
 passe 0 + `mwsr` 1,53 contre passe 0 + SGSR1 ≈ 2,6-2,8 (P0) et passe 0 + FSR1 9,5 : **C2 tenue**
 (× 0,16 de FSR1) ; avec `half` ≈ 1,38.
+
+## 2026-10-21 — J11, le feed HDR tel qu'il est, et le noyau dessus (C8, qualité)
+
+**Le feed.** Le plan (§4.1) attendait de la lumière de scène linéaire et prévoyait une compression
+réversible autour du noyau. La passe 0 HDR du renderer (`tonemapPq`, courbe 2) écrit en réalité des
+valeurs **encodées sRGB, prolongées au-delà de 1,0** (`linToSrgb(P * scaled)` sur un canvas
+`rgba16float` en `toneMapping: extended`) : 203 nits = 1,0, 1000 nits ≈ 2,0, 10000 nits ≈ 5,3. La
+dynamique est déjà compressée par la courbe ; le noyau, borné par ses propres échantillons et sans
+aucun `clamp` à 1,0, tourne dessus sans changement. **La compression du plan est sans objet.**
+
+**L'instrument.** `hdr=1` dans la page (textures et cibles `rgba16float`, image `f16:<url>`,
+relecture en demi-flottants), mires de `hdr_mires.py` (rampe PQ grise et rouge, douze marches avec un
+trait sombre, rayures 1000 / 0,5 nits, dégradé ; texte 0,5 sur 1000 nits, 1000 sur 10, rouge P3 sur
+blanc ; l'image `game` de la page poussée à 1000 nits), vérité au format du feed, entrée réduite en
+lumière linéaire (Lanczos-3), `metrics_hdr.py` : ΔE ITP (BT.2124, ICtCp depuis des nits BT.2020),
+PSNR et SSIM en PQ, maximum, dépassement du max local 2×2 en nits (1 % + 0,5 nit).
+
+Passe SwiftShader du 21/10 (les pixels y sont ceux du RTX : contrôle SDR identique à P2 au centième),
+720p → 1440p :
+
+| mire | cellule | ΔE ITP moy | p99 | centre moy | PSNR PQ | max nits (× entrée) | dépassement |
+|---|---|---|---|---|---|---|---|
+| rampe | bilinéaire | 34,26 | 352 | 29,4 | 17,19 | 10718 (0,972) | 0 % |
+| rampe | FSR1 | **30,73** | **331** | 25,9 | **17,87** | 11348 (**1,030**) | **5,16 %** |
+| rampe | SGSR1 | 41,06 | 334 | 33,1 | 17,00 | 10073 (0,914) | 1,47 % |
+| rampe | **`mwsr`** | 31,32 | 352 | **23,6** | 17,70 | 10791 (0,979) | **0 %** |
+| texte | bilinéaire | 15,76 | 251 | 2,26 | 22,72 | 1139 (0,887) | 0 % |
+| texte | FSR1 | 16,71 | 252 | 2,61 | 22,52 | 1418 (**1,104**) | **4,81 %** |
+| texte | SGSR1 | 34,51 | 267 | 3,04 | 20,24 | 1083 (0,843) | 17,65 % |
+| texte | **`mwsr`** | **15,38** | 257 | **2,14** | **22,76** | 1149 (0,894) | **0 %** |
+| jeu | bilinéaire | 3,65 | 22,9 | 5,24 | 38,47 | 1078 (0,872) | 0 % |
+| jeu | FSR1 | 3,64 | 23,2 | 5,44 | 37,91 | 1354 (**1,095**) | 0,18 % |
+| jeu | SGSR1 | 4,07 | 40,4 | 5,95 | 36,69 | 1075 (0,870) | 0,97 % |
+| jeu | **`mwsr`** | **3,54** | **20,7** | **4,97** | **39,14** | 1162 (0,940) | **0 %** |
+
+Part du chemin contour : rampe 12 %, texte 28 %, jeu 2 %. Le « max » se lit contre l'entrée : la
+réduction Lanczos-3 en lumière linéaire sonne elle-même à 1285 nits sur le texte à 1000 ; `mwsr` garde
+le maximum local de l'entrée et ne le dépasse jamais, FSR1 y ajoute 10 % (RCAS n'a pas de borne au-delà
+de 1,0). SGSR1 écrête à 1,0 sur son chemin contour (`saturate`) : inutilisable en HDR, comme prévu.
+
+**Verdict H11.** Qualité de C8 **tenue** : ΔE ITP moyen de `mwsr` ≤ FSR1 sur le texte (−8 %) et le jeu
+(−3 %), +2 % sur la rampe (mais −9 % au centre) ; maximum conservé ; 0 % au-delà du maximum local
+contre 5 % pour FSR1 ; aucun changement de texte. Le temps ajouté (C8, « ≤ FSR1 `linear` ») se mesure
+sur le RTX (J14). Le module `half` sur le feed HDR (valeurs jusqu'à 5,3) : pixels à vérifier sur le RTX.
+
+## 2026-10-21 — J12, la réduction (C10) : la lumière linéaire d'abord, la grille ensuite
+
+Mode `down` du texte : grille k×k d'échantillons bilinéaires répartie sur l'empreinte du pixel de
+sortie (1/s texel par axe), étendue `R_DOWN`, moyenne en valeurs encodées (`LINEAR_LIGHT 0`), en
+gamma 2 (1 : carré, racine) ou en sRGB exact (2 : 15 `pow` par pixel à 4 taps). Référence : le
+Lanczos-2 de l'hôte en lumière linéaire (`p3_flows.lanczos_linear`) ; `smooth2d` = `drawImage` de
+Canvas2D en qualité `high` (le Smooth2D du critère) ; FSR1 et SGSR1 hors de leur domaine, tels que le
+client les ferait tourner aujourd'hui ; `alias` = RMS de l'erreur dans l'anneau de la zone-plate dont
+la fréquence dépasse la Nyquist de sortie, `flat` = RMS autour de la moyenne (le moiré lui-même),
+`lines` = PSNR de la moitié des traits fins. SwiftShader, 21/10.
+
+| échelle, image | cellule | PSNR | FLIP | alias | flat | lines |
+|---|---|---|---|---|---|---|
+| ×0,75 texte | bilinéaire = Smooth2D | 26,00 | 0,055 | | | |
+| ×0,75 texte | FSR1 / SGSR1 | 23,51 / 23,69 | 0,050 / 0,051 | | | |
+| ×0,75 texte | 2×2, encodé | 26,85 | 0,070 | | | |
+| ×0,75 texte | **2×2, gamma 2** | **28,55** | 0,054 | | | |
+| ×0,75 texte | 2×2, sRGB | 28,90 | 0,051 | | | |
+| ×0,75 texte | 2×2 sRGB, étendue 0,75 / 0,5 | 28,47 / 27,20 | 0,050 / 0,048 | | | |
+| ×0,75 code | bilinéaire / FSR1 | 32,99 / 31,37 | 0,022 / 0,017 | | | |
+| ×0,75 code | 2×2 encodé / gamma 2 / sRGB | 32,95 / 33,91 / 34,08 | 0,029 / 0,023 / 0,022 | | | |
+| ×0,75 zone | bilinéaire = Smooth2D | 17,67 | | 0,165 | 0,186 | 17,9 |
+| ×0,75 zone | FSR1 / SGSR1 | 15,20 / 16,05 | | 0,235 / 0,209 | 0,294 / 0,255 | 15,9 / 16,5 |
+| ×0,75 zone | 2×2 encodé / gamma 2 / sRGB | 18,84 / 20,37 / 20,70 | | 0,133 / 0,109 / 0,104 | 0,105 / 0,103 / 0,104 | 19,1 / 20,9 / 21,3 |
+| ×0,5 texte | bilinéaire (= boîte 2×2) | 24,77 | 0,077 | | | |
+| ×0,5 texte | FSR1 / SGSR1 | 22,95 / 22,04 | 0,063 / 0,070 | | | |
+| ×0,5 texte | **2×2, gamma 2** | **30,63** | **0,015** | | | |
+| ×0,5 texte | 2×2, sRGB | 30,76 | 0,025 | | | |
+| ×0,5 texte | 3×3 encodé / gamma 2 | 26,35 / 31,46 | 0,093 / 0,054 | | | |
+| ×0,5 code | bilinéaire / FSR1 | 30,58 / 29,01 | 0,031 / 0,024 | | | |
+| ×0,5 code | 2×2 gamma 2 / sRGB | 32,79 / 32,99 | 0,012 / 0,008 | | | |
+| ×0,5 zone | bilinéaire = Smooth2D | 16,86 | | 0,166 | 0,143 | 17,0 |
+| ×0,5 zone | FSR1 | 14,41 | | 0,266 | 0,270 | 16,6 |
+| ×0,5 zone | 2×2 gamma 2 / sRGB | 20,16 / 20,32 | | 0,094 / 0,090 | 0,133 / 0,134 | 18,8 / 18,9 |
+| ×0,5 zone | 3×3 encodé / gamma 2 | 18,23 / 20,46 | | 0,141 / 0,104 | 0,091 / 0,088 | 18,7 / 20,7 |
+| ×0,33 texte | bilinéaire / FSR1 / SGSR1 | 19,5 / 19,5 / 19,4 | 0,096 / 0,095 / 0,097 | | | |
+| ×0,33 texte | Smooth2D | 25,98 | 0,099 | | | |
+| ×0,33 texte | 3×3 encodé / gamma 2 / sRGB | 24,93 / 31,80 / 31,81 | 0,085 / 0,014 / 0,022 | | | |
+| ×0,33 texte | **3×3 étendue 1,25, gamma 2** / sRGB | **35,07** / 34,52 | 0,034 / 0,024 | | | |
+| ×0,33 texte | 4×4 encodé / sRGB | 25,55 / 33,29 | 0,093 / 0,030 | | | |
+| ×0,33 zone | bilinéaire / FSR1 | 9,8 / 9,6 | | 0,367 / 0,375 | 0,354 / 0,363 | 10,6 / 10,2 |
+| ×0,33 zone | Smooth2D | 16,67 | | 0,148 | 0,078 | 16,3 |
+| ×0,33 zone | 3×3 encodé / gamma 2 / sRGB | 16,09 / 20,30 / 20,63 | | 0,147 / 0,058 / 0,052 | 0,085 / 0,076 / 0,075 | 15,3 / 18,0 / 18,3 |
+| ×0,33 zone | **3×3 étendue 1,25, gamma 2** / sRGB | 22,65 / **23,69** | | 0,068 / 0,056 | **0,043** / 0,044 | 22,5 / 23,3 |
+| ×0,33 zone | 4×4 sRGB / 4×4 étendue 1,25 sRGB | 20,02 / 20,40 | | 0,084 / 0,101 | 0,063 / 0,041 | 19,0 / 21,2 |
+
+**Verdicts H12.** (a) **La lumière linéaire est le terme décisif** : +2,5 dB (×0,75) à +6 dB (×0,5) et
++12 dB (×0,33 contre le bilinéaire) sur le texte, FLIP divisé par trois à cinq ; la moyenne en valeurs
+encodées assombrit toute structure fine (le gris moyen d'un damier sort à 0,5 encodé au lieu de 0,73),
+ce que PSNR et FLIP sanctionnent tous deux. Le sRGB exact gagne ≤ 0,35 dB sur le gamma 2 et perd en
+FLIP sur le texte ×0,5 : **`LINEAR_LIGHT 1` par défaut**, 2 en option là où quinze `pow` ne coûtent
+rien (classe d'ordinateur, J14). (b) **Grilles** : à ×0,5 la grille 2×2 à l'étendue 1 est la boîte
+exacte, et FLIP la préfère nettement à la 3×3 (0,015 contre 0,054 sur le texte) ; en dessous de ×0,5,
+la 3×3 à l'étendue 1,25 vaut +2,7 dB sur le texte et −40 % de moiré (`flat` 0,044 contre 0,076) à FLIP
+égal ; la 4×4 ne fait pas mieux à ×0,33 (régime < ×0,25 non mesuré, laissé au plan). **Table :
+0,5 ≤ s < 1 → 2×2, étendue 1 ; 0,25 ≤ s < 0,5 → 3×3, étendue 1,25 ; s < 0,25 → 4×4, étendue 1,25**
+(`MWSR_DOWN_TAPS`, `mwsrRegime()`). (c) Contre le critère : énergie d'aliasing ≤ Smooth2D partout
+(×0,33 : 0,068 contre 0,148 ; `flat` 0,043 contre 0,078) ; PSNR contre le Lanczos-2 de l'hôte 28,5 à
+35 dB sur le texte ; le coût (« ≤ bilinéaire + 30 % ») se mesure au RTX et au 780M (J14). FSR1 et SGSR1
+en réduction sont pires que le bilinéaire (FSR1 : 27 à 50 % de dépassements à ×0,33) : c'est ce que le
+client WebGPU fait aujourd'hui avec un enhancer allumé sur un flux plus grand que l'écran.
+
+## 2026-10-21 — J13, le 4:4:4 (C9) et la netteté par la luma
+
+Mires `code` (syntaxe VS Code sur fond sombre) et `codeiso` (les mêmes couleurs ramenées à une luma
+Rec. 709 à 5/255 près du fond : chaque contour n'est qu'un contour de chroma), entrée brute (4:4:4) et
+la même passée par un pipeline 4:2:0 simulé (`p3_flows.chroma_420` : Y'CbCr 709, chroma moyennée 2×2 et
+remontée en bilinéaire, ce que fait l'import du navigateur). `CHROMA444 1` : vote sur le canal à la
+pente la plus forte, cohérence et poids par canal. `LUMA_SHARP 1` (expérience) : netteté par la luma
+seule, teinte des échantillons conservée. ×2, 720p → 1440p, SwiftShader.
+
+| mire, entrée | cellule | FLIP | PSNR Cb / Cr | ΔE00 moy / p99 | dépassement | part contour |
+|---|---|---|---|---|---|---|
+| code 4:4:4 | bilinéaire | 0,034 | 36,94 / 37,69 | 1,653 / 23,7 | 0 % | |
+| code 4:4:4 | SGSR1 | 0,026 | 36,98 / 37,73 | **1,563** / 24,2 | 4,92 % | |
+| code 4:4:4 | FSR1 | **0,024** | **37,07** / 37,70 | 1,626 / **23,6** | 1,30 % | |
+| code 4:4:4 | `mwsr` | 0,029 | 36,62 / 37,21 | 1,614 / 24,6 | 0 % | 14,4 % |
+| code 4:4:4 | `mwsr:c444=1` | 0,029 | 36,58 / 37,18 | 1,623 / 24,7 | 0 % | 16,0 % |
+| code 4:4:4 | `mwsr:lsharp=1` | 0,030 | 36,79 / 37,49 | 1,568 / 24,5 | 0 % | |
+| code 4:2:0 | bilinéaire | 0,040 | 34,64 / 35,59 | 1,827 / 24,3 | 0 % | |
+| code 4:2:0 | SGSR1 | 0,032 | 34,66 / 35,61 | 1,748 / 25,4 | 1,11 % | |
+| code 4:2:0 | FSR1 | **0,031** | **34,79** / 35,73 | 1,743 / 24,3 | 1,17 % | |
+| code 4:2:0 | `mwsr` | 0,036 | 34,70 / 35,65 | 1,742 / 25,3 | 0 % | 14,5 % |
+| code 4:2:0 | `mwsr:c444=1` | 0,036 | 34,71 / 35,66 | 1,737 / 25,2 | 0 % | 15,5 % |
+| code 4:2:0 | `mwsr:lsharp=1` | 0,036 | 34,76 / 35,69 | **1,716** / 25,2 | 0 % | |
+| codeiso 4:4:4 | bilinéaire = SGSR1 = `mwsr` | 0,014 | 34,57 / 40,62 | 0,752 / 13,0 | 0 % | 0,1 % |
+| codeiso 4:4:4 | FSR1 | **0,008** | **34,94 / 42,00** | **0,654** / 11,4 | 1,16 % | |
+| codeiso 4:4:4 | **`mwsr:c444=1`** | 0,011 | 34,55 / 41,39 | 0,675 / 12,1 | 0 % | 11,7 % |
+| codeiso 4:2:0 | bilinéaire = `mwsr` | 0,027 | 30,17 / 36,17 | 1,415 / 24,6 | 0 % | 0,0 % |
+| codeiso 4:2:0 | FSR1 | 0,026 | 30,38 / 36,37 | 1,359 / 24,3 | 0,15 % | |
+| codeiso 4:2:0 | `mwsr:c444=1` | 0,026 | 30,30 / 36,28 | 1,367 / 24,6 | 0 % | 8,5 % |
+
+Réglages de `c444` essayés sur `codeiso` (netteté 1,5 et 2, τ 0,03, `W_ACROSS` 0,45, `W_ALONG` 0,25) :
+ΔE00 0,665 à 0,680, FLIP 0,010 à 0,011 — aucun levier, la table reste celle de la luma. Contrôle SDR à
+×2 (texte, jeu, code) : le défaut rend les pixels de P2 au centième ; `c444` y vaut +0,08 dB sur le
+texte (la mire a des parties colorées) et rien ailleurs ; `lsharp` −0,06 dB et FLIP +0,002 sur le texte,
+rien sur le jeu et le code ; en HDR (J11) `lsharp` perd 0,1 à 0,2 % de ΔE ITP sur les trois mires.
+
+**Verdicts H13.** (a) Sur la syntaxe colorée ordinaire, la luma voit déjà chaque contour : le vote par
+canal n'y change pas les pixels (14,4 → 16,0 % de quads, mêmes chiffres) ; le défaut égale FSR1 en
+ΔE00 (4:4:4 1,614 contre 1,626 ; 4:2:0 1,742 contre 1,743), reste 0,1 à 0,4 dB sous lui en PSNR de
+chroma, et seul des cinq sans dépassement. (b) Sur les bords **isoluminants**, le cas que le mode
+existe pour servir, la luma seule ne voit rien (0,1 % de quads, `mwsr` = bilinéaire = SGSR1) ; `c444`
+les voit (11,7 %) : FLIP 0,014 → 0,011, ΔE00 −10 %, SSIM 0,9751 → 0,9785, un cheveu derrière FSR1
+(0,675 contre 0,654 ; FSR1 affûte tous les canaux par construction, et dépasse 1,2 %). **C9 : mieux que
+SGSR1 partout, égal à FSR1 en ΔE00 sur la syntaxe, derrière lui de 3 % sur les bords isoluminants** :
+tenu pour la première moitié, à 3 % près pour la seconde. `CHROMA444` reste dans le texte, pour les flux
+4:4:4 (`StreamView._yuv444`, P4) ; coût nul quand il est à 0 (constante de pipeline), à mesurer à 1
+(J14). (c) **`LUMA_SHARP` sort du texte** : −0,03 de ΔE00 sur la chroma (marginal), perdant en luma SDR
+et en HDR.

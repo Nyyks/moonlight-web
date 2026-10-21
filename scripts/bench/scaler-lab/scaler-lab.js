@@ -5,7 +5,11 @@
 //
 // Driven by scaler-lab.html, whose query carries the parameters:
 //   in=1280x720 out=2560x1440   input and output sizes (16:9 both, as a stream)
-//   content=text|ui|game|img:<url>  the picture (drawn by the page, or fetched)
+//   content=text|ui|game|zone|code|codeiso|img:<url>|f16:<url>
+//                                the picture: drawn by the page, fetched as an
+//                                image, or (hdr=1) fetched as RGBA half floats
+//   hdr=1                        the HDR feed: rgba16float textures and targets
+//                                (the renderer's `linear` mode), dumps as .f16
 //   set=feed,base,chain          which cells (see CELL_SETS), or cells=a,b,c
 //   codec=avc|none               VideoFrames from a WebCodecs encode → decode
 //                                loop (the external-texture feed), or none
@@ -65,12 +69,15 @@ const CELL_SETS = {
     "blit+fsr1",
   ],
   chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1"],
-  // The mwsr kernel (plan §3.2): `mwsr[:key=val;key=val…]` sets its
-  // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering),
-  // uniforms (tau, sharp) and half=1 (the f16 module; the page needs f16=1)
-  // and uniforms (tau, sharp); `ext-mwsr` reads the external texture (no
-  // pass 0), `blit+mwsr` pays the pass 0 first.
+  // The mwsr kernel (plan §3.2, §4.3): `mwsr[:key=val;key=val…]` sets its
+  // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering,
+  // c444, rdown, ll), the uniforms (tau, sharp), half=1 (the f16
+  // module; the page needs f16=1), mode=up|down (default: by the scale) and
+  // taps=4|9|16 (the reduction's grid); `ext-mwsr` reads the external texture
+  // (no pass 0), `blit+mwsr` pays the pass 0 first.
   mwsr: ["mwsr", "mwsr:dering=0", "mwsr:half=1", "blit+mwsr"],
+  // P3: the reduction grids and lights (the mode follows the scale), 4:4:4.
+  p3: ["mwsr", "mwsr:taps=9", "mwsr:ll=1", "mwsr:c444=1", "smooth2d"],
 };
 
 const VS = /* wgsl */ `
@@ -420,21 +427,33 @@ function drawZone(ctx, w, h) {
 }
 
 // Coloured syntax on a dark background: text whose edges live in the chroma
-// as much as in the luma (§4.2, C9).
-function drawCode(ctx, w, h) {
-  ctx.fillStyle = "#1e1e1e";
+// as much as in the luma (§4.2, C9). `iso`: the same text in colours of one
+// luma (Rec. 709 within 5/255 of the background's), so that every edge is a
+// chroma edge and nothing else — the case the 4:4:4 vote exists for.
+function drawCode(ctx, w, h, iso = false) {
+  ctx.fillStyle = iso ? "#786e28" : "#1e1e1e";
   ctx.fillRect(0, 0, w, h);
   const px = Math.max(9, Math.round(h / 56));
   ctx.font = px + "px Consolas, monospace";
-  const colors = {
-    kw: "#569cd6",
-    str: "#ce9178",
-    cmt: "#6a9955",
-    id: "#9cdcfe",
-    num: "#b5cea8",
-    fn: "#dcdcaa",
-    pl: "#d4d4d4",
-  };
+  const colors = iso
+    ? {
+        kw: "#287d5a",
+        str: "#b45a46",
+        cmt: "#5a5fe6",
+        id: "#c846b4",
+        num: "#3c7882",
+        fn: "#96643c",
+        pl: "#467378",
+      }
+    : {
+        kw: "#569cd6",
+        str: "#ce9178",
+        cmt: "#6a9955",
+        id: "#9cdcfe",
+        num: "#b5cea8",
+        fn: "#dcdcaa",
+        pl: "#d4d4d4",
+      };
   const lines = [
     [
       ["kw", "const "],
@@ -493,7 +512,7 @@ function drawCode(ctx, w, h) {
     const line = lines[n % lines.length];
     for (const x0 of [px, Math.round(w * 0.5)]) {
       let x = x0;
-      ctx.fillStyle = "#858585";
+      ctx.fillStyle = iso ? "#64696e" : "#858585";
       ctx.fillText(String(n + 1).padStart(3), x, y);
       x += px * 3;
       for (const [kind, text] of line) {
@@ -526,7 +545,7 @@ async function makePicture(kind, w, h, k) {
   } else if (kind === "ui") drawUi(ctx, w, h);
   else if (kind === "game") drawGame(ctx, w, h);
   else if (kind === "zone") drawZone(ctx, w, h);
-  else if (kind === "code") drawCode(ctx, w, h);
+  else if (kind === "code" || kind === "codeiso") drawCode(ctx, w, h, kind === "codeiso");
   else drawText(ctx, w, h);
   // frame k: a small moving square, so that an encoded clip has P-frames
   // with motion and the artefacts of a real stream (still.html's anim).
@@ -725,19 +744,35 @@ export async function runLab(p, log = () => {}) {
     `adapter: ${adapterName} | timestamps ${hasTs} f16 ${hasF16} | features ${features.join(" ")}`,
   );
   const format = navigator.gpu.getPreferredCanvasFormat();
+  // hdr=1: the renderer's `linear` HDR feed — rgba16float textures and targets,
+  // the picture fetched as RGBA half floats (f16:<url>), the dumps written back
+  // as half floats.
+  const hdr = p.hdr === "1";
+  const texFormat = hdr ? "rgba16float" : "rgba8unorm";
+  const outFormat = hdr ? "rgba16float" : format;
 
   // Pictures: F frames of the content at the input size (the clip), and the
-  // first one as the materialised texture.
+  // first one as the materialised texture; or the half floats of an HDR picture.
   const F = 12;
   const pictures = [];
-  for (let k = 0; k < F; k++)
-    pictures.push(await makePicture(content, inW, inH, k));
+  let halfData = null;
+  if (content.startsWith("f16:")) {
+    const r = await fetch(content.slice(4));
+    if (!r.ok) throw new Error(content + ": " + r.status);
+    halfData = new Uint16Array(await r.arrayBuffer());
+    if (halfData.length !== inW * inH * 4)
+      throw new Error(`${content}: ${halfData.length} halves, not ${inW}x${inH}x4`);
+    if (!hdr) throw new Error("an f16 picture needs hdr=1");
+  } else {
+    for (let k = 0; k < F; k++)
+      pictures.push(await makePicture(content, inW, inH, k));
+  }
   let frames = [];
   let frameInfo = null;
   const needExt = cellNames.some(
     (c) => c.startsWith("ext") || c.startsWith("blit") || c.startsWith("chain"),
   );
-  if (codec !== "none" && needExt) {
+  if (codec !== "none" && needExt && pictures.length) {
     try {
       const r = await makeFrames(pictures, codec, log);
       frames = r.frames;
@@ -754,33 +789,46 @@ export async function runLab(p, log = () => {}) {
   const inTex = mkTex(
     inW,
     inH,
-    "rgba8unorm",
+    texFormat,
     T.TEXTURE_BINDING | T.COPY_DST | T.RENDER_ATTACHMENT,
   );
-  device.queue.copyExternalImageToTexture(
-    { source: pictures[0] },
-    { texture: inTex },
-    { width: inW, height: inH },
-  );
+  if (halfData)
+    device.queue.writeTexture(
+      { texture: inTex },
+      halfData,
+      { bytesPerRow: inW * 8, rowsPerImage: inH },
+      { width: inW, height: inH },
+    );
+  else
+    device.queue.copyExternalImageToTexture(
+      { source: pictures[0] },
+      { texture: inTex },
+      { width: inW, height: inH },
+    );
   const blitTex = mkTex(
     inW,
     inH,
-    "rgba8unorm",
+    texFormat,
     T.TEXTURE_BINDING | T.RENDER_ATTACHMENT,
   );
   const midTex = mkTex(
     outW,
     outH,
-    "rgba8unorm",
+    texFormat,
     T.TEXTURE_BINDING | T.RENDER_ATTACHMENT,
   );
   const intermTex = mkTex(
     outW,
     outH,
-    "rgba8unorm",
+    texFormat,
     T.TEXTURE_BINDING | T.RENDER_ATTACHMENT,
   );
-  const outTex = mkTex(outW, outH, format, T.RENDER_ATTACHMENT | T.COPY_SRC);
+  const outTex = mkTex(
+    outW,
+    outH,
+    outFormat,
+    T.RENDER_ATTACHMENT | T.COPY_SRC | T.COPY_DST,
+  );
   const views = {
     blit: blitTex.createView(),
     interm: intermTex.createView(),
@@ -813,7 +861,7 @@ export async function runLab(p, log = () => {}) {
     rcas: extractWgsl(src, "RCAS_WGSL"),
   };
   SH.sgsrSrc = sgsrSource(SH.sgsr);
-  const { mwsrWgsl, mwsrUniforms } = await import(MWSR_URL);
+  const { mwsrWgsl, mwsrUniforms, mwsrRegime } = await import(MWSR_URL);
 
   const pipelines = new Map();
   const pipeline = (
@@ -832,7 +880,7 @@ export async function runLab(p, log = () => {}) {
       fragment: {
         module,
         entryPoint: entry[1],
-        targets: [{ format: target === "out" ? format : "rgba8unorm" }],
+        targets: [{ format: target === "out" ? outFormat : texFormat }],
         constants,
       },
       primitive: { topology: "triangle-list" },
@@ -1021,14 +1069,23 @@ export async function runLab(p, log = () => {}) {
     sfull: "S_FULL",
     wmin: "W_MIN",
     dering: "DERING",
+    c444: "CHROMA444",
+    rdown: "R_DOWN",
+    ll: "LINEAR_LIGHT",
   };
+  const regime = mwsrRegime(inW, inH, outW, outH);
   const mwsrPass = (name, feed, opts, srcView) => {
     const over = {};
     const uni = {};
     let half = false;
+    let mode = regime.mode === "down" ? "down" : "up";
+    let taps = regime.mode === "down" ? regime.taps : 4;
+    if (regime.mode === "down") over.R_DOWN = regime.rDown;
     for (const [k, v] of Object.entries(opts)) {
       if (k === "tau" || k === "sharp") uni[k] = Number(v);
       else if (k === "half") half = v === "1";
+      else if (k === "mode") mode = v;
+      else if (k === "taps") taps = Number(v);
       else if (k in MWSR_KEYS) over[MWSR_KEYS[k]] = Number(v);
       else throw new Error(name + ": option " + k + "?");
     }
@@ -1036,7 +1093,7 @@ export async function runLab(p, log = () => {}) {
       throw new Error(name + ": the device has no shader-f16 (f16=1 asks for it)");
     const pl = pipeline(
       name,
-      mwsrWgsl({ feed, half }),
+      mwsrWgsl({ feed, half, mode, taps }),
       "out",
       ["vs", "fs"],
       feed === "ext" ? plExt : plTex,
@@ -1095,6 +1152,28 @@ export async function runLab(p, log = () => {}) {
       return { name, feed: pre || feed === "ext" ? "ext" : "tex", passes };
     }
     if (name === "blit") return { name, feed: "ext", passes: [blitPass()] };
+    // Canvas2D's own resampling (imageSmoothingQuality high: the Smooth2D of
+    // criterion C10), a CPU cell for the quality flows only: no GPU time.
+    if (name === "smooth2d")
+      return {
+        name,
+        feed: "cpu",
+        passes: [],
+        run: async () => {
+          if (!pictures.length) throw new Error("smooth2d: no canvas picture (hdr)");
+          const cv = new OffscreenCanvas(outW, outH);
+          const ctx = cv.getContext("2d", { alpha: false });
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(pictures[0], 0, 0, outW, outH);
+          device.queue.copyExternalImageToTexture(
+            { source: cv },
+            { texture: outTex },
+            { width: outW, height: outH },
+          );
+          await device.queue.onSubmittedWorkDone();
+        },
+      };
     const w = /^(blit\+)?(ext-)?mwsr(?::(.*))?$/.exec(name);
     if (w) {
       const pre = !!w[1];
@@ -1279,6 +1358,10 @@ export async function runLab(p, log = () => {}) {
 
   async function measure(cell, iters, stamp) {
     if (cell.feed === "chain") return runChain(cell, iters, stamp);
+    if (cell.feed === "cpu") {
+      await cell.run();
+      return { wall: 0, times: null, passes: 0, iters };
+    }
     if (pace === "tick") {
       // one iteration per period, each its own submission
       const times = [];
@@ -1429,7 +1512,7 @@ export async function runLab(p, log = () => {}) {
   }
 
   let shots = null;
-  if (wantShots) {
+  if (wantShots && !hdr) {
     shots = {};
     for (const c of cells) {
       if (!c || c.feed === "chain") continue;
@@ -1446,9 +1529,14 @@ export async function runLab(p, log = () => {}) {
     if (!c || c.feed === "chain" || !dumpList.includes(c.name)) continue;
     try {
       await measure(c, 1, false);
-      const blob = await readPng(device, outTex, format, 0, 0, outW, outH);
       const name = (p.tag || "lab") + "-" + c.name.replace(/[^\w.+-]/g, "_");
-      await postBlob("/__png?name=" + encodeURIComponent(name), blob);
+      if (hdr) {
+        const bytes = await readHalf(device, outTex, outW, outH);
+        await postBlob("/__bin?name=" + encodeURIComponent(name), new Blob([bytes]));
+      } else {
+        const blob = await readPng(device, outTex, format, 0, 0, outW, outH);
+        await postBlob("/__png?name=" + encodeURIComponent(name), blob);
+      }
       dumped.push(name);
     } catch (e) {
       errors.push("[dump " + c.name + "] " + e.message);
@@ -1469,7 +1557,7 @@ export async function runLab(p, log = () => {}) {
     },
     features,
     timestamps: hasTs,
-    format,
+    format: outFormat,
     userAgent: navigator.userAgent,
     isolated: !!globalThis.crossOriginIsolated,
     params: {
@@ -1517,6 +1605,29 @@ async function crop(device, tex, format, w, h) {
 }
 
 // A region of a texture read back, as a PNG blob.
+// The whole of an rgba16float texture, as tightly packed half floats (RGBA).
+async function readHalf(device, tex, cw, ch) {
+  const bpr = Math.ceil((cw * 8) / 256) * 256;
+  const buf = device.createBuffer({
+    size: bpr * ch,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+  const enc = device.createCommandEncoder();
+  enc.copyTextureToBuffer(
+    { texture: tex },
+    { buffer: buf, bytesPerRow: bpr },
+    { width: cw, height: ch },
+  );
+  device.queue.submit([enc.finish()]);
+  await buf.mapAsync(GPUMapMode.READ);
+  const a = new Uint8Array(buf.getMappedRange());
+  const out = new Uint8Array(cw * ch * 8);
+  for (let r = 0; r < ch; r++) out.set(a.subarray(r * bpr, r * bpr + cw * 8), r * cw * 8);
+  buf.unmap();
+  buf.destroy();
+  return out;
+}
+
 async function readPng(device, tex, format, x, y, cw, ch) {
   const bpr = Math.ceil((cw * 4) / 256) * 256;
   const buf = device.createBuffer({
