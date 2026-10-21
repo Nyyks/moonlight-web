@@ -34,6 +34,7 @@ import {
 } from "/frontend/js/stream/renderers/NisTables.js";
 
 const RENDERER_URL = "/frontend/js/stream/renderers/WebGpuRenderer.js";
+const MWSR_URL = "/frontend/js/stream/renderers/MwsrShader.js";
 
 const CELL_SETS = {
   feed: [
@@ -64,6 +65,11 @@ const CELL_SETS = {
     "blit+fsr1",
   ],
   chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1"],
+  // The mwsr kernel (plan §3.2): `mwsr[:key=val;key=val…]` sets its
+  // overrides (orient, early, show, walong, wacross, ralong, racross, sfull)
+  // and uniforms (tau, sharp); `ext-mwsr` reads the external texture (no
+  // pass 0), `blit+mwsr` pays the pass 0 first.
+  mwsr: ["mwsr", "mwsr:orient=0", "mwsr:early=0", "ext-mwsr"],
 };
 
 const VS = /* wgsl */ `
@@ -682,7 +688,7 @@ export async function runLab(p, log = () => {}) {
     p.dump === "all"
       ? cellNames.filter((c) => !c.startsWith("chain"))
       : p.dump === "base"
-        ? ["tex-s1", "sgsr-repo", "sgsr-src", "nis", "easu", "fsr1"].filter(
+        ? ["tex-s1", "sgsr-repo", "sgsr-src", "nis", "easu", "fsr1", "mwsr"].filter(
             (c) => cellNames.includes(c),
           )
         : (p.dump || "").split(",").filter(Boolean);
@@ -802,6 +808,7 @@ export async function runLab(p, log = () => {}) {
     rcas: extractWgsl(src, "RCAS_WGSL"),
   };
   SH.sgsrSrc = sgsrSource(SH.sgsr);
+  const { mwsrWgsl, mwsrUniforms } = await import(MWSR_URL);
 
   const pipelines = new Map();
   const pipeline = (
@@ -810,6 +817,7 @@ export async function runLab(p, log = () => {}) {
     target,
     entry = ["vs", "fs"],
     layout = "auto",
+    constants = undefined,
   ) => {
     if (pipelines.has(key)) return pipelines.get(key);
     const module = device.createShaderModule({ code });
@@ -820,6 +828,7 @@ export async function runLab(p, log = () => {}) {
         module,
         entryPoint: entry[1],
         targets: [{ format: target === "out" ? format : "rgba8unorm" }],
+        constants,
       },
       primitive: { topology: "triangle-list" },
     });
@@ -996,6 +1005,49 @@ export async function runLab(p, log = () => {}) {
     };
   };
 
+  // The mwsr kernel, one pass to `out`; the cell's options become overrides
+  // (pipeline constants) and uniforms. The override defaults are the text's.
+  const MWSR_KEYS = {
+    orient: "ORIENT",
+    early: "EARLY_OUT",
+    show: "SHOW",
+    walong: "W_ALONG",
+    wacross: "W_ACROSS",
+    ralong: "R_ALONG",
+    racross: "R_ACROSS",
+    sfull: "S_FULL",
+    wmin: "W_MIN",
+  };
+  const mwsrPass = (name, feed, opts, srcView) => {
+    const over = {};
+    const uni = {};
+    for (const [k, v] of Object.entries(opts)) {
+      if (k === "tau" || k === "sharp") uni[k] = Number(v);
+      else if (k in MWSR_KEYS) over[MWSR_KEYS[k]] = Number(v);
+      else throw new Error(name + ": option " + k + "?");
+    }
+    const pl = pipeline(
+      name,
+      mwsrWgsl({ feed }),
+      "out",
+      ["vs", "fs"],
+      feed === "ext" ? plExt : plTex,
+      over,
+    );
+    const ub = uniform(mwsrUniforms(inW, inH, outW, outH, uni));
+    if (feed === "ext")
+      return {
+        pipeline: pl,
+        target: "out",
+        ext: (ext) => bind(pl, [sampler, ext, { buffer: ub }]),
+      };
+    return {
+      pipeline: pl,
+      target: "out",
+      group: bind(pl, [sampler, srcView, { buffer: ub }]),
+    };
+  };
+
   // midTex: the picture at the output size (a bilinear blit, once), the input
   // of the `rcas` cell alone, as RCAS reads EASU's output in the product.
   {
@@ -1035,6 +1087,22 @@ export async function runLab(p, log = () => {}) {
       return { name, feed: pre || feed === "ext" ? "ext" : "tex", passes };
     }
     if (name === "blit") return { name, feed: "ext", passes: [blitPass()] };
+    const w = /^(blit\+)?(ext-)?mwsr(?::(.*))?$/.exec(name);
+    if (w) {
+      const pre = !!w[1];
+      const feed = w[2] ? "ext" : "tex";
+      if (feed === "ext" && pre)
+        throw new Error(name + ": blit then external makes no sense");
+      const opts = Object.fromEntries(
+        (w[3] || "")
+          .split(";")
+          .filter(Boolean)
+          .map((kv) => kv.split("=")),
+      );
+      const passes = pre ? [blitPass()] : [];
+      passes.push(mwsrPass(name, feed, opts, pre ? views.blit : inView));
+      return { name, feed: pre || feed === "ext" ? "ext" : "tex", passes };
+    }
     const k = /^(blit\+)?(sgsr-repo|sgsr-src|nis|easu|rcas|fsr1)$/.exec(name);
     if (k) {
       const pre = !!k[1];
@@ -1371,7 +1439,7 @@ export async function runLab(p, log = () => {}) {
     try {
       await measure(c, 1, false);
       const blob = await readPng(device, outTex, format, 0, 0, outW, outH);
-      const name = (p.tag || "lab") + "-" + c.name;
+      const name = (p.tag || "lab") + "-" + c.name.replace(/[^\w.+-]/g, "_");
       await postBlob("/__png?name=" + encodeURIComponent(name), blob);
       dumped.push(name);
     } catch (e) {

@@ -68,6 +68,19 @@ P1_CASES = [
 ]
 
 
+# The P2 set (--p2; upscaler-mwsr.md §3, §6, criteria C1-C2): the mwsr kernel
+# next to the floor (one and five bilinear taps), its two orientations, with
+# and without the branch, on the external texture, and the shipped kernels;
+# three pictures at ×2, text at ×1.33.
+P2_CELLS = "tex-s1,tex-s5,mwsr,mwsr:orient=0,mwsr:early=0,ext-s1,ext-mwsr,sgsr-repo,fsr1,nis"
+P2_CASES = [
+    ("x2-text", "in=1280x720&out=2560x1440&content=text&cells=%s&rounds=3" % P2_CELLS),
+    ("x2-ui", "in=1280x720&out=2560x1440&content=ui&cells=%s&rounds=3" % P2_CELLS),
+    ("x2-game", "in=1280x720&out=2560x1440&content=game&cells=%s&rounds=3" % P2_CELLS),
+    ("x133-text", "in=1920x1080&out=2560x1440&content=text&cells=%s&rounds=3" % P2_CELLS),
+]
+
+
 class LabHandler(Handler):
     """The repository, C:\\Test under /test/, the output directory under /__dir/,
     results posted under /__result, pictures (PNG) under /__png."""
@@ -189,7 +202,7 @@ def make_input(gt_path, in_path, size):
     Image.fromarray((srgb * 255.0 + 0.5).astype(np.uint8), mode="RGB").save(in_path)
 
 
-QUALITY_CELLS = "tex-s1,sgsr-repo,sgsr-src,nis,easu,fsr1"
+QUALITY_CELLS = "tex-s1,sgsr-repo,sgsr-src,nis,easu,fsr1,mwsr"
 
 # The phone set: the ×2 case with the product's chain, the reduction a phone
 # does most (§1.6), and a game picture; 2 rounds so that a slot holds 10 min.
@@ -271,6 +284,8 @@ def main():
     ap.add_argument("--power", default="", help="high-performance or low-power (the adapter asked for)")
     ap.add_argument("--swiftshader", action="store_true", help="the software adapter (fallback), for a first run")
     ap.add_argument("--p1", action="store_true", help="the P1 set (the chain at 1:1, the passage 1:1 <-> x2) instead of P0's")
+    ap.add_argument("--p2", action="store_true", help="the P2 set (the mwsr kernel against the floor and the shipped kernels)")
+    ap.add_argument("--quality-cells", default="", help="the cells of --quality instead of %s (mwsr variants…)" % QUALITY_CELLS)
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab"))
     ap.add_argument("--chrome-arg", action="append", default=[])
     ap.add_argument("--headed", default="", help="X,Y,W,H: a shown window there instead of headless")
@@ -392,9 +407,10 @@ def main():
                 gt_path = os.path.join(a.dir, base + "-gt.png")
                 in_path = os.path.join(a.dir, base + "-in.png")
                 make_input(gt_path, in_path, (inw, inh))
-                res = run_page("in=%s&out=%s&content=img:/__dir/%s-in.png&codec=none&cells=%s&dump=base"
+                res = run_page("in=%s&out=%s&content=img:/__dir/%s-in.png&codec=none&cells=%s&dump=%s"
                                "&rounds=1&batches=1&batch=4&warm=1&tag=%s" % (
-                                   a.size_in, a.size_out, base, QUALITY_CELLS, base))
+                                   a.size_in, a.size_out, base, a.quality_cells or QUALITY_CELLS,
+                                   "all" if a.quality_cells else "base", base))
                 if "error" in res:
                     print(base, "cells ERROR", res["error"][:600])
                     continue
@@ -416,7 +432,7 @@ def main():
                 sys.stdout.flush()
             return
 
-        cases = case_list(a.case or (P1_CASES if a.p1 else None))
+        cases = case_list(a.case or (P1_CASES if a.p1 else P2_CASES if a.p2 else None))
         for name, query in cases:
             t0 = time.time()
             res = run_page(query)
