@@ -43,6 +43,7 @@
         error: String(e && e.stack ? e.stack : e),
       }));
       window.__labResult.then(async (r) => {
+        window.__labDone = r; // what the driver polls for (a value, not a promise)
         if (r.error) log('ERROR ' + r.error);
         else {
           log('done: ' + r.cells.length + ' cells');

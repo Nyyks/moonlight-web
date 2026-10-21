@@ -38,6 +38,13 @@
  *               the 6×6 luma support, the four 3×3 edge maps and the 64-phase
  *               filter banks are recomputed per fragment. Same output, more
  *               texture reads — which is the honest cost on a fragment path.
+ *   'gl-mwsr' — MoonlightWeb's own upscaler, the GLSL twin of the WGSL text
+ *               (MwsrShader.js, docs/design/upscaler-mwsr.md §3.6): the same
+ *               kernel and constants from the same tables, one program per
+ *               regime, the one to run picked per frame by the frame and
+ *               canvas sizes. Bilinear taps and screen derivatives only, no
+ *               gather to emulate. The reduction averages in software light:
+ *               a WebGL2 drawing buffer has no sRGB view.
  *
  * GLSL ES 3.00 (WebGL2) has no textureGather: every gather is four texelFetch
  * on the 2×2 footprint a bilinear tap would cover, in the same component
@@ -57,6 +64,7 @@
 import { VideoRenderer } from './VideoRenderer.js';
 import { nisConfig, nisCoefTexture, readNisSharpness, nisScaleInRange } from './NisTables.js';
 import { fitOutputSize, isIdentityScale } from './scaleRegime.js';
+import { mwsrGlsl, mwsrRegime, mwsrRegimeKey, mwsrRegimes, mwsrUniforms } from './MwsrShader.js';
 
 // ── Shaders ─────────────────────────────────────────────────────────────────
 
@@ -585,7 +593,7 @@ void main() {
 }
 `;
 
-export const WEBGL_ALGOS = ['gl-fsr1', 'gl-sgsr', 'gl-nis'];
+export const WEBGL_ALGOS = ['gl-fsr1', 'gl-sgsr', 'gl-nis', 'gl-mwsr'];
 
 export class WebGlRenderer extends VideoRenderer {
     constructor() {
@@ -595,6 +603,12 @@ export class WebGlRenderer extends VideoRenderer {
         this._algo = 'gl-fsr1';
         /** The last draw copied the frame 1:1 instead of running the pass. */
         this._passthrough = false;
+        /** 4:4:4 stream: mwsr votes and sharpens per channel (CHROMA444). */
+        this._yuv444 = false;
+        /** @type {Map<string, {prog: WebGLProgram, u: Object}>|null} mwsr's programs, by regime. */
+        this._mwsr = null;
+        this._mwsrUni = null;
+        this._mwsrUniKey = '';
         this.gl = null;
         this._outW = 0;
         this._outH = 0;
@@ -717,6 +731,7 @@ export class WebGlRenderer extends VideoRenderer {
         r.canvas = canvas;
         r.videoCodec = opts.videoCodec;
         r._algo = WEBGL_ALGOS.includes(opts.algo) || opts.algo === 'off' ? opts.algo : 'gl-fsr1';
+        r._yuv444 = opts.yuv444 === true;
         // Diagnostics: mw_webgl_power picks the GPU preference, for the A/B of
         // 25/09/2026 — FSR1 cost +34 ms of click-to-photon on a three-GPU
         // client and nothing on a one-GPU one, and "high-performance" may put
@@ -787,6 +802,7 @@ export class WebGlRenderer extends VideoRenderer {
     get algoName() {
         if (this._algo === 'gl-nis') return 'WebGL NIS';
         if (this._algo === 'gl-sgsr') return 'WebGL SGSR';
+        if (this._algo === 'gl-mwsr') return 'WebGL MWSR';
         if (this._algo === 'off') return 'WebGL';
         return 'WebGL FSR1';
     }
@@ -882,6 +898,7 @@ export class WebGlRenderer extends VideoRenderer {
         // and the ladder's last rung); setAlgo builds the others on demand.
         // Whatever a lost context held is gone with it.
         this._easu = this._rcas = this._sgsr = this._nis = this._blit = null;
+        this._mwsr = null;
         this._intermTex = this._fbo = this._coefTex = null;
         this._buildAlgo(this._algo);
         this._buildAlgo('off');
@@ -904,6 +921,26 @@ export class WebGlRenderer extends VideoRenderer {
             this._fbo = gl.createFramebuffer();
         } else if (algo === 'gl-sgsr') {
             if (!this._sgsr) this._sgsr = this._program(SGSR_FS, ['uTex', 'uView']);
+        } else if (algo === 'gl-mwsr') {
+            if (this._mwsr) return;
+            // One program per regime, all built here so that nothing compiles
+            // while the stream runs; the overrides baked into each text.
+            const programs = new Map();
+            for (const reg of mwsrRegimes()) {
+                const overrides =
+                    reg.mode === 'up'
+                        ? { CHROMA444: this._yuv444 ? 1 : 0 }
+                        : { R_DOWN: reg.rDown, LINEAR_LIGHT: reg.linearLight };
+                programs.set(
+                    mwsrRegimeKey(reg),
+                    this._program(mwsrGlsl({ mode: reg.mode, taps: reg.taps, overrides }), [
+                        'uTex',
+                        'uTexelScale',
+                        'uTauSharp',
+                    ]),
+                );
+            }
+            this._mwsr = programs;
         } else {
             if (this._nis) return;
             this._nis = this._program(NIS_FS, [
@@ -1071,6 +1108,26 @@ export class WebGlRenderer extends VideoRenderer {
                 gl.uniform1i(this._sgsr.u.uTex, 0);
                 gl.uniform4f(this._sgsr.u.uView, 1 / inW, 1 / inH, inW, inH);
                 gl.drawArrays(gl.TRIANGLES, 0, 3);
+            } else if (pass === 'gl-mwsr') {
+                // The regime by the frame and canvas sizes — never 'copy', the
+                // 1:1 frame took the plain copy; the uniform block of the WGSL
+                // twin, kept while the sizes hold, in two vec4.
+                const reg = mwsrRegime(inW, inH, cw, ch);
+                const p = this._mwsr.get(mwsrRegimeKey(reg));
+                const uniKey = inW + 'x' + inH + '>' + cw + 'x' + ch;
+                if (this._mwsrUniKey !== uniKey) {
+                    this._mwsrUniKey = uniKey;
+                    this._mwsrUni = mwsrUniforms(inW, inH, cw, ch);
+                }
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.viewport(0, 0, cw, ch);
+                gl.useProgram(p.prog);
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, this._inputTex);
+                gl.uniform1i(p.u.uTex, 0);
+                gl.uniform4fv(p.u.uTexelScale, this._mwsrUni.subarray(0, 4));
+                gl.uniform4fv(p.u.uTauSharp, this._mwsrUni.subarray(4, 8));
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
             } else if (pass === 'off') {
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, cw, ch);
@@ -1146,6 +1203,7 @@ export class WebGlRenderer extends VideoRenderer {
                 this._fence = null;
                 for (const p of [this._easu, this._rcas, this._sgsr, this._nis, this._blit])
                     if (p) gl.deleteProgram(p.prog);
+                if (this._mwsr) for (const p of this._mwsr.values()) gl.deleteProgram(p.prog);
                 const ext = gl.getExtension('WEBGL_lose_context');
                 if (ext) ext.loseContext();
             } catch (e) {}

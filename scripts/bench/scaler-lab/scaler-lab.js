@@ -38,6 +38,7 @@ import {
 } from "/frontend/js/stream/renderers/NisTables.js";
 
 const RENDERER_URL = "/frontend/js/stream/renderers/WebGpuRenderer.js";
+const WEBGL_RENDERER_URL = "/frontend/js/stream/renderers/WebGlRenderer.js";
 const MWSR_URL = "/frontend/js/stream/renderers/MwsrShader.js";
 
 const CELL_SETS = {
@@ -69,6 +70,9 @@ const CELL_SETS = {
     "blit+fsr1",
   ],
   chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1", "chain-mwsr"],
+  // The product's WebGL2 renderer, the same way (`chain-gl-<pass>`, `chain-gl-off`
+  // its plain copy): wall time per draw and the picture, no GPU stamps.
+  glchain: ["chain-gl-off", "chain-gl-sgsr", "chain-gl-nis", "chain-gl-fsr1", "chain-gl-mwsr"],
   // The mwsr kernel (plan §3.2, §4.3): `mwsr[:key=val;key=val…]` sets its
   // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering,
   // c444, rdown, ll), the uniforms (tau, sharp), half=1 (the f16
@@ -657,6 +661,164 @@ async function makeFrames(pictures, codec, log) {
   return { frames, info };
 }
 
+
+// ── the WebGL2 side ────────────────────────────────────────────────────────
+
+// RGBA frames straight from the pictures (codec=none): the exact texels of the
+// lab's input texture, so that a chain renders the same picture as the cells.
+function makeRgbaFrames(pictures) {
+  const frames = pictures.map(
+    (pic, k) => new VideoFrame(pic, { timestamp: k * 16667, duration: 16667 }),
+  );
+  const info = {
+    codec: "none",
+    format: frames[0].format,
+    coded: frames[0].codedWidth + "x" + frames[0].codedHeight,
+    display: frames[0].displayWidth + "x" + frames[0].displayHeight,
+    frames: frames.length,
+  };
+  return { frames, info };
+}
+
+// gl=1: a Chrome without WebGPU (ANGLE on SwiftShader, the driver's
+// --webgl-swiftshader; forcing it switches WebGPU off, so the two twins cannot
+// share a Chrome on the software adapters). Only the chain-gl-* cells: the
+// product's WebGL2 renderer on the same pictures, each draw timed on the wall,
+// the picture dumped through a 2D canvas under the name the WebGPU side would
+// give it, so that the conformity flow compares the two sides from two runs.
+async function runGlLab(p, log, ctx) {
+  const { inW, inH, outW, outH, content, codec, cellNames, dumpList } = ctx;
+  const { batch, batches, warm, rounds } = ctx;
+  const errors = [];
+  const bad = cellNames.filter((c) => !c.startsWith("chain-gl-"));
+  if (bad.length) throw new Error("gl=1 runs chain-gl-* cells only, not " + bad.join(","));
+  const pictures = [];
+  for (let k = 0; k < 12; k++) pictures.push(await makePicture(content, inW, inH, k));
+  const made = codec !== "none" ? await makeFrames(pictures, codec, log) : makeRgbaFrames(pictures);
+  const frames = made.frames;
+  log("frames: " + JSON.stringify(made.info));
+  const { WebGlRenderer } = await import(WEBGL_RENDERER_URL);
+  let gpu = "?";
+  const renderers = new Map();
+  async function renderer(algo) {
+    if (renderers.has(algo)) return renderers.get(algo);
+    const canvas = new OffscreenCanvas(outW, outH);
+    const r = await WebGlRenderer.create(canvas, {
+      algo: algo === "gl-off" ? "off" : algo,
+      videoCodec: "h264",
+    });
+    r.setOutputSize(outW, outH);
+    renderers.set(algo, r);
+    const dbg = r.gl.getExtension("WEBGL_debug_renderer_info");
+    gpu = String(dbg ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : r.gl.getParameter(r.gl.RENDERER));
+    log("chain " + algo + ": " + r.kind + " renderer on " + gpu);
+    return r;
+  }
+  let cursor = 0;
+  const nextFrame = () => frames[cursor++ % frames.length];
+  async function draws(r, n) {
+    const walls = [];
+    let copies = 0;
+    for (let i = 0; i < n; i++) {
+      const f = nextFrame().clone();
+      const t0 = performance.now();
+      await r.draw(f);
+      walls.push(performance.now() - t0);
+      if (r.passthrough === true) copies++;
+    }
+    return { walls, copies };
+  }
+  const t0 = performance.now();
+  const out = [];
+  for (const name of cellNames) {
+    const algo = name.slice(6);
+    try {
+      const r = await renderer(algo);
+      if (warm > 0) await draws(r, 4 * warm);
+      const walls = [];
+      let copies = 0;
+      for (let b = 0; b < batches * rounds; b++) {
+        const d = await draws(r, batch);
+        walls.push(...d.walls);
+        copies += d.copies;
+      }
+      const w = stats(walls);
+      log(`${name.padEnd(16)} wall/draw p50 ${w.p50.toFixed(3)} p99 ${w.p99.toFixed(3)} ms`);
+      out.push({
+        name,
+        feed: "chain",
+        algo,
+        passes: 0,
+        gpu: null,
+        perPass: [],
+        disp: null,
+        wall: w,
+        wallPerIter: w.mean,
+        iters: walls.length,
+        draws: walls,
+        copies,
+        passSeq: {},
+      });
+    } catch (e) {
+      errors.push("[" + name + "] " + (e.message || e));
+      log(name + " failed: " + (e.message || e));
+    }
+  }
+  const dumped = [];
+  for (const name of cellNames) {
+    if (!dumpList.includes(name)) continue;
+    try {
+      const r = await renderer(name.slice(6));
+      cursor = 0; // the clip's first frame: the kernel cells' picture
+      await draws(r, 1);
+      const bmp = r.canvas.transferToImageBitmap();
+      const cv = new OffscreenCanvas(bmp.width, bmp.height);
+      cv.getContext("2d").drawImage(bmp, 0, 0);
+      bmp.close();
+      const blob = await cv.convertToBlob({ type: "image/png" });
+      const dname = (p.tag || "lab") + "-" + name.replace(/[^\w.+-]/g, "_");
+      await postBlob("/__png?name=" + encodeURIComponent(dname), blob);
+      dumped.push(dname);
+    } catch (e) {
+      errors.push("[dump " + name + "] " + (e.message || e));
+    }
+  }
+  if (dumped.length) log("dumped: " + dumped.join(" "));
+  for (const f of frames) f.close();
+  for (const r of renderers.values()) r.dispose();
+  return {
+    adapter: { name: "webgl2: " + gpu, vendor: null, architecture: null, device: null, description: gpu },
+    features: [],
+    timestamps: false,
+    format: "canvas",
+    userAgent: navigator.userAgent,
+    isolated: !!globalThis.crossOriginIsolated,
+    params: {
+      in: `${inW}x${inH}`,
+      out: `${outW}x${outH}`,
+      content,
+      codec,
+      pace: "back",
+      period: 0,
+      batch,
+      batches,
+      warm,
+      rounds,
+      sets: [],
+      power: null,
+      fallback: false,
+      flip: false,
+      gl: true,
+    },
+    frames: made.info,
+    elapsedMs: performance.now() - t0,
+    cells: out,
+    shots: null,
+    dumped,
+    errors,
+  };
+}
+
 // ── statistics ─────────────────────────────────────────────────────────────
 
 function quant(xs, f) {
@@ -720,6 +882,13 @@ export async function runLab(p, log = () => {}) {
             (c) => cellNames.includes(c),
           )
         : (p.dump || "").split(",").filter(Boolean);
+
+  // gl=1: the WebGL2 side alone, in a Chrome without WebGPU (see runGlLab).
+  if (p.gl === "1")
+    return runGlLab(p, log, {
+      inW, inH, outW, outH, content, codec, cellNames, dumpList,
+      batch, batches, warm, rounds,
+    });
 
   if (!navigator.gpu) throw new Error("no WebGPU (navigator.gpu)");
   // The product's renderer asks for the default adapter and a bare device:
@@ -790,16 +959,9 @@ export async function runLab(p, log = () => {}) {
     // of the lab's input texture — the product's chain renders the same
     // picture as the kernel cells, so the two can be fingerprinted together
     // (the golden set).
-    frames = pictures.map(
-      (pic, k) => new VideoFrame(pic, { timestamp: k * 16667, duration: 16667 }),
-    );
-    frameInfo = {
-      codec: "none",
-      format: frames[0].format,
-      coded: frames[0].codedWidth + "x" + frames[0].codedHeight,
-      display: frames[0].displayWidth + "x" + frames[0].displayHeight,
-      frames: frames.length,
-    };
+    const made = makeRgbaFrames(pictures);
+    frames = made.frames;
+    frameInfo = made.info;
     log("frames: " + JSON.stringify(frameInfo));
   }
 
@@ -1128,6 +1290,7 @@ export async function runLab(p, log = () => {}) {
     const over = {};
     const uni = {};
     let half = false;
+    let fine = false;
     const srgb = opts.srgb === "1";
     const reg = srgb ? regimes.srgb : regimes.soft;
     let mode = reg.mode === "down" ? "down" : "up";
@@ -1139,6 +1302,7 @@ export async function runLab(p, log = () => {}) {
     for (const [k, v] of Object.entries(opts)) {
       if (k === "tau" || k === "sharp") uni[k] = Number(v);
       else if (k === "half") half = v === "1";
+      else if (k === "fine") fine = v === "1";
       else if (k === "srgb") continue;
       else if (k === "mode") mode = v;
       else if (k === "taps") taps = Number(v);
@@ -1155,7 +1319,7 @@ export async function runLab(p, log = () => {}) {
     const target = srgb ? "out-srgb" : "out";
     const pl = pipeline(
       name,
-      mwsrWgsl({ feed, half, mode, taps }),
+      mwsrWgsl({ feed, half, mode, taps, fine }),
       target,
       ["vs", "fs"],
       feed === "ext" ? plExt : plTex,
@@ -1371,11 +1535,26 @@ export async function runLab(p, log = () => {}) {
   const renderers = new Map();
   async function chainRenderer(algo) {
     if (renderers.has(algo)) return renderers.get(algo);
-    const { WebGpuRenderer } = await import(RENDERER_URL);
     const canvas = new OffscreenCanvas(outW, outH);
-    const r = await WebGpuRenderer.create(canvas, { algo, videoCodec: "h264" });
+    let r;
+    if (algo.startsWith("gl-")) {
+      const { WebGlRenderer } = await import(WEBGL_RENDERER_URL);
+      r = await WebGlRenderer.create(canvas, {
+        algo: algo === "gl-off" ? "off" : algo,
+        videoCodec: "h264",
+      });
+    } else {
+      const { WebGpuRenderer } = await import(RENDERER_URL);
+      r = await WebGpuRenderer.create(canvas, { algo, videoCodec: "h264" });
+    }
     r.setOutputSize(outW, outH);
     renderers.set(algo, r);
+    let gpu = "";
+    if (r.gl) {
+      const dbg = r.gl.getExtension("WEBGL_debug_renderer_info");
+      gpu = " on " + (dbg ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : r.gl.getParameter(r.gl.RENDERER));
+    }
+    log("chain " + algo + ": " + r.kind + " renderer" + gpu);
     return r;
   }
   async function runChain(cell, iters, stamp) {
@@ -1609,6 +1788,7 @@ export async function runLab(p, log = () => {}) {
     for (const c of cells) {
       if (!c) continue;
       try {
+        if (c.feed === "chain") frameCursor = 0; // the kernel cells' picture
         await measure(c, 1, false);
         if (c.feed === "chain") await chainToOut(c);
         shots[c.name] = await crop(device, outTex, format, outW, outH);
@@ -1621,6 +1801,7 @@ export async function runLab(p, log = () => {}) {
   for (const c of cells) {
     if (!c || !dumpList.includes(c.name) || (c.feed === "chain" && hdr)) continue;
     try {
+      if (c.feed === "chain") frameCursor = 0; // the kernel cells' picture
       await measure(c, 1, false);
       if (c.feed === "chain") await chainToOut(c);
       const name = (p.tag || "lab") + "-" + c.name.replace(/[^\w.+-]/g, "_");

@@ -6,7 +6,9 @@ import {
     MWSR_OVERRIDES,
     MWSR_OVERRIDE_SPEC,
     MWSR_UNIFORM_FLOATS,
+    mwsrGlsl,
     mwsrRegime,
+    mwsrRegimeKey,
     mwsrRegimes,
     mwsrUniforms,
     mwsrWgsl,
@@ -16,6 +18,8 @@ describe('the mwsr shader text', () => {
     const tex = mwsrWgsl({ feed: 'tex' });
     const ext = mwsrWgsl({ feed: 'ext' });
     const down = mwsrWgsl({ mode: 'down' });
+    const glsl = mwsrGlsl();
+    const glslDown = mwsrGlsl({ mode: 'down' });
     const kernel = (s) => s.slice(s.indexOf('override '));
 
     it('reads either feed with the same kernel', () => {
@@ -142,8 +146,59 @@ describe('the mwsr shader text', () => {
     });
 
     it('uses no gather, no discard, no loop, no dynamic indexing (plan §3.4)', () => {
-        for (const text of [tex, down, mwsrWgsl({ mode: 'down', taps: 16 })])
+        for (const text of [tex, down, mwsrWgsl({ mode: 'down', taps: 16 }), glsl, glslDown])
             expect(text).not.toMatch(/textureGather|discard|\bfor\s*\(|\bloop\b|\bwhile\b|\[\s*i\s*\]/);
+    });
+
+    it('has a GLSL ES 3.00 twin written from the same tables (plan §3.6)', () => {
+        expect(glsl.startsWith('#version 300 es\n')).toBe(true);
+        expect(glslDown.startsWith('#version 300 es\n')).toBe(true);
+        for (const text of [glsl, glslDown]) {
+            for (const [name, [type, value]] of Object.entries(MWSR_OVERRIDE_SPEC)) {
+                const lit =
+                    type === 'u32' ? `${value}u` : Number.isInteger(value) ? `${value}.0` : `${value}`;
+                expect(text).toContain(`const ${type === 'u32' ? 'uint' : 'float'} ${name} = ${lit};`);
+            }
+            expect(text).toContain('const vec3 LUMA = vec3(0.25, 0.625, 0.125);');
+            expect(text).toContain('uniform vec4 uTexelScale;');
+            expect(text).toContain('uniform vec4 uTauSharp;');
+            expect(text).not.toMatch(/\btexture\(/);
+        }
+        // the overrides are baked into the text, by name
+        const c444 = mwsrGlsl({ overrides: { CHROMA444: 1, W_ALONG: 0.2 } });
+        expect(c444).toContain('const uint CHROMA444 = 1u;');
+        expect(c444).toContain('const float W_ALONG = 0.2;');
+        expect(c444).toContain('const float W_ACROSS = 0.3;');
+        expect(() => mwsrGlsl({ overrides: { NOPE: 1 } })).toThrow(/override/);
+        expect(() => mwsrGlsl({ mode: 'side' })).toThrow(/mode/);
+        // the same kernel: derivatives first, explicit level and texel fetches, the bound
+        const main = glsl.slice(glsl.indexOf('void main()'));
+        expect(main.indexOf('dFdx(C)')).toBeGreaterThan(0);
+        // GL's window y runs up: the WGSL dpdy is -dFdy here
+        expect(main).toContain('vec3 dy = -dFdy(C) * uTexelScale.w;');
+        expect(tex).toContain('let dy = dpdyCoarse(C) * u.scale.y;');
+        expect(main.indexOf('dFdx(C)')).toBeLessThan(main.indexOf('if (isFlat)'));
+        expect(main.slice(main.indexOf('if (isFlat)'))).not.toMatch(/dFd[xy]/);
+        expect(glsl).toContain('textureLod(uTex, uv, 0.0)');
+        expect(glsl).toContain('texelFetch(uTex, c, 0)');
+        expect(glsl).toContain('mediump vec3 T1 = S(uv - dt);');
+        for (const line of ['let strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);'])
+            expect(tex).toContain(line);
+        expect(glsl).toContain('float strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);');
+        // the same grids, from the same offsets
+        const offs = (t) => [...t.matchAll(/vec2f?\(([-\d.]+), ([-\d.]+)\) \* span/g)].map((m) => m[1] + ',' + m[2]);
+        for (const taps of [1, 4, 9, 16]) {
+            const w = offs(mwsrWgsl({ mode: 'down', taps }));
+            expect(w.length).toBe(taps);
+            expect(offs(mwsrGlsl({ mode: 'down', taps }))).toEqual(w);
+        }
+        expect(mwsrGlsl({ mode: 'down', overrides: { LINEAR_LIGHT: 0, R_DOWN: 1.25 } })).toContain(
+            'const float R_DOWN = 1.25;',
+        );
+        // the key both renderers keep a regime's pipeline or program under
+        expect(mwsrRegimeKey({ mode: 'up', taps: 5 })).toBe('up');
+        expect(mwsrRegimeKey({ mode: 'down', taps: 9 })).toBe('down9');
+        expect(new Set(mwsrRegimes().map(mwsrRegimeKey)).size).toBe(mwsrRegimes().length);
     });
 
     it('copies no constant of the kernels it was written next to (plan §10.2)', () => {
@@ -159,7 +214,7 @@ describe('the mwsr shader text', () => {
             '8.0 / 255.0',
             '23.0 / 255.0',
         ]) {
-            for (const text of [tex, down]) expect(text, bad).not.toContain(bad);
+            for (const text of [tex, down, glsl, glslDown]) expect(text, bad).not.toContain(bad);
         }
     });
 

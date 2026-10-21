@@ -80,6 +80,7 @@ import { fitOutputSize, isIdentityScale } from './scaleRegime.js';
 import {
     MWSR_UNIFORM_FLOATS,
     mwsrRegime,
+    mwsrRegimeKey,
     mwsrRegimes,
     mwsrUniforms,
     mwsrWgsl,
@@ -1349,7 +1350,7 @@ export class WebGpuRenderer extends VideoRenderer {
      * @returns {GPURenderPipeline}
      */
     _mwsrPipeline(reg) {
-        const key = reg.mode === 'up' ? 'up' : 'down' + reg.taps;
+        const key = mwsrRegimeKey(reg);
         let pipeline = this._mwsrPipelines.get(key);
         if (pipeline) return pipeline;
         const srgb = reg.mode === 'down' && this._srgbViews;

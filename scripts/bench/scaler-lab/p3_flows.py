@@ -275,8 +275,10 @@ def p3_cases(a):
 # ── golden fingerprints (plan §8.2) ─────────────────────────────────────────
 
 GOLDEN_FILE = os.path.join(HERE, "golden.json")
-# chain-mwsr is the product's renderer with the key (P4): its picture must be
-# the kernel's at scale and the sRGB-view reduction's below 1:1.
+# chain-mwsr is the product's WebGPU renderer with the key (P4): its picture
+# must be the kernel's at scale and the sRGB-view reduction's below 1:1. (The
+# WebGL2 twin runs in another Chrome and is held by the conformity flow,
+# p4_flows.py, to a tolerance rather than a fingerprint.)
 GOLDEN_UP = "tex-s1,mwsr,mwsr:dering=0,mwsr:c444=1,chain-mwsr"
 GOLDEN_DOWN = "tex-s1,mwsr,mwsr:srgb=1,mwsr:taps=9,mwsr:ll=2,chain-mwsr"
 GOLDEN_CASES = [

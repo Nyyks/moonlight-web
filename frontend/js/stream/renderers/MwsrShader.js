@@ -19,8 +19,9 @@
  * MwsrShader — the texts of `mwsr`, MoonlightWeb's own upscaler
  * (docs/design/upscaler-mwsr.md, §3 and §4): one WGSL source per mode,
  * specialised by `override` constants, the input feed substituted in its
- * preamble. The GLSL ES 3.00 twin (plan §3.6, phase P4) will be generated from
- * the same table of constants, so that the two texts cannot drift apart.
+ * preamble; and the GLSL ES 3.00 twin of each (mwsrGlsl, plan §3.6), written
+ * from the same tables of constants so that the two texts cannot drift
+ * apart, which the laboratory's conformity flow holds to 2/255 (C11).
  *
  * Two modes (plan §4.3), chosen per frame by mwsrRegime():
  *
@@ -195,6 +196,17 @@ export function mwsrRegimes({ srgb = false } = {}) {
         { mode: 'up', taps: 5, rDown: 0, linearLight: 0 },
         ...table.map(([, taps, rDown]) => ({ mode: 'down', taps, rDown, linearLight })),
     ];
+}
+
+/**
+ * The name a renderer keeps a regime's pipeline or program under: 'up', or
+ * 'down' and the grid's taps (the span and the light follow from the taps
+ * and the renderer's views).
+ * @param {{mode: 'up'|'down', taps?: number}} reg
+ * @returns {string}
+ */
+export function mwsrRegimeKey(reg) {
+    return reg.mode === 'up' ? 'up' : 'down' + reg.taps;
 }
 
 /**
@@ -389,20 +401,27 @@ fn fs(in : VSOut) -> @location(0) vec4f {
 }
 `;
 
-// The `down` fragment stage: a k×k grid of bilinear samples over the pixel's
-// footprint, averaged (plan §4.3), unrolled here so that the text holds no loop.
-function downFs(taps) {
+// The k×k grid of the reduction, as offsets in the pixel's footprint (the
+// span): the centres of k×k equal cells, row by row. Both twins unroll it.
+function downOffsets(taps) {
     const k = Math.round(Math.sqrt(taps));
     if (![1, 2, 3, 4].includes(k) || k * k !== taps)
         throw new Error('mwsr: down taps ' + taps + '?');
     const offs = [];
     for (let i = 0; i < k; i++) offs.push((i + 0.5) / k - 0.5);
-    const lines = [];
-    for (const oy of offs)
-        for (const ox of offs)
-            lines.push(
-                `    acc += dec(S(uv + vec2f(${wgslNumber('f32', ox)}, ${wgslNumber('f32', oy)}) * span));`,
-            );
+    const grid = [];
+    for (const oy of offs) for (const ox of offs) grid.push([ox, oy]);
+    return grid;
+}
+
+// The `down` fragment stage: a k×k grid of bilinear samples over the pixel's
+// footprint, averaged (plan §4.3), unrolled here so that the text holds no loop.
+function downFs(taps) {
+    const k = Math.round(Math.sqrt(taps));
+    const lines = downOffsets(taps).map(
+        ([ox, oy]) =>
+            `    acc += dec(S(uv + vec2f(${wgslNumber('f32', ox)}, ${wgslNumber('f32', oy)}) * span));`,
+    );
     return `
 // The sRGB transfer, both ways, for LINEAR_LIGHT 2; past 1.0 (HDR) the same
 // formula continues, as the renderer's HDR pass 0 encodes it.
@@ -467,8 +486,210 @@ ${lines.join('\n')}
  *   is the reduction with `taps` samples (1, 4, 9 or 16; see mwsrRegime()).
  * @returns {string}
  */
-export function mwsrWgsl({ feed = 'tex', half = false, mode = 'up', taps = 4 } = {}) {
-    if (mode === 'up') return preamble(feed, half) + UP_FS;
+export function mwsrWgsl({ feed = 'tex', half = false, mode = 'up', taps = 4, fine = false } = {}) {
+    if (mode === 'up')
+        return (
+            preamble(feed, half) + (fine ? UP_FS.replace(/dpd([xy])Coarse/g, 'dpd$1Fine') : UP_FS)
+        );
     if (mode === 'down') return preamble(feed, false) + downFs(taps);
+    throw new Error('mwsr: mode ' + mode + '?');
+}
+
+// The `up` fragment stage in GLSL: the kernel of the WGSL text above, line for
+// line. The colours and weights of the edge path are mediump — f16 where the
+// GPU has it, the twin of the `half` module — the coordinates, the
+// derivatives, the bound and the result highp.
+const UP_GLSL = `
+mediump vec3 blend(mediump vec3 C, mediump vec3 T1, mediump vec3 T2, mediump vec3 X1, mediump vec3 X2,
+                   mediump vec3 wT, mediump vec3 wX) {
+    mediump vec3 R = (C + wT * (T1 + T2) + wX * (X1 + X2)) / (1.0 + 2.0 * (wT + wX));
+    mediump vec3 lo = min(min(C, T1), min(T2, min(X1, X2)));
+    mediump vec3 hi = max(max(C, T1), max(T2, max(X1, X2)));
+    return clamp(R, lo, hi);
+}
+
+mediump float coherence(mediump float c, mediump float t1, mediump float t2, mediump float x1,
+                        mediump float x2) {
+    mediump float jump = abs(x2 - x1);
+    mediump float ridge = abs(x1 + x2 - 2.0 * c);
+    mediump float variation = abs(x2 - c) + abs(c - x1) + abs(t2 - c) + abs(c - t1) + EPS_H;
+    return max(jump, ridge) / variation;
+}
+
+void main() {
+    vec2 uv = vUv;
+    vec3 C = S(uv);
+    float lC = luma(C);
+    // GL's window y runs up, WebGPU's framebuffer y runs down: dFdy is the
+    // WGSL text's dpdy negated, or the edge normal comes out mirrored and the
+    // along and across taps swap on every diagonal (the first conformity run).
+    vec3 dx = dFdx(C) * uTexelScale.z;
+    vec3 dy = -dFdy(C) * uTexelScale.w;
+    vec3 m = abs(dx) + abs(dy);
+    bool rg = m.g > m.r;
+    bool b = m.b > max(m.r, m.g);
+    bool c444 = CHROMA444 == 1u;
+    float gx = c444 ? (b ? dx.b : (rg ? dx.g : dx.r)) : dot(dx, LUMA);
+    float gy = c444 ? (b ? dy.b : (rg ? dy.g : dy.r)) : dot(dy, LUMA);
+    bool isFlat = (c444 ? max(m.r, max(m.g, m.b)) : abs(gx) + abs(gy)) < uTauSharp.x;
+    if (SHOW == 1u) {
+        oColor = vec4(vec3(isFlat ? 0.0 : 1.0), 1.0);
+        return;
+    }
+    if (isFlat) {
+        oColor = vec4(C, 1.0);
+        return;
+    }
+    float smin = min(uTexelScale.z, uTexelScale.w);
+    float strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
+    vec2 n = vec2(gx, gy) * inversesqrt(max(gx * gx + gy * gy, 1e-12));
+    vec2 dt = vec2(-n.y, n.x) * uTexelScale.xy * R_ALONG;
+    vec2 dn = n * uTexelScale.xy * R_ACROSS;
+    mediump vec3 Ch = C;
+    mediump vec3 T1 = S(uv - dt);
+    mediump vec3 T2 = S(uv + dt);
+    mediump vec3 X1 = S(uv - dn);
+    mediump vec3 X2 = S(uv + dn);
+    mediump float lCh = lC;
+    mediump float lT1 = lumah(T1);
+    mediump float lT2 = lumah(T2);
+    mediump float lX1 = lumah(X1);
+    mediump float lX2 = lumah(X2);
+    mediump vec3 a;
+    if (CHROMA444 == 1u) {
+        a = vec3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+                 coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+                 coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * strength;
+    } else {
+        a = vec3(coherence(lCh, lT1, lT2, lX1, lX2) * strength);
+    }
+    mediump vec3 wT = W_ALONG * a;
+    mediump vec3 wX = max(-W_ACROSS * uTauSharp.y * a, vec3(W_MIN));
+    vec3 R = blend(Ch, T1, T2, X1, X2, wT, wX);
+    if (DERING == 1u) {
+        ivec2 dims = textureSize(uTex, 0);
+        vec2 pt = uv * vec2(dims) - 0.5;
+        ivec2 i0 = clamp(ivec2(floor(pt)), ivec2(0), dims - 1);
+        ivec2 i1 = min(i0 + 1, dims - 1);
+        vec3 q00 = L(i0);
+        vec3 q10 = L(ivec2(i1.x, i0.y));
+        vec3 q01 = L(ivec2(i0.x, i1.y));
+        vec3 q11 = L(i1);
+        R = clamp(R, min(min(q00, q10), min(q01, q11)), max(max(q00, q10), max(q01, q11)));
+    }
+    oColor = vec4(R, 1.0);
+}
+`;
+
+// The `down` fragment stage in GLSL: the same grid, from the same offsets.
+function downGlsl(taps) {
+    const lines = downOffsets(taps).map(
+        ([ox, oy]) =>
+            `    acc += dec(S(uv + vec2(${wgslNumber('f32', ox)}, ${wgslNumber('f32', oy)}) * span));`,
+    );
+    return `
+vec3 srgbToLin(vec3 c) {
+    vec3 lo = c / 12.92;
+    vec3 hi = pow((max(c, vec3(0.0)) + 0.055) / 1.055, vec3(2.4));
+    return mix(hi, lo, lessThanEqual(c, vec3(0.04045)));
+}
+
+vec3 linToSrgb(vec3 c) {
+    vec3 lo = c * 12.92;
+    vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
+    return mix(hi, lo, lessThanEqual(c, vec3(0.0031308)));
+}
+
+vec3 dec(vec3 c) {
+    if (LINEAR_LIGHT == 1u) {
+        return c * c;
+    }
+    if (LINEAR_LIGHT == 2u) {
+        return srgbToLin(c);
+    }
+    return c;
+}
+
+vec3 enc(vec3 c) {
+    if (LINEAR_LIGHT == 1u) {
+        return sqrt(max(c, vec3(0.0)));
+    }
+    if (LINEAR_LIGHT == 2u) {
+        return linToSrgb(c);
+    }
+    return c;
+}
+
+void main() {
+    vec2 uv = vUv;
+    vec2 span = uTexelScale.xy / uTexelScale.zw * R_DOWN;
+    vec3 acc = vec3(0.0);
+${lines.join('\n')}
+    oColor = vec4(enc(acc * ${wgslNumber('f32', 1 / taps)}), 1.0);
+}
+`;
+}
+
+// The part every GLSL text shares: the uniforms (the block of mwsrUniforms()
+// in two vec4), the varying and the output of WebGlRenderer's full-screen
+// triangle, the feed, the overrides as constants and the luma.
+function glslPreamble(overrides) {
+    for (const k of Object.keys(overrides))
+        if (!(k in MWSR_OVERRIDE_SPEC)) throw new Error('mwsr: override ' + k + '?');
+    const consts = Object.entries(MWSR_OVERRIDE_SPEC)
+        .map(
+            ([k, [t, v]]) =>
+                `const ${t === 'u32' ? 'uint' : 'float'} ${k} = ${wgslNumber(t, overrides[k] ?? v)};`,
+        )
+        .join('\n');
+    const [lr, lg, lb] = MWSR_CONSTANTS.LUMA;
+    return `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uTex;
+uniform vec4 uTexelScale; // texel.xy, scale.xy: the first four of mwsrUniforms()
+uniform vec4 uTauSharp; // tau, sharp, 0, 0: the last four
+in vec2 vUv;
+out vec4 oColor;
+
+vec3 S(vec2 uv) {
+    return textureLod(uTex, uv, 0.0).rgb;
+}
+vec3 L(ivec2 c) {
+    return texelFetch(uTex, c, 0).rgb;
+}
+
+const mediump float EPS_H = 0.001;
+
+${consts}
+
+const vec3 LUMA = vec3(${wgslNumber('f32', lr)}, ${wgslNumber('f32', lg)}, ${wgslNumber('f32', lb)});
+
+float luma(vec3 c) {
+    return dot(c, LUMA);
+}
+
+mediump float lumah(mediump vec3 c) {
+    return dot(c, LUMA);
+}
+`;
+}
+
+/**
+ * The GLSL ES 3.00 twin of one mode (plan §3.6): the same kernel and the same
+ * constants as mwsrWgsl(), from the same tables, for WebGlRenderer's
+ * full-screen triangle (`vUv` in, `oColor` out). WebGL2 has no pipeline
+ * constants, so the overrides are baked into the text (`overrides`, by name;
+ * the rest at their defaults); two vec4 uniforms carry the block of
+ * mwsrUniforms(). The edge path's colours and weights are mediump: f16 on the
+ * GPUs that have it, the twin of the `half` module, and highp on the others.
+ * No sRGB views on a WebGL2 drawing buffer: the reduction takes the software
+ * light (MWSR_DOWN_TAPS, LINEAR_LIGHT 1).
+ * @param {{mode?: 'up'|'down', taps?: number, overrides?: Object<string, number>}} [opts]
+ * @returns {string}
+ */
+export function mwsrGlsl({ mode = 'up', taps = 4, overrides = {} } = {}) {
+    if (mode === 'up') return glslPreamble(overrides) + UP_GLSL;
+    if (mode === 'down') return glslPreamble(overrides) + downGlsl(taps);
     throw new Error('mwsr: mode ' + mode + '?');
 }

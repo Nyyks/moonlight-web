@@ -286,7 +286,12 @@ def main():
     ap.add_argument("--case", action="append", default=[], help="NAME:QUERY (scaler-lab.js parameters)")
     ap.add_argument("--extra", default="", help="query appended to every case (rounds=1, shot=1, codec=none...)")
     ap.add_argument("--power", default="", help="high-performance or low-power (the adapter asked for)")
-    ap.add_argument("--swiftshader", action="store_true", help="the software adapter (fallback), for a first run")
+    ap.add_argument("--swiftshader", action="store_true",
+                    help="the software adapter (WebGPU's fallback, ANGLE on SwiftShader for WebGL2), for a first run")
+    ap.add_argument("--webgl-swiftshader", action="store_true",
+                    help="the WebGL2 side on ANGLE's SwiftShader (no WebGPU in that Chrome): chain-gl-* cells only")
+    ap.add_argument("--page-timeout", type=float, default=600,
+                    help="seconds a page may take; past it its log is printed and the case fails")
     ap.add_argument("--p1", action="store_true", help="the P1 set (the chain at 1:1, the passage 1:1 <-> x2) instead of P0's")
     ap.add_argument("--p2", action="store_true", help="the P2 set (the mwsr kernel against the floor and the shipped kernels)")
     ap.add_argument("--quality-cells", default="", help="the cells of --quality instead of %s (mwsr variants…)" % QUALITY_CELLS)
@@ -299,6 +304,8 @@ def main():
                     help="P3, C8: an HDR mire (ramp, text, game) on the rgba16float feed, judged in linear light")
     ap.add_argument("--golden", action="store_true", help="write golden.json (the software adapter: add --swiftshader)")
     ap.add_argument("--golden-check", action="store_true", help="compare the run with golden.json; exit 1 on a difference")
+    ap.add_argument("--conformity", action="store_true",
+                    help="the twins against the kernel cells on the golden cases (C11: 2/255); exit 1 beyond")
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab"))
     ap.add_argument("--chrome-arg", action="append", default=[])
     ap.add_argument("--headed", default="", help="X,Y,W,H: a shown window there instead of headless")
@@ -321,6 +328,8 @@ def main():
         extra += "&power=" + a.power
     if a.swiftshader:
         extra += "&fallback=1"
+    if a.webgl_swiftshader:
+        extra += "&gl=1"
     if a.extra:
         extra += "&" + a.extra.lstrip("&")
 
@@ -366,6 +375,10 @@ def main():
              "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"]
     if a.swiftshader:
         flags += ["--enable-unsafe-swiftshader"]
+    if a.webgl_swiftshader:
+        # ANGLE on SwiftShader for WebGL2. It switches WebGPU off in that
+        # Chrome (its fallback adapter included), hence a side of its own.
+        flags += ["--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader"]
     chrome = None if a.remote_cdp else subprocess.Popen([
         CHROME, *([] if a.headed else ["--headless=new"]), "--remote-debugging-port=%d" % cdp_port,
         "--user-data-dir=" + profile, *flags, *window, "about:blank",
@@ -402,13 +415,26 @@ def main():
             res = None
             for attempt in range(tries):
                 call("Page.navigate", url=url)
-                for _ in range(1200):
+                # The page leaves its settled result in __labDone; polled with a
+                # deadline, so that a hung await in a cell fails the case with
+                # the page's log instead of holding the driver forever.
+                deadline = time.time() + a.page_timeout
+                r = {}
+                while True:
                     time.sleep(0.5)
                     ready = call("Runtime.evaluate", returnByValue=True,
-                                 expression="location.href === %s && window.__labResult !== undefined" % json.dumps(url))
+                                 expression="location.href === %s && window.__labDone !== undefined" % json.dumps(url))
                     if ready.get("result", {}).get("value"):
+                        r = call("Runtime.evaluate", expression="window.__labDone", returnByValue=True)
                         break
-                r = call("Runtime.evaluate", expression="window.__labResult", awaitPromise=True, returnByValue=True)
+                    if time.time() > deadline:
+                        page_log = call("Runtime.evaluate", returnByValue=True,
+                                        expression="(document.getElementById('log') || {}).textContent || ''")
+                        text = str(page_log.get("result", {}).get("value", ""))[-1500:]
+                        print("  page timeout after %.0f s; its log:\n%s" % (a.page_timeout, text))
+                        sys.stdout.flush()
+                        res = {"error": "page timeout after %.0f s" % a.page_timeout, "log": text, "url": url}
+                        return res
                 res = r.get("result", {}).get("value")
                 # no value, a module that failed to load, a dump that failed to post
                 transient = res is None or (
@@ -422,6 +448,14 @@ def main():
                     sys.stdout.flush()
             res["url"] = url
             return res
+
+        if a.conformity:
+            sys.path.insert(0, HERE)
+            import p4_flows
+            code = p4_flows.conformity(a, run_page)
+            if code:
+                sys.exit(code)
+            return
 
         if a.reduce_quality or a.c444_quality or a.hdr_quality or a.golden or a.golden_check:
             sys.path.insert(0, HERE)
