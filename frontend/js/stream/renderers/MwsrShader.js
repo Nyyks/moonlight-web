@@ -28,7 +28,7 @@
  *      texel, decide per 2×2 quad whether the pixel sits on an edge; a flat
  *      quad returns C — one sample, a dozen operations;
  *   3. on an edge, four more bilinear samples, laid along and across the edge
- *      the derivatives measure (ORIENT 1) or on the axes (ORIENT 0): the
+ *      the derivatives measure: the
  *      along pair smooths the staircase, the across pair sharpens the ramp;
  *   4. a coherence term (a step or a ridge across, against all the variation
  *      around) doses both, so that grain, texture and compression blocks are
@@ -52,20 +52,14 @@
  * (`fragment.constants`), the laboratory per cell (`mwsr:orient=0;...`).
  */
 export const MWSR_OVERRIDE_SPEC = Object.freeze({
-    /** 1: taps along/across the edge the derivatives measure; 0: axis cross. */
-    ORIENT: ['u32', 1],
     /** 1: branch after the vote; 0: no branch, same pixels (a timing A/B). */
     EARLY_OUT: ['u32', 1],
     /** 1: paint the vote (white = edge quad, black = flat) instead of the picture. */
     SHOW: ['u32', 0],
-    /** 1: the quality tier, the four corners of the rotated 3×3 grid on the edge path (nine samples). */
-    TIER: ['u32', 0],
-    /** Scale of the corner weights, 1 = the separable window (across weight × along weight). */
-    W_CORNER: ['f32', 1.0],
     /** Weight of each tap along the edge, at full coherence and strength. */
     W_ALONG: ['f32', 0.15],
     /** Weight of each tap across the edge, negated and × sharpness. */
-    W_ACROSS: ['f32', 0.35],
+    W_ACROSS: ['f32', 0.3],
     /** Distance of the along taps, input texels. */
     R_ALONG: ['f32', 0.5],
     /** Distance of the across taps, input texels. */
@@ -76,10 +70,6 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     W_MIN: ['f32', -0.3],
     /** 1: bound the result by the four input texels around the pixel (four loads, edge path only). */
     DERING: ['u32', 1],
-    /** 1: on a step, a curve bounded by the two plateaus steepens the ramp instead of the unsharp mask (no overshoot); ridges keep the mask. */
-    SHAPE: ['u32', 0],
-    /** How far the curve pushes a ramp pixel toward its nearer plateau, at full coherence. */
-    K_SHAPE: ['f32', 0.5],
 });
 
 /** The defaults alone, name → value. */
@@ -229,78 +219,28 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     // S_FULL on; none on a flat quad when there is no branch.
     let smin = min(u.scale.x, u.scale.y);
     let strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0) * select(1.0, 0.0, flat);
-    var R : vec3f;
-    if (ORIENT == 1u) {
-        // The taps along and across the edge the derivatives measure.
-        let n = vec2f(gx, gy) * inverseSqrt(max(gx * gx + gy * gy, 1e-12));
-        let dt = vec2f(-n.y, n.x) * u.texel * R_ALONG;
-        let dn = n * u.texel * R_ACROSS;
-        let T1 = S(uv - dt);
-        let T2 = S(uv + dt);
-        let X1 = S(uv - dn);
-        let X2 = S(uv + dn);
-        let lT1 = luma(T1);
-        let lT2 = luma(T2);
-        let lX1 = luma(X1);
-        let lX2 = luma(X2);
-        // Coherence: a step (|X2 - X1|) or a ridge (|X1 + X2 - 2C|) across,
-        // against all the variation around: 1 on a clean edge or line, near
-        // 0 on texture, grain and compression blocks.
-        let step = abs(lX2 - lX1);
-        let ridge = abs(lX1 + lX2 - 2.0 * lC);
-        let variation = abs(lX2 - lC) + abs(lC - lX1) + abs(lT2 - lC) + abs(lC - lT1) + EPS;
-        let a = max(step, ridge) / variation * strength;
-        let wT = W_ALONG * a;
-        let wX = max(-W_ACROSS * u.sharp * a, W_MIN);
-        if (TIER == 1u) {
-            // The quality tier: the four corners of the rotated grid, weighted
-            // as the product of the across and along weights (a separable
-            // window in the edge's frame), so that a diagonal edge is smoothed
-            // along itself and sharpened across itself like an axis one.
-            let Q1 = S(uv - dn - dt);
-            let Q2 = S(uv - dn + dt);
-            let Q3 = S(uv + dn - dt);
-            let Q4 = S(uv + dn + dt);
-            let wQ = W_CORNER * wX * wT;
-            let sum = C + wT * (T1 + T2) + wX * (X1 + X2) + wQ * (Q1 + Q2 + Q3 + Q4);
-            let Rq = sum / (1.0 + 2.0 * (wT + wX) + 4.0 * wQ);
-            let lo = min(min(min(C, T1), min(T2, X1)), min(min(X2, Q1), min(Q2, min(Q3, Q4))));
-            let hi = max(max(max(C, T1), max(T2, X1)), max(max(X2, Q1), max(Q2, max(Q3, Q4))));
-            R = clamp(Rq, lo, hi);
-        } else {
-            R = blend(C, T1, T2, X1, X2, wT, wX);
-        }
-        if (SHAPE == 1u) {
-            // On a step the pixel sits at t on the ramp from X1 to X2: the
-            // curve pushes it toward the nearer plateau, never beyond either.
-            let d = lX2 - lX1;
-            let t = clamp((lC - lX1) / select(d, EPS, abs(d) < EPS), 0.0, 1.0);
-            let push = 4.0 * K_SHAPE * a * t * (1.0 - t) * (2.0 * t - 1.0);
-            let Rs = clamp(C + push * (X2 - X1), min(X1, X2), max(X1, X2));
-            R = mix(R, Rs, step / (step + ridge + EPS));
-        }
-    } else {
-        // The axis cross; its frame comes from the taps, and each pair blends
-        // its along and across weights by the gradient's share along x.
-        let A = S(uv - vec2f(0.0, u.texel.y) * R_ALONG);
-        let B = S(uv - vec2f(u.texel.x, 0.0) * R_ALONG);
-        let D = S(uv + vec2f(u.texel.x, 0.0) * R_ALONG);
-        let E = S(uv + vec2f(0.0, u.texel.y) * R_ALONG);
-        let lA = luma(A);
-        let lB = luma(B);
-        let lD = luma(D);
-        let lE = luma(E);
-        let hx = lD - lB;
-        let hy = lE - lA;
-        let q = hx * hx / (hx * hx + hy * hy + EPS);
-        let step = abs(hx) + abs(hy);
-        let ridge = max(abs(lB + lD - 2.0 * lC), abs(lA + lE - 2.0 * lC));
-        let variation = abs(lD - lC) + abs(lC - lB) + abs(lE - lC) + abs(lC - lA) + EPS;
-        let a = max(step, ridge) / variation * strength;
-        let wT = W_ALONG * a;
-        let wX = max(-W_ACROSS * u.sharp * a, W_MIN);
-        R = blend(C, B, D, A, E, mix(wT, wX, q), mix(wT, wX, 1.0 - q));
-    }
+    // The taps along and across the edge the derivatives measure.
+    let n = vec2f(gx, gy) * inverseSqrt(max(gx * gx + gy * gy, 1e-12));
+    let dt = vec2f(-n.y, n.x) * u.texel * R_ALONG;
+    let dn = n * u.texel * R_ACROSS;
+    let T1 = S(uv - dt);
+    let T2 = S(uv + dt);
+    let X1 = S(uv - dn);
+    let X2 = S(uv + dn);
+    let lT1 = luma(T1);
+    let lT2 = luma(T2);
+    let lX1 = luma(X1);
+    let lX2 = luma(X2);
+    // Coherence: a step (|X2 - X1|) or a ridge (|X1 + X2 - 2C|) across,
+    // against all the variation around: 1 on a clean edge or line, near
+    // 0 on texture, grain and compression blocks.
+    let step = abs(lX2 - lX1);
+    let ridge = abs(lX1 + lX2 - 2.0 * lC);
+    let variation = abs(lX2 - lC) + abs(lC - lX1) + abs(lT2 - lC) + abs(lC - lT1) + EPS;
+    let a = max(step, ridge) / variation * strength;
+    let wT = W_ALONG * a;
+    let wX = max(-W_ACROSS * u.sharp * a, W_MIN);
+    var R = blend(C, T1, T2, X1, X2, wT, wX);
     if (DERING == 1u) {
         // The exact bound: the four input texels around the pixel, the
         // footprint of its bilinear sample.
