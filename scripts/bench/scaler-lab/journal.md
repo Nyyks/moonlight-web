@@ -795,3 +795,27 @@ Qualité face à la vérité terrain (`--quality`, ×2) :
 
 0 % de dépassement des deux côtés ; le jumeau vaut le noyau à 0,000 FLIP et 0,025 dB près. Le job CI
 `scaler-lab` (non bloquant) rejoue les deux côtés sur un runner hébergé.
+
+## 2026-10-21 — J19, la CI : la chaîne WebGPU noire sur le runner Linux, la capture par la texture
+
+Première exécution du job `scaler-lab` (CI 39627353471, signalée par 59) : côté WebGPU (SwiftShader
+Subzero sur Ubuntu), `chain-mwsr` hors tolérance sur les neuf cas, ~100 % des pixels, PSNR 0,4 à
+15,6 dB ; en qualité, `chain-mwsr` à 0,45 / 7,14 / 14,94 dB (texte, jeu, code) avec SSIM ≈ 0 et 95-99 %
+de dépassements, le noyau seul sain (18,43 / 35,93 / 27,08 : les polices d'Ubuntu, pas celles de
+DualRTX). Ces PSNR sont ceux d'une **image noire** contre les trois mires (le texte presque blanc à
+0,45 dB, le code sombre à 15) : le `transferToImageBitmap()` d'un `OffscreenCanvas` WebGPU ne rend pas
+l'image présentée sur ce chemin logiciel Linux, alors qu'il la rendait au bit près sous Windows (J17).
+
+Correctif : pendant le dessin du dump, un crochet sur `GPUCanvasContext.getCurrentTexture` donne au
+renderer une texture du labo (même device, format, taille et `viewFormats` que la swap chain, `COPY_SRC`),
+relue par `copyTextureToBuffer` sur ce device puis écrite dans la texture de sortie du labo ; la chaîne
+WebGL2 garde son tampon de dessin. Sur DualRTX (SwiftShader) : toujours exact sur les neuf cas dorés,
+conformité OK des deux côtés. Pour qu'une exécution que personne ne regarde dise ce qui s'est passé :
+les lignes console des renderers et tous les avertissements vont dans le journal de la page, les
+erreurs non capturées des devices du produit rejoignent celles du passage, le pilote garde le journal de
+la page avec chaque résultat (`pageLog`), le flux de conformité imprime le renderer et le GPU de chaque
+chaîne. Au passage : une page dont l'import statique du module échouait restait muette jusqu'au
+délai (un cas sur douze côté WebGL2, 18:10) — import dynamique rapporté en résultat (rechargé aussitôt
+par la règle des transitoires), et une page muette au délai est rechargée une fois. Verdict H19 :
+**à confirmer par la prochaine exécution de la CI** ; si la chaîne y reste fausse avec la texture relue
+directement, c'est le renderer sur cette plateforme et non plus la lecture.

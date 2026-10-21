@@ -35,8 +35,10 @@ Session « Shader Upscaler », 21/10/2026 après-midi, Fable 5.1 `max` (gardé p
   (`BrowserDetect.mwsrPreferred`) jusqu'à la décision de P6. Sans le drapeau, rien ne change pour
   `auto`.
 - **Le labo** : la chaîne du produit avec la clé (`chain-mwsr`), la chaîne WebGL2 (`chain-gl-<passe>`,
-  jeu `glchain`), captures et dumps des cellules chain (le canvas présenté copié dans la texture de
-  sortie), images RGBA faites des mires avec `codec=none` (les texels exacts de la texture d'entrée),
+  jeu `glchain`), captures et dumps des cellules chain (côté WebGPU la texture que le renderer a
+  dessinée, relue sur son device par un crochet sur `getCurrentTexture` : le bitmap présenté revenait
+  noir sur un runner Linux, J19 ; côté WebGL2 le tampon de dessin), images RGBA faites des mires avec
+  `codec=none` (les texels exacts de la texture d'entrée),
   `chain-mwsr` dans les dorés ; le flux de conformité (`scaler_lab.py --conformity`, `p4_flows.py`) ;
   un mode `gl=1` de la page (WebGL2 seul, dumps par un canvas 2D) pour le Chrome où WebGPU est éteint ;
   un chien de garde du pilote (`--page-timeout`) ; le bouton `mwsr:fine=1`.

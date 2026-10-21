@@ -443,15 +443,30 @@ def main():
                                  expression="location.href === %s && window.__labDone !== undefined" % json.dumps(url))
                     if ready.get("result", {}).get("value"):
                         r = call("Runtime.evaluate", expression="window.__labDone", returnByValue=True)
+                        # The page's log travels with the result: the renderers' console
+                        # lines, the chains' GPU, what a run nobody watched said.
+                        page_log = call("Runtime.evaluate", returnByValue=True,
+                                        expression="(document.getElementById('log') || {}).textContent || ''")
+                        v = r.get("result", {}).get("value")
+                        if isinstance(v, dict):
+                            v["pageLog"] = str(page_log.get("result", {}).get("value", ""))[-20000:]
                         break
                     if time.time() > deadline:
                         page_log = call("Runtime.evaluate", returnByValue=True,
                                         expression="(document.getElementById('log') || {}).textContent || ''")
                         text = str(page_log.get("result", {}).get("value", ""))[-1500:]
+                        if not text.strip() and attempt + 1 < tries:
+                            # nothing ran at all (the page never started): once more
+                            print("  page timeout after %.0f s with an empty log: loading it again" % a.page_timeout)
+                            sys.stdout.flush()
+                            r = None
+                            break
                         print("  page timeout after %.0f s; its log:\n%s" % (a.page_timeout, text))
                         sys.stdout.flush()
                         res = {"error": "page timeout after %.0f s" % a.page_timeout, "log": text, "url": url}
                         return res
+                if r is None:
+                    continue
                 res = r.get("result", {}).get("value")
                 # no value, a module that failed to load, a dump that failed to post
                 transient = res is None or (

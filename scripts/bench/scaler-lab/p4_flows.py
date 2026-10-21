@@ -86,6 +86,10 @@ def conformity(a, run_page):
             bad += 1
             return None
         adapter = (res.get("adapter") or {}).get("name", adapter)  # a gt=1 page names none
+        # what the renderers said: the chain's kind and GPU, every console warning
+        for line in str(res.get("pageLog", "")).splitlines():
+            if line.startswith("chain ") or line.startswith("console."):
+                print("   ", key, "|", line[:200])
         if res.get("errors"):
             print(key, "errors:", res["errors"][:5])
             bad += 1

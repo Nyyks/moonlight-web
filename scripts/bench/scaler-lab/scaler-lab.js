@@ -844,6 +844,28 @@ function stats(xs) {
 // ── the lab ────────────────────────────────────────────────────────────────
 
 export async function runLab(p, log = () => {}) {
+  // The renderers speak through the console; the page log keeps what they
+  // say (every warning and error, and their own lines), so that a run on a
+  // machine nobody watches — the CI — tells which pipeline was refused.
+  const taps = [];
+  for (const level of ["log", "warn", "error"]) {
+    const orig = console[level];
+    taps.push([level, orig]);
+    console[level] = (...a) => {
+      const s = a.map((x) => (x && x.message) || String(x)).join(" ");
+      if (level !== "log" || /^\[Web(Gpu|Gl)Renderer\]/.test(s))
+        log("console." + level + ": " + s.slice(0, 400));
+      orig.apply(console, a);
+    };
+  }
+  try {
+    return await runLabInner(p, log);
+  } finally {
+    for (const [level, orig] of taps) console[level] = orig;
+  }
+}
+
+async function runLabInner(p, log) {
   const [inW, inH] = (p.in || "1280x720").split("x").map(Number);
   const [outW, outH] = (p.out || "2560x1440").split("x").map(Number);
   const content = p.content || "text";
@@ -910,6 +932,8 @@ export async function runLab(p, log = () => {}) {
   if (hasF16 && p.f16 === "1") required.push("shader-f16");
   const device = await adapter.requestDevice({ requiredFeatures: required });
   device.onuncapturederror = (e) => errors.push(e.error.message);
+  HOOK.labDevice = device;
+  HOOK.productErrors = [];
   const adapterName =
     `${info.vendor || "?"} ${info.architecture || ""} ${info.device || ""} ${info.description || ""}`
       .replace(/\s+/g, " ")
@@ -1614,17 +1638,74 @@ export async function runLab(p, log = () => {}) {
   async function chainToOut(cell) {
     const r = renderers.get(cell.algo);
     if (!r) throw new Error(cell.name + ": no renderer");
-    const bmp = r.canvas.transferToImageBitmap();
+    frameCursor = 0; // the clip's first frame: the kernel cells' picture
+    if (r.gl) {
+      // WebGL2: one draw, then the drawing buffer as a bitmap.
+      await runChain(cell, 1, false);
+      const bmp = r.canvas.transferToImageBitmap();
+      try {
+        if (bmp.width !== outW || bmp.height !== outH)
+          throw new Error(cell.name + ": canvas " + bmp.width + "x" + bmp.height);
+        device.queue.copyExternalImageToTexture(
+          { source: bmp },
+          { texture: outTex },
+          { width: outW, height: outH },
+        );
+      } finally {
+        bmp.close();
+      }
+      return;
+    }
+    // WebGPU: during this one draw the renderer gets a texture of ours in
+    // place of the swap chain's (the getCurrentTexture hook) and we read it
+    // back on its own device — the presented bitmap of a WebGPU
+    // OffscreenCanvas came back black on a Linux runner's software adapter
+    // (CI 39627353471) while the same read was exact on Windows.
+    HOOK.capture = {};
+    let cap;
     try {
-      if (bmp.width !== outW || bmp.height !== outH)
-        throw new Error(cell.name + ": canvas " + bmp.width + "x" + bmp.height);
-      device.queue.copyExternalImageToTexture(
-        { source: bmp },
+      await runChain(cell, 1, false);
+    } finally {
+      cap = HOOK.capture;
+      HOOK.capture = null;
+    }
+    if (!cap.texture) throw new Error(cell.name + ": the renderer drew no canvas texture");
+    try {
+      if (cap.w !== outW || cap.h !== outH)
+        throw new Error(cell.name + ": canvas " + cap.w + "x" + cap.h);
+      const bpr = Math.ceil((cap.w * 4) / 256) * 256;
+      const buf = cap.device.createBuffer({
+        size: bpr * cap.h,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      });
+      const enc = cap.device.createCommandEncoder();
+      enc.copyTextureToBuffer(
+        { texture: cap.texture },
+        { buffer: buf, bytesPerRow: bpr },
+        { width: cap.w, height: cap.h },
+      );
+      cap.device.queue.submit([enc.finish()]);
+      await buf.mapAsync(GPUMapMode.READ);
+      const bytes = new Uint8Array(buf.getMappedRange()).slice();
+      buf.unmap();
+      buf.destroy();
+      // Both canvases take the preferred format; should they differ, swap R and B.
+      const swap = (cap.format.startsWith("bgra") !== format.startsWith("bgra"));
+      if (swap)
+        for (let y = 0; y < cap.h; y++)
+          for (let o = y * bpr, e = o + cap.w * 4; o < e; o += 4) {
+            const t = bytes[o];
+            bytes[o] = bytes[o + 2];
+            bytes[o + 2] = t;
+          }
+      device.queue.writeTexture(
         { texture: outTex },
-        { width: outW, height: outH },
+        bytes,
+        { bytesPerRow: bpr, rowsPerImage: cap.h },
+        { width: cap.w, height: cap.h },
       );
     } finally {
-      bmp.close();
+      cap.texture.destroy();
     }
   }
 
@@ -1789,9 +1870,8 @@ export async function runLab(p, log = () => {}) {
     for (const c of cells) {
       if (!c) continue;
       try {
-        if (c.feed === "chain") frameCursor = 0; // the kernel cells' picture
-        await measure(c, 1, false);
         if (c.feed === "chain") await chainToOut(c);
+        else await measure(c, 1, false);
         shots[c.name] = await crop(device, outTex, format, outW, outH);
       } catch (e) {
         errors.push("[shot " + c.name + "] " + e.message);
@@ -1802,9 +1882,8 @@ export async function runLab(p, log = () => {}) {
   for (const c of cells) {
     if (!c || !dumpList.includes(c.name) || (c.feed === "chain" && hdr)) continue;
     try {
-      if (c.feed === "chain") frameCursor = 0; // the kernel cells' picture
-      await measure(c, 1, false);
       if (c.feed === "chain") await chainToOut(c);
+      else await measure(c, 1, false);
       const name = (p.tag || "lab") + "-" + c.name.replace(/[^\w.+-]/g, "_");
       if (hdr) {
         const bytes = await readHalf(device, outTex, outW, outH);
@@ -1823,6 +1902,8 @@ export async function runLab(p, log = () => {}) {
   for (const f of frames) f.close();
   for (const r of renderers.values()) r.dispose();
   device.destroy();
+  for (const m of HOOK.productErrors) errors.push("[product device] " + m);
+  HOOK.productErrors = [];
   return {
     adapter: {
       name: adapterName,
@@ -1950,6 +2031,12 @@ const HOOK = {
   resolve: null,
   read: null,
   count: 8,
+  /** The lab's own device (its errors are its own). */
+  labDevice: null,
+  /** Uncaptured errors of the product's devices, joined to the run's. */
+  productErrors: [],
+  /** While set, getCurrentTexture hands the renderer a texture of ours (chainToOut). */
+  capture: null,
 };
 let hooked = false;
 function installHooks(adapterOpts) {
@@ -1965,7 +2052,42 @@ function installHooks(adapterOpts) {
     const f = new Set(d.requiredFeatures || []);
     if (this.features.has("timestamp-query")) f.add("timestamp-query");
     d.requiredFeatures = [...f];
-    return origDev.call(this, d);
+    return origDev.call(this, d).then((dev) => {
+      dev.addEventListener("uncapturederror", (e) => {
+        if (dev !== HOOK.labDevice) HOOK.productErrors.push(e.error.message);
+      });
+      return dev;
+    });
+  };
+  // The canvas: its configuration remembered, and while a capture is on the
+  // current texture is one of ours — same device, format, size and view
+  // formats as the swap chain's, readable (COPY_SRC) once the draw is in.
+  const origCfg = GPUCanvasContext.prototype.configure;
+  GPUCanvasContext.prototype.configure = function (cfg) {
+    this.__cfg = cfg;
+    return origCfg.call(this, cfg);
+  };
+  const origCur = GPUCanvasContext.prototype.getCurrentTexture;
+  GPUCanvasContext.prototype.getCurrentTexture = function () {
+    const cap = HOOK.capture;
+    if (!cap || !this.__cfg) return origCur.call(this);
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    if (!cap.texture || cap.ctx !== this || cap.w !== w || cap.h !== h) {
+      if (cap.texture) cap.texture.destroy();
+      cap.ctx = this;
+      cap.w = w;
+      cap.h = h;
+      cap.device = this.__cfg.device;
+      cap.format = this.__cfg.format;
+      cap.texture = cap.device.createTexture({
+        size: { width: w, height: h },
+        format: cap.format,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        viewFormats: this.__cfg.viewFormats || [],
+      });
+    }
+    return cap.texture;
   };
   const origEnc = GPUDevice.prototype.createCommandEncoder;
   GPUDevice.prototype.createCommandEncoder = function (d) {

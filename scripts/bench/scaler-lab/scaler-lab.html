@@ -32,16 +32,20 @@
       // parameters are the URL's query (see scaler-lab.js); the result is left
       // in window.__labResult, and posted to the serving script when post=1
       // (a phone's Safari or Chrome, which nothing drives over CDP).
-      import { runLab } from './scaler-lab.js';
-
       const params = Object.fromEntries(new URLSearchParams(location.search));
       const out = document.getElementById('log');
       const log = (s) => {
         out.textContent += s + '\n';
       };
-      window.__labResult = runLab(params, log).catch((e) => ({
-        error: String(e && e.stack ? e.stack : e),
-      }));
+      // The module is imported here, not statically: a fetch that fails on
+      // the lab's own server (seen once in fifty on the software adapter)
+      // then becomes a result the driver reloads at once, where a failed
+      // static import left the page silent until the driver's deadline.
+      window.__labResult = import('./scaler-lab.js')
+        .then(({ runLab }) => runLab(params, log))
+        .catch((e) => ({
+          error: String(e && e.stack ? e.stack : e),
+        }));
       window.__labResult.then(async (r) => {
         window.__labDone = r; // what the driver polls for (a value, not a promise)
         if (r.error) log('ERROR ' + r.error);
