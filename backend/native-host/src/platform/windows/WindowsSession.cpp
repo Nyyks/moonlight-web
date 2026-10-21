@@ -1269,6 +1269,29 @@ private:
             forceWgc = n > 0 && n < sizeof(value) && ::_stricmp(value, "wgc") == 0;
         }
 
+        // The bench's key (capture=, EncoderTuning::Capture; plan « Gels du
+        // lien », route B). wgc asks for Windows.Graphics.Capture first and
+        // takes the duplication when WGC cannot serve — said in the log, so
+        // that a pass labelled wgc is not read as one — where the variable
+        // above fails the session instead. A duplication found to paint the
+        // pointer in stays on WGC, as without the key.
+        const EncoderTuning::Capture asked = m_Config.tuning.capture;
+        if (asked == EncoderTuning::Capture::Wgc && !forceWgc && !m_DuplicationPaintsPointer) {
+            std::string wgcError;
+            if (!capture::WgcCapture::available(&wgcError))
+                wgcError = "Windows.Graphics.Capture is unavailable here: " + wgcError;
+            else if (openWgc(wgcError)) {
+                m_DdaMayReturn = false;
+                return true;
+            }
+            log::info("[native] capture=wgc: Windows.Graphics.Capture cannot serve this display (" +
+                      wgcError + ") — Desktop Duplication instead");
+            bool mayReturn = false;
+            if (openDuplication(attached, error, mayReturn)) return true;
+            error = wgcError + " (and Desktop Duplication: " + error + ")";
+            return false;
+        }
+
         std::string ddaError;
         // Whether Desktop Duplication may serve this display later in the
         // session, so that the fallback below keeps looking for it.
@@ -1281,15 +1304,18 @@ private:
             ddaError = "MW_CAPTURE=wgc";
         } else if (ddaRefusedOnPurpose(ddaError)) {
             ddaMayReturn = true;
-        } else {
-            m_Capture = std::make_unique<capture::DxgiDuplication>(m_Target.captureAdapterHandle,
-                                                                   m_Target.outputIndex);
-            if (startCapture(*m_Capture, attached, ddaError)) {
-                m_CaptureApi = CaptureApi::DxgiDuplication;
-                m_DdaMayReturn = false;
-                return true;
-            }
-            ddaMayReturn = static_cast<capture::DxgiDuplication&>(*m_Capture).refusalMayPass();
+        } else if (openDuplication(attached, ddaError, ddaMayReturn)) {
+            return true;
+        }
+
+        if (asked == EncoderTuning::Capture::Dda) {
+            // The duplication alone, as a machine without WGC has it: a pass
+            // labelled dda is never a WGC one. The loop tries again, as it
+            // does on such a machine.
+            log::info("[native] capture=dda: Desktop Duplication refused this display (" +
+                      ddaError + "), and no fallback is taken");
+            error = ddaError;
+            return false;
         }
 
         std::string wgcWhy;
@@ -1306,17 +1332,52 @@ private:
         log::info("[native] Desktop Duplication refused this display (" + ddaError +
                   ") — falling back to Windows.Graphics.Capture");
 
-        m_Capture = std::make_unique<capture::WgcCapture>(m_Target.captureAdapterHandle,
-                                                          m_Target.outputIndex);
-        if (!m_Capture->start(error)) {
+        std::string wgcError;
+        if (!openWgc(wgcError)) {
             // Both failed. The DDA reason is the one worth carrying: WGC is the
             // afterthought, and its message would hide why the primary path
             // could not serve this display.
-            error = ddaError + " (and the fallback failed too: " + error + ")";
-            m_Capture.reset();
+            error = ddaError + " (and the fallback failed too: " + wgcError + ")";
             return false;
         }
 
+        // A refusal that may pass — the secure desktop, for a worker below
+        // SYSTEM, is the usual one — is not the session's last word: the loop
+        // looks for the duplication to come back (duplicationBack), and with
+        // it the wake-up on the present, which WGC has not (plan C8.3 bis).
+        m_DdaMayReturn = ddaMayReturn;
+        m_DdaTries = 0;
+        m_NextDdaLookUs = steadyNowUs() + kDdaLookUs;
+        return true;
+    }
+
+    /// Desktop Duplication on the display: m_Capture and m_CaptureApi set.
+    /// False with its reason, and whether that reason may pass
+    /// (DxgiDuplication::refusalMayPass).
+    bool openDuplication(bool attached, std::string& error, bool& mayReturn)
+    {
+        m_Capture = std::make_unique<capture::DxgiDuplication>(m_Target.captureAdapterHandle,
+                                                               m_Target.outputIndex);
+        if (startCapture(*m_Capture, attached, error)) {
+            m_CaptureApi = CaptureApi::DxgiDuplication;
+            m_DdaMayReturn = false;
+            return true;
+        }
+        mayReturn = static_cast<capture::DxgiDuplication&>(*m_Capture).refusalMayPass();
+        return false;
+    }
+
+    /// Windows.Graphics.Capture on the display (the caller has asked
+    /// WgcCapture::available first): m_Capture and m_CaptureApi set. False
+    /// with start()'s reason.
+    bool openWgc(std::string& error)
+    {
+        m_Capture = std::make_unique<capture::WgcCapture>(m_Target.captureAdapterHandle,
+                                                          m_Target.outputIndex);
+        if (!m_Capture->start(error)) {
+            m_Capture.reset();
+            return false;
+        }
         // ⚠️ HDR is not carried on this path. WGC can deliver FP16, but nothing
         // here has ever seen it do so — the machines that need the fallback are
         // exactly the ones nobody has an HDR panel on — and an unwatched colour
@@ -1324,13 +1385,6 @@ private:
         // AMF and oneVPL are held to in §16.3). The session downgrades itself
         // below, on the format the capture really hands over.
         m_CaptureApi = CaptureApi::WindowsGraphicsCapture;
-        // A refusal that may pass — the secure desktop, for a worker below
-        // SYSTEM, is the usual one — is not the session's last word: the loop
-        // looks for the duplication to come back (duplicationBack), and with
-        // it the D3D12 chain WGC cannot feed (plan C8.3 bis).
-        m_DdaMayReturn = ddaMayReturn;
-        m_DdaTries = 0;
-        m_NextDdaLookUs = steadyNowUs() + kDdaLookUs;
         return true;
     }
 
@@ -1441,7 +1495,6 @@ private:
         f.codec = m_Target.codec;
         f.conv12 = m_Config.tuning.conv12;
         f.enc12 = m_Config.tuning.enc12;
-        f.capture = m_CaptureApi;
         f.crossGpuCopy = m_Target.crossGpuCopy;
         f.yuv444 = m_Target.yuv444;
         // Taken for granted until a build finds out: a GPU without it (Windows
@@ -2787,7 +2840,9 @@ private:
             // road a mode change takes, with DDA skipped for the rest of the
             // session. Before the acquire, so no frame is held when it goes.
             if (m_CaptureApi == CaptureApi::DxgiDuplication && m_Capture->pointerPaintedIn() &&
-                !m_DuplicationPaintsPointer && capture::WgcCapture::available()) {
+                !m_DuplicationPaintsPointer &&
+                m_Config.tuning.capture != EncoderTuning::Capture::Dda &&
+                capture::WgcCapture::available()) {
                 m_DuplicationPaintsPointer = true;
                 log::info("[native] moving this display to Windows.Graphics.Capture, which leaves "
                           "the pointer out of the picture");

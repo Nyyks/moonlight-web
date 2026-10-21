@@ -299,9 +299,9 @@ void run_video_pipeline_choice_tests()
             void (*spoil)(VideoPipelineFacts&);
             const char* named;
         };
+        // Not the capture: Windows.Graphics.Capture feeds the chain through a
+        // copy since route B (DdaInterop::open, test_dda_interop).
         const Case cases[] = {
-            {"WGC", [](VideoPipelineFacts& f) { f.capture = CaptureApi::WindowsGraphicsCapture; },
-             "Windows.Graphics.Capture"},
             {"bridge", [](VideoPipelineFacts& f) { f.crossGpuCopy = true; }, "another GPU"},
             {"MF", [](VideoPipelineFacts& f) { f.encoder = EncoderApi::MediaFoundation; },
              "Media Foundation has no D3D12 route"},
@@ -426,7 +426,7 @@ void run_video_pipeline_choice_tests()
     {
         VideoPipelineFacts f = arc();
         f.encoder = EncoderApi::Nvenc; // whose line is D3D11
-        f.capture = CaptureApi::WindowsGraphicsCapture;
+        f.crossGpuCopy = true;
         f.yuv444 = true;
         const VideoPipelineChoice c = chooseVideoPipeline(f);
         CHECK(c.pipeline == VideoPipeline::D3d11);
@@ -482,9 +482,9 @@ void run_video_pipeline_choice_tests()
         amd.enc12 = EncoderTuning::Encoder12::Pyrowave;
         CHECK(chooseVideoPipeline(amd).pipeline == VideoPipeline::D3d12);
         // What rules the route out for every encoder still does.
-        VideoPipelineFacts wgc = rtx;
-        wgc.capture = CaptureApi::WindowsGraphicsCapture;
-        CHECK(chooseVideoPipeline(wgc).refused);
+        VideoPipelineFacts bridge = rtx;
+        bridge.crossGpuCopy = true;
+        CHECK(chooseVideoPipeline(bridge).refused);
         // The bench spec names it back.
         EncoderTuning t;
         t.enc12 = EncoderTuning::Encoder12::Pyrowave;

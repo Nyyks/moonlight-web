@@ -163,6 +163,12 @@ const char* const kUsage =
     "                              an Intel GPU with memory of its own, 0 elsewhere\n"
     "  keep12=0|1                 a capture restart keeps the D3D12 Video Encode encoder\n"
     "                              when the stream it codes is the same (default 1)\n"
+    "  capture=auto|dda|wgc        the capture in front of the chain (plan Gels du lien,\n"
+    "                              route B): Desktop Duplication, and Windows.Graphics.\n"
+    "                              Capture when it refuses the display (auto, the engine's\n"
+    "                              own); wgc first, the duplication when WGC cannot serve\n"
+    "                              (the worker of a real session then runs on the user's\n"
+    "                              token: WGC has none for SYSTEM); dda alone, no fallback\n"
     "  conv12=direct|compute       the D3D12 conversion's queue\n"
     "  enc12=ve|nvenc|amf|pyrowave the D3D12 route's encoder; pyrowave = POC Ultra\n"
     "  ultrambps=<Mbit/s>          the PyroWave encoder's rate (default 128)\n"
@@ -525,6 +531,17 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
             tuning.ddaSync = S::None;
         else if (s == "cpu")
             tuning.ddaSync = S::Cpu;
+        else
+            ok = false;
+    } else if (key == "capture") {
+        using C = mw::native::EncoderTuning::Capture;
+        const QString c = value.toLower();
+        if (c == "auto")
+            tuning.capture = C::Default;
+        else if (c == "dda")
+            tuning.capture = C::Dda;
+        else if (c == "wgc")
+            tuning.capture = C::Wgc;
         else
             ok = false;
     } else if (key == "gputiming") {

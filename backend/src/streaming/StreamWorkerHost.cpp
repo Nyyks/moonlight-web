@@ -16,8 +16,10 @@
  */
 
 #include "StreamWorkerHost.h"
+#include "CaptureKey.h"
 #include "ConsoleSession.h"
 #include "HidParkingTransfer.h"
+#include "NativeBench.h"
 #include "StreamEnds.h"
 #include "WorkerService.h"
 #include "common/Edition.h"
@@ -113,7 +115,19 @@ bool StreamWorkerHost::start(const QJsonObject& config)
     // A failed attempt costs this one launch, never the stream: it falls to the
     // next line, which loses reach and nothing else. Both detours also switch
     // themselves off for the rest of the run once they have failed once.
-    if (native && WorkerService::available() &&
+    //
+    // capture=wgc (plan « Gels du lien », route B): Windows.Graphics.Capture
+    // exists for no SYSTEM process, so the worker asked for it runs on the
+    // user's token — the elevated task, else a plain child — and the launcher
+    // service is skipped, the secure desktop with it (CaptureKey.h).
+    const bool userToken =
+        native && mw::capturekey::asksWgc(
+                      effectiveTuningSpec(config["nativeTuning"].toString()).toStdString());
+    if (userToken)
+        qInfo() << "[StreamWorkerHost] capture=wgc: the worker runs on the user's token"
+                   " (Windows.Graphics.Capture has none for SYSTEM), the secure desktop out of"
+                   " its reach";
+    if (native && !userToken && WorkerService::available() &&
         startInConsoleSession(args, configLine, Launch::ServiceAsSystem))
         return true;
     if (native && ConsoleSession::elevatedWorkerAvailable() &&

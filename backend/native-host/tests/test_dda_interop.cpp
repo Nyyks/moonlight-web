@@ -247,11 +247,56 @@ void warpRoundTrip()
     CHECK(interop.beforeRelease(context.Get(), b2, d3d12::DdaSync::Cpu, 1000, error));
     CHECK(interop.converted().completed() >= b2);
 
+    // Route B (plan « Gels du lien »): a surface without an NT handle, as
+    // Windows.Graphics.Capture's pool hands out. The two-argument open
+    // refuses it; the three-argument one copies it on the capture's context
+    // into a shareable texture of the interop's own, read behind the same
+    // fences — and written again two frames on, behind the wait for B.
+    ComPtr<ID3D11Texture2D> plain;
+    CHECK(SUCCEEDED(device11->CreateTexture2D(&desc, nullptr, &plain)));
+    if (!plain) return;
+    context->CopyResource(plain.Get(), secondPicture.Get());
+    CHECK(interop.open(plain.Get(), error) == nullptr);
+    CHECK(!error.empty());
+    ID3D12Resource* copied = interop.open(plain.Get(), context.Get(), error);
+    CHECK(copied != nullptr);
+    CHECK_EQ(interop.copiedFrames(), static_cast<size_t>(1));
+    // Not kept as an opened surface: the duplication's own stays alone there.
+    CHECK_EQ(interop.openedSurfaces(), static_cast<size_t>(1));
+    if (!copied) return;
+    Readback readback2;
+    CHECK(readback2.record(device->device(), copied, kW, kH));
+    const uint64_t a2 = interop.signalAcquired(context.Get(), d3d12::DdaSync::Gpu, error);
+    CHECK(a2 == 2);
+    CHECK(interop.conversionWaits(queue.queue.Get(), a2, error));
+    ID3D12CommandList* lists2[] = {readback2.list.Get()};
+    queue.queue->ExecuteCommandLists(1, lists2);
+    const uint64_t b3 = interop.conversionSignals(queue.queue.Get(), error);
+    CHECK(b3 == 3);
+    CHECK(interop.beforeRelease(context.Get(), b3, d3d12::DdaSync::Gpu, 1000, error));
+    // The next frame takes the other texture; the one after it the first
+    // again, its copy queued behind the wait above — so D3D12 reads the
+    // picture it was handed, not the one copied over it.
+    context->CopyResource(plain.Get(), firstPicture.Get());
+    ID3D12Resource* next = interop.open(plain.Get(), context.Get(), error);
+    CHECK(next != nullptr && next != copied);
+    ID3D12Resource* third = interop.open(plain.Get(), context.Get(), error);
+    CHECK(third == copied);
+    CHECK_EQ(interop.copiedFrames(), static_cast<size_t>(3));
+    context->Flush();
+    CHECK(interop.converted().wait(b3, 2000, error) == d3d12::GpuFence::Wait::Done);
+    CHECK(readback2.pixels(kW, kH, 4) == second);
+    // A surface with a handle still goes by it, copied or not.
+    CHECK(interop.open(surface.Get(), context.Get(), error) == opened);
+    CHECK_EQ(interop.copiedFrames(), static_cast<size_t>(3));
+
     // A restart: everything of the old capture device is let go.
     interop.unbind();
     CHECK(!interop.bound());
     CHECK_EQ(interop.openedSurfaces(), static_cast<size_t>(0));
+    CHECK_EQ(interop.copiedFrames(), static_cast<size_t>(0));
     CHECK(interop.open(surface.Get(), error) == nullptr);
+    CHECK(interop.open(plain.Get(), context.Get(), error) == nullptr);
 }
 
 void realDuplication()
@@ -357,7 +402,10 @@ void realDuplication()
 // DdaInterop (plan pipeline-video-d3d12-v2, C2.2-C2.3): the capture's D3D11
 // device and the pipeline's D3D12 device ordered by two shared fences — D3D12
 // reads what D3D11 wrote before the signal and not what it wrote after the
-// wait — on WARP, then on a real duplicated display where there is one.
+// wait — on WARP, then on a real duplicated display where there is one. And
+// a surface without a handle (Windows.Graphics.Capture's; plan « Gels du
+// lien », route B), copied into one of the interop's own behind the same
+// fences.
 void run_dda_interop_tests()
 {
 #if defined(_WIN32)

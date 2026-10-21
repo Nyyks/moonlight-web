@@ -65,10 +65,21 @@ const char* toString(DdaSync sync);
 ///                     keyed mutex is let go after the read — and the CPU does
 ///                     not wait at all.
 ///
+/// ── Windows.Graphics.Capture ─────────────────────────────────────────────────
+///
+/// Its pool's textures have no NT handle, so D3D12 cannot open them, and a
+/// device of its own does not take them either (a D3D11On12 pool got two
+/// frames and nothing after, like the duplication; bench §8y.1). The frame is
+/// copied instead, on the capture's context, into a shareable texture of the
+/// interop's own, and the two fences order that copy exactly as they order
+/// the compositor's write: see open() with a context (plan « Gels du lien »,
+/// route B).
+///
 /// ── Rebinding ────────────────────────────────────────────────────────────────
 ///
 /// A capture restart brings a new D3D11 device: both fences are made again
-/// and the opened surfaces forgotten. The D3D12 device and its queues stay.
+/// and the opened surfaces forgotten, the copies' textures with them. The
+/// D3D12 device and its queues stay.
 ///
 /// Every refusal has a name — the log line that says why a session is on
 /// D3D11 is only useful if it says which step said no.
@@ -103,8 +114,24 @@ public:
     /// handle (Windows.Graphics.Capture's, or a secure desktop's).
     ID3D12Resource* open(ID3D11Texture2D* captured, std::string& error);
 
+    /// The same, for a capture whose surfaces may have no NT handle
+    /// (Windows.Graphics.Capture's pool; plan « Gels du lien », route B,
+    /// 22/10/2026): one that has is opened as above; one that has not is
+    /// copied on @p context — the capture's, so the copy lands behind the
+    /// compositor's write and in front of fence A's signal — into a
+    /// shareable texture of the interop's own, which D3D12 reads as it reads
+    /// the duplication's surface, behind the same two fences. Two such
+    /// textures take turns, and a surface found without a handle is
+    /// remembered as such, so the pool's few buffers cost one refused handle
+    /// each and a copy per frame. Measured on the RTX and the N95 (bench
+    /// §8y.1): the read matched the frame delivered every time.
+    ID3D12Resource* open(ID3D11Texture2D* captured, ID3D11DeviceContext* context,
+                         std::string& error);
+
     /// Surfaces opened so far (the tests read it).
     size_t openedSurfaces() const { return m_Surfaces.size(); }
+    /// Frames copied so far for want of a handle (the tests read it).
+    size_t copiedFrames() const { return m_Copied; }
 
     /// Fence A: the capture context signals it right after the acquire and
     /// flushes, so the signal reaches the GPU. The value the conversion queue
@@ -134,6 +161,20 @@ private:
         Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11;
         Microsoft::WRL::ComPtr<ID3D12Resource> d3d12;
     };
+    /// One of the interop's own textures, for the surfaces without a handle:
+    /// made on the capture device at the captured surface's size and format,
+    /// opened by D3D12 once.
+    struct Slot
+    {
+        Surface surface;
+        UINT width = 0;
+        UINT height = 0;
+        DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+    };
+    static constexpr size_t kSlots = 2;
+
+    /// @p slot made (again) for a surface of @p desc.
+    bool makeSlot(Slot& slot, const D3D11_TEXTURE2D_DESC& desc, std::string& error);
 
     std::shared_ptr<D3d12Device> m_Device;
     Microsoft::WRL::ComPtr<ID3D11Device5> m_Device11;
@@ -142,6 +183,13 @@ private:
     GpuFence m_FenceB;                              // made by D3D12, signalled by it
     Microsoft::WRL::ComPtr<ID3D11Fence> m_FenceB11; // the same, opened in D3D11
     std::vector<Surface> m_Surfaces;
+    /// The surfaces found without a handle (by pointer, as m_Surfaces), the
+    /// textures they are copied into, which of them takes the next copy, and
+    /// how many copies were made.
+    std::vector<ID3D11Texture2D*> m_NoHandle;
+    Slot m_Slots[kSlots];
+    size_t m_NextSlot = 0;
+    size_t m_Copied = 0;
 };
 
 } // namespace mw::native::d3d12

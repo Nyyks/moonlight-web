@@ -50,10 +50,13 @@ struct VideoPipelineFacts
     EncoderTuning::Encoder12 enc12 = EncoderTuning::Encoder12::Default;
 
     // ── What rules D3D12 out for this build ─────────────────────────────────
+    //
+    // Not the capture any more: Desktop Duplication's surface is opened by
+    // its NT handle, and Windows.Graphics.Capture's, which has none, is
+    // copied into one of the interop's own on the capture's context, behind
+    // the same two fences (DdaInterop::open; plan « Gels du lien », route B,
+    // 22/10/2026).
 
-    /// Only Desktop Duplication has the handshake: Windows.Graphics.Capture
-    /// hands its pictures to D3D11 with nothing to order a D3D12 read by.
-    CaptureApi capture = CaptureApi::DxgiDuplication;
     /// The cross-GPU bridge is D3D11 end to end.
     bool crossGpuCopy = false;
     /// No D3D12 encoder takes 4:4:4 (AYUV input nowhere, measured).
@@ -156,9 +159,6 @@ inline const char* encoderLabel(EncoderTuning::Encoder12 e)
 inline std::string refusal(const VideoPipelineFacts& f, EncoderTuning::Encoder12 encoder)
 {
     using E = EncoderTuning::Encoder12;
-    if (f.capture != CaptureApi::DxgiDuplication)
-        return std::string("the display is captured through ") + toString(f.capture) +
-               ", which hands its pictures to D3D11 only";
     if (f.crossGpuCopy) return "the pictures cross to another GPU, over a D3D11 bridge";
     if (f.encoder != EncoderApi::Nvenc && f.encoder != EncoderApi::Amf &&
         f.encoder != EncoderApi::Vpl)

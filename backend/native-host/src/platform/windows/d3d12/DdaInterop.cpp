@@ -19,6 +19,8 @@
 
 #include <dxgi1_2.h>
 
+#include <algorithm>
+
 using Microsoft::WRL::ComPtr;
 
 namespace mw::native::d3d12 {
@@ -41,6 +43,11 @@ DdaInterop::~DdaInterop()
 void DdaInterop::unbind()
 {
     m_Surfaces.clear();
+    m_NoHandle.clear();
+    for (Slot& slot : m_Slots)
+        slot = Slot{};
+    m_NextSlot = 0;
+    m_Copied = 0;
     m_FenceB11.Reset();
     m_FenceB.reset();
     m_FenceA.reset();
@@ -171,6 +178,88 @@ ID3D12Resource* DdaInterop::open(ID3D11Texture2D* captured, std::string& error)
     surface.d3d12 = opened;
     m_Surfaces.push_back(std::move(surface));
     return m_Surfaces.back().d3d12.Get();
+}
+
+ID3D12Resource* DdaInterop::open(ID3D11Texture2D* captured, ID3D11DeviceContext* context,
+                                 std::string& error)
+{
+    if (!m_Device || !captured) {
+        error = "the interop is not bound";
+        return nullptr;
+    }
+    // By its handle when it has one — the duplication's surfaces, opened once
+    // and kept — unless this surface was already refused one.
+    if (std::find(m_NoHandle.begin(), m_NoHandle.end(), captured) == m_NoHandle.end()) {
+        std::string refused;
+        if (ID3D12Resource* opened = open(captured, refused)) return opened;
+        // Like m_Surfaces: past this many the pool was made again under us.
+        if (m_NoHandle.size() >= kMaxSurfaces) m_NoHandle.clear();
+        m_NoHandle.push_back(captured);
+    }
+    if (!context) {
+        error = "no context to copy the captured surface on";
+        return nullptr;
+    }
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    captured->GetDesc(&desc);
+    Slot& slot = m_Slots[m_NextSlot];
+    m_NextSlot = (m_NextSlot + 1) % kSlots;
+    if (!slot.surface.d3d11 || slot.width != desc.Width || slot.height != desc.Height ||
+        slot.format != desc.Format) {
+        if (!makeSlot(slot, desc, error)) return nullptr;
+    }
+    // Queued on the capture's context: behind whatever put the picture there,
+    // in front of the signal of fence A that follows. The slot is written
+    // again two frames on, behind the wait for fence B queued before the
+    // release of the frame it held (beforeRelease), so D3D12 has read it.
+    context->CopyResource(slot.surface.d3d11.Get(), captured);
+    ++m_Copied;
+    return slot.surface.d3d12.Get();
+}
+
+bool DdaInterop::makeSlot(Slot& slot, const D3D11_TEXTURE2D_DESC& desc, std::string& error)
+{
+    slot = Slot{};
+    D3D11_TEXTURE2D_DESC own = {};
+    own.Width = desc.Width;
+    own.Height = desc.Height;
+    own.MipLevels = 1;
+    own.ArraySize = 1;
+    own.Format = desc.Format;
+    own.SampleDesc.Count = 1;
+    own.Usage = D3D11_USAGE_DEFAULT;
+    own.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    own.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+    ComPtr<ID3D11Texture2D> texture;
+    HRESULT hr = m_Device11->CreateTexture2D(&own, nullptr, &texture);
+    if (FAILED(hr)) {
+        error =
+            "the copy of the captured surface cannot be made shareable (" + hresultText(hr) + ")";
+        return false;
+    }
+    ComPtr<IDXGIResource1> shareable;
+    HANDLE handle = nullptr;
+    hr = texture.As(&shareable);
+    if (SUCCEEDED(hr))
+        hr = shareable->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ, nullptr, &handle);
+    if (FAILED(hr)) {
+        error = "the copy of the captured surface has no shared handle (" + hresultText(hr) + ")";
+        return false;
+    }
+    ComPtr<ID3D12Resource> opened;
+    hr = m_Device->device()->OpenSharedHandle(handle, IID_PPV_ARGS(&opened));
+    ::CloseHandle(handle);
+    if (FAILED(hr)) {
+        error = "D3D12 cannot open the copy of the captured surface (" + hresultText(hr) + ")";
+        return false;
+    }
+    slot.surface.d3d11 = texture;
+    slot.surface.d3d12 = opened;
+    slot.width = desc.Width;
+    slot.height = desc.Height;
+    slot.format = desc.Format;
+    return true;
 }
 
 uint64_t DdaInterop::signalAcquired(ID3D11DeviceContext* context, DdaSync sync, std::string& error)

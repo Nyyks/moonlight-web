@@ -257,6 +257,20 @@ void run_cadence_choice_tests()
         CHECK_EQ(t.describe(), std::string("ovfgood=1"));
     }
 
+    // capture= (plan « Gels du lien », route B): the engine's own unless said,
+    // both captures named.
+    SECTION("capture= — the engine's own unless said, dda and wgc named");
+    {
+        EncoderTuning t;
+        CHECK(t.capture == EncoderTuning::Capture::Default);
+        CHECK(t.isDefault());
+        t.capture = EncoderTuning::Capture::Wgc;
+        CHECK(!t.isDefault());
+        CHECK_EQ(t.describe(), std::string("capture=wgc"));
+        t.capture = EncoderTuning::Capture::Dda;
+        CHECK_EQ(t.describe(), std::string("capture=dda"));
+    }
+
     SECTION("ovfgood= — shed frames lower the good rate unless the key says 0");
     {
         CHECK(mw::native::overflowLowersGoodByDefault(-1));

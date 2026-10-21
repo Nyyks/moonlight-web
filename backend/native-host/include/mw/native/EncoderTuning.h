@@ -318,6 +318,24 @@ struct EncoderTuning
     /// engine's own since 29/09/2026 (§9-27): the keyframe after a mode
     /// change came 717 → 546 ms sooner on the Arc; keep12=0 makes it again.
     Choice keep12 = Choice::Default;
+    /// The capture in front of the Windows chains (plan « Gels du lien »,
+    /// route B, 22/10/2026). The engine's own is Desktop Duplication, and
+    /// Windows.Graphics.Capture when the duplication refuses the display.
+    /// Wgc asks for Windows.Graphics.Capture first — the duplication again
+    /// when WGC is unavailable or does not start, said in the log — on
+    /// either chain: the D3D12 one copies its pictures, which have no NT
+    /// handle, into a shareable texture of its own (DdaInterop::open). WGC
+    /// exists for no SYSTEM process (the per-user CaptureService has no
+    /// instance for it), so the server starts the worker asked for it on the
+    /// user's token. Dda is the duplication alone, as a machine without WGC
+    /// has it: a bench row labelled dda is never a WGC one.
+    enum class Capture
+    {
+        Default,
+        Dda,
+        Wgc
+    };
+    Capture capture = Capture::Default;
 
     // ── The stream's cadence (plan framerate-hote, design §33) ─────────────
 
@@ -624,19 +642,19 @@ struct EncoderTuning
                prio12 == Priority12::Default && ownCreator12 == Choice::Default &&
                ddaSync == DdaSync::Default && !gpuTiming && !strict12 &&
                pipelined == Choice::Default && keep12 == Choice::Default &&
-               cadence == Cadence::Default && convertLinux == ConvertLinux::Default &&
-               prioVk == PriorityVk::Default && portalDmabuf == Choice::Default &&
-               mutterDirect == Choice::Default && lossPermille == 0 && lossBurst == 0 &&
-               sctpCongestion < 0 && floodKbps == 0 && floodBytes == 0 && !floodLikeVideo &&
-               ultraSynthKb == 0 && !ultraUnordered && ultraMbps == 0 && aroadPace < 0 &&
-               aroadWindowKb == 0 && aroadBudgetPct == 0 && aroadChunk == 0 && !relayLog &&
-               paceMultiple == 0 && paceBurstKb == 0 && retransCutPermille < 0 &&
-               sctpBufferKb == 0 && linkHoldMs == 0 && sctpMaxBurst < 0 && sctpScheduler < 0 &&
-               sctpMtu == 0 && !audioLog && audioFrameMs == 0 && audioGraceUs < 0 && !clickTrace &&
-               virtualMouse < 0 && inputAdmit < 0 && inputAdmitMs == 0 && inputAdmitBurst == 0 &&
-               inputAdmitRate == 0 && inputAdmitMax == 0 && inputAdmitGapUs < 0 &&
-               cadenceLock < 0 && preGate < 0 && vddMatch < 0 && vddMatchMaxHz == 0 &&
-               sckQueueDepth == 0 && sckMinIntervalUs < 0;
+               capture == Capture::Default && cadence == Cadence::Default &&
+               convertLinux == ConvertLinux::Default && prioVk == PriorityVk::Default &&
+               portalDmabuf == Choice::Default && mutterDirect == Choice::Default &&
+               lossPermille == 0 && lossBurst == 0 && sctpCongestion < 0 && floodKbps == 0 &&
+               floodBytes == 0 && !floodLikeVideo && ultraSynthKb == 0 && !ultraUnordered &&
+               ultraMbps == 0 && aroadPace < 0 && aroadWindowKb == 0 && aroadBudgetPct == 0 &&
+               aroadChunk == 0 && !relayLog && paceMultiple == 0 && paceBurstKb == 0 &&
+               retransCutPermille < 0 && sctpBufferKb == 0 && linkHoldMs == 0 && sctpMaxBurst < 0 &&
+               sctpScheduler < 0 && sctpMtu == 0 && !audioLog && audioFrameMs == 0 &&
+               audioGraceUs < 0 && !clickTrace && virtualMouse < 0 && inputAdmit < 0 &&
+               inputAdmitMs == 0 && inputAdmitBurst == 0 && inputAdmitRate == 0 &&
+               inputAdmitMax == 0 && inputAdmitGapUs < 0 && cadenceLock < 0 && preGate < 0 &&
+               vddMatch < 0 && vddMatchMaxHz == 0 && sckQueueDepth == 0 && sckMinIntervalUs < 0;
     }
 
     /// One line naming every field that is NOT at its default, for the log and
@@ -718,6 +736,8 @@ struct EncoderTuning
         if (strict12) add("strict12=1");
         if (pipelined != Choice::Default) add(std::string("pipelined=") + choice(pipelined));
         if (keep12 != Choice::Default) add(std::string("keep12=") + choice(keep12));
+        if (capture == Capture::Dda) add("capture=dda");
+        if (capture == Capture::Wgc) add("capture=wgc");
         if (cadence == Cadence::Host) add("cadence=host");
         if (cadence == Cadence::HostCeiling) add("cadence=host-ceiling");
         if (cadence == Cadence::HostGuarded) add("cadence=host-guarded");

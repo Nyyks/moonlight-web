@@ -86,6 +86,7 @@ add_executable(run_tests
     test_annexb_filler.cpp
     test_link_freeze_log.cpp
     test_rxbuf_section.cpp
+    test_capture_key.cpp
     test_signaling_wait.cpp
     test_single_session_hosts.cpp
     test_stream_ends.cpp

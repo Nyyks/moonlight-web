@@ -1695,8 +1695,9 @@ faire. Campagne du 04/09/2026 et recommandation : `docs/bench-native-host.md`.
   `interfloor=<k>|off`, `prio12=normal|high|realtime`,
   `creator12=own|default`, `ddasync=gpu|none|cpu`, `gputiming=0|1`,
   `strict12=0|1`, `pipelined=0|1` (§32.17 ; par défaut 1 sur un GPU Intel à
-  mémoire propre, 0 ailleurs, depuis le 29/09) et `keep12=0|1` (§32.18, 1 par
-  défaut depuis le 29/09).
+  mémoire propre, 0 ailleurs, depuis le 29/09), `keep12=0|1` (§32.18, 1 par
+  défaut depuis le 29/09) et `capture=auto|dda|wgc` (§17.5, 22/10 : la
+  capture devant la chaîne, `auto` = la duplication puis WGC en repli).
 - Sous Linux : `pipeline=auto|vaapi|vulkan`, `convert=gl|vulkan`,
   `priovk=normal|high`.
 - Sur une vraie session seulement (`MW_NATIVE_TUNING`) : `namedrops=0|1`,
@@ -2293,6 +2294,66 @@ dans les tests la relecture des pixels — **luma NV12 19..234**, donc une vraie
 image et pas un écran noir, ce que « la session a démarré » n'aurait jamais
 prouvé. La branche WGC des tests s'exécute sur **toute** machine, pas seulement
 sur celles qui en ont besoin.
+
+### 17.5 WGC devant la chaîne D3D12, et la clé `capture=` (route B, 22/10/2026)
+
+Plan « Gels du lien » : sous charge, sur l'iGPU d'un N95 sans HAGS, les appels
+du runtime D3D11 de la duplication (`AcquireNextFrame`, `ReleaseFrame`, le
+`Flush` de la poignée de main) attendent le planificateur 10 à 90 ms par image
+(banc §8y). La parade à mesurer est l'autre capture devant la **même** chaîne.
+Jusqu'ici `VideoPipelineChoice` refusait D3D12 derrière WGC : les textures de
+son pool n'ont pas de handle NT, et D3D12 ne pouvait pas les ouvrir.
+
+**La copie partagée (B1).** `DdaInterop::open` prend désormais le contexte de
+la capture. Une surface qui a un handle s'ouvre comme avant (la duplication) ;
+une surface qui n'en a pas est **copiée sur le contexte de la capture** dans
+une texture à nous, `SHARED | SHARED_NTHANDLE`, que D3D12 a ouverte une fois.
+La copie est mise en file **avant** le signal de la fence A, donc la lecture
+D3D12 l'attend comme elle attend l'écriture du compositeur ; deux textures se
+relaient, et la copie suivante dans la même texture est mise en file **après**
+l'attente de la fence B posée avant la libération de l'image (ReleaseFrame /
+`Close`), donc après la lecture D3D12. Les surfaces trouvées sans handle sont
+retenues par pointeur : un handle refusé par tampon du pool, puis une copie par
+image. Mesuré par la sonde `mw-d3d12-lab wgc` (banc §8y.1) : la lecture égale à
+l'image livrée dans tous les cas, copie + ouverture + signal 0,11 ms sur la RTX.
+Vérifié dans `test_dda_interop` sur WARP : la texture sans handle refusée par
+l'`open` à deux arguments, copiée par celui à trois, lue derrière les fences, et
+la troisième image réécrite dans la première texture **après** la lecture.
+
+**B2, écarté.** Le pool sur un device D3D11On12 porté par la file de la chaîne
+(zéro copie) livre deux images puis plus rien, comme la duplication sur 11on12
+(§8y, essai A) : les surfaces du compositeur ne passent pas par ce device.
+
+**La clé `capture=auto|dda|wgc`** (`EncoderTuning::capture`, lue dans
+`openCapture`). `auto`, le moteur : la duplication, WGC quand elle refuse
+l'écran. `wgc` : WGC d'abord, et la duplication **avec une ligne de journal**
+quand WGC n'existe pas ou ne démarre pas — une passe étiquetée wgc ne doit pas
+passer pour une passe WGC ; les stats disent de toute façon quelle capture
+répond. `dda` : la duplication seule, sans repli, comme sur une machine sans
+WGC — une passe étiquetée dda n'est jamais une passe WGC. `MW_CAPTURE=wgc`
+garde son sens de forçage (échec de la session si WGC ne démarre pas). Sous
+`wgc`, la boucle ne cherche pas le retour de la duplication (elle n'a pas été
+refusée) ; sous `auto`, le retour à la duplication après un refus passager
+(§17.1) reste, pour le réveil sur le présent que WGC n'a pas.
+
+**⚠️ WGC n'existe pas pour SYSTEM.** La sonde lancée par une tâche SYSTEM et
+relancée dans la session console sur le même jeton — ce que fait le service
+Worker pour le worker du stream — voit `IsSupported` échouer avec `0x80070424`
+(ERROR_SERVICE_DOES_NOT_EXIST) : WGC s'appuie sur le service **par
+utilisateur** CaptureService, sans instance pour la session d'ouverture de
+SYSTEM ; l'usurpation du jeton de l'utilisateur par le fil n'y change rien.
+Le serveur lit donc la seule clé dont le lancement dépend (`CaptureKey.h`,
+`capture=wgc` dans `native_tuning` ou `MW_NATIVE_TUNING`) **avant** de choisir
+la voie du worker (`StreamWorkerHost::start`) : la tâche élevée, sinon un
+enfant ordinaire, jamais le service lanceur — le worker est alors au jeton de
+l'utilisateur, et l'écran sécurisé hors de sa portée pour ce stream. Journal :
+« capture=wgc: the worker runs on the user's token ». Rien ne change sans la
+clé.
+
+**Ce qui reste à mesurer (jour 3)** : l'A/B `capture=dda` / `capture=wgc` avec
+la chaîne complète sur le N95 sous charge, la latence au repos sur DualRTX, et
+WGC à 60 i/s sur un écran à 120 Hz (la duplication en donne 120) — la valeur
+par défaut `auto` ne bouge pas avant le banc d'acceptation.
 
 ## 18. oneVPL : audit sans matériel (04/09/2026)
 
@@ -5766,9 +5827,9 @@ D3D11.
   « Avancé » dans l'admin ; `auto` suit une ligne par vendeur, qui ne bouge que
   sur décision de Bruno : D3D11 partout au départ, Intel en D3D12 depuis le
   28/09 (§32.9).
-- Un refus à la construction (Windows.Graphics.Capture, pont inter-GPU, 4:4:4,
-  étage logiciel, codec pas encore fait…) repasse en D3D11 pour cette
-  construction, avec la raison au journal. Un échec en cours de stream repasse en
+- Un refus à la construction (pont inter-GPU, 4:4:4, étage logiciel, codec pas
+  encore fait… ; Windows.Graphics.Capture jusqu'au 22/10, §17.5) repasse en
+  D3D11 pour cette construction, avec la raison au journal. Un échec en cours de stream repasse en
   D3D11 pour la session, en une image clé, sans couper le stream.
 - Le chemin D3D11 passe d'abord derrière une interface (`WindowsVideoPipeline`)
   **sans changement de comportement**, prouvé au banc avant toute ligne D3D12
@@ -5986,7 +6047,8 @@ Video Encode HEVC, contrôle de débit maison. L'overlay lit « D3D12 VE
   d'avant. C'est le retour arrière, sans clé de banc.
 - Ce que la route D3D12 ne porte pas encore reste en D3D11, pour la
   construction concernée : H.264 (un navigateur sans HEVC), AV1, 4:4:4,
-  Windows.Graphics.Capture, pont inter-GPU. Le journal dit pourquoi, et
+  pont inter-GPU (Windows.Graphics.Capture aussi, jusqu'à la copie partagée
+  du 22/10, §17.5). Le journal dit pourquoi, et
   l'overlay lit « oneVPL (D3D11) » : `refused` vaut aussi quand c'est la table
   qui a demandé D3D12.
 

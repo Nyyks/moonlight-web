@@ -569,7 +569,11 @@ bool D3d12VideoPipeline::convert(capture::IWindowsCapture& capture, ID3D11Textur
     if (m_Pipelined) m_Converter->selectOutput(m_Target = reserveOutput());
     const D3d12Fault::Kind fault = nextConversion();
     std::string why;
-    ID3D12Resource* surface = m_Interop.open(captured, why);
+    // The duplication's surface by its handle; Windows.Graphics.Capture's,
+    // which has none, copied on the capture's context into one of the
+    // interop's own — queued before fence A's signal, so the read below
+    // waits for the copy as it waits for the compositor.
+    ID3D12Resource* surface = m_Interop.open(captured, capture.context(), why);
     if (!surface) {
         lose("the captured surface does not open in D3D12: " + why);
         return true;

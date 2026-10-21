@@ -7594,6 +7594,29 @@ capture de l'hôte 10 à 90 ms par image, d'où les à-coups ; la conversion et
 l'encodeur n'y sont pour rien. La parade mesurée est une autre capture
 (Windows.Graphics.Capture) devant la même chaîne, à venir.
 
+### 8y.2 Route B, jour 2 : le code (22/10/2026)
+
+- **B1 dans le produit** : `DdaInterop::open(captured, context)` ouvre une
+  surface par son handle quand elle en a un, et copie sur le contexte de la
+  capture celle qui n'en a pas dans l'une de deux textures partagées à nous,
+  avant le signal de la fence A ; la réécriture d'une texture tombe derrière
+  l'attente de la fence B posée avant la libération. La règle de
+  `VideoPipelineChoice` qui refusait D3D12 derrière WGC est levée (design
+  §17.5). Test `test_dda_interop` sur WARP : surface sans handle refusée à
+  deux arguments, copiée à trois, lue derrière les fences, troisième image
+  réécrite après la lecture.
+- **Clé `capture=auto|dda|wgc`** (`EncoderTuning::capture`) : `auto` le
+  moteur (duplication, WGC en repli), `wgc` WGC d'abord et la duplication
+  avec une ligne de journal quand WGC ne sert pas, `dda` la duplication seule
+  sans repli. Dans la description du tuning (« capture=wgc »).
+- **Le worker au jeton de l'utilisateur** : le serveur lit `capture=wgc`
+  dans `native_tuning` / `MW_NATIVE_TUNING` (`CaptureKey.h`) et saute le
+  service lanceur SYSTEM (tâche élevée, sinon enfant ordinaire) — WGC n'a pas
+  d'instance pour SYSTEM (8y.1). Journal « capture=wgc: the worker runs on
+  the user's token ». Sans la clé, rien ne change.
+- Pas de banc ce jour : l'A/B `capture=dda` / `capture=wgc` avec la chaîne
+  complète est le jour 3 (N95 sous charge, DualRTX au repos, WGC à 120 Hz).
+
 ## 9. Pour l'A/B
 
 Le banc encode vers un puits ; l'A/B se fait sur un vrai flux. Une session
@@ -7618,6 +7641,10 @@ lui-même, son AppData étant celui de SYSTEM (`systemprofile`). Le moteur le
 prend quand la variable est absente, et le journal du worker dit « settings.json
 native_tuning in effect ». Rien à redémarrer : la clé vaut pour le stream
 suivant. Le produit ne l'écrit jamais ; la retirer rend la session au moteur.
+Une seule clé change le lancement lui-même : avec `capture=wgc`, le serveur
+saute le service lanceur et démarre le worker au jeton de l'utilisateur (la
+tâche « Stream Worker », sinon un enfant ordinaire), parce que WGC n'existe pas
+pour SYSTEM (§8y.1) ; l'écran sécurisé est hors de portée pour ce stream.
 
 ## 10. Reproduire
 
@@ -7637,8 +7664,10 @@ Clés d'encodeur : `preset=1..7`, `tuning=ull|ll`, `multipass=off|quarter|full`,
 `winbrc=<frames>`. La chaîne d'image (plan D3D12) a les siennes, listées au
 §14 du design : `pipeline=`, `conv12=`, `enc12=`, `rc12=`, `reencode=`,
 `refit=`, `prio12=`, `ddasync=`, `gputiming=`, `strict12=`, `pipelined=`,
-`keep12=` sous Windows, `pipeline=vaapi|vulkan`, `convert=`, `priovk=` sous
-Linux, et `dump=`, `lose=`, `ramp=` pour le banc lui-même. `namedrops=` ne sert
+`keep12=`, `capture=auto|dda|wgc` (§8y.2 ; `wgc` sur une vraie session met le
+worker au jeton de l'utilisateur) sous Windows, `pipeline=vaapi|vulkan`,
+`convert=`, `priovk=` sous Linux, et `dump=`, `lose=`, `ramp=` pour le banc
+lui-même. `namedrops=` ne sert
 que sur une vraie session (`MW_NATIVE_TUNING`, §9) : c'est le relais qui la lit. Les A/B du plan
 passent par `scripts/bench/ab-native-bench.ps1`, en classe REALTIME par un
 exécuteur élevé (§8n.2). Le contenu est affaire d'opérateur : ici
