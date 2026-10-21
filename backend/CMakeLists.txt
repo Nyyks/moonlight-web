@@ -190,6 +190,12 @@ endfunction()
 # (plan « le son et la priorité des paquets », D5).
 mw_apply_patch("${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel"
                libdatachannel-dscp-settings.patch)
+# DtlsSrtpTransport copies every RTP packet with make_message(size, orig), which
+# dropped the DSCP the track had set: the sound left in the video's class, never
+# its own (bench of 21/10). A patch of its own, so a tree with the one above
+# already applied takes it too.
+mw_apply_patch("${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel"
+               libdatachannel-srtp-dscp.patch)
 # libjuice gives up marking on Windows without trying; on Windows 11 an
 # unelevated setsockopt(IP_TOS) does mark, under the service too. Chosen over a
 # QoS policy laid by the installer, which Windows leaves out of force after a
