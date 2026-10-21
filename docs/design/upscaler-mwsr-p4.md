@@ -193,7 +193,10 @@ suffisent), realme Note 60 (Chrome Android) et `mw-arm` (WebGL2 seul : `--gl`) :
 `scaler_lab.py --serve 0.0.0.0:8766 --tag <appareil> --p4 [--screen 1600x720] [--gl]`, dix liens
 `/1`-`/10` (plus huit à la taille de l'écran avec `--screen`), puis `--p4-table <appareil>` sur les
 `phone-*.json` postés. La décision par classe d'appareil (plan §9, P6) : ordinateur tranché (WebGL2) ;
-Apple et Mali après ces liens ; la réduction sur iGPU à regarder avec le résultat du 780M.
+Apple et Mali après ces liens ; la réduction sur iGPU à regarder avec le résultat du 780M. `mw-arm` à
+distance (22/10, journal J22) : un Chrome lancé par SSH (séance 0) n'y a pas de GPU utilisable et la tâche
+planifiée interactive attend une session console ; ce banc se fait avec Bruno connecté à sa console, par
+la recette `--remote-cdp` à travers un tunnel SSH.
 
 **La CI** (run 39661997273, lu par 59) : sur le runner Linux, l'adaptateur logiciel forcé refuse
 d'importer une image vidéo dans WebGPU (`importExternalTexture` : « Failed to import texture from
@@ -210,4 +213,8 @@ le canvas lit la texture par un blit `texture_2d`), retente l'import tous les 30
 avertissement, et un draw qui échoue n'est plus journalisé qu'une fois par message. L'upscaler continue
 de tourner ; rien ne change à l'écran ni dans l'overlay. Vérifié par un test à device simulé (cinq cas)
 et au labo sur SwiftShader avec `importfail=1` : dorés exacts et conformité OK par le repli comme par
-l'import. Reste la mesure de son coût sur un GPU, au prochain créneau.
+l'import. **Son coût, mesuré le 22/10 sur le 780M** (journal J21 ; `--p4 --extra importfail=1`, les mêmes
+conditions que la porte) : `done` p50 de la chaîne `mwsr` ×1,2-1,3 celui de l'import à 720p → 1440p
+(≈ +1 ms par image), ×1,8 avec une entrée 4K (le bitmap d'une image 4K, +5 à 6 ms), le fil principal pas
+plus chargé (la création du bitmap est asynchrone) ; les cellules WebGL2 des deux passes, que le repli ne
+touche pas, dérivent de 0,91 à 1,21. Un chemin de secours, jamais le chemin normal : acceptable.

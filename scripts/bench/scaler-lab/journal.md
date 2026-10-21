@@ -901,3 +901,31 @@ accepté, refusé puis copié avec une seule ligne, retenté 300 draws plus tard
 refuse l'import aux seuls devices du produit) : **dorés exacts sur les neuf cas** par le repli comme par
 l'import, conformité OK. Reste la mesure du coût du repli sur un GPU (créneau à demander à 59) : sur
 SwiftShader la chaîne `chain-mwsr` passe par le bitmap sans écart de pixel.
+
+**Le coût du repli, 22/10 00:21-00:23 (780M, créneau de 59 ; même sonde et mêmes conditions que la
+porte ; `scaler_lab.py --p4 --extra importfail=1 --tag p4amdbm`, table par
+`p4_fallback_compare.py bench-out/scaler-lab p4amd p4amdbm`).** `done` p50 de la chaîne WebGPU `mwsr`,
+repli contre import : ×2 texte 5,34 contre 4,11 ms saturé (×1,30) et 6,55 contre 5,61 à 60 i/s
+(×1,17) ; ×2 jeu ×1,21 / ×1,22 ; ×2 interface ×0,98 / ×1,02 ; ×1,33 texte ×1,26 / ×1,20 ; réduction
+×0,67 (entrée 4K) 11,45 contre 6,42 (×1,78) et 13,34 contre 7,60 (×1,76). Témoin : les cellules WebGL2
+des deux passes, que `importfail` ne touche pas, dérivent de 0,91 à 1,21 (médiane 1,03). Lecture :
+≈ +1 ms par image à 720p → 1440p (au-dessus du bruit sur la plupart des lignes, pas toutes), +5 à 6 ms
+quand l'entrée est en 4K (le bitmap d'une image 4K). Le fil principal n'est pas plus chargé (`submit`
+p50 égal ou plus bas : la création du bitmap est asynchrone) ; le temps GPU horodaté baisse de 5 à
+15 % (la passe 0 n'est plus une passe, la copie passe par la file) et de moitié à ×0,67. Chemin de
+secours seulement, jamais le chemin normal : acceptable, une image vaut mieux qu'un écran noir.
+
+## 2026-10-22 — J22, mw-arm à distance : pas de GPU pour un Chrome lancé par SSH
+
+Créneau de 59 (00:26-00:38). Recette : tunnel SSH (`-L 9222` pour DevTools, `-R 8767` pour le serveur
+du labo), `scaler_lab.py --remote-cdp 9222 --http-port 8767 --gl` depuis DualRTX, la page en
+`http://127.0.0.1:8767` vue de mw-arm (contexte sécurisé, aucun certificat à accepter). Trois
+constats. (1) Une tâche planifiée `Interactive` reste en file (`Queued`) : personne n'est connecté à la
+console de mw-arm. (2) Un Chrome `--headless=new` lancé depuis la session SSH (séance 0) n'a **aucun
+GPU** (`gl=disabled`, aucun adaptateur énuméré) ; avec `--use-gl=angle --use-angle=d3d11
+--ignore-gpu-blocklist`, l'Adreno 618 est énuméré et `webgl: enabled`, mais chaque contexte est perdu à
+la création et le domaine finit bloqué (« Web page caused context loss and was blocked ») : la séance 0
+n'a pas accès au périphérique. (3) Couper le bac à sable du processus GPU n'est pas une option sans
+l'accord de Bruno. La porte `mw-arm` se fait donc avec sa console ouverte (Bruno connecté) : la tâche
+`Interactive` du 06/09 marche alors, et la même recette `--remote-cdp` s'applique. Tout rendu à 00:38 :
+0 Chrome, tâche et profil effacés, tunnel fermé, aucun GPU de DualRTX pris.
