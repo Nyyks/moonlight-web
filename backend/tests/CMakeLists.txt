@@ -73,6 +73,7 @@ add_executable(run_tests
     test_host_persistence.cpp
     test_rendezvous_id.cpp
     test_rendezvous_line.cpp
+    test_address_race.cpp
     test_backend_probe.cpp
     test_host_os_probe.cpp
     test_send_backlog.cpp
@@ -148,6 +149,9 @@ add_executable(run_tests
     # The host's line to the introduction server, against a local stand-in:
     # how fast it comes back when the line fails under it.
     ${_src}/src/network/RendezvousClient.cpp
+    # Which of the server's addresses the line opens on: the race behind it,
+    # with legs the test answers by hand.
+    ${_src}/src/network/AddressRace.cpp
     # Host persistence: the restart path for a paired host (issue #9).
     ${_src}/src/backend/NvComputer.cpp
     ${_src}/src/backend/NvHTTP.cpp

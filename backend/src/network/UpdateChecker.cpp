@@ -16,6 +16,7 @@
  */
 
 #include "UpdateChecker.h"
+#include "AddressRace.h"
 #include "common/Edition.h"
 #include "common/Logger.h"
 
@@ -209,6 +210,7 @@ void UpdateChecker::fetchFrom(const QString& url, bool viaRelay)
     // without that key never reaches here — buildRelayUrl() returns empty and
     // the check goes straight to GitHub.
     if (viaRelay) req.setRawHeader("X-API-Key", qgetenv("MW_PDNS_TOKEN"));
+    AddressRace::enableOn(req);
     req.setTransferTimeout(8000);
 
     QNetworkReply* reply = m_nam->get(req);

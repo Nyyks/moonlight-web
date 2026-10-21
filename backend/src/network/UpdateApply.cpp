@@ -21,6 +21,7 @@
 #include "common/Logger.h"
 
 #ifdef Q_OS_WIN
+#include "network/AddressRace.h"
 #include "network/SelfUpdater.h"
 #include "network/UpdateApplyRules.h"
 #include "network/UpdateChecker.h"
@@ -269,6 +270,7 @@ QString fetchLatestRelease(QJsonObject* release)
     req.setRawHeader("Accept", "application/vnd.github+json");
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                      QNetworkRequest::ManualRedirectPolicy);
+    AddressRace::enableOn(req);
     req.setTransferTimeout(30000);
 
     QNetworkReply* reply = nam.get(req);

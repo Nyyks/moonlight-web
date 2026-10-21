@@ -17,12 +17,14 @@
 
 #include "RendezvousClient.h"
 
+#include "AddressRace.h"
 #include "../common/Edition.h"
 #include "../common/RendezvousId.h"
 #include "../server/AppSettings.h"
 
 #include <iterator>
 
+#include <QHostInfo>
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -62,6 +64,15 @@ constexpr int kKeepAliveMs = 45 * 1000;
 // more than waiting.
 constexpr int kPongTimeoutMs = 20 * 1000;
 
+// One attempt to bring the line up, openLine() to connected, may take this
+// long: name lookup, the address race, TLS and the upgrade. A healthy one takes
+// under a second. Nothing used to bound this phase (the pong watchdog only
+// starts once the line is up), and on 20/10/2026 a line sat in it for two hours
+// while its machine was unreachable. 15 s lets two SYN retransmissions through
+// on Windows (at 3 s and 9 s) and three on Linux, and still beats the 20 s a
+// missing pong is given.
+constexpr int kOpenTimeoutMs = 15 * 1000;
+
 // Backoff bounds. Capped so a machine left running overnight still recovers
 // promptly once the server returns.
 constexpr int kRetryBaseMs = 2 * 1000;
@@ -95,11 +106,14 @@ RendezvousClient::RendezvousClient(AppSettings* settings, QObject* parent)
     : QObject(parent)
     , m_Settings(settings)
     , m_Net(new QNetworkAccessManager(this))
+    , m_Race(new AddressRace(this))
+    , m_OpenTimeoutMs(kOpenTimeoutMs)
 {
     m_RetryTimer.setSingleShot(true);
     m_KeepAliveTimer.setInterval(kKeepAliveMs);
     m_Watchdog.setSingleShot(true);
     m_Watchdog.setInterval(kPongTimeoutMs);
+    m_OpenTimer.setSingleShot(true);
 
     connect(&m_RetryTimer, &QTimer::timeout, this, [this]() {
         if (!m_Running) return;
@@ -110,6 +124,9 @@ RendezvousClient::RendezvousClient(AppSettings* settings, QObject* parent)
     });
     connect(&m_KeepAliveTimer, &QTimer::timeout, this, &RendezvousClient::onKeepAlive);
     connect(&m_Watchdog, &QTimer::timeout, this, &RendezvousClient::onWatchdog);
+    connect(&m_OpenTimer, &QTimer::timeout, this, &RendezvousClient::onOpenTimeout);
+    connect(m_Race, &AddressRace::won, this, &RendezvousClient::onRaceWon);
+    connect(m_Race, &AddressRace::lost, this, &RendezvousClient::onRaceLost);
 
     connect(&m_Socket, &QWebSocket::connected, this, &RendezvousClient::onConnected);
     connect(&m_Socket, &QWebSocket::disconnected, this, &RendezvousClient::onDisconnected);
@@ -176,8 +193,15 @@ void RendezvousClient::stop()
     m_RetryTimer.stop();
     m_KeepAliveTimer.stop();
     m_Watchdog.stop();
+    // A deliberate stop is not an attempt that failed: nothing is counted.
+    abandonAttempt();
     m_Socket.close(QWebSocketProtocol::CloseCodeNormal, QStringLiteral("shutting down"));
     setOnline(false);
+}
+
+void RendezvousClient::setOpenTimeoutMs(int ms)
+{
+    m_OpenTimeoutMs = qMax(1, ms);
 }
 
 void RendezvousClient::ensureIdentity()
@@ -218,6 +242,10 @@ void RendezvousClient::claim()
     QNetworkRequest req{claimUrl};
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setRawHeader("X-MW-Owner", token.toLatin1());
+    // The claim goes by name through Qt's own address race, and it is bounded
+    // like the line: a claim that hangs would hold every retry behind it.
+    AddressRace::enableOn(req);
+    req.setTransferTimeout(m_OpenTimeoutMs);
 
     QJsonObject body;
     body["id"] = id;
@@ -316,7 +344,7 @@ QUrlQuery RendezvousClient::protoQuery()
 
 void RendezvousClient::openLine()
 {
-    if (!m_Running || m_Halted) return;
+    if (!m_Running || m_Halted || m_Opening) return;
     if (m_Socket.state() != QAbstractSocket::UnconnectedState) return;
 
     const QString id = m_Settings->rendezvousId();
@@ -327,6 +355,7 @@ void RendezvousClient::openLine()
     }
 
     m_LineEverUp = false;
+    m_RaceWinner = QAbstractSocket::UnknownNetworkLayerProtocol;
     QUrl url(baseUrl() + QStringLiteral("/v1/host"));
     url.setScheme(url.scheme() == QLatin1String("http") ? QStringLiteral("ws")
                                                         : QStringLiteral("wss"));
@@ -334,30 +363,132 @@ void RendezvousClient::openLine()
     query.addQueryItem(QStringLiteral("id"), id);
     url.setQuery(query);
 
-    QNetworkRequest req(url);
-    req.setRawHeader("X-MW-Owner", token.toLatin1());
+    m_LineRequest = QNetworkRequest(url);
+    m_LineRequest.setRawHeader("X-MW-Owner", token.toLatin1());
+
+    // One attempt starts here and ends in onConnected() or attemptFailed(),
+    // whichever the open timeout lets happen first.
+    ++m_Attempt;
+    m_Opening = true;
+    m_OpenTimer.start(m_OpenTimeoutMs);
+
+    // A URL that names an address has nothing to race: the test stand-in, or a
+    // server pinned by hand.
+    if (!QHostAddress(url.host()).isNull()) {
+        m_Socket.open(m_LineRequest);
+        return;
+    }
+
+    const int attempt = m_Attempt;
+    m_Lookup = QHostInfo::lookupHost(
+        url.host(), this, [this, attempt](const QHostInfo& info) { onResolved(attempt, info); });
+}
+
+void RendezvousClient::onResolved(int attempt, const QHostInfo& info)
+{
+    // A lookup answers once, and only the attempt that asked is listening.
+    if (attempt != m_Attempt || !m_Opening) return;
+    m_Lookup = -1;
+
+    QList<QHostAddress> addresses;
+    for (const QHostAddress& address : info.addresses()) {
+        const auto family = address.protocol();
+        if (family == QAbstractSocket::IPv4Protocol || family == QAbstractSocket::IPv6Protocol)
+            addresses.append(address);
+    }
+    if (addresses.isEmpty()) {
+        qWarning() << "[RDV] cannot resolve" << m_LineRequest.url().host() << "-"
+                   << info.errorString();
+        attemptFailed("name lookup failed");
+        return;
+    }
+
+    const QUrl url = m_LineRequest.url();
+    const quint16 port = quint16(url.port(url.scheme() == QLatin1String("wss") ? 443 : 80));
+    m_Race->start(addresses, port, m_LeadFamily);
+}
+
+void RendezvousClient::onRaceWon(const QHostAddress& address, qint64 elapsedMs)
+{
+    if (!m_Opening) return;
+    m_RaceWinner = address.protocol();
+    qInfo() << "[RDV] line via" << (m_RaceWinner == QAbstractSocket::IPv6Protocol ? "IPv6" : "IPv4")
+            << "(race" << elapsedMs << "ms)";
+    openLineOn(address);
+}
+
+void RendezvousClient::onRaceLost(qint64 elapsedMs)
+{
+    if (!m_Opening) return;
+    qWarning() << "[RDV] no address of" << m_LineRequest.url().host() << "answered (race"
+               << elapsedMs << "ms)";
+    attemptFailed("no address answered");
+}
+
+void RendezvousClient::openLineOn(const QHostAddress& address)
+{
+    // The line goes to the address that answered, and the name goes with it.
+    // The server routes on the Host header and the certificate is checked
+    // against the name, and Qt would take both from the URL, which now names an
+    // address. Both are set to exactly what the URL by name would have sent:
+    // the authority as written, with the port only where the URL spells one.
+    const QUrl named = m_LineRequest.url();
+    const quint16 port = quint16(named.port(named.scheme() == QLatin1String("wss") ? 443 : 80));
+    const QString literal = address.protocol() == QAbstractSocket::IPv6Protocol
+                                ? QLatin1Char('[') + address.toString() + QLatin1Char(']')
+                                : address.toString();
+    QUrl pinned = named;
+    pinned.setAuthority(literal + QLatin1Char(':') + QString::number(port));
+
+    const QString hostHeader =
+        named
+            .toString(QUrl::RemoveScheme | QUrl::RemoveUserInfo | QUrl::RemovePath |
+                      QUrl::RemoveQuery | QUrl::RemoveFragment)
+            .mid(2);
+
+    QNetworkRequest req = m_LineRequest;
+    req.setUrl(pinned);
+    req.setRawHeader("Host", hostHeader.toLatin1());
+    req.setPeerVerifyName(named.host());
     m_Socket.open(req);
 }
 
-void RendezvousClient::onConnected()
+void RendezvousClient::onOpenTimeout()
 {
-    m_RetryCount = 0;
-    m_LineFailures = 0;
-    m_LineEverUp = true;
-    m_KeepAliveTimer.start();
-    setOnline(true);
-    qInfo() << "[RDV] line up —" << entryUrl();
+    if (!m_Opening) return;
+    qWarning() << "[RDV] the line did not come up within" << m_OpenTimeoutMs
+               << "ms - abandoning this attempt";
+
+    // A family that won the race and then stalled is not the one to lead with
+    // next time: its TCP went through but TLS or the upgrade never completed,
+    // which is what a path MTU hole in IPv6 looks like from here. The race
+    // alone cannot see that; this is the only place that can.
+    if (m_RaceWinner != QAbstractSocket::UnknownNetworkLayerProtocol) {
+        m_LeadFamily = m_RaceWinner == QAbstractSocket::IPv6Protocol
+                           ? QAbstractSocket::IPv4Protocol
+                           : QAbstractSocket::IPv6Protocol;
+    }
+
+    // The failure first, the abort second: abort() on a connecting socket
+    // emits disconnected() from inside the call, and that path must find the
+    // attempt already counted rather than count it again.
+    attemptFailed("open timeout");
+    if (m_Socket.state() != QAbstractSocket::UnconnectedState) m_Socket.abort();
 }
 
-void RendezvousClient::onDisconnected()
+void RendezvousClient::attemptFailed(const char* why)
 {
-    m_KeepAliveTimer.stop();
-    m_Watchdog.stop();
-    setOnline(false);
+    // Every way an attempt can end without the line coming up lands here: the
+    // socket's disconnected (a refusal), its error without a disconnected (a
+    // URL Qt will not open), a race nobody won, the open timeout. Whichever
+    // reports first closes the attempt; the others find it closed and do
+    // nothing, so a failure counts once.
+    if (!m_Opening) return;
+    abandonAttempt();
 
     // An attempt that never came up is a different animal from a line that was
-    // working and dropped. Count only the former, and after a few of them go
-    // back through the claim.
+    // working and dropped. Only the former is counted, and after a few of them
+    // the client goes back through the claim.
     //
     // This exists because of a real failure that a live test found and no unit
     // test could: the server had lost its claim store, so it answered the
@@ -373,21 +504,56 @@ void RendezvousClient::onDisconnected()
     // still own the identifier costs nothing — the server answers
     // "claimed": false and charges no budget for it — so the repair is safe to
     // attempt even when the real cause was something else entirely.
+    if (++m_LineFailures >= kReclaimAfterFailures) {
+        m_LineFailures = 0;
+        qWarning() << "[RDV] line refused repeatedly — re-claiming the identifier";
+        m_Settings->setRendezvousClaimed(false);
+    }
+
+    if (m_Running) scheduleRetry(why);
+}
+
+void RendezvousClient::abandonAttempt()
+{
+    m_Opening = false;
+    m_OpenTimer.stop();
+    if (m_Lookup != -1) {
+        QHostInfo::abortHostLookup(m_Lookup);
+        m_Lookup = -1;
+    }
+    m_Race->cancel();
+}
+
+void RendezvousClient::onConnected()
+{
+    m_Opening = false;
+    m_OpenTimer.stop();
+    m_LeadFamily = QAbstractSocket::UnknownNetworkLayerProtocol;
+    m_RetryCount = 0;
+    m_LineFailures = 0;
+    m_LineEverUp = true;
+    m_KeepAliveTimer.start();
+    setOnline(true);
+    qInfo() << "[RDV] line up —" << entryUrl();
+}
+
+void RendezvousClient::onDisconnected()
+{
+    m_KeepAliveTimer.stop();
+    m_Watchdog.stop();
+    setOnline(false);
+
     // A halt is the server having said, in words, that no retry will be
-    // served. It is neither of the two cases above and must not feed them: the
+    // served. It is neither a refusal nor a drop and must not feed either: the
     // re-claim would only be refused with the same code.
     if (m_Halted) return;
 
     if (!m_LineEverUp) {
-        if (++m_LineFailures >= kReclaimAfterFailures) {
-            m_LineFailures = 0;
-            qWarning() << "[RDV] line refused repeatedly — re-claiming the identifier";
-            m_Settings->setRendezvousClaimed(false);
-        }
-    } else {
-        m_LineFailures = 0;
+        attemptFailed("line refused");
+        return;
     }
 
+    m_LineFailures = 0;
     if (m_Running) scheduleRetry("line dropped");
 }
 
@@ -406,6 +572,19 @@ void RendezvousClient::onSocketError(QAbstractSocket::SocketError error)
 {
     Q_UNUSED(error)
     qWarning() << "[RDV] line error:" << m_Socket.errorString();
+
+    // An attempt that errors out before connecting normally gets a disconnected
+    // right after, and that is its exit. Not always: a URL Qt will not open is
+    // an error and nothing else, and the attempt would otherwise wait out the
+    // open timeout for a line that was never tried. Looked at on the next turn
+    // of the loop, once Qt has emitted whatever else it was going to.
+    if (m_Opening && m_Socket.state() == QAbstractSocket::UnconnectedState) {
+        QTimer::singleShot(0, this, [this]() {
+            if (m_Opening && m_Socket.state() == QAbstractSocket::UnconnectedState)
+                attemptFailed("line error");
+        });
+        return;
+    }
 
     // An error on a line that is still open means the line is gone, whatever Qt
     // says next — and sometimes it says nothing. Behind production's Caddy, a

@@ -16,6 +16,7 @@
  */
 
 #include "SelfUpdater.h"
+#include "AddressRace.h"
 #include "RelaunchScript.h"
 #include "UpdateChecker.h"
 #include "common/Edition.h"
@@ -377,6 +378,7 @@ QString SelfUpdater::beginDownload()
     req.setRawHeader("User-Agent", "MoonlightWeb-SelfUpdater");
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                      QNetworkRequest::NoLessSafeRedirectPolicy);
+    AddressRace::enableOn(req);
     m_reply = m_nam->get(req);
 
     connect(m_reply, &QNetworkReply::readyRead, this, [this]() {

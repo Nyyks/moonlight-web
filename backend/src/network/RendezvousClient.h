@@ -18,14 +18,18 @@
 #pragma once
 
 #include <QObject>
+#include <QHostAddress>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QString>
 #include <QTimer>
 #include <QUrlQuery>
 #include <QWebSocket>
 
+class AddressRace;
 class AppSettings;
+class QHostInfo;
 
 /**
  * @brief Holds this instance's line to the rendezvous server.
@@ -49,6 +53,17 @@ class AppSettings;
  * WebRTC signalling, and nothing else. No media, no input, no credentials. The
  * payloads are opaque to the server, which copies them between this line and
  * the browser that asked for this instance by identifier.
+ *
+ * Reaching the server
+ * -------------------
+ * The line is not opened by name. The name is resolved, its addresses are
+ * raced (AddressRace), and the line is opened on the one that answered first,
+ * carrying the name where the server and the certificate expect it. An IPv6
+ * that silently drops packets then costs a quarter of a second instead of the
+ * 21 to 30 s Qt spends on it before trying the IPv4. Each attempt, from
+ * openLine() to connected, is bounded by an open timeout: past it the attempt
+ * counts as a failure like a refusal would, and the family that had won the
+ * race is not the one to lead with next time.
  *
  * Threading: Qt main thread only, like the rest of the network layer.
  */
@@ -85,6 +100,11 @@ public:
     /// look exactly like a network problem.
     QString lastError() const { return m_LastError; }
 
+    /// How long one attempt to bring the line up may take, from openLine() to
+    /// connected: name lookup, the race, TLS and the upgrade. The claim's
+    /// transfer timeout follows it. The default suits production; tests shorten it.
+    void setOpenTimeoutMs(int ms);
+
 signals:
     /// A browser arrived and the server opened a session for it.
     void sessionOpened(const QString& sessionId);
@@ -117,11 +137,21 @@ private slots:
     void onPong(quint64 elapsed, const QByteArray& payload);
     void onKeepAlive();
     void onWatchdog();
+    void onOpenTimeout();
+    void onRaceWon(const QHostAddress& address, qint64 elapsedMs);
+    void onRaceLost(qint64 elapsedMs);
 
 private:
     void ensureIdentity();
     void claim();
     void openLine();
+    void onResolved(int attempt, const QHostInfo& info);
+    /// Open the line on one address, with the name kept for Host and the certificate.
+    void openLineOn(const QHostAddress& address);
+    /// The one exit of an attempt that never came up. Counts once per attempt.
+    void attemptFailed(const char* why);
+    /// Forget the attempt in progress: its timeout, lookup and race. Counts nothing.
+    void abandonAttempt();
     void scheduleRetry(const char* why);
     void setOnline(bool online);
     void sendFrame(const QJsonObject& frame);
@@ -133,11 +163,32 @@ private:
 
     AppSettings* m_Settings = nullptr;
     QNetworkAccessManager* m_Net = nullptr;
+    AddressRace* m_Race = nullptr;
     QWebSocket m_Socket;
 
     QTimer m_RetryTimer;     // reconnect / re-claim backoff
     QTimer m_KeepAliveTimer; // our own ping, so a dead line is noticed
     QTimer m_Watchdog;       // fires when a pong never came back
+    QTimer m_OpenTimer;      // bounds one attempt, openLine() to connected
+    int m_OpenTimeoutMs;
+
+    /// The attempt in progress, if any: true from openLine() until the line is
+    /// up or attemptFailed() has counted it. Attempts are numbered so that a
+    /// name lookup answering late is recognised as the previous one's.
+    bool m_Opening = false;
+    int m_Attempt = 0;
+    int m_Lookup = -1; // QHostInfo lookup id, -1 when none is pending
+
+    /// The request as it would be sent by name: URL, revision, owner header.
+    QNetworkRequest m_LineRequest;
+
+    /// Which family won this attempt's race, unknown until it has or when the
+    /// URL named an address; and which family the next race should lead with,
+    /// set by a timed-out attempt, cleared once the line is up.
+    QAbstractSocket::NetworkLayerProtocol m_RaceWinner =
+        QAbstractSocket::UnknownNetworkLayerProtocol;
+    QAbstractSocket::NetworkLayerProtocol m_LeadFamily =
+        QAbstractSocket::UnknownNetworkLayerProtocol;
 
     bool m_Running = false;
     bool m_Online = false;

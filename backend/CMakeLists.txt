@@ -299,6 +299,7 @@ add_executable(mw-server
     src/common/RendezvousId.cpp
     src/common/InheritedEnvironment.cpp
     src/network/RendezvousClient.cpp
+    src/network/AddressRace.cpp
     src/network/UPNPClient.cpp
     src/network/RouterPortCore.cpp
     src/network/RouterPortAllocator.cpp
@@ -658,6 +659,8 @@ if(MW_BUILD_TESTS)
         tests/test_update_apply.cpp
         src/network/UpdateApplyRules.cpp
         src/network/UpdateChecker.cpp
+        # UpdateChecker asks for the address race on its request (AddressRace).
+        src/network/AddressRace.cpp
         src/common/InheritedEnvironment.cpp
         src/common/Edition.cpp
         src/server/ConnectionGuard.cpp

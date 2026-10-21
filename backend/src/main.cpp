@@ -120,6 +120,7 @@
 #include "server/HostAppImage.h"
 #include "server/HostAppLauncher.h"
 #include "server/LauncherDetect.h"
+#include "network/AddressRace.h"
 #include "network/InternetAccessManager.h"
 #include "network/MdnsAdvertiser.h"
 #include "network/RendezvousClient.h"
@@ -5989,6 +5990,7 @@ int main(int argc, char* argv[])
         QNetworkRequest req{QUrl(url)};
         req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
+        AddressRace::enableOn(req);
         req.setTransferTimeout(5000);
         entryProbeReply = entryProbeNam.get(req);
         QObject::connect(entryProbeReply, &QNetworkReply::finished, &app, [&]() {
