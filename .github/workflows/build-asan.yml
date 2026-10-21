@@ -22,7 +22,7 @@ jobs:
       - name: Install Qt 6.11
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.0'
+          version: '6.11.2'
           arch: win64_msvc2022_64
           modules: qtwebsockets
           # aqt 3.3.0 doesn't know the new Qt 6.11 per-arch repo layout (404s on
