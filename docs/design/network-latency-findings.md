@@ -2363,6 +2363,41 @@ the page reads those drops as congestion and steps down its ladder 10-20 s in. I
 again). Both sit upstream of the section, the same with `rxbuf=0`, and are not
 followed up here.
 
+### 21/10/2026 — Chrome on a Mac over the house Wi-Fi loses at the socket too, and the section stops it (plan « Gels du lien », point 9)
+
+**The question.** The cable's losses were Chrome's 64 KB UDP receive buffer
+(20/10). Does the same hold for Chrome on macOS over Wi-Fi, where radio bursts
+could be the cause instead?
+
+**The bench.** Léo's M1 Mac (Chrome 155 on its own profile, house Wi-Fi,
+Roblox open, load 2 to 5) as the client; the N95's DEV on `7c71a814` as the
+host, on the LAN; 1080p60 HEVC at 30 Mbit/s, gaming off; a YouTube clip
+(313 s) rewound before every pass; 3 min per pass, the two arms alternated: the
+section (the default since `ef94fce5`) against `rxbuf=0`. The Mac kernel's UDP
+counters (`netstat -s -p udp`: datagrams received, dropped due to full socket
+buffers) read before and after each pass. A first chain streamed a 20 s ad the
+clip page had looped (0.7 Mbit/s, 28 fps): same direction (146 / 15 / 152
+retransmits and 35 / 8 / 43 kernel drops against 0 / 0 / 0 and none), redone
+with the clip.
+
+| pass | key | SCTP fast retransmits / chunks sent | Mac kernel drops (full socket buffers) | freezes |
+|---|---|---|---|---|
+| sa1 | `rxbuf=0` | 119 / 132 706 | 46 | 0 |
+| sb1 | section (default) | 0 / 134 851 | 0 | 0 |
+| sa2 | `rxbuf=0` | 22 / 131 614 | 19 | 0 |
+| sb2 | section (default) | 0 / 133 856 | 0 | 0 |
+| sa3 | `rxbuf=0` | 73 / 129 419 | 29 | 1 (424 ms) |
+| sb3 | section (default) | 0 / 135 121 | 0 | 0 |
+
+**What it says.** The losses are the browser's socket, not the radio: the
+kernel's "full socket buffers" counter moves in the three `rxbuf=0` passes and
+only there, by the same order as the retransmits, and the section brings both
+to zero. Chrome on macOS behaves like Chrome on Windows (20/10); Safari on
+macOS had no losses to compare (20/10). The one freeze of the chain (424 ms,
+the send buffer not draining) is in a `rxbuf=0` arm. The received bitrate sat
+around 6 Mbit/s (the clip asks no more of the VE at this quality), so the
+buffer overflows at a sixth of the cap too.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
