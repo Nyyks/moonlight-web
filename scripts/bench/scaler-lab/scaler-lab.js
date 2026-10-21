@@ -72,12 +72,16 @@ const CELL_SETS = {
   // The mwsr kernel (plan §3.2, §4.3): `mwsr[:key=val;key=val…]` sets its
   // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering,
   // c444, rdown, ll), the uniforms (tau, sharp), half=1 (the f16
-  // module; the page needs f16=1), mode=up|down (default: by the scale) and
-  // taps=4|9|16 (the reduction's grid); `ext-mwsr` reads the external texture
-  // (no pass 0), `blit+mwsr` pays the pass 0 first.
+  // module; the page needs f16=1), mode=up|down (default: by the scale),
+  // taps=1|4|9|16 (the reduction's grid) and srgb=1 (SDR only: the input
+  // read and the output written through `-srgb` views, the sampler decoding
+  // and the target encoding; the regime of the views: one sample down to x0.5,
+  // LINEAR_LIGHT 0, unless taps or ll say otherwise); `ext-mwsr` reads the
+  // external texture (no pass 0), `blit+mwsr` pays the pass 0 first;
+  // `tex-s1-srgb` is the bilinear floor through the same views.
   mwsr: ["mwsr", "mwsr:dering=0", "mwsr:half=1", "blit+mwsr"],
   // P3: the reduction grids and lights (the mode follows the scale), 4:4:4.
-  p3: ["mwsr", "mwsr:taps=9", "mwsr:ll=1", "mwsr:c444=1", "smooth2d"],
+  p3: ["mwsr", "mwsr:srgb=1", "mwsr:taps=9", "mwsr:ll=2", "mwsr:c444=1", "smooth2d"],
 };
 
 const VS = /* wgsl */ `
@@ -783,14 +787,23 @@ export async function runLab(p, log = () => {}) {
     }
   }
 
-  const mkTex = (w, h, fmt, usage) =>
-    device.createTexture({ size: { width: w, height: h }, format: fmt, usage });
+  const mkTex = (w, h, fmt, usage, viewFormats = []) =>
+    device.createTexture({
+      size: { width: w, height: h },
+      format: fmt,
+      usage,
+      viewFormats,
+    });
+  // SDR: the input and the output also as `-srgb` views (srgb cells): the
+  // sampler then decodes sRGB before it filters, the target encodes on write.
+  const srgbViews = !hdr;
   const T = GPUTextureUsage;
   const inTex = mkTex(
     inW,
     inH,
     texFormat,
     T.TEXTURE_BINDING | T.COPY_DST | T.RENDER_ATTACHMENT,
+    srgbViews ? [texFormat + "-srgb"] : [],
   );
   if (halfData)
     device.queue.writeTexture(
@@ -828,12 +841,16 @@ export async function runLab(p, log = () => {}) {
     outH,
     outFormat,
     T.RENDER_ATTACHMENT | T.COPY_SRC | T.COPY_DST,
+    srgbViews ? [outFormat + "-srgb"] : [],
   );
   const views = {
     blit: blitTex.createView(),
     interm: intermTex.createView(),
     mid: midTex.createView(),
     out: outTex.createView(),
+    "out-srgb": srgbViews
+      ? outTex.createView({ format: outFormat + "-srgb" })
+      : null,
   };
   const sampler = device.createSampler({
     magFilter: "linear",
@@ -880,7 +897,16 @@ export async function runLab(p, log = () => {}) {
       fragment: {
         module,
         entryPoint: entry[1],
-        targets: [{ format: target === "out" ? outFormat : texFormat }],
+        targets: [
+          {
+            format:
+              target === "out"
+                ? outFormat
+                : target === "out-srgb"
+                  ? outFormat + "-srgb"
+                  : texFormat,
+          },
+        ],
         constants,
       },
       primitive: { topology: "triangle-list" },
@@ -963,6 +989,9 @@ export async function runLab(p, log = () => {}) {
   const nisPl = device.createPipelineLayout({ bindGroupLayouts: [nisLayout] });
 
   const inView = inTex.createView();
+  const inViewSrgb = srgbViews
+    ? inTex.createView({ format: texFormat + "-srgb" })
+    : null;
   const kernelPass = (name, srcView) => {
     switch (name) {
       case "sgsr-repo": {
@@ -1036,24 +1065,25 @@ export async function runLab(p, log = () => {}) {
       ext: (ext) => bind(pl, [sampler, ext]),
     };
   };
-  const tapsPass = (feed, n, mode, fw, srcView) => {
-    const key = `${feed}-${mode}${n}${fw ? "-fw" : ""}`;
+  const tapsPass = (feed, n, mode, fw, srcView, srgb = false) => {
+    const key = `${feed}-${mode}${n}${fw ? "-fw" : ""}${srgb ? "-srgb" : ""}`;
+    const target = srgb ? "out-srgb" : "out";
     const pl = pipeline(
       key,
       tapsShader(feed, n, mode, fw),
-      "out",
+      target,
       ["vs", "fs"],
       feed === "ext" ? plExt : plTex,
     );
     if (feed === "ext")
       return {
         pipeline: pl,
-        target: "out",
+        target,
         ext: (ext) => bind(pl, [sampler, ext, { buffer: texelIn }]),
       };
     return {
       pipeline: pl,
-      target: "out",
+      target,
       group: bind(pl, [sampler, srcView, { buffer: texelIn }]),
     };
   };
@@ -1073,17 +1103,27 @@ export async function runLab(p, log = () => {}) {
     rdown: "R_DOWN",
     ll: "LINEAR_LIGHT",
   };
-  const regime = mwsrRegime(inW, inH, outW, outH);
+  const regimes = {
+    soft: mwsrRegime(inW, inH, outW, outH),
+    srgb: mwsrRegime(inW, inH, outW, outH, { srgb: true }),
+  };
+  const regime = regimes.soft;
   const mwsrPass = (name, feed, opts, srcView) => {
     const over = {};
     const uni = {};
     let half = false;
-    let mode = regime.mode === "down" ? "down" : "up";
-    let taps = regime.mode === "down" ? regime.taps : 4;
-    if (regime.mode === "down") over.R_DOWN = regime.rDown;
+    const srgb = opts.srgb === "1";
+    const reg = srgb ? regimes.srgb : regimes.soft;
+    let mode = reg.mode === "down" ? "down" : "up";
+    let taps = reg.mode === "down" ? reg.taps : 4;
+    if (reg.mode === "down") {
+      over.R_DOWN = reg.rDown;
+      over.LINEAR_LIGHT = reg.linearLight;
+    }
     for (const [k, v] of Object.entries(opts)) {
       if (k === "tau" || k === "sharp") uni[k] = Number(v);
       else if (k === "half") half = v === "1";
+      else if (k === "srgb") continue;
       else if (k === "mode") mode = v;
       else if (k === "taps") taps = Number(v);
       else if (k in MWSR_KEYS) over[MWSR_KEYS[k]] = Number(v);
@@ -1091,10 +1131,16 @@ export async function runLab(p, log = () => {}) {
     }
     if (half && !device.features.has("shader-f16"))
       throw new Error(name + ": the device has no shader-f16 (f16=1 asks for it)");
+    if (srgb) {
+      if (!srgbViews || feed === "ext" || srcView !== inView)
+        throw new Error(name + ": srgb=1 reads the SDR input texture only");
+      srcView = inViewSrgb;
+    }
+    const target = srgb ? "out-srgb" : "out";
     const pl = pipeline(
       name,
       mwsrWgsl({ feed, half, mode, taps }),
-      "out",
+      target,
       ["vs", "fs"],
       feed === "ext" ? plExt : plTex,
       over,
@@ -1103,12 +1149,12 @@ export async function runLab(p, log = () => {}) {
     if (feed === "ext")
       return {
         pipeline: pl,
-        target: "out",
+        target,
         ext: (ext) => bind(pl, [sampler, ext, { buffer: ub }]),
       };
     return {
       pipeline: pl,
-      target: "out",
+      target,
       group: bind(pl, [sampler, srcView, { buffer: ub }]),
     };
   };
@@ -1138,16 +1184,26 @@ export async function runLab(p, log = () => {}) {
 
   // A cell: its feed and its passes, in order.
   function makeCell(name) {
-    const m = /^(blit\+)?(ext|tex)-(s|l)(\d)(-fw)?$/.exec(name);
+    const m = /^(blit\+)?(ext|tex)-(s|l)(\d)(-fw)?(-srgb)?$/.exec(name);
     if (m) {
       const pre = !!m[1];
       const feed = m[2];
+      const srgb = !!m[6];
       if (feed === "ext" && pre)
         throw new Error(name + ": blit then external makes no sense");
+      if (srgb && (feed === "ext" || pre || !srgbViews))
+        throw new Error(name + ": -srgb reads the SDR input texture only");
       const passes = [];
       if (pre) passes.push(blitPass());
       passes.push(
-        tapsPass(feed, Number(m[4]), m[3], !!m[5], pre ? views.blit : inView),
+        tapsPass(
+          feed,
+          Number(m[4]),
+          m[3],
+          !!m[5],
+          srgb ? inViewSrgb : pre ? views.blit : inView,
+          srgb,
+        ),
       );
       return { name, feed: pre || feed === "ext" ? "ext" : "tex", passes };
     }

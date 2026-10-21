@@ -546,3 +546,190 @@ tenu pour la première moitié, à 3 % près pour la seconde. `CHROMA444` reste 
 4:4:4 (`StreamView._yuv444`, P4) ; coût nul quand il est à 0 (constante de pipeline), à mesurer à 1
 (J14). (c) **`LUMA_SHARP` sort du texte** : −0,03 de ΔE00 sur la chroma (marginal), perdant en luma SDR
 et en HDR.
+
+## 2026-10-21 — J14, les temps de P3 sur le 780M et le RTX (C8 temps, C10 coût, `c444`)
+
+Passes `--p3` du 21/10 (13:55-13:58, créneau de 59 ; Chrome sans tête épinglé par `--use-adapter-luid`,
+adaptateur vérifié par une sonde avant chaque passe : `NVIDIA GeForce RTX 5060 Ti`, `AMD Radeon(TM)
+Graphics` RDNA 2), GPU p50 en ms, trois tours. Le feed HDR : textures et cible `rgba16float`, mire
+`text` de `hdr_mires.py` chargée en demi-flottants ; les réductions en SDR (`bgra8unorm`).
+
+**Feed HDR (C8 temps)**, 720p → 1440p et 1080p → 1440p :
+
+| cellule | 780M ×2 | 780M ×1,33 | RTX ×2 | RTX ×1,33 |
+|---|---|---|---|---|
+| plancher (`tex-s1`, cible f16) | 0,642 | 0,860 | 0,056 | 0,056 |
+| FSR1 | 9,51 | 9,57 | 0,247 | 0,250 |
+| SGSR1 | 2,502 | 2,404 | 0,069 | 0,066 |
+| **`mwsr`** | **1,517** | **1,390** | **0,058** | **0,057** |
+| `mwsr:half=1` | 1,387 | 1,292 | 0,058 | 0,057 |
+
+Pixels sur le RTX (`--hdr-quality`, f16) : `half=1` rend ceux du f32 au millième de ΔE ITP (rampe
+31,335 contre 31,325 ; texte 15,376 = 15,376 ; jeu 3,541 contre 3,540), même maximum en nits (10791 /
+1156 / 1159), 0 % de dépassement ; et le RTX rend les chiffres de SwiftShader (J11) au centième.
+
+**Réduction (C10 coût)**, `text` ×0,75 (1440p → 1080p), `text` ×0,5 (1440p → 720p), `zone` ×0,33
+(2160p → 720p) ; `mwsr` = la table de J12 (2×2 étendue 1, 2×2 étendue 1, 3×3 étendue 1,25 ;
+`LINEAR_LIGHT 1`) :
+
+| cellule | 780M ×0,75 | 780M ×0,5 | 780M ×0,33 | RTX ×0,75 | RTX ×0,5 | RTX ×0,33 |
+|---|---|---|---|---|---|---|
+| plancher (`tex-s1`) | 0,246 | 0,145 | 0,336 | 0,016 | 0,007 | 0,016 |
+| FSR1 | 5,284 | 2,364 | | 0,136 | 0,062 | |
+| SGSR1 | 1,284 | | | 0,039 | | |
+| **`mwsr`** (table) | **0,541** | **0,246** | **1,059** | **0,022** | **0,009** | **0,026** |
+| `mwsr:ll=2` (sRGB exact) | 1,585 | 0,709 | 1,426 | 0,048 | 0,021 | 0,040 |
+| `mwsr:taps=9` | 1,174 | 0,559 | (table) | 0,048 | 0,022 | (table) |
+| `mwsr:taps=16` | | 0,920 | 1,692 | | 0,037 | 0,039 |
+| `mwsr:rdown=1.25;ll=2` | | | 1,425 | | | 0,040 |
+| **`mwsr` / plancher** | **2,20** | **1,69** | **3,15** | **1,40** | **1,30** | **1,66** |
+
+**4:4:4**, `code` ×2 (720p → 1440p) : 780M plancher 0,379, `mwsr` 0,899, `mwsr:c444=1` 0,964 (+7 %) ;
+RTX 0,028, 0,039, 0,042 (+8 %).
+
+**Verdicts H14.** (a) **C8 temps : tenu**, largement : sur le feed HDR `mwsr` vaut 0,16 × FSR1 sur le
+780M (1,52 contre 9,51 ms) et 0,23 × sur le RTX (0,058 contre 0,247). La cible f16 coûte à tous
++0,26 ms sur le 780M (plancher 0,385 → 0,642) et le noyau y ajoute les mêmes ≈ 0,9 ms qu'en SDR ; sur
+le RTX l'écriture f16 cache le noyau (plancher +2 %). `half` : −9 % sur le 780M, comme en SDR, et les
+mêmes pixels jusqu'à 10 000 nits (valeurs ≤ 5,3) : le module f16 est sûr sur le feed HDR. Il reste à
+C8 le regard de Bruno sur le M27Q (P5). (b) **`c444=1` : +7-8 %** sur les deux GPU (cohérence et
+poids par canal sur le chemin contour) : à prendre quand `StreamView._yuv444` l'annonce, coût nul
+sinon (constante de pipeline, chemin supprimé). (c) **C10 coût : non tenu** à la lettre (« ≤
+bilinéaire + 30 % ») : 2,20 / 1,69 / 3,15 × le plancher sur le 780M, 1,40 / 1,30 / 1,66 × sur le RTX,
+le seul point dans le critère étant le RTX à ×0,5. En absolu : 0,54 ms pour une sortie 1080p sur le
+780M (3 % d'une image à 60 Hz), 1,06 ms pour 720p depuis 2160p en 3×3. Lecture : le plancher est un
+seul échantillon bilinéaire ; la grille en fait k² et y ajoute le décodage et l'encodage, et sur le
+780M cette arithmétique pèse autant que les échantillons (`ll=2` ×2,9, le 4×4 ×3,7 pour rien, J12).
+Contre ce que le client fait aujourd'hui en réduction avec un enhancer allumé : FSR1 5,28 ms (×10) et
+SGSR1 1,28 (×2,4), tous deux pires que le bilinéaire en qualité (J12). `LINEAR_LIGHT 2` sort des
+défauts partout (×2,2 même sur le RTX) et reste une option. (d) **Piste J15, les vues sRGB** : une vue
+`rgba8unorm-srgb` sur la texture de la passe 0 et une vue `bgra8unorm-srgb` sur le canvas font
+décoder par l'échantillonneur et encoder par la cible, gratuitement et en sRGB exact (`ll=0` au prix de
+`ll=0`) ; et l'unique échantillon bilinéaire du plancher devient lui-même un filtre en lumière
+linéaire — à ×0,5 exactement c'est la boîte 2×2 de la table, pixel pour pixel, au coût du plancher.
+Qualité sur SwiftShader en J15 ; coût au 780M au prochain créneau. La décision sur le coût de C10
+appartient à Bruno (porte P3, rapport §6).
+
+## 2026-10-21 — J15, la réduction par vues sRGB : la lumière linéaire faite par le matériel
+
+Idée : une vue `rgba8unorm-srgb` sur la texture d'entrée et une vue `bgra8unorm-srgb` sur la cible
+font décoder chaque texel par l'échantillonneur *avant* le filtrage, et encoder le résultat à
+l'écriture — sRGB exact, sans une instruction, sur tout GPU WebGPU (`viewFormats` à la création de la
+texture et dans la configuration du canvas). Dans le labo (SDR) : `viewFormats` sur `inTex` et
+`outTex`, cellules `tex-s1-srgb` (le bilinéaire du plancher à travers les vues) et `mwsr:srgb=1` (la
+grille à travers les vues, `LINEAR_LIGHT 0`). SwiftShader, contre le Lanczos-2 de l'hôte en lumière
+linéaire (la référence de C10), mires `text` et `zone` ; `mwsr` = la table de J12 (lumière
+logicielle, `ll=1`) ; `mwsr:ll=2` = la même grille en sRGB exact *calculé* (décodage après chaque
+échantillon bilinéaire).
+
+| échelle, mire | cellule | PSNR | FLIP | ΔE00 | alias | flat |
+|---|---|---|---|---|---|---|
+| ×0,75 texte | bilinéaire = Smooth2D | 26,00 | 0,055 | 1,810 | | |
+| ×0,75 texte | **bilinéaire, vues sRGB** | **30,18** | 0,027 | **1,060** | | |
+| ×0,75 texte | `mwsr` 2×2 (`ll=1`) | 28,55 | 0,054 | 1,446 | | |
+| ×0,75 texte | `mwsr:ll=2` | 28,90 | 0,051 | 1,365 | | |
+| ×0,75 texte | 2×2, vues sRGB | 27,19 | **0,020** | 1,195 | | |
+| ×0,75 zone | bilinéaire = Smooth2D | 17,67 | 0,204 | 7,76 | 0,165 | 0,186 |
+| ×0,75 zone | **bilinéaire, vues sRGB** | **22,57** | 0,055 | 3,94 | 0,074 | 0,159 |
+| ×0,75 zone | `mwsr` 2×2 (`ll=1`) | 20,37 | 0,210 | 6,12 | 0,109 | 0,103 |
+| ×0,75 zone | `mwsr:ll=2` | 20,70 | 0,200 | 5,82 | 0,104 | 0,104 |
+| ×0,75 zone | 2×2, vues sRGB | 21,98 | **0,036** | **3,38** | **0,037** | **0,093** |
+| ×0,5 texte | bilinéaire = Smooth2D | 24,77 | 0,077 | 2,288 | | |
+| ×0,5 texte | **bilinéaire, vues sRGB** = 2×2 vues = `ll=2` | **30,76** | 0,025 | **1,051** | | |
+| ×0,5 texte | `mwsr` 2×2 (`ll=1`) | 30,63 | **0,015** | 1,083 | | |
+| ×0,5 zone | bilinéaire = Smooth2D | 16,86 | 0,213 | 9,89 | 0,166 | 0,143 |
+| ×0,5 zone | **bilinéaire, vues sRGB** = 2×2 vues = `ll=2` | **20,32** | **0,030** | **5,07** | **0,090** | 0,134 |
+| ×0,5 zone | `mwsr` 2×2 (`ll=1`) | 20,16 | 0,068 | 5,46 | 0,094 | 0,133 |
+| ×0,33 texte | bilinéaire (= vues sRGB : échantillon ponctuel) | 19,48 | 0,096 | 3,60 | | |
+| ×0,33 texte | Smooth2D | 25,98 | 0,099 | 1,94 | | |
+| ×0,33 texte | `mwsr` 3×3 (`ll=1`) | **35,07** | 0,034 | 0,683 | | |
+| ×0,33 texte | `mwsr:ll=2` | 34,52 | 0,024 | 0,736 | | |
+| ×0,33 texte | **3×3, vues sRGB** | 32,23 | **0,022** | 0,685 | | |
+| ×0,33 texte | 2×2, vues sRGB | 29,46 | 0,043 | 1,49 | | |
+| ×0,33 zone | bilinéaire (= vues sRGB) | 9,77 | 0,173 | 21,8 | 0,367 | 0,354 |
+| ×0,33 zone | Smooth2D | 16,67 | 0,299 | 10,8 | 0,148 | 0,078 |
+| ×0,33 zone | `mwsr` 3×3 (`ll=1`) | 22,65 | 0,197 | 5,16 | 0,068 | 0,043 |
+| ×0,33 zone | `mwsr:ll=2` | 23,69 | 0,168 | 4,32 | 0,056 | 0,044 |
+| ×0,33 zone | **3×3, vues sRGB** | **30,04** | **0,018** | **1,27** | **0,013** | **0,039** |
+| ×0,33 zone | 2×2, vues sRGB | 16,86 | 0,072 | 8,13 | 0,107 | 0,113 |
+
+**Verdicts H15.** (a) **Décoder avant de filtrer n'est pas décoder après** : `ll=2` décode des
+échantillons bilinéaires déjà mélangés en gamma, les vues décodent les texels. À ×0,5 les deux
+coïncident (les échantillons tombent sur les texels : 30,76 dB, pixel pour pixel) ; dès que les
+échantillons sont entre les texels (×0,75, ×0,33) le mélange en gamma à l'intérieur de chaque
+échantillon biaise la moyenne : sur la zone-plate à ×0,33, 23,7 dB (`ll=2`) contre 30,0 (vues),
+aliasing 0,056 contre 0,013, FLIP 0,168 contre 0,018. (b) **Entre ×0,5 et 1:1, un seul échantillon
+bilinéaire à travers les vues suffit** : à ×0,75 il bat toutes les grilles en PSNR (30,18 contre
+27,2-28,9 sur le texte, 22,57 contre 20,4-22,0 sur la zone), divise le FLIP du plancher par deux
+(0,027 ; 0,055 contre 0,204 sur la zone) et l'aliasing par 2,2 (0,074 ≤ Smooth2D 0,165) ; la 2×2 à
+travers les vues fait un peu mieux en FLIP et en aliasing (0,020 ; 0,037) pour 3 dB de moins et
+quatre échantillons. À ×0,5 c'est la boîte exacte de la table. **Son coût est le plancher** (c'est
+l'échantillon que le client fait déjà) : **C10 (×0,75, ×0,5) tenu en coût (+0 %) et en qualité**,
+mieux qu'avec la grille de J12. *Confirmé au GPU (passe de 14:33, trois tours) : les vues ne coûtent
+rien (`tex-s1-srgb` = `tex-s1` : 780M 0,241 = 0,241 ms à ×0,75, RTX 0,016 = 0,016) et l'échantillon
+unique vaut le plancher (780M 0,250 à ×0,75, 0,146 = 0,146 à ×0,5 ; RTX 0,016 et 0,007, égaux) ; la
+2×2 à travers les vues coûte sa grille calculée (0,539 = 0,539), comme `ll=0` : sur le 780M aussi, ce
+sont les échantillons qui coûtent, pas le carré et la racine ; seul le `pow` de `ll=2` pèse.* (c) **Sous ×0,5, la 3×3 à travers les vues** : sur la zone-plate
++7,4 dB, aliasing ÷ 5 et FLIP ÷ 11 contre la même grille en lumière logicielle ; sur le texte −2,8 dB
+de PSNR (32,2 contre 35,1) mais FLIP 0,022 contre 0,034 à ΔE00 égal — l'œil (FLIP) la préfère, le
+PSNR non ; la 2×2 n'y suffit pas (16,9 dB sur la zone). Neuf échantillons sans arithmétique : au GPU
+(14:33) la 3×3 à travers les vues coûte sa grille calculée (780M 1,041 contre 1,058 ms ; RTX 0,026
+les deux), 3,1 × le plancher ; le plancher y est un échantillon ponctuel (9,8 dB sur la zone,
+inutilisable), le « + 30 % » n'y a pas de sens, la référence utile est Smooth2D, que le navigateur
+paie sur le CPU. (d) **Décisions** : `MWSR_DOWN_TAPS_SRGB = [[0,5, 1, 1], [0,25, 9, 1,25], [0, 16,
+1,25]]`, `mwsrRegime(…, { srgb: true })` rend `taps 1` jusqu'à ×0,5 et `linearLight 0` ; la table
+logicielle (`MWSR_DOWN_TAPS`, 2×2 d'abord, `LINEAR_LIGHT 1`) reste pour les feeds sans vue sRGB (le
+`rgba16float` du HDR, un navigateur qui refuserait `viewFormats`). Ce que le renderer fait en P4 :
+`viewFormats: ['rgba8unorm-srgb']` sur la texture de la passe 0, `viewFormats: [format + '-srgb']`
+dans la configuration du canvas SDR, et en mode `down` lier la vue sRGB de l'entrée et dessiner dans
+la vue sRGB du canvas (`getCurrentTexture().createView({ format })`) ; en mode `up` et à 1:1 les vues
+ordinaires (le noyau travaille en gamma, à dessein). Dorés : `mwsr:srgb=1` ajouté aux trois cas de
+réduction, `golden.json` régénéré.
+
+## 2026-10-21 — J16, le realme Note 60 (Mali-G57 MP1, Chrome Android) : le reste de P0, `mwsr`, la réduction
+
+Créneau de Bruno (14:26-14:31) : la page servie en HTTPS depuis DualRTX (`scaler_lab.py --serve
+0.0.0.0:8766 --tag realme`, huit liens courts, résultats `bench-out/scaler-lab/phone-realme-*.json` ;
+aucune règle de pare-feu à ouvrir : les règles entrantes « Python » existantes couvrent le port sur le
+profil public du LAN). Adaptateur `arm valhall` (WebGPU de Chrome Android) ; `shader-f16`,
+`timestamp-query`, `subgroups`, `float32-filterable`, `texture-formats-tier2`, ASTC et ETC2 ; décodeur
+H.264 matériel à **sortie RGBA** (pas NV12 : un échantillon de la texture externe vaut un échantillon
+RGBA, `ext-s1` = `tex-s1`). Les horodatages d'un lot s'additionnent (×2 texte : lot 18,0 ms contre
+18,6 à une soumission par itération ; plancher 3,6 contre 4,8) : lecture directe, les cas `-single`
+sont inutiles ici. Dispersion ≤ 2 % sauf les cellules sous 2 ms (p90 jusqu'à ×1,6 : bruit d'horloge).
+2 tours × 4 lots × 8 itérations. GPU p50 en ms :
+
+| cas | plancher | externe `ext-s1` | SGSR1 | FSR1 | **`mwsr`** | `half=1` | `dering=0` | passe 0 + `mwsr` |
+|---|---|---|---|---|---|---|---|---|
+| ×2 texte, 720p → 1440p | 3,60 | 3,67 | 24,5 | 83,1 | **18,0** | 16,3 | 13,2 | 18,8 (0,92 + 17,9) |
+| ×2 jeu | 3,67 | 3,74 | 23,3 | 83,1 | **8,78** | 7,60 | 7,41 | 9,90 (0,92 + 9,11) |
+| ×1,33 texte, 1080p → 1440p | 3,60 | | 22,5 | 83,2 | **16,7** | 14,9 | 12,3 | |
+| **l'écran du realme** : texte, 720p → 1600×720 | 1,18 | 1,25 | 8,39 | 26,0 | **5,90** | 5,31 | 4,33 | 6,75 (0,85 + 5,96) |
+
+Chaînes du produit à ×2 texte (`chain-*`, une image par tampon) : `off` 4,00 ms de GPU pour 22,3 ms de
+mur par `draw()` ; SGSR1 26,3 / 46,7 ; FSR1 85,3 / 110.
+
+Réduction, texte :
+
+| cas | plancher | plancher, vues sRGB | `mwsr` 2×2 (`ll=1`) | **un échantillon, vues sRGB** | 2×2, vues sRGB | `ll=2` | FSR1 |
+|---|---|---|---|---|---|---|---|
+| ×0,67, 1080p → 1600×720 | 1,31 (p90 2,10) | 1,18 | 3,80 | **1,18** | 3,80 | | 26,0 |
+| ×0,5, 1440p → 720p | 1,05 | 0,92 | 3,08 | **0,98** | | 8,06 | |
+
+**Verdicts H16.** (a) **C1 tenue sur le Mali** : noyau seul `mwsr` / SGSR1 = 0,74 (texte ×2), 0,38
+(jeu), 0,74 (texte ×1,33), 0,70 (écran) — le critère dit ≤ 0,9 noyau seul, ≤ 0,8 jeu, ≤ 1,0 texte ;
+avec `half` 0,66 / 0,33 / 0,66 / 0,63 ; chaîne passe 0 + `mwsr` 18,8 contre la chaîne SGSR1 26,3
+(0,72). C2 au passage : 0,22 × FSR1. (b) À la taille de l'écran (1600×720), passe 0 + `mwsr` =
+6,75 ms par image (`half` ≈ 6,1, `dering=0` ≈ 5,2) : tient dans les 11,1 ms d'une image à 90 Hz,
+large à 60 Hz ; la chaîne SGSR1 y fait 9,6 ms et FSR1 27 ms — ce que le client propose aujourd'hui sur
+ce téléphone fait tomber des images. (c) `half` vaut 10 % sur Mali, comme sur le 780M : à prendre ;
+`dering=0` vaut 27 % sur le texte et 16 % sur le jeu : le cran performance existe. (d) **La passe 0
+coûte 0,85-0,92 ms** à 720p sur ce téléphone, où la texture externe est déjà RGBA (`ext-s1` =
+`tex-s1`) : 13-15 % du noyau à la taille de l'écran ; `ext-mwsr` n'était pas dans les liens (à mesurer
+au prochain créneau : si l'externe RGBA vaut la texture, la passe 0 est évitable sur cette famille
+d'Android, décision P4 par `frames.format`). (e) **Réduction : l'échantillon unique à travers les vues
+sRGB coûte le plancher** (1,18 = 1,18 à ×0,67 ; 0,98 contre 0,92-1,05 à ×0,5) : **C10 tenu en coût sur
+la machine du critère** (« téléphone 1080p ») ; la grille 2×2 coûte 3,2 × le plancher, vues ou pas (sur
+Mali ce sont les échantillons, pas l'arithmétique), `ll=2` 7,7 ×. (f) Le mur par `draw()` de la chaîne
+`off` (22 ms pour 4 ms de GPU) dit le coût CPU du chemin du renderer sur ce SoC (Unisoc T612) : à
+regarder en P5 sur le flux réel, hors shader.

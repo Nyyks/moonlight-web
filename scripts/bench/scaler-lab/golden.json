@@ -54,6 +54,11 @@
     "psnrVsBilinear": 36.131,
     "sha256": "4e879b2d39f3980913c9de1fdc2c2da7e9bbd7b271e8484fb7c2d3a8ed5297bf"
    },
+   "mwsr_srgb_1": {
+    "mean": 0.141807,
+    "psnrVsBilinear": 36.131,
+    "sha256": "a775871b9984cdac0aff568dda13593280d4463156cc5955bfe22acf135b826d"
+   },
    "mwsr_taps_9": {
     "mean": 0.14088,
     "psnrVsBilinear": 37.261,
@@ -159,6 +164,11 @@
     "psnrVsBilinear": 25.782,
     "sha256": "3b3f77fbe37d342758d612ada2359e6b3830aec38999845f3af77c890119e499"
    },
+   "mwsr_srgb_1": {
+    "mean": 0.934023,
+    "psnrVsBilinear": 25.781,
+    "sha256": "956d2a952b2fccf0fb3bd4af7aa4bad0bdaaeb286e86d8443be6acc0a77f36d1"
+   },
    "mwsr_taps_9": {
     "mean": 0.925753,
     "psnrVsBilinear": 28.163,
@@ -179,6 +189,11 @@
     "mean": 0.570161,
     "psnrVsBilinear": 19.997,
     "sha256": "f4224df8faca3710406613be58f7a3c6d0e6f050269c8a79f79df3f542bbdd82"
+   },
+   "mwsr_srgb_1": {
+    "mean": 0.570168,
+    "psnrVsBilinear": 19.996,
+    "sha256": "22c8fec17d09572c2eac5cc72f909782962120a999c381a1d7fdf20d7f22df19"
    },
    "mwsr_taps_9": {
     "mean": 0.526575,

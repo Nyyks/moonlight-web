@@ -26,8 +26,8 @@ QUICK = "&rounds=1&batches=1&batch=4&warm=1"
 # `high` smoothing (the Smooth2D reference of the criterion), the shipped
 # kernels run out of their range, and the mwsr surface filter in its grids,
 # spans and lights.
-REDUCE_CELLS = ("tex-s1,smooth2d,fsr1,sgsr-src,mwsr,mwsr:ll=0,mwsr:ll=2,mwsr:taps=9,mwsr:taps=16,"
-                "mwsr:rdown=0.75,mwsr:rdown=1.25")
+REDUCE_CELLS = ("tex-s1,tex-s1-srgb,smooth2d,fsr1,sgsr-src,mwsr,mwsr:srgb=1,mwsr:ll=0,mwsr:ll=2,"
+                "mwsr:taps=9,mwsr:taps=16,mwsr:rdown=0.75,mwsr:rdown=1.25")
 # 4:4:4 (C9): the kernels on the raw input and on its 4:2:0 self.
 C444_CELLS = "tex-s1,sgsr-src,nis,fsr1,mwsr,mwsr:c444=1,mwsr:show=1,mwsr:c444=1;show=1"
 # HDR (C8): FSR1 is the product's HDR enhancer; SGSR1 clamps to 1.0 (a witness).
@@ -259,11 +259,14 @@ def p3_cases(a):
         ("hdr-x2-text", "hdr=1&f16=1&in=1280x720&out=2560x1440&codec=none&content=%s&cells=%s&rounds=3" % (hdr[0], hdr_cells)),
         ("hdr-x133-text", "hdr=1&f16=1&in=1920x1080&out=2560x1440&codec=none&content=%s&cells=%s&rounds=3" % (hdr[1], hdr_cells)),
         ("down-x075-text", "in=2560x1440&out=1920x1080&content=text&codec=none&cells="
-                           "tex-s1,fsr1,sgsr-src,mwsr,mwsr:ll=1,mwsr:ll=2,mwsr:taps=9;ll=1&rounds=3"),
+                           "tex-s1,tex-s1-srgb,fsr1,sgsr-src,mwsr,mwsr:srgb=1,mwsr:taps=4;srgb=1,mwsr:ll=0,"
+                           "mwsr:ll=2,mwsr:taps=9;ll=1&rounds=3"),
         ("down-x05-text", "in=2560x1440&out=1280x720&content=text&codec=none&cells="
-                          "tex-s1,fsr1,mwsr,mwsr:ll=1,mwsr:ll=2,mwsr:taps=9;ll=1,mwsr:taps=16;ll=1&rounds=3"),
+                          "tex-s1,tex-s1-srgb,fsr1,mwsr,mwsr:srgb=1,mwsr:taps=4;srgb=1,mwsr:ll=0,mwsr:ll=2,"
+                          "mwsr:taps=9;ll=1,mwsr:taps=16;ll=1&rounds=3"),
         ("down-x033-zone", "in=3840x2160&out=1280x720&content=zone&codec=none&cells="
-                           "tex-s1,mwsr,mwsr:ll=1,mwsr:ll=2,mwsr:taps=16;ll=1,mwsr:rdown=1.25;ll=2&rounds=3"),
+                           "tex-s1,tex-s1-srgb,mwsr,mwsr:srgb=1,mwsr:ll=0,mwsr:ll=2,mwsr:taps=16;ll=1,"
+                           "mwsr:taps=16;srgb=1&rounds=3"),
         ("x2-code-c444", "in=1280x720&out=2560x1440&content=code&codec=none&cells="
                          "tex-s1,mwsr,mwsr:c444=1&rounds=3"),
     ]
@@ -273,7 +276,7 @@ def p3_cases(a):
 
 GOLDEN_FILE = os.path.join(HERE, "golden.json")
 GOLDEN_UP = "tex-s1,mwsr,mwsr:dering=0,mwsr:c444=1"
-GOLDEN_DOWN = "tex-s1,mwsr,mwsr:taps=9,mwsr:ll=2"
+GOLDEN_DOWN = "tex-s1,mwsr,mwsr:srgb=1,mwsr:taps=9,mwsr:ll=2"
 GOLDEN_CASES = [
     ("text", "1280x720", "2560x1440", GOLDEN_UP),
     ("game", "1280x720", "2560x1440", GOLDEN_UP),
