@@ -58,6 +58,10 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     EARLY_OUT: ['u32', 1],
     /** 1: paint the vote (white = edge quad, black = flat) instead of the picture. */
     SHOW: ['u32', 0],
+    /** 1: the quality tier, the four corners of the rotated 3×3 grid on the edge path (nine samples). */
+    TIER: ['u32', 0],
+    /** Scale of the corner weights, 1 = the separable window (across weight × along weight). */
+    W_CORNER: ['f32', 1.0],
     /** Weight of each tap along the edge, at full coherence and strength. */
     W_ALONG: ['f32', 0.15],
     /** Weight of each tap across the edge, negated and × sharpness. */
@@ -248,7 +252,24 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         let a = max(step, ridge) / variation * strength;
         let wT = W_ALONG * a;
         let wX = max(-W_ACROSS * u.sharp * a, W_MIN);
-        R = blend(C, T1, T2, X1, X2, wT, wX);
+        if (TIER == 1u) {
+            // The quality tier: the four corners of the rotated grid, weighted
+            // as the product of the across and along weights (a separable
+            // window in the edge's frame), so that a diagonal edge is smoothed
+            // along itself and sharpened across itself like an axis one.
+            let Q1 = S(uv - dn - dt);
+            let Q2 = S(uv - dn + dt);
+            let Q3 = S(uv + dn - dt);
+            let Q4 = S(uv + dn + dt);
+            let wQ = W_CORNER * wX * wT;
+            let sum = C + wT * (T1 + T2) + wX * (X1 + X2) + wQ * (Q1 + Q2 + Q3 + Q4);
+            let Rq = sum / (1.0 + 2.0 * (wT + wX) + 4.0 * wQ);
+            let lo = min(min(min(C, T1), min(T2, X1)), min(min(X2, Q1), min(Q2, min(Q3, Q4))));
+            let hi = max(max(max(C, T1), max(T2, X1)), max(max(X2, Q1), max(Q2, max(Q3, Q4))));
+            R = clamp(Rq, lo, hi);
+        } else {
+            R = blend(C, T1, T2, X1, X2, wT, wX);
+        }
         if (SHAPE == 1u) {
             // On a step the pixel sits at t on the ramp from X1 to X2: the
             // curve pushes it toward the nearer plateau, never beyond either.
