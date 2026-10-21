@@ -28,6 +28,7 @@
 #include <avrt.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <map>
@@ -89,6 +90,27 @@ const char* syncName(d3d12::DdaSync sync)
 /// The CPU's longest wait on the conversion queue: for the capture's release
 /// under ddasync=cpu, and before a list is recorded again (d3d12::kGpuGoneMs).
 constexpr uint32_t kWaitMs = d3d12::kGpuGoneMs;
+
+/// The engine's steady clock, as the session stamps it (WindowsSession.cpp).
+int64_t steadyNowUs()
+{
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+/// A QueryPerformanceCounter value on that clock: MSVC's steady_clock IS the
+/// counter, counted from zero (as WindowsSession's qpcToSteadyUs). 0 for 0.
+int64_t qpcToSteadyUs(int64_t qpc)
+{
+    static const int64_t frequency = [] {
+        LARGE_INTEGER f = {};
+        ::QueryPerformanceFrequency(&f);
+        return f.QuadPart > 0 ? f.QuadPart : 1;
+    }();
+    if (qpc <= 0) return 0;
+    return (qpc / frequency) * 1000000 + ((qpc % frequency) * 1000000) / frequency;
+}
 
 } // namespace
 
@@ -541,6 +563,7 @@ bool D3d12VideoPipeline::convert(capture::IWindowsCapture& capture, ID3D11Textur
 {
     (void)error;
     m_ReleaseAfter = 0;
+    m_ConvertTrace = ConvertTrace{};
     if (m_Pipelined) absorbEncodeLoss();
     if (!m_Lost.empty()) return true;
     if (m_Pipelined) m_Converter->selectOutput(m_Target = reserveOutput());
@@ -559,11 +582,13 @@ bool D3d12VideoPipeline::convert(capture::IWindowsCapture& capture, ID3D11Textur
     // Without the handshake (a bench's none), what the acquire queued still
     // goes to the GPU now, as the lab's probe does it.
     if (m_Sync == d3d12::DdaSync::None) capture.context()->Flush();
+    m_ConvertTrace.signalledUs = steadyNowUs();
     ID3D12GraphicsCommandList* list = beginList(why);
     if (!list) {
         lose(why);
         return true;
     }
+    m_ConvertTrace.listUs = steadyNowUs();
     if (m_Timing) {
         std::lock_guard<std::mutex> lock(m_TimerLock);
         m_TimerSlot = m_Timer.begin(list);
@@ -581,10 +606,12 @@ bool D3d12VideoPipeline::convert(capture::IWindowsCapture& capture, ID3D11Textur
         std::lock_guard<std::mutex> lock(m_TimerLock);
         m_Timer.end(list, m_TimerSlot);
     }
+    m_ConvertTrace.recordedUs = steadyNowUs();
     if (!submit(acquired, /*signalCapture=*/true, why))
         lose(why);
     else if (m_Pipelined)
         noteConverted();
+    m_ConvertTrace.executedUs = steadyNowUs();
     return true;
 }
 
@@ -604,6 +631,7 @@ bool D3d12VideoPipeline::convertHeld(capture::IWindowsCapture& capture,
     (void)capture;
     (void)error;
     m_ReleaseAfter = 0;
+    m_ConvertTrace = ConvertTrace{};
     if (m_Pipelined) absorbEncodeLoss();
     if (!m_Lost.empty()) return true;
     if (!m_Converter || !m_Converter->held()) {
@@ -618,6 +646,7 @@ bool D3d12VideoPipeline::convertHeld(capture::IWindowsCapture& capture,
         lose(why);
         return true;
     }
+    m_ConvertTrace.listUs = steadyNowUs();
     if (m_Timing) {
         std::lock_guard<std::mutex> lock(m_TimerLock);
         m_TimerSlot = m_Timer.begin(list);
@@ -632,10 +661,12 @@ bool D3d12VideoPipeline::convertHeld(capture::IWindowsCapture& capture,
         std::lock_guard<std::mutex> lock(m_TimerLock);
         m_Timer.end(list, m_TimerSlot);
     }
+    m_ConvertTrace.recordedUs = steadyNowUs();
     if (!submit(0, /*signalCapture=*/false, why))
         lose(why);
     else if (m_Pipelined)
         noteConverted();
+    m_ConvertTrace.executedUs = steadyNowUs();
     return true;
 }
 
@@ -655,6 +686,7 @@ bool D3d12VideoPipeline::convertBlank(const convert::CursorDraw& draw, std::stri
 {
     (void)draw;
     (void)error;
+    m_ConvertTrace = ConvertTrace{};
     if (m_Pipelined) absorbEncodeLoss();
     if (!m_Lost.empty()) return true;
     if (m_Pipelined) m_Converter->selectOutput(m_Target = reserveOutput());
@@ -665,15 +697,18 @@ bool D3d12VideoPipeline::convertBlank(const convert::CursorDraw& draw, std::stri
         lose(why);
         return true;
     }
+    m_ConvertTrace.listUs = steadyNowUs();
     if (!m_Converter->recordClearBlack(list, why) || !armFault(fault, why)) {
         m_List->Close();
         lose("black picture: " + why);
         return true;
     }
+    m_ConvertTrace.recordedUs = steadyNowUs();
     if (!submit(0, /*signalCapture=*/false, why))
         lose(why);
     else if (m_Pipelined)
         noteConverted();
+    m_ConvertTrace.executedUs = steadyNowUs();
     return true;
 }
 
@@ -763,6 +798,9 @@ D3d12VideoPipeline::encodeOutput(int output, const Output& picture, bool forceKe
         std::lock_guard<std::mutex> lock(m_TimerLock);
         if (m_Timer.read(picture.timerSlot, sample)) {
             out.gpuConvertUs = sample.gpuUs;
+            // On the engine's clock, for the bench's frame rows (ClickTrace).
+            out.gpuConvertStartUs = qpcToSteadyUs(sample.startQpc);
+            out.gpuConvertEndUs = qpcToSteadyUs(sample.endQpc);
             m_GpuConvertUs += sample.gpuUs;
             ++m_TimedFrames;
         }

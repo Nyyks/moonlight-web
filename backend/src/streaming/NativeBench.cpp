@@ -267,8 +267,10 @@ const char* const kUsage =
     "                    (plan audio + DSCP)\n"
     "  clicktrace=0|1    the click's way through the host: each press handed to the OS,\n"
     "                    each wake-up of the capture with the OS's and the compositor's\n"
-    "                    stamps, a CSV next to the log when the session ends (Windows\n"
-    "                    and macOS hosts; plan attente, A0 and AM0)\n"
+    "                    stamps, and on Windows each picture's way from the converter to\n"
+    "                    the bitstream (the D3D12 chain's steps; the GPU's own times with\n"
+    "                    gputiming=1), a CSV next to the log when the session ends (Windows\n"
+    "                    and macOS hosts; plan attente, A0 and AM0; plan Gels du lien)\n"
     "  vmouse=0|1        the host's own mouse (Windows host): 1 made beside a real one too,\n"
     "                    0 never, Mouse Keys alone; the product: made when the host has\n"
     "                    no pointing device (plan souris HID virtuelle)\n"
@@ -287,6 +289,10 @@ const char* const kUsage =
     "                    open halfway between two of them, decided on each picture's own\n"
     "                    present; the product's: on (Windows host, Desktop\n"
     "                    Duplication; plan glissade)\n"
+    "  pregate=0|1       the stream's gate asked before a present is converted: a present\n"
+    "                    it skips is not converted, where it was converted for nothing and\n"
+    "                    the next conversion waited for it (Windows host; the product's:\n"
+    "                    off until measured; plan Gels du lien)\n"
     "  vddmatch=0|1      the virtual display at a whole multiple of the client's measured\n"
     "                    refresh (239.744 for 119.872 Hz) when the stream divides it; the\n"
     "                    product's: on (Windows host; plan glissade, section V)\n"
@@ -659,6 +665,10 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
         tuning.cadenceLock = v;
+    } else if (key == "pregate") {
+        const int v = value.toInt(&ok);
+        ok = ok && (v == 0 || v == 1);
+        tuning.preGate = v;
     } else if (key == "vddmatch") {
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
@@ -1116,6 +1126,10 @@ int runNativeBenchCommand(const QString& specText)
     // A D3D12 session that failed while streaming went on in D3D11: its rows
     // after that are not D3D12 ones, and the summary says so.
     const mw::native::SessionInfo endInfo = session->info();
+    // The click trace (clicktrace=1), beside the bench's CSV: here it holds
+    // the capture's wake-ups and the frame rows alone, no press.
+    const std::string clickTrace =
+        spec.tuning.clickTrace ? session->clickTraceCsv() : std::string();
     session.reset();
     if (dumpFile.isOpen()) dumpFile.close();
     if (ended.load())
@@ -1155,6 +1169,14 @@ int runNativeBenchCommand(const QString& specText)
         }
     }
     file.close();
+    if (!clickTrace.empty()) {
+        QFile trace(path + QStringLiteral(".click-trace.csv"));
+        if (trace.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            trace.write(clickTrace.data(), static_cast<qint64>(clickTrace.size()));
+        else
+            err << "native-bench: cannot write " << trace.fileName() << ": " << trace.errorString()
+                << "\n";
+    }
 
     // ── Summary ─────────────────────────────────────────────────────────────
     // Captured frames only for the stage figures: a re-send has no capture and

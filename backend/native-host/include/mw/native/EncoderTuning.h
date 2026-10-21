@@ -443,7 +443,9 @@ struct EncoderTuning
     /// SCTP », W1). false, the product: nothing kept.
     bool relayLog = false;
     /// The click's way through the host — each press handed to the OS, each
-    /// wake-up of the capture with the OS's and the compositor's own stamps —
+    /// wake-up of the capture with the OS's and the compositor's own stamps,
+    /// and on Windows each picture's way from the converter to the bitstream,
+    /// the D3D12 chain's steps included (plan « Gels du lien », 21/10/2026) —
     /// written as a CSV next to the log when the session ends (plan
     /// « attente », A0; see src/core/ClickTrace.h). false, the product:
     /// nothing kept.
@@ -482,6 +484,14 @@ struct EncoderTuning
     /// -1, the product: on since the bench (kCadenceLockProduct, gate G2);
     /// 0: off; 1: on. The lattice is kept and logged whatever this says.
     int cadenceLock = -1;
+    /// The stream's gate asked BEFORE a present is converted rather than
+    /// after (plan « Gels du lien », the N95's lags of 21/10/2026): a present
+    /// the gate skips is then never converted, where today it is converted
+    /// for nothing and the next conversion waits for it on the CPU — 5 to
+    /// 20 ms on an iGPU another program keeps busy, five or six times a
+    /// second under a 65-presents/s desktop. Windows host. -1, the product:
+    /// off until measured; 0 off; 1 on.
+    int preGate = -1;
     /// "MoonlightWeb Virtual Display" at a whole multiple of the client's own
     /// refresh, measured to the millihertz (plan « glissade », section V,
     /// 15/10/2026; VirtualDisplay::matchedRefreshMilliHz): 239.744 Hz for a
@@ -624,8 +634,8 @@ struct EncoderTuning
                sctpMtu == 0 && !audioLog && audioFrameMs == 0 && audioGraceUs < 0 && !clickTrace &&
                virtualMouse < 0 && inputAdmit < 0 && inputAdmitMs == 0 && inputAdmitBurst == 0 &&
                inputAdmitRate == 0 && inputAdmitMax == 0 && inputAdmitGapUs < 0 &&
-               cadenceLock < 0 && vddMatch < 0 && vddMatchMaxHz == 0 && sckQueueDepth == 0 &&
-               sckMinIntervalUs < 0;
+               cadenceLock < 0 && preGate < 0 && vddMatch < 0 && vddMatchMaxHz == 0 &&
+               sckQueueDepth == 0 && sckMinIntervalUs < 0;
     }
 
     /// One line naming every field that is NOT at its default, for the log and
@@ -763,6 +773,7 @@ struct EncoderTuning
         if (inputAdmitMax > 0) add("inputadmitmax=" + std::to_string(inputAdmitMax));
         if (inputAdmitGapUs >= 0) add("inputadmitgap=" + std::to_string(inputAdmitGapUs) + "us");
         if (cadenceLock >= 0) add("cadencelock=" + std::to_string(cadenceLock));
+        if (preGate >= 0) add("pregate=" + std::to_string(preGate));
         if (vddMatch >= 0) add("vddmatch=" + std::to_string(vddMatch));
         if (vddMatchMaxHz > 0) add("vddmatchmax=" + std::to_string(vddMatchMaxHz));
         if (sckQueueDepth > 0) add("sckdepth=" + std::to_string(sckQueueDepth));

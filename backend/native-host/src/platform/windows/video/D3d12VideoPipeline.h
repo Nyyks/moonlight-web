@@ -159,6 +159,12 @@ public:
 
     void logEndOfSession() const override;
 
+    bool lastConvertTrace(ConvertTrace& out) const override
+    {
+        out = m_ConvertTrace;
+        return true;
+    }
+
     /// The converter's output, for the tests.
     ID3D12Resource* output() const { return m_Converter ? m_Converter->output() : nullptr; }
 
@@ -243,6 +249,8 @@ private:
     d3d12::QueueTimer m_Timer;
     bool m_Timing = false;
     int m_TimerSlot = -1;
+    /// The last conversion's CPU steps (lastConvertTrace).
+    ConvertTrace m_ConvertTrace;
 
     ConverterBuild m_ConverterBuild;
     DXGI_FORMAT m_SourceFormat = DXGI_FORMAT_UNKNOWN;

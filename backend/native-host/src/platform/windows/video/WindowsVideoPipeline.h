@@ -235,6 +235,30 @@ public:
     /// The pipeline's own end-of-session figures, if it has any.
     virtual void logEndOfSession() const = 0;
 
+    // ── The bench's trace of a conversion (ClickTrace's frame rows) ─────────
+
+    /// When the CPU steps of the last conversion ended, on the engine's
+    /// steady clock: the capture context's signal flushed (0 for a held
+    /// picture converted again, which signals nothing), the list ready to
+    /// record (a conversion the cadence skipped waited for first), the list
+    /// recorded, the list executed and the fences signalled. What a busy GPU
+    /// stretches on the N95 (plan « Gels du lien », 21/10/2026).
+    struct ConvertTrace
+    {
+        int64_t signalledUs = 0;
+        int64_t listUs = 0;
+        int64_t recordedUs = 0;
+        int64_t executedUs = 0;
+    };
+
+    /// The last conversion's steps; false where the pipeline keeps none
+    /// (D3D11), and the session traces its own stamps alone.
+    virtual bool lastConvertTrace(ConvertTrace& out) const
+    {
+        (void)out;
+        return false;
+    }
+
 protected:
     WindowsVideoPipeline() = default;
 };

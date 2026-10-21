@@ -64,6 +64,22 @@
 //    (plan « glissade », FrameCadence.h), 0 when not, and `latticeUs` the
 //    point of the presents' lattice nearest it (core/PresentLattice.h),
 //    empty before the lattice has a present.
+//  - frame (Windows host, the chain that encodes one picture at a time): a
+//    picture's way from the converter to the bitstream, for the steps of the
+//    D3D12 chain's conversion that a busy GPU stretches (plan « Gels du
+//    lien », the N95's lags of 21/10). `startUs` is when the picture was
+//    handed to the converter, `us` when its bitstream was ready, `presentUs`
+//    its present, `frame` its number on the wire. Then, in order, when the
+//    capture context had signalled fence A and flushed (`signalledUs`; empty
+//    for a held picture converted again, which signals nothing), the list
+//    was ready to record (`listUs`: after the wait for a conversion the
+//    cadence skipped), recorded (`recordedUs`), executed and the fences
+//    signalled (`executedUs`), the capture context had queued its wait for
+//    the read (`heldUs`) and the frame was given back (`releasedUs`);
+//    `encodeUs` when the encoder was asked. With gputiming=1, when the GPU
+//    started and finished the conversion (`gpuStartUs`, `gpuEndUs`, on the
+//    engine's clock) and the encode's GPU time (`gpuEncodeUs`). The D3D11
+//    chain fills only the session's own stamps.
 //
 // A field the platform cannot tell is left empty. Only the first kMaxRows rows
 // are kept: minutes of a bench pass, not a session left running.
@@ -77,6 +93,7 @@ public:
         Press,
         Capture,
         Admit,
+        Frame,
     };
 
     struct Row
@@ -100,6 +117,20 @@ public:
         /// Admit: whether the gate decided locked (1) or not (0); -1 empty.
         int locked = -1;
         int64_t latticeUs = 0;
+        /// Frame: the picture's number on the wire (-1 empty), the steps of
+        /// its conversion and encode (0 empty), the GPU's own times (0 and
+        /// -1 empty) — see the frame row above.
+        int64_t frame = -1;
+        int64_t signalledUs = 0;
+        int64_t listUs = 0;
+        int64_t recordedUs = 0;
+        int64_t executedUs = 0;
+        int64_t heldUs = 0;
+        int64_t releasedUs = 0;
+        int64_t encodeUs = 0;
+        int64_t gpuStartUs = 0;
+        int64_t gpuEndUs = 0;
+        int64_t gpuEncodeUs = -1;
     };
 
     static constexpr size_t kMaxRows = size_t(1) << 18;
@@ -158,14 +189,18 @@ public:
         std::lock_guard<std::mutex> lock(m_Mutex);
         std::string out = "kind,us,startUs,queuedUs,status,presentUs,presentRawUs,mouseUs,"
                           "accumulated,vblankUs,periodUs,composeUs,composedFrames,deliveredUs,"
-                          "locked,latticeUs\n";
-        out.reserve(out.size() + m_Rows.size() * 96);
+                          "locked,latticeUs,frame,signalledUs,listUs,recordedUs,executedUs,"
+                          "heldUs,releasedUs,encodeUs,gpuStartUs,gpuEndUs,gpuEncodeUs\n";
+        out.reserve(out.size() + m_Rows.size() * 128);
         const auto num = [&out](int64_t v, bool known) {
             if (known) out += std::to_string(v);
             out += ',';
         };
         for (const Row& r : m_Rows) {
-            out += r.kind == Kind::Press ? "press," : r.kind == Kind::Admit ? "admit," : "capture,";
+            out += r.kind == Kind::Press   ? "press,"
+                   : r.kind == Kind::Admit ? "admit,"
+                   : r.kind == Kind::Frame ? "frame,"
+                                           : "capture,";
             num(r.us, true);
             num(r.startUs, r.startUs != 0);
             num(r.queuedUs, r.queuedUs != 0);
@@ -181,7 +216,18 @@ public:
             num(r.composedFrames, r.composedFrames >= 0);
             num(r.deliveredUs, r.deliveredUs != 0);
             num(r.locked, r.locked >= 0);
-            if (r.latticeUs != 0) out += std::to_string(r.latticeUs);
+            num(r.latticeUs, r.latticeUs != 0);
+            num(r.frame, r.frame >= 0);
+            num(r.signalledUs, r.signalledUs != 0);
+            num(r.listUs, r.listUs != 0);
+            num(r.recordedUs, r.recordedUs != 0);
+            num(r.executedUs, r.executedUs != 0);
+            num(r.heldUs, r.heldUs != 0);
+            num(r.releasedUs, r.releasedUs != 0);
+            num(r.encodeUs, r.encodeUs != 0);
+            num(r.gpuStartUs, r.gpuStartUs != 0);
+            num(r.gpuEndUs, r.gpuEndUs != 0);
+            if (r.gpuEncodeUs >= 0) out += std::to_string(r.gpuEncodeUs);
             out += '\n';
         }
         return out;

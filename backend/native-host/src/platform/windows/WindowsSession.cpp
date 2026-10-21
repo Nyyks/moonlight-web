@@ -148,6 +148,10 @@ struct FrameStamps
     /// The held picture encoded again (idle floor, refinement, a keyframe on
     /// request), not a new one: what it costs says nothing about keeping up.
     bool resend = false;
+    /// For the click trace's frame rows: when the capture context had queued
+    /// its wait for the conversion's read, right before the frame was given
+    /// back (0 for a picture with no capture to give back).
+    int64_t heldUs = 0;
 };
 
 /// A re-send has no present of its own. Reporting "now" for everything keeps
@@ -2499,6 +2503,10 @@ private:
         // a picture never encoded is no hole.
         const bool linkHold = m_Config.tuning.linkHoldMs > 0;
         bool heldForLink = false;
+        m_PreGate = m_Config.tuning.preGate == 1;
+        if (m_PreGate)
+            log::info("[native] pregate=1: the stream's gate is asked before a present is "
+                      "converted, and a present it skips is not");
         auto creditMissing = [&]() {
             return (guarded && m_DecodeCredit.missing(steadyNowUs())) || (linkHold && linkBusy());
         };
@@ -2583,8 +2591,11 @@ private:
             }
             return verdict != InputAdmit::Verdict::Skip;
         };
-        auto emitPicture = [&](const FrameStamps& stamps, bool present) -> bool {
-            if (!aimedNow && !gateSays(stamps, present)) return true;
+        // @p gated: the gate already said yes to this picture, before its
+        // conversion (pregate=1 below); it is not asked twice.
+        auto emitPicture = [&](const FrameStamps& stamps, bool present,
+                               bool gated = false) -> bool {
+            if (!aimedNow && !gated && !gateSays(stamps, present)) return true;
             if (withheld(stamps)) return true;
             creditHeld = false;
             if (!emit(frameNumber, stamps, error)) return false;
@@ -2595,8 +2606,8 @@ private:
         // The same, pipelined (plan Phase 10): the picture goes to the encode
         // thread and the loop goes back to the capture; the cadence counts it
         // once it went out (absorbDelivered), the refinement window starts now.
-        auto emitPictureLater = [&](const FrameStamps& stamps) {
-            if (!aimedNow && !gateSays(stamps, true)) return;
+        auto emitPictureLater = [&](const FrameStamps& stamps, bool gated = false) {
+            if (!aimedNow && !gated && !gateSays(stamps, true)) return;
             if (withheld(stamps)) return;
             creditHeld = false;
             emitLater(frameNumber, stamps);
@@ -3045,6 +3056,30 @@ private:
             noteLattice(frame.presentUs);
             const int64_t submittedUs = steadyNowUs();
 
+            // pregate=1 (plan « Gels du lien », 21/10/2026): the gate's word
+            // before the conversion. A present it skips was converted all
+            // the same, and the next conversion then waited for that one on
+            // the CPU (D3d12VideoPipeline::beginList) — the whole GPU queue
+            // under another program's load, 5 to 20 ms on the N95's iGPU,
+            // five or six times a second with a browser's video plane and a
+            // second window presenting together. The gate decides on the
+            // time the picture would be ready, taken as now: the conversion
+            // adds a millisecond or two, under the gate's quarter-interval
+            // windows. The held-for-credit path keeps needing a converted
+            // picture, so only the gate moves up, never withheld().
+            bool gated = false;
+            if (m_PreGate && !aimedNow) {
+                const FrameStamps early{frame.presentUs, frame.capturedUs, submittedUs,
+                                        submittedUs};
+                if (!gateSays(early, true)) {
+                    m_Pipeline->beforeCaptureRelease();
+                    m_Capture->release();
+                    m_PreGateSkips++;
+                    continue;
+                }
+                gated = true;
+            }
+
             // See pointerToDraw(): an empty state draws nothing, which is how
             // the client-drawn mode keeps the picture clean.
             const bool composite = m_CompositeCursor.load();
@@ -3074,6 +3109,7 @@ private:
             // acquire while a frame is held, and the conversion has already
             // copied what it needs into the NV12 texture.
             m_Pipeline->beforeCaptureRelease();
+            const int64_t heldUs = steadyNowUs();
             m_Capture->release();
 
             // t₂ once the capture is given back, so the stage reads as the
@@ -3083,10 +3119,14 @@ private:
             // can be a game frame from well before, and the client's lead is
             // counted from the taking — see DeadlineCadence.h.
             const FrameStamps stamps{aimedNow ? frame.capturedUs : frame.presentUs,
-                                     frame.capturedUs, submittedUs, steadyNowUs()};
+                                     frame.capturedUs,
+                                     submittedUs,
+                                     steadyNowUs(),
+                                     false,
+                                     heldUs};
             if (m_Pipeline->pipelined())
-                emitPictureLater(stamps);
-            else if (!emitPicture(stamps, true))
+                emitPictureLater(stamps, gated);
+            else if (!emitPicture(stamps, true, gated))
                 return;
         }
     }
@@ -3277,6 +3317,7 @@ private:
 
         const bool forceKeyframe = m_ForceKeyframe.exchange(false);
         encode::EncoderOutput encoded;
+        const int64_t encodeStartUs = steadyNowUs();
         const WindowsVideoPipeline::EncodeResult result =
             m_Pipeline->encode(forceKeyframe, frameNumber, encoded, error);
         if (result == WindowsVideoPipeline::EncodeResult::Lost) {
@@ -3296,6 +3337,9 @@ private:
 
         if (encoded.data && encoded.size > 0 && m_Callbacks.onVideo) {
             const EncodedFrame out = encodedFrame(encoded, frameNumber++, stamps, m_EncoderKbps);
+            // Before the send, which is not the picture's own cost.
+            if (m_Config.tuning.clickTrace && !stamps.resend)
+                traceFrame(out, stamps, encodeStartUs, encoded);
             // Delivered on this thread, and the consumer sends it before
             // returning. The buffer is unlocked immediately after, which is
             // what keeps the GPU→CPU copy at exactly one per frame.
@@ -3483,6 +3527,35 @@ private:
             log::warning(std::string("[native] click trace: DWM gives no composition timing (") +
                          code + ") — the trace goes without it");
         }
+        m_ClickTrace.add(row);
+    }
+
+    /// A frame row of the click trace (core/ClickTrace.h): the picture's way
+    /// from the converter to the bitstream, with the D3D12 chain's own steps
+    /// where it keeps them. One picture at a time only: the pipelined chain
+    /// encodes on a thread of its own, and traces nothing.
+    void traceFrame(const EncodedFrame& out, const FrameStamps& stamps, int64_t encodeStartUs,
+                    const encode::EncoderOutput& encoded)
+    {
+        ClickTrace::Row row;
+        row.kind = ClickTrace::Kind::Frame;
+        row.us = out.encodedUs;
+        row.startUs = stamps.submittedUs;
+        row.presentUs = stamps.presentUs;
+        row.frame = out.frameNumber;
+        WindowsVideoPipeline::ConvertTrace trace;
+        if (m_Pipeline->lastConvertTrace(trace)) {
+            row.signalledUs = trace.signalledUs;
+            row.listUs = trace.listUs;
+            row.recordedUs = trace.recordedUs;
+            row.executedUs = trace.executedUs;
+        }
+        row.heldUs = stamps.heldUs;
+        row.releasedUs = stamps.convertedUs;
+        row.encodeUs = encodeStartUs;
+        row.gpuStartUs = encoded.gpuConvertStartUs;
+        row.gpuEndUs = encoded.gpuConvertEndUs;
+        row.gpuEncodeUs = encoded.gpuEncodeUs;
         m_ClickTrace.add(row);
     }
 
@@ -4100,6 +4173,10 @@ private:
                                  perSecond(folded) + "/s), "
                            : std::string()) +
                       waited + " % of the time waiting in the acquire");
+            if (m_PreGate)
+                log::info("[native] pregate: " + std::to_string(m_PreGateSkips) +
+                          " presents the gate skipped were not converted (" +
+                          perSecond(m_PreGateSkips) + "/s)");
         }
 
         // Whether the capture held this display over its dense content, for
@@ -4329,6 +4406,10 @@ private:
     int64_t m_PointerWakes = 0;
     int64_t m_TimeoutWakes = 0;
     int64_t m_LoopStartUs = 0;
+    /// pregate=1 (EncoderTuning::preGate): the gate asked before a present is
+    /// converted, and how many presents it then spared the converter.
+    bool m_PreGate = false;
+    int64_t m_PreGateSkips = 0;
 
     std::unique_ptr<capture::IWindowsCapture> m_Capture;
     /// Which backend actually answered. Settled by openCapture(), reported in
