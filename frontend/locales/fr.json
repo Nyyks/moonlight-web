@@ -746,6 +746,7 @@
         "webcodecsUnsupported": "WebCodecs non pris en charge",
         "codecUnsupported": "Codec non pris en charge par le navigateur",
         "streamDisconnected": "Flux déconnecté",
+        "reconnecting": "Reconnexion…",
         "lineReconnecting": "Reconnexion à votre machine… le stream continue.",
         "lineOutOfReach": "Les commandes de votre machine sont hors d'atteinte — le stream continue.",
         "gamepadIgnored": "« {{name}} » n’est pas transmise : sa disposition est inconnue. Configurez-la une fois et elle fonctionnera.",

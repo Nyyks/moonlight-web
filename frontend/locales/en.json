@@ -746,6 +746,7 @@
         "webcodecsUnsupported": "WebCodecs not supported",
         "codecUnsupported": "Codec not supported by browser",
         "streamDisconnected": "Stream disconnected",
+        "reconnecting": "Reconnecting…",
         "lineReconnecting": "Reconnecting to your machine… the stream carries on.",
         "lineOutOfReach": "Your machine's controls are out of reach — the stream carries on.",
         "gamepadIgnored": "\"{{name}}\" is not forwarded: its layout is unknown. Map it once and it will work.",

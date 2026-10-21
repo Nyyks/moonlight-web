@@ -746,6 +746,7 @@
         "webcodecsUnsupported": "不支持 WebCodecs",
         "codecUnsupported": "浏览器不支持该编解码器",
         "streamDisconnected": "串流已断开",
+        "reconnecting": "正在重新连接…",
         "lineReconnecting": "正在重新连接您的电脑…串流不受影响。",
         "lineOutOfReach": "暂时无法操作您的电脑——串流不受影响。",
         "gamepadIgnored": "“{{name}}”未被转发：布局未知。映射一次即可使用。",

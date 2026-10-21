@@ -48,6 +48,7 @@ export default defineConfig({
                 'js/stream/RenderPacing.js',
                 'js/stream/DecodeQueuePolicy.js',
                 'js/stream/DecodeRateGovernor.js',
+                'js/stream/CrashRelaunch.js',
                 'js/stream/GamepadManager.js',
                 'js/stream/gamepadMapping.js',
                 'js/util/gamepadMappingsStore.js',

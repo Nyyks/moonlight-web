@@ -540,6 +540,9 @@ export class StreamView {
         // retiring one leg of a dual stream never cancels the other.
         this._sessionSlot = typeof opts.sessionSlot === 'number' ? opts.sessionSlot : 0;
         this._slotUniqueId = opts.slotUniqueId || null;
+        // What the host knows this stream by (/start's stream_id): the page
+        // asks it how the stream ended once the link goes (_handOffLinkLoss).
+        this.streamId = typeof opts.streamId === 'string' ? opts.streamId : '';
         // ── Player mode (invited guest) ─────────────────────────────────────
         // A player's view is the same stream pipeline with the owner's controls
         // taken away: Stop becomes Leave (their leaving must not end the game),
@@ -929,6 +932,11 @@ export class StreamView {
          *  (ICE failure / closed before ever connecting). MoonlightApp relaunches
          *  with the next transport in the priority chain. Receives a reason string. */
         this.onConnectionFailed = null;
+        /** Callback invoked when the link goes AFTER it connected, in place of
+         *  ending the stream at once (_handOffLinkLoss). MoonlightApp asks the
+         *  host how the stream ended: it starts it again when the worker
+         *  crashed, and calls _linkLostDefault() for everything else. */
+        this.onLinkLost = null;
         /** Callback invoked on SUSTAINED network congestion (IDR storms, backend
          *  SCTP backpressure drops, PLI storms). MoonlightApp reacts by
          *  relaunching the stream with a degraded session-only profile
@@ -4972,6 +4980,38 @@ export class StreamView {
         return true;
     }
 
+    /**
+     * The link went after it had connected: hand the ending to MoonlightApp
+     * (onLinkLost), which asks the host how the stream ended before anything
+     * shows. Once: a transport error comes with its close. Returns false when
+     * there is nobody to hand it to, and the stream ends at once as it did.
+     */
+    _handOffLinkLoss(err) {
+        if (!this._linkLossHandedOff) {
+            if (!this._everConnected || this._takenOver) return false;
+            if (typeof this.onLinkLost !== 'function') return false;
+            this._linkLossHandedOff = true;
+            this.connected = false;
+            const cb = this.onLinkLost;
+            // Deferred, as _reportConnectionFailed: the transport is still in
+            // its _onError, whose onClose and close() come next.
+            setTimeout(() => cb(), 0);
+        }
+        // Its banner waits with the rest of the ending (_linkLostDefault).
+        if (err) this._linkLostError = true;
+        return true;
+    }
+
+    /** How a lost link has always ended: the banners, then quit() in 3 s. */
+    _linkLostDefault() {
+        if (this._quitting || this._manualQuitting || this._takenOver) return;
+        if (this._linkLostError) Toast.error(t('stream.webrtcError'));
+        this.connected = false;
+        this.setStatus('disconnected', 'Disconnected');
+        Toast.error(t('stream.streamDisconnected'));
+        setTimeout(() => this.quit(), 3000);
+    }
+
     // =========================================================================
     // WebRTC DataChannel (replaces legacy WebSocket binary transport)
     // =========================================================================
@@ -5241,10 +5281,10 @@ export class StreamView {
             // transport instead of showing a disconnect error.
             if (!this._everConnected && this._reportConnectionFailed('closed before connect'))
                 return;
-            this.connected = false;
-            this.setStatus('disconnected', 'Disconnected');
-            Toast.error(t('stream.streamDisconnected'));
-            setTimeout(() => this.quit(), 3000);
+            // Why it went is the host's to say: its worker may have crashed
+            // under a healthy stream, and then the stream starts again.
+            if (this._handOffLinkLoss()) return;
+            this._linkLostDefault();
         };
         this.webrtc.onError = (err) => {
             if (this._quitting || this._manualQuitting) return;
@@ -5257,6 +5297,7 @@ export class StreamView {
             }
             // Never connected → connection failure, defer to the transport chain.
             if (!this._everConnected && this._reportConnectionFailed(err.message)) return;
+            if (this._handOffLinkLoss(err)) return;
             Toast.error(t('stream.webrtcError'));
         };
         // Video frames: DataChannel mode uses WebCodecs callbacks

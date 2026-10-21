@@ -828,6 +828,27 @@ body.streaming-active::after {
     opacity: 0.8;
 }
 
+/* The host's stream worker crashed and the stream starts again: the last
+   frame stays, under a veil that says so, with the loader centred over it
+   (on the bare surround when there was no frame to keep). */
+#stream-relaunch-loader.is-reconnecting .relaunch-freeze-frame {
+    filter: brightness(0.45);
+}
+
+#stream-relaunch-loader.is-reconnecting .startup-loader {
+    z-index: 1;
+}
+
+#stream-relaunch-loader .relaunch-reconnecting {
+    position: relative;
+    z-index: 1;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
 .startup-step {
     display: flex;
     align-items: center;

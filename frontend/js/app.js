@@ -103,6 +103,7 @@ import {
     capSizeToDecoder,
 } from './util/DecoderLimit.js';
 import { startAspectProbe } from './stream/AspectProbe.js';
+import { recordCrashRelaunch, shouldRelaunchAfterCrash } from './stream/CrashRelaunch.js';
 import * as iosAudioUnlock from './audio/iosAudioUnlock.js';
 import { init as i18nInit, applyDOM, t } from './i18n/i18n.js';
 import { escapeHtml } from './util/escapeHtml.js';
@@ -503,7 +504,17 @@ export const MoonlightApp = {
         const view = new PlayerJoinView(
             container,
             token,
-            async ({ height, gaming, touchScreen, padKey }, transportIndex = 0, codec) => {
+            async (
+                { height, gaming, touchScreen, padKey },
+                transportIndex = 0,
+                codec,
+                rejoin = {},
+            ) => {
+                // The guest's own Join starts the count of restarts after a
+                // crash again (stream/CrashRelaunch.js), as the owner's launch.
+                if (!rejoin.reconnectOf && transportIndex === 0 && !codec) {
+                    this._crashRelaunches = [];
+                }
                 // Same question as the owner's launch, same one-minute memory:
                 // a guest on a network that blocks UDP skips the UDP rungs.
                 const udpBlocked = (await this._probeUdpCached()) === false;
@@ -514,10 +525,20 @@ export const MoonlightApp = {
                     transportIndex,
                     codec,
                     udpBlocked,
+                    rejoin.reconnectOf,
                 );
+                // Left from the veil while the rejoin was on its way.
+                if (rejoin.aborted) {
+                    BackendClient.playerLeave().catch(() => {});
+                    return;
+                }
 
                 // StreamView renders (and connects) from its constructor, so the
-                // join screen has to be gone first.
+                // join screen has to be gone first. The veil of a rejoin after a
+                // crash stays over the new stream until its first frame.
+                const veil = rejoin.reconnectOf
+                    ? document.getElementById('stream-relaunch-loader')
+                    : null;
                 container.innerHTML = '';
 
                 // The launch payload is the same shape as the owner's, so the whole
@@ -548,6 +569,10 @@ export const MoonlightApp = {
                     },
                 );
                 this.streamView = streamView;
+                if (veil) {
+                    container.appendChild(veil);
+                    this._holdRelaunchLoader(streamView);
+                }
 
                 // The guest walks the transport chain as the owner does: a rung
                 // that never connects is replaced by the next one, in place,
@@ -611,6 +636,69 @@ export const MoonlightApp = {
                         await view.onJoin({ height, gaming, touchScreen, padKey }, next, codec);
                     } catch (err) {
                         console.error('[MW] Guest relaunch failed:', err);
+                        view.refresh();
+                    }
+                };
+                // The link went once connected. As the owner's (_onLiveLinkLost):
+                // a worker that crashed under it is rejoined behind the veil, on
+                // the same rung and with the same cookie; anything else ends as
+                // it always has.
+                streamView.onLinkLost = async () => {
+                    const state = streamView.streamId
+                        ? await BackendClient.playerStreamState(streamView.streamId)
+                        : 'unknown';
+                    if (
+                        this.streamView !== streamView ||
+                        streamView._quitting ||
+                        streamView._manualQuitting ||
+                        streamView._takenOver
+                    )
+                        return;
+                    const now = Date.now();
+                    if (!shouldRelaunchAfterCrash(state, this._crashRelaunches, now)) {
+                        if (state === 'crashed')
+                            console.warn('[MW] Guest: the stream worker crashed again — leaving');
+                        streamView._linkLostDefault();
+                        return;
+                    }
+                    this._crashRelaunches = recordCrashRelaunch(this._crashRelaunches, now);
+                    console.warn('[MW] Guest: the stream worker on the host crashed — rejoining');
+                    const again = { reconnectOf: streamView.streamId, aborted: false };
+                    const frame = await streamView.captureLastFrameAsync();
+                    this._showRelaunchLoader(frame, {
+                        reconnecting: true,
+                        stopLabel: t('player.leave'),
+                        onStop: () => {
+                            again.aborted = true;
+                            this._hideRelaunchLoader();
+                            // Back already, under the veil until its first
+                            // frame: its own Leave, which ends on the join screen.
+                            if (this.streamView) {
+                                this.streamView.quit();
+                                return;
+                            }
+                            BackendClient.playerLeave().catch(() => {});
+                            view.refresh();
+                        },
+                    });
+                    streamView.onQuit = null;
+                    streamView.onConnectionFailed = null;
+                    this.streamView = null;
+                    // Closed here only: its worker is gone, and a Leave now
+                    // would free the slot the rejoin comes back to.
+                    await streamView.quit({ silent: true, retire: true, takenOver: true });
+                    try {
+                        await view.onJoin(
+                            { height, gaming, touchScreen, padKey },
+                            at,
+                            codec,
+                            again,
+                        );
+                    } catch (err) {
+                        console.error('[MW] Guest rejoin after a crash failed:', err);
+                        this._hideRelaunchLoader();
+                        if (again.aborted) return;
+                        Toast.error(t('stream.streamDisconnected'));
                         view.refresh();
                     }
                 };
@@ -1922,6 +2010,10 @@ export const MoonlightApp = {
             this._transportIndex = 0;
             this._firstTransportRetried = false;
             this._launchRetried = false;
+            // Restarts after a worker crash (stream/CrashRelaunch.js): counted
+            // from this launch on.
+            this._crashRelaunches = [];
+            this._reconnectOf = null;
             // Reset the congestion-degradation ladder. The overrides are
             // session-only (never persisted): a fresh launch always starts from
             // the user's own settings.
@@ -3236,6 +3328,9 @@ export const MoonlightApp = {
         // onConnectionFailed: transport never connected → try the next entry
         // in the priority chain (or give up if the chain is exhausted).
         sv.onConnectionFailed = (reason) => this._onTransportFailed(reason);
+        // onLinkLost: the link went once connected → ask the host why, and
+        // start the stream again if its worker crashed (_onLiveLinkLost).
+        sv.onLinkLost = () => this._onLiveLinkLost(sv);
         // onCongestion: sustained congestion detected mid-stream → relaunch with
         // a degraded session-only profile (bitrate −30% steps, resolution rungs,
         // media transport, 60 fps cap). See _onStreamCongested().
@@ -3385,6 +3480,9 @@ export const MoonlightApp = {
                 (streamingSettings.chroma_444_enabled === true && result.yuv444 !== true
                     ? 'no 4:4:4 on host'
                     : null),
+            // What the host knows this stream by: asked how it ended once its
+            // link goes (_onLiveLinkLost).
+            streamId: typeof result.stream_id === 'string' ? result.stream_id : '',
         };
         // The degradation ladder stands down for the native host — see
         // _onStreamCongested.
@@ -3472,6 +3570,50 @@ export const MoonlightApp = {
     },
 
     /**
+     * The live view's link went after it connected (StreamView.onLinkLost).
+     * The host says how that stream ended (stream/CrashRelaunch.js): a worker
+     * that crashed under it is started again on the transport that worked,
+     * behind the "Reconnecting…" veil and with no /quit, which would take the
+     * guests and the host's app down with it. Anything else (a network cut,
+     * the app closed, Stop or a take-over elsewhere, no answer in time) ends
+     * as it always has.
+     */
+    async _onLiveLinkLost(sv) {
+        const host = this._lastStreamHost;
+        const state =
+            sv.streamId && host
+                ? await BackendClient.streamState(host.uuid, sv.streamId)
+                : 'unknown';
+        // Stop pressed, a notice from the host, or a relaunch that replaced
+        // this view while the answer came: the ending is theirs.
+        if (sv !== this.streamView || sv._quitting || sv._manualQuitting || sv._takenOver) return;
+        const now = Date.now();
+        if (this._relaunching || !shouldRelaunchAfterCrash(state, this._crashRelaunches, now)) {
+            if (state === 'crashed')
+                console.warn('[MW] The stream worker crashed again — ending the stream');
+            sv._linkLostDefault();
+            return;
+        }
+        this._crashRelaunches = recordCrashRelaunch(this._crashRelaunches, now);
+        // Named to the host until a launch succeeds (_doRelaunchTransport).
+        this._reconnectOf = sv.streamId;
+        console.warn('[MW] The stream worker on the host crashed — starting the stream again');
+        this._relaunchTransport(this._transportIndex || 0);
+    },
+
+    /**
+     * The end of a launch that has given up: through the view's quit() when
+     * there is one. A failed relaunch has already taken it down, and then its
+     * onQuit is called here, or the page would stay on an empty stream screen.
+     */
+    _endAfterFailedLaunch() {
+        this._reconnectOf = null;
+        this._hideRelaunchLoader();
+        if (this.streamView) this.streamView.quit({ silent: true });
+        else this._onStreamingQuit();
+    },
+
+    /**
      * A transport failed to establish a connection. If there is a next entry in
      * the priority chain, relaunch with it (warning toast). Otherwise show a
      * final error and return to the apps view.
@@ -3496,6 +3638,16 @@ export const MoonlightApp = {
 
         const chain = this._transportChain || [];
         const cur = this._transportIndex || 0;
+
+        // Back after a worker crash, and the host refused: that stream is not
+        // this page's to take back any more (another device streams the host
+        // since). It ends as it would have without the restart.
+        if (reason === 'reconnect_refused') {
+            console.warn('[MW] The host refused the restart after a crash — ending the stream');
+            Toast.error(t('stream.streamDisconnected'));
+            this._endAfterFailedLaunch();
+            return;
+        }
 
         // The launch itself never returned a session (timeout, 502, Sunshine
         // refusal). Nothing was tried at the transport level — no offer, no ICE
@@ -3545,8 +3697,7 @@ export const MoonlightApp = {
                     walkedOut ? '(chain exhausted)' : '(retried once)',
                 );
                 Toast.error(t(walkedOut ? 'transport.allFailed' : 'transport.launchFailed'));
-                this._hideRelaunchLoader();
-                if (this.streamView) this.streamView.quit({ silent: true });
+                this._endAfterFailedLaunch();
                 return;
             }
             this._launchRetried = true;
@@ -3569,8 +3720,7 @@ export const MoonlightApp = {
                     'no fallback transport',
             );
             Toast.error(t('transport.identityRefused'));
-            this._hideRelaunchLoader();
-            if (this.streamView) this.streamView.quit({ silent: true });
+            this._endAfterFailedLaunch();
             return;
         }
 
@@ -3618,10 +3768,9 @@ export const MoonlightApp = {
                 `[MW] All transports failed (last: ${chain[cur] || '?'}, reason: ${reason})`,
             );
             Toast.error(t('transport.allFailed'));
-            this._hideRelaunchLoader();
             // quit() fires onQuit → _onStreamingQuit, which handles navigation
             // back to the apps view. silent: suppress the "Stream end" toast.
-            if (this.streamView) this.streamView.quit({ silent: true });
+            this._endAfterFailedLaunch();
         }
     },
 
@@ -3631,12 +3780,30 @@ export const MoonlightApp = {
      *  last frame of the outgoing stream is provided (quality transition on a
      *  live stream), the connection steps are NOT shown: just the frame with a
      *  small corner spinner, so the switch reads as a brief pause, not a
-     *  reconnection. */
-    _showRelaunchLoader(freezeFrame) {
+     *  reconnection.
+     *
+     *  opts.reconnecting: the host's worker crashed and the stream starts
+     *  again — the frame (or the bare surround) goes under a veil that says
+     *  "Reconnecting…", the loader centred over it. opts.onStop and
+     *  opts.stopLabel: a guest's way out, which is Leave. */
+    _showRelaunchLoader(freezeFrame, opts = {}) {
         if (document.getElementById('stream-relaunch-loader')) return;
         const el = document.createElement('div');
         el.id = 'stream-relaunch-loader';
-        if (freezeFrame) {
+        if (opts.reconnecting) {
+            el.classList.add('is-reconnecting');
+            el.innerHTML =
+                '<div class="startup-loader" aria-hidden="true"><div class="startup-loader-ring"></div></div>';
+            const label = document.createElement('div');
+            label.className = 'relaunch-reconnecting';
+            label.setAttribute('role', 'status');
+            label.textContent = t('stream.reconnecting');
+            el.appendChild(label);
+            if (freezeFrame) {
+                freezeFrame.className = 'relaunch-freeze-frame';
+                el.insertBefore(freezeFrame, el.firstChild);
+            }
+        } else if (freezeFrame) {
             el.classList.add('has-freeze-frame');
             el.innerHTML =
                 '<div class="startup-loader" aria-hidden="true"><div class="startup-loader-ring"></div></div>';
@@ -3673,8 +3840,9 @@ export const MoonlightApp = {
         const stopBtn = document.createElement('button');
         stopBtn.className = 'btn stream-quit-btn';
         stopBtn.id = 'btn-relaunch-quit';
-        stopBtn.textContent = IS_MOBILE_OR_TABLET ? t('stream.stop') : t('stream.stopStreaming');
-        stopBtn.onclick = () => this._abortStreamStartup();
+        stopBtn.textContent =
+            opts.stopLabel || (IS_MOBILE_OR_TABLET ? t('stream.stop') : t('stream.stopStreaming'));
+        stopBtn.onclick = opts.onStop || (() => this._abortStreamStartup());
         header.appendChild(stopBtn);
         el.appendChild(header);
         document.getElementById('app').appendChild(el);
@@ -3692,6 +3860,7 @@ export const MoonlightApp = {
         if (this._startupAborted) return;
         console.warn('[MW] Stream startup aborted by the user');
         this._startupAborted = true;
+        this._reconnectOf = null;
         this._abortStandby('startup aborted');
         this._hideRelaunchLoader();
         this._stopUpgradeTimer();
@@ -3825,6 +3994,9 @@ export const MoonlightApp = {
     async _doRelaunchTransport(nextIndex, host, app) {
         // A legacy relaunch takes over every slot — drop any in-flight standby.
         this._abortStandby('legacy relaunch');
+        // The stream's worker crashed (_onLiveLinkLost): the same relaunch,
+        // under the "Reconnecting…" veil, naming the lost stream to the host.
+        const reconnectOf = this._reconnectOf || null;
 
         // Claim and silence the outgoing view BEFORE the first await: from here
         // on, none of its events may re-enter the relaunch machinery or surface
@@ -3860,7 +4032,7 @@ export const MoonlightApp = {
         const freezeFrame = sv ? await sv.captureLastFrameAsync() : null;
         // Loader up BEFORE teardown so the apps view underneath is never
         // revealed (stay on the stream initialization screen).
-        this._showRelaunchLoader(freezeFrame);
+        this._showRelaunchLoader(freezeFrame, { reconnecting: !!reconnectOf });
 
         // Quietly tear down the outgoing StreamView (no navigation, no toast).
         // retire: keep the Sunshine host app session alive — we relaunch the
@@ -3870,9 +4042,16 @@ export const MoonlightApp = {
         // then 503s), the frontend connect timeout fires mid-RTSP-handshake,
         // and the killed handshake leaves a stale session key that makes every
         // later attempt die with "Failed to decrypt RTSP response".
+        //
+        // After a crash, closed here only (takenOver): the worker is gone with
+        // its slot, and the host has nothing left to quit.
         if (sv) {
             try {
-                await sv.quit({ silent: true, retire: true });
+                await sv.quit(
+                    reconnectOf
+                        ? { silent: true, retire: true, takenOver: true }
+                        : { silent: true, retire: true },
+                );
             } catch (e) {
                 /* ignore */
             }
@@ -3889,7 +4068,11 @@ export const MoonlightApp = {
             transport_index: nextIndex,
         };
         try {
-            const result = await BackendClient.launchApp(host.uuid, app.id, settings);
+            const result = await BackendClient.launchApp(
+                host.uuid,
+                app.id,
+                reconnectOf ? { ...settings, reconnect_of: reconnectOf } : settings,
+            );
             // Stop pressed while this relaunch was in flight: _abortStreamStartup
             // had no view to quit through (the outgoing one is already gone), so
             // hand the freshly started session back here instead of mounting it.
@@ -3911,6 +4094,7 @@ export const MoonlightApp = {
                 // over, so a later one earns its retry again. (Loop-safe — this
                 // only resets after a session actually started.)
                 this._launchRetried = false;
+                this._reconnectOf = null;
                 // Transport relaunch (fallback chain / congestion degradation) —
                 // suppress the shortcuts slide so it doesn't re-pop each step.
                 // Pass the merged settings so the degradation overrides (reduced
@@ -3922,32 +4106,8 @@ export const MoonlightApp = {
                     this.streamView.restoreViewState(viewState);
                     this._carryViewState = null;
                 }
-                if (freezeFrame && this.streamView) {
-                    // Hold the frozen frame until the new stream presents its
-                    // first frame (bounded — the failure paths hide the loader
-                    // themselves, this timer only covers a silent stall).
-                    //
-                    // On expiry the frame moves BEHIND the loader instead of
-                    // going away with it: a host that stopped encoding (still
-                    // screen, no damage, so the IDRs we keep asking for are
-                    // applied to a frame that is never captured) leaves the new
-                    // view with an empty canvas, and dropping the cover there
-                    // used to reveal it as a black screen that stood until the
-                    // user moved the mouse. As a poster it keeps showing what
-                    // the host screen actually looks like, and — unlike the
-                    // loader — it lets the pointer through, so that mouse move
-                    // is possible. StreamView drops it on its first frame.
-                    const failsafe = setTimeout(() => {
-                        const img = document.querySelector(
-                            '#stream-relaunch-loader .relaunch-freeze-frame',
-                        );
-                        if (img && this.streamView) this.streamView.showStalePoster(img);
-                        this._hideRelaunchLoader();
-                    }, 15000);
-                    this.streamView.onFirstFrame = () => {
-                        clearTimeout(failsafe);
-                        this._hideRelaunchLoader();
-                    };
+                if ((freezeFrame || reconnectOf) && this.streamView) {
+                    this._holdRelaunchLoader(this.streamView);
                 } else {
                     // New StreamView rendered its own #stream-view on top — drop
                     // the bridging loader.
@@ -3958,6 +4118,9 @@ export const MoonlightApp = {
                 return 'launch_failed';
             }
         } catch (err) {
+            // The host would not take this stream back after its crash.
+            if (reconnectOf && err && err.statusCode === 409 && err.message === 'reconnect_refused')
+                return 'reconnect_refused';
             // The host never gave us a session — a timeout, a 502, a Sunshine
             // refusal. That is a verdict on the HOST, not on this transport, so
             // it must not be charged to the chain (see _onTransportFailed).
@@ -3965,6 +4128,32 @@ export const MoonlightApp = {
             return 'launch_failed';
         }
         return null;
+    },
+
+    /**
+     * Hold the relaunch loader over @p sv until its first frame (bounded — the
+     * failure paths hide the loader themselves, this timer only covers a
+     * silent stall).
+     *
+     * On expiry the frame moves BEHIND the loader instead of going away with
+     * it: a host that stopped encoding (still screen, no damage, so the IDRs
+     * we keep asking for are applied to a frame that is never captured) leaves
+     * the new view with an empty canvas, and dropping the cover there used to
+     * reveal it as a black screen that stood until the user moved the mouse.
+     * As a poster it keeps showing what the host screen actually looks like,
+     * and — unlike the loader — it lets the pointer through, so that mouse
+     * move is possible. StreamView drops it on its first frame.
+     */
+    _holdRelaunchLoader(sv) {
+        const failsafe = setTimeout(() => {
+            const img = document.querySelector('#stream-relaunch-loader .relaunch-freeze-frame');
+            if (img && this.streamView) this.streamView.showStalePoster(img);
+            this._hideRelaunchLoader();
+        }, 15000);
+        sv.onFirstFrame = () => {
+            clearTimeout(failsafe);
+            this._hideRelaunchLoader();
+        };
     },
 
     // ── Seamless dual-stream transition ───────────────────────────────────
@@ -4477,6 +4666,7 @@ export const MoonlightApp = {
         this._stopAspectProbe();
         this._nativeFormat = null;
         this._abortStandby('active stream ended');
+        this._reconnectOf = null;
         // The session is over — no successor will claim the inherited display
         // state, and a bridged soft keyboard must not outlive the stream.
         this._carryViewState = null;

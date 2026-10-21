@@ -84,6 +84,7 @@ import {
 } from '../util/BrowserDetect.js';
 import { currentRefreshMilliHz } from '../util/RefreshRate.js';
 import { canCropFrames } from '../stream/FrameCrop.js';
+import { STREAM_STATE_TIMEOUT_MS } from '../stream/CrashRelaunch.js';
 
 export class BackendClient {
     /** Cached promise for the per-run admin key (see _adminKey). */
@@ -420,6 +421,43 @@ export class BackendClient {
             { timeoutMs: 25000 },
         );
     }
+    /**
+     * How the stream this page knows as @p streamId ended, asked once its
+     * link went (stream/CrashRelaunch.js): "crashed", "live", "ended",
+     * "stopped" — and "unknown" for anything else, a late answer included,
+     * which ends the stream as it always has.
+     * @returns {Promise<string>}
+     */
+    static async streamState(hostId, streamId) {
+        return this._streamState(
+            `/api/hosts/${hostId}/stream-state?stream=${encodeURIComponent(streamId)}`,
+        );
+    }
+    /** The same, for a guest: their invitation's cookie names the slot. */
+    static async playerStreamState(streamId) {
+        return this._streamState(
+            `/api/share/player/stream-state?stream=${encodeURIComponent(streamId)}`,
+        );
+    }
+    static async _streamState(path) {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = controller
+            ? setTimeout(() => controller.abort(), STREAM_STATE_TIMEOUT_MS)
+            : 0;
+        try {
+            const resp = await fetch(path, {
+                cache: 'no-store',
+                signal: controller ? controller.signal : undefined,
+            });
+            if (!resp.ok) return 'unknown';
+            const body = await resp.json();
+            return typeof body.state === 'string' ? body.state : 'unknown';
+        } catch (_) {
+            return 'unknown';
+        } finally {
+            clearTimeout(timer);
+        }
+    }
     static async quitApp(hostId, extra = {}) {
         // Fail fast if the backend is dead — don't wait 30s for a /quit that'll
         // never arrive while the UI is stuck in the quit animation.
@@ -555,11 +593,21 @@ export class BackendClient {
      *  codec the backend picked; omitted, the backend picks.
      *  @param {boolean} [udpBlocked] this browser's STUN probe got no answer:
      *  the backend skips the UDP rungs for an internet guest. */
-    static async playerJoin(token, height, aspect, transportIndex = 0, codec, udpBlocked) {
+    static async playerJoin(
+        token,
+        height,
+        aspect,
+        transportIndex = 0,
+        codec,
+        udpBlocked,
+        reconnectOf,
+    ) {
         const body = aspect ? { token, height, aspect } : { token, height };
         if (transportIndex > 0) body.transport_index = transportIndex;
         if (codec) body.codec = codec;
         if (udpBlocked) body.udp_blocked = true;
+        // Back after the worker of that stream crashed (stream/CrashRelaunch.js).
+        if (reconnectOf) body.reconnect_of = reconnectOf;
         // As launchApp's: a guest's browser decodes through a gap too, and a
         // native host then gives their stream the owner's refresh wave.
         body.ride_out_loss = RIDE_OUT_LOSS && decoderRidesOutGaps();
