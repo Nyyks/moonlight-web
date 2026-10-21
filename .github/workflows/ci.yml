@@ -118,6 +118,45 @@ jobs:
           path: frontend/coverage
           if-no-files-found: ignore
 
+  # ──────────────────── 1b. THE UPSCALER LABORATORY (software GPUs) ────────────────────
+  # The two renderers run MoonlightWeb's own upscaler on SwiftShader — WebGPU's
+  # fallback adapter, then ANGLE on SwiftShader for WebGL2 — through the lab's
+  # conformity flow (docs/design/upscaler-mwsr.md §3.6, criterion C11): every
+  # shader text compiles, the WebGPU chain gives the kernel's picture exactly,
+  # the WebGL2 twin the same quality. Not blocking yet: the software adapters of
+  # a hosted runner are new ground (plan §12.1, P4).
+  scaler-lab:
+    name: Upscaler lab (SwiftShader conformity, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install websocket-client numpy pillow scikit-image
+      - name: WebGPU side (the kernel cells and the WebGPU chain)
+        env:
+          MW_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: python scripts/bench/scaler-lab/scaler_lab.py --tag ci --swiftshader --page-timeout 240 --conformity
+      - name: WebGL2 side (the GLSL twin) and the comparison
+        env:
+          MW_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: python scripts/bench/scaler-lab/scaler_lab.py --tag ci --webgl-swiftshader --page-timeout 240 --conformity --md
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: scaler-lab-conformity
+          path: |
+            bench-out/scaler-lab/*.md
+            bench-out/scaler-lab/conf-*.json
+          if-no-files-found: ignore
+
   quality-cpp-format:
     name: Quality · C++ clang-format
     runs-on: ubuntu-latest

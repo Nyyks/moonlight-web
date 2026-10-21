@@ -37,7 +37,13 @@ import websocket
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "ultra"))
-from decoder_lab import CHROME, REPO, Handler, free_port  # noqa: E402
+from decoder_lab import CHROME as _WIN_CHROME, REPO, Handler, free_port  # noqa: E402
+
+# The browser: MW_CHROME, else the Windows install of the bench, else the first
+# Chrome or Chromium on the PATH (a Linux runner, the CI's conformity job).
+CHROME = os.environ.get("MW_CHROME") or (_WIN_CHROME if os.path.exists(_WIN_CHROME) else next(
+    (p for p in map(shutil.which, ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"))
+     if p), _WIN_CHROME))
 
 TEST_IMAGES = r"C:\Test"
 
@@ -373,6 +379,9 @@ def main():
     flags = ["--enable-unsafe-webgpu", "--enable-webgpu-developer-features", "--mute-audio",
              "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling",
              "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"]
+    if os.environ.get("CI"):
+        # A hosted runner: no user namespaces for the sandbox, a small /dev/shm.
+        flags += ["--no-sandbox", "--disable-dev-shm-usage"]
     if a.swiftshader:
         flags += ["--enable-unsafe-swiftshader"]
     if a.webgl_swiftshader:
