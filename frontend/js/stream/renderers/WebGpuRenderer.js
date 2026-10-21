@@ -24,7 +24,10 @@
  * but the enhancers need textureGather → materialize the frame first. (mwsr
  * needs no gather; it keeps the pass 0 because the external texture costs two
  * fetches a sample, which lost to pass 0 + kernel on every GPU measured,
- * upscaler-mwsr-p2.md §3.)
+ * upscaler-mwsr-p2.md §3.) A browser that refuses the import (Chrome on a
+ * machine whose decoded frames cannot be shared with WebGPU) gets the frame
+ * copied through an ImageBitmap into inputTex instead, and the picture stays
+ * on screen (see _importFrame).
  *
  * mwsr (algo 'mwsr'): 2 passes — Pass 0 blit, Pass 1 mwsr inputTex → canvas.
  *   MoonlightWeb's own upscaler (MwsrShader.js, docs/design/upscaler-mwsr.md).
@@ -115,6 +118,25 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     return textureSampleBaseClampToEdge(tex, samp, in.uv);
 }
 `;
+
+// The same copy from inputTex: the plain copy to the canvas when the frame
+// came in through an ImageBitmap (the import fallback) instead of an
+// external texture.
+const BLIT_TEX_WGSL =
+    FULLSCREEN_VS +
+    /* wgsl */ `
+@group(0) @binding(0) var samp : sampler;
+@group(0) @binding(1) var tex : texture_2d<f32>;
+
+@fragment
+fn fs(in : VSOut) -> @location(0) vec4f {
+    return textureSampleLevel(tex, samp, in.uv, 0.0);
+}
+`;
+
+// After a refused import, the import is tried again this many draws later:
+// a refusal that was transient ends the slower ImageBitmap path by itself.
+const IMPORT_RETRY_FRAMES = 300;
 
 // HDR tone-map (Pass 0 replacement). Reads the decoded 10/12-bit YUV planes
 // (frame.copyTo readback) instead of importExternalTexture — the only way to get
@@ -1005,6 +1027,12 @@ export class WebGpuRenderer extends VideoRenderer {
         r._yuvCH = 0;
         r._yuvFormatLogged = false;
         r._copyWarned = false;
+        // The import fallback (see _importFrame) and the once-per-message log.
+        r._importRefused = false;
+        r._importRefusedAt = 0;
+        r._importWarned = false;
+        r._drawCount = 0;
+        r._drawErrors = new Set();
         r._adapter = adapter;
         r._device = device;
         r._ready = false;
@@ -1386,6 +1414,22 @@ export class WebGpuRenderer extends VideoRenderer {
             fragment: { module: blitModule, entryPoint: 'fs', targets: [{ format: this._format }] },
             primitive: { topology: 'triangle-list' },
         });
+        // The same copy from inputTex, for a frame that came in through an
+        // ImageBitmap (the import fallback); its bind group follows inputTex.
+        this._texBlitLayout = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+            ],
+        });
+        const texModule = device.createShaderModule({ code: BLIT_TEX_WGSL });
+        this._texBlitPipeline = device.createRenderPipeline({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [this._texBlitLayout] }),
+            vertex: { module: texModule, entryPoint: 'vs' },
+            fragment: { module: texModule, entryPoint: 'fs', targets: [{ format: this._format }] },
+            primitive: { topology: 'triangle-list' },
+        });
+        this._texBlitBindGroup = null;
     }
 
     _buildSgsrResources() {
@@ -1784,7 +1828,11 @@ export class WebGpuRenderer extends VideoRenderer {
         this._inputTex = this._device.createTexture({
             size: { width: inW, height: inH },
             format: this._interFormat,
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+            // COPY_DST: the import fallback copies the frame in (see _importFrame).
+            usage:
+                GPUTextureUsage.RENDER_ATTACHMENT |
+                GPUTextureUsage.TEXTURE_BINDING |
+                GPUTextureUsage.COPY_DST,
             // The `-srgb` view mwsr's reduction reads through (SDR).
             viewFormats: this._srgbViews ? [this._interFormat + '-srgb'] : [],
         });
@@ -1794,6 +1842,13 @@ export class WebGpuRenderer extends VideoRenderer {
             : null;
         this._inW = inW;
         this._inH = inH;
+        this._texBlitBindGroup = this._device.createBindGroup({
+            layout: this._texBlitLayout,
+            entries: [
+                { binding: 0, resource: this._sampler },
+                { binding: 1, resource: this._inputTexView },
+            ],
+        });
 
         if (this._algo === 'fsr1') {
             this._enhanceBindGroup = this._device.createBindGroup({
@@ -1947,6 +2002,59 @@ export class WebGpuRenderer extends VideoRenderer {
         return true;
     }
 
+    /**
+     * The frame as an external texture, or null when the browser refuses the
+     * import. Chrome on a machine whose decoded frames cannot be shared with
+     * WebGPU (a Linux runner on the software adapter, 21/10/2026) threw
+     * "Failed to import texture from video" on every frame, and the canvas
+     * stayed black while the console filled up. From the first refusal on,
+     * draw() copies the frames through an ImageBitmap instead (one extra copy,
+     * the WebGL renderer's own fallback for a refused VideoFrame) and tries the
+     * import again every IMPORT_RETRY_FRAMES draws, in case the refusal was
+     * transient. One console line in all. In HDR the bitmap is the browser's
+     * SDR rendering of the frame: a picture, not the HDR one.
+     * @param {VideoFrame} frame
+     * @returns {GPUExternalTexture|null}
+     */
+    _importFrame(frame) {
+        if (this._importRefused && this._drawCount - this._importRefusedAt < IMPORT_RETRY_FRAMES)
+            return null;
+        try {
+            const tex = this._device.importExternalTexture({
+                source: frame,
+                colorSpace: this._importColorSpace || 'srgb',
+            });
+            this._importRefused = false;
+            return tex;
+        } catch (e) {
+            if (!this._importWarned) {
+                this._importWarned = true;
+                console.warn(
+                    '[WebGpuRenderer] importExternalTexture refused the frame (' +
+                        e.message +
+                        '): the frames go through an ImageBitmap from now on',
+                );
+            }
+            this._importRefused = true;
+            this._importRefusedAt = this._drawCount;
+            return null;
+        }
+    }
+
+    /** The import fallback's pass 0: the frame, as an ImageBitmap, copied into inputTex. */
+    async _copyFrameThroughBitmap(frame, inW, inH) {
+        const bmp = await createImageBitmap(frame);
+        try {
+            this._device.queue.copyExternalImageToTexture(
+                { source: bmp },
+                { texture: this._inputTex, colorSpace: 'srgb', premultipliedAlpha: false },
+                { width: Math.min(bmp.width, inW), height: Math.min(bmp.height, inH) },
+            );
+        } finally {
+            bmp.close();
+        }
+    }
+
     async draw(frame) {
         if (!this._ready || !this.ctx) {
             try {
@@ -1962,6 +2070,8 @@ export class WebGpuRenderer extends VideoRenderer {
         // what a rising framerate turns into). See VideoRenderer.lastDraw.
         const drawStart = performance.now();
         let uploadMs = 0;
+        // Set when the frame came in through an ImageBitmap (see _importFrame).
+        let viaBitmap = false;
 
         const inW = frame.displayWidth || frame.codedWidth || 0;
         const inH = frame.displayHeight || frame.codedHeight || 0;
@@ -1971,6 +2081,7 @@ export class WebGpuRenderer extends VideoRenderer {
             } catch (e) {}
             return;
         }
+        this._drawCount++;
 
         // Canvas backing = frame-aspect rect fitting the output box (else frame
         // res), capped (scaleRegime.js). At exactly the frame size the pass has
@@ -2016,33 +2127,41 @@ export class WebGpuRenderer extends VideoRenderer {
             // The external texture feeds either the plain blit or, on a browser
             // that did not tone-map it on import, the ext tone-map pass.
             const useExt = !useYuv && this._hdrExtTonemap && !!this._extPipeline;
+            // A refused import: the frame is copied through an ImageBitmap into
+            // inputTex here (pass 0 done), and the plain copy to the canvas
+            // reads inputTex (see _importFrame).
             if (!useYuv) {
-                const externalTex = this._device.importExternalTexture({
-                    source: frame,
-                    colorSpace: this._importColorSpace || 'srgb',
-                });
-                if (useExt) {
-                    this._readHdrKnobs();
-                    // Written each frame (cheap) so the localStorage knobs apply live.
-                    this._device.queue.writeBuffer(
-                        this._extParams,
-                        0,
-                        new Float32Array([this._refWhite, 1.0, this._exposure, this._curve]),
-                    );
+                const externalTex = this._importFrame(frame);
+                if (!externalTex) {
+                    viaBitmap = true;
+                    const uploadStart = performance.now();
+                    this._ensureInputTex(inW, inH);
+                    await this._copyFrameThroughBitmap(frame, inW, inH);
+                    uploadMs += performance.now() - uploadStart;
+                } else {
+                    if (useExt) {
+                        this._readHdrKnobs();
+                        // Written each frame (cheap) so the localStorage knobs apply live.
+                        this._device.queue.writeBuffer(
+                            this._extParams,
+                            0,
+                            new Float32Array([this._refWhite, 1.0, this._exposure, this._curve]),
+                        );
+                    }
+                    blitBindGroup = this._device.createBindGroup({
+                        layout: useExt ? this._extLayout : this._blitLayout,
+                        entries: useExt
+                            ? [
+                                  { binding: 0, resource: this._sampler },
+                                  { binding: 1, resource: externalTex },
+                                  { binding: 2, resource: { buffer: this._extParams } },
+                              ]
+                            : [
+                                  { binding: 0, resource: this._sampler },
+                                  { binding: 1, resource: externalTex },
+                              ],
+                    });
                 }
-                blitBindGroup = this._device.createBindGroup({
-                    layout: useExt ? this._extLayout : this._blitLayout,
-                    entries: useExt
-                        ? [
-                              { binding: 0, resource: this._sampler },
-                              { binding: 1, resource: externalTex },
-                              { binding: 2, resource: { buffer: this._extParams } },
-                          ]
-                        : [
-                              { binding: 0, resource: this._sampler },
-                              { binding: 1, resource: externalTex },
-                          ],
-                });
             }
 
             const encoder = this._device.createCommandEncoder();
@@ -2065,6 +2184,9 @@ export class WebGpuRenderer extends VideoRenderer {
                 if (useYuv) {
                     pass.setPipeline(this._yuvCanvasPipeline);
                     pass.setBindGroup(0, this._yuvBindGroup);
+                } else if (viaBitmap) {
+                    pass.setPipeline(this._texBlitPipeline);
+                    pass.setBindGroup(0, this._texBlitBindGroup);
                 } else {
                     pass.setPipeline(useExt ? this._extCanvasPipeline : this._passthroughPipeline);
                     pass.setBindGroup(0, blitBindGroup);
@@ -2086,35 +2208,40 @@ export class WebGpuRenderer extends VideoRenderer {
                 this._noteDraw(
                     drawStart,
                     uploadMs + (performance.now() - gpuStart),
-                    (this._passthrough ? '1:1' : 'off') + (useYuv ? '+yuv' : ''),
+                    (this._passthrough ? '1:1' : 'off') +
+                        (useYuv ? '+yuv' : '') +
+                        (viaBitmap ? '+bitmap' : ''),
                 );
                 return;
             }
 
             this._ensureInputTex(inW, inH);
 
-            // Pass 0: external → inputTex (frame res).
-            const p0 = encoder.beginRenderPass({
-                colorAttachments: [
-                    {
-                        view: this._inputTexView,
-                        loadOp: 'clear',
-                        storeOp: 'store',
-                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-                    },
-                ],
-            });
-            if (useYuv) {
-                // HDR YUV → SDR (ACES) tone-map into inputTex.
-                p0.setPipeline(this._yuvPipeline);
-                p0.setBindGroup(0, this._yuvBindGroup);
-            } else {
-                // Plain blit, or the same ACES tone-map fed by the external texture.
-                p0.setPipeline(useExt ? this._extPipeline : this._blitPipeline);
-                p0.setBindGroup(0, blitBindGroup);
+            // Pass 0: external → inputTex (frame res). Already done by the copy
+            // when the frame came in through an ImageBitmap.
+            if (!viaBitmap) {
+                const p0 = encoder.beginRenderPass({
+                    colorAttachments: [
+                        {
+                            view: this._inputTexView,
+                            loadOp: 'clear',
+                            storeOp: 'store',
+                            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        },
+                    ],
+                });
+                if (useYuv) {
+                    // HDR YUV → SDR (ACES) tone-map into inputTex.
+                    p0.setPipeline(this._yuvPipeline);
+                    p0.setBindGroup(0, this._yuvBindGroup);
+                } else {
+                    // Plain blit, or the same ACES tone-map fed by the external texture.
+                    p0.setPipeline(useExt ? this._extPipeline : this._blitPipeline);
+                    p0.setBindGroup(0, blitBindGroup);
+                }
+                p0.draw(3);
+                p0.end();
             }
-            p0.draw(3);
-            p0.end();
 
             if (this._algo === 'fsr1') {
                 this._ensureIntermTex(cw, ch);
@@ -2276,7 +2403,16 @@ export class WebGpuRenderer extends VideoRenderer {
             this._device.queue.submit([encoder.finish()]);
             if (probing) this._mapProbeRead();
         } catch (e) {
-            console.error('[WebGpuRenderer] draw failed:', e.message);
+            // Once per distinct message: a frame that fails is every frame.
+            const msg = String(e && e.message);
+            if (!this._drawErrors.has(msg)) {
+                this._drawErrors.add(msg);
+                console.error(
+                    '[WebGpuRenderer] draw failed: ' +
+                        msg +
+                        ' (further frames failing the same way are not logged)',
+                );
+            }
         }
 
         frame.close();
@@ -2291,7 +2427,7 @@ export class WebGpuRenderer extends VideoRenderer {
         this._noteDraw(
             drawStart,
             uploadMs + (performance.now() - gpuStart),
-            this._algo + (useYuv ? '+yuv' : ''),
+            this._algo + (useYuv ? '+yuv' : '') + (viaBitmap ? '+bitmap' : ''),
         );
     }
 

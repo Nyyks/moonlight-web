@@ -19,6 +19,9 @@
 //   f16=1                        ask for shader-f16 when the adapter has it
 //   shot=1                       a crop of each cell's output, as PNG data URLs
 //   post=1 tag=<name>            POST the result to the serving script
+//   importfail=1                 the product's renderer gets every video import
+//                                refused (its ImageBitmap fallback, as on a
+//                                machine that cannot share frames with WebGPU)
 //
 // Three feeds (§7.1, rule 1): `ext` reads the decoded VideoFrame through a
 // texture_external (no pass 0); `tex` reads an rgba8unorm texture already
@@ -1019,6 +1022,7 @@ async function runLabInner(p, log) {
   if (p.power) adapterOpts.powerPreference = p.power;
   if (p.fallback === "1") adapterOpts.forceFallbackAdapter = true;
   installHooks(adapterOpts);
+  HOOK.importFail = p.importfail === "1";
   const adapter = await navigator.gpu.requestAdapter(adapterOpts);
   if (!adapter) throw new Error("requestAdapter returned null");
   const info = adapter.info || {};
@@ -2182,6 +2186,8 @@ const HOOK = {
   productErrors: [],
   /** While set, getCurrentTexture hands the renderer a texture of ours (chainToOut). */
   capture: null,
+  /** importfail=1: the product's devices get every video import refused. */
+  importFail: false,
 };
 let hooked = false;
 function installHooks(adapterOpts) {
@@ -2190,6 +2196,15 @@ function installHooks(adapterOpts) {
   const origReq = GPU.prototype.requestAdapter;
   GPU.prototype.requestAdapter = function (opts) {
     return origReq.call(this, { ...(opts || {}), ...adapterOpts });
+  };
+  // importfail=1: the product's devices (never the lab's) get every import
+  // refused, as Chrome does on a machine whose decoded frames cannot be
+  // shared with WebGPU (the Linux runner of CI 39661997273).
+  const origImport = GPUDevice.prototype.importExternalTexture;
+  GPUDevice.prototype.importExternalTexture = function (d) {
+    if (HOOK.importFail && this !== HOOK.labDevice)
+      throw new DOMException("Failed to import texture from video (lab importfail=1)", "OperationError");
+    return origImport.call(this, d);
   };
   const origDev = GPUAdapter.prototype.requestDevice;
   GPUAdapter.prototype.requestDevice = function (desc) {
