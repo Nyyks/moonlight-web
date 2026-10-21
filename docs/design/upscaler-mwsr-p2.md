@@ -162,3 +162,67 @@ par plateforme pour P2.3.
   externe (P0 : plus cher que l'échantillon sur AMD et Apple → variante par échantillons au plus
   proche), `HALF`, `QUAD_UNIFORM`, `EARLY_OUT 0` contre 1 par classe de GPU.
 - À nettoyer en fin de P2.2 : `SHAPE`/`K_SHAPE` (rejetés, J4) et `ORIENT 0` si rien ne les rappelle.
+
+## 2. P2.2 — la boucle d'optimisation (21/10/2026)
+
+### 2.1 L'instrument, complété
+
+- **FLIP** : `flip-evaluator` n'a pas de roue pour Python 3.14 ; `metrics.py` l'appelle désormais
+  dans un venv Python 3.12 posé à côté du labo (`.flipenv`, ignoré par git, ou `MW_FLIP_PYTHON`),
+  les deux images passées en `.npy`. Les colonnes FLIP et FLIP p99 de `--quality` se remplissent ;
+  les verdicts de C3 se lisent en FLIP (plus bas = mieux).
+- **La part du chemin contour** : une cellule `mwsr:show=1` peint le vote et le pilote imprime la
+  part des pixels traités : `text` 35 %, étalon 29 %, `game` 2 %, `zone` 50 %, `code` 14 % à ×2 ;
+  26-28 % à ×1,33 ; 37-40 % à ×3.
+- La mire `code` est passée à deux colonnes (son tiers central était vide, P0 §6) ; ses chiffres
+  depuis J5 ne se comparent plus à ceux de J1-J4.
+
+### 2.2 Les quatre tours (journal J5 à J8)
+
+| tour | hypothèse | verdict |
+|---|---|---|
+| J5 | les quatre coins de la grille 3×3 tournée (`TIER 1`, neuf échantillons, fenêtre séparable) rendent la reconstruction qui manque à ×2 | **rejetée** : +0,2-0,4 dB sur le texte mais −0,7 dB au centre de l'étalon, et le **FLIP** les refuse partout (texte 0,073-0,076 contre 0,072 ; étalon 0,056-0,059 contre 0,052) |
+| J6 | les 71 % de pixels de l'étalon sous `τ`, rendus en bilinéaire pur, portent l'écart de SSIM ; `τ` de 0,05 à 0 le referme | **rejetée** : traiter tous les pixels rend 0,001 de FLIP et 0,003 de SSIM pour deux fois plus de quads traités ; l'écart tient à ce que le noyau fait sur les contours |
+| J7 | le rayon en travers (0,75-0,85) et la force referment l'écart | **rejetée** (FLIP plat à ± 0,002) ; un gain gratuit : `W_ACROSS 0,3` (+0,13 dB au centre de l'étalon, FLIP égal ou meilleur partout) |
+| J8 | `S_FULL` à ×1,33 ; contrôle à ×3 | `S_FULL 1,5` reste (meilleur FLIP sur l'étalon) ; à ×3 le noyau vaut FSR1 (FLIP 0,076 / 0,073 sur l'étalon, 0,111 / 0,111 sur le texte) sans réglage propre |
+
+Trois tours sur la question de l'étalon à ×2 (règle du §8.3) : l'écart de FLIP qui reste (0,051
+contre 0,045) est celui d'une reconstruction à cinq échantillons contre douze texels, pas d'un
+réglage ; il entre dans C3 (≤ +0,01) et on s'arrête là. Les variantes rejetées (`ORIENT 0`, `SHAPE`,
+`TIER`) sont **retirées du texte** : le WGSL ne porte que ce qui tourne (plan §3.6).
+
+### 2.3 La table de P2.2 et C3
+
+`W_ALONG 0,15`, `R_ALONG 0,5`, `W_ACROSS 0,3`, `R_ACROSS 1`, `W_MIN −0,3`, `DERING 1`, `S_FULL 1,5`,
+`EARLY_OUT 1`, luma `(0,25, 0,625, 0,125)`, `τ 0,05`, netteté 1.
+
+| cas | FLIP FSR1 | **FLIP mwsr** | écart (≤ +0,010) | SSIM mwsr − FSR1 (≥ −0,005) | dépassements |
+|---|---|---|---|---|---|
+| `text` ×2 | 0,068 | **0,071** | +0,003 | −0,003 | 0 % |
+| étalon ×2 (image entière) | 0,045 | **0,051** | +0,006 | −0,006 (centre) | 0 % |
+| `game` ×2 | 0,017 | **0,019** | +0,002 | −0,005 | 0 % |
+| `zone` ×2 | 0,107 | **0,116** | +0,009 | −0,025 | 0 % |
+| `code` ×2 | 0,024 | **0,029** | +0,005 | +0,005 | 0 % |
+| étalon ×1,33 | 0,035 | **0,038** | +0,003 | +0,003 (centre) | 0 % |
+| `text` ×1,33 | 0,042 | **0,047** | +0,005 | +0,000 | 0 % |
+| étalon ×3 | 0,073 | **0,076** | +0,003 | +0,002 (centre) | 0,4 % (bords) |
+| `text` ×3 | 0,111 | **0,111** | 0 | −0,003 | 0,3 % (bords) |
+
+**C3 tenu en FLIP et en dépassements sur les neuf cas** ; en SSIM, l'étalon ×2 (−0,006) est à un
+millième de la barre et `zone` (−0,025) nettement sous — la zone-plate à ×2 est de la reconstruction
+de hautes fréquences pure, que douze texels font mieux que cinq ; c'est dit. En PSNR : au-dessus de
+FSR1 sur `game` ×2 (+0,3 dB), l'étalon ×1,33 (+0,8) et le texte ×1,33 (+0,05), en dessous de 0,15 à
+0,45 dB ailleurs à ×2. Contre SGSR1 (C4, « FLIP ≤ SGSR1 ») : égal sur le texte brut (0,071 contre
+0,067, à l'écart près de la quantification) et au-dessus partout ailleurs, sans sa sonnerie.
+
+### 2.4 Ce que P2.2 laisse
+
+- **Au temps** : la table ne change pas le coût de P2.1 (`W_ACROSS` est un poids) ; les temps RTX et
+  M1 du §1.4 valent pour elle.
+- **À P2.3** : le feed externe et la passe 0 par plateforme (Apple : passe 0 par défaut, §1.4), la
+  borne par échantillons au plus proche sur l'externe, `HALF`, `QUAD_UNIFORM`, `EARLY_OUT` par classe
+  de GPU (gagnant sur NVIDIA et Apple ; à voir sur Mali et Adreno).
+- **À P4** : `malioc` et un passage SweetOpt sur le chemin contour, qui attendent le texte GLSL du
+  jumeau (le WGSL est fixé, ils ne le changeront plus).
+- **À P5** : l'œil de Bruno sur l'étalon à ×2, là où FLIP met `mwsr` à +0,006 de FSR1 et à 0 % de
+  dépassements contre 2 %.

@@ -190,3 +190,117 @@ travers comme un contour droit : SSIM remonte sur l'étalon sans perdre le texte
 sept cas ; puis le coût (RTX : `tex-s9` 0,085 ms sur `text` ; M1 : 0,36 ms, au niveau de SGSR1 — le
 palier qualité est un choix d'ordinateur). Outil : `mwsr:show=1` dans `--quality-cells` imprime la
 part des pixels sur le chemin contour par image.
+
+**Mesure J5** (SwiftShader ; T = `TIER 1`, K2 = `W_CORNER 2`, W/R = `W_ALONG`/`R_ALONG` ; PSNR / SSIM,
+dépassements 0 % partout) :
+
+| variante | `text` ×2 | étalon ×2 (centre) | `game` ×2 | `zone` ×2 | `code` ×2 (deux colonnes) | étalon ×1,33 | `text` ×1,33 |
+|---|---|---|---|---|---|---|---|
+| FSR1 | 17,57 / 0,845 | 32,26 / 0,940 | 35,55 / 0,887 | 10,79 / 0,484 | 27,35 / 0,951 | 35,94 / 0,976 | 21,45 / 0,942 |
+| table (5 taps) | 17,42 / 0,842 | **31,82 / 0,933** | **35,87 / 0,882** | 10,65 / 0,459 | **26,88 / 0,956** | **36,55 / 0,978** | 21,60 / 0,944 |
+| T | 17,58 / 0,850 | 31,12 / 0,929 | 35,80 / 0,882 | 10,68 / 0,463 | 26,56 / 0,955 | 36,11 / 0,977 | 21,85 / 0,949 |
+| T K2 | **17,63 / 0,853** | 30,23 / 0,922 | 35,50 / 0,882 | **10,71 / 0,466** | 26,25 / 0,954 | 35,53 / 0,976 | **21,97 / 0,951** |
+| T W0,3 | 17,55 / 0,849 | 31,09 / 0,929 | 35,81 / 0,882 | 10,68 / 0,463 | 26,56 / 0,955 | 36,09 / 0,977 | 21,81 / 0,948 |
+| T W0,3 R1 | 17,34 / 0,842 | 30,91 / 0,926 | 35,85 / 0,882 | 10,66 / 0,459 | 26,53 / 0,955 | 35,91 / 0,976 | 21,54 / 0,943 |
+| T W0,15 R1 | 17,46 / 0,846 | 31,12 / 0,929 | 35,84 / 0,882 | 10,67 / 0,461 | 26,61 / 0,955 | 36,11 / 0,977 | 21,70 / 0,946 |
+
+Part des pixels sur le chemin contour (`SHOW 1`, `τ 0,05`) : `text` 35 %, étalon 29 % (28 % à ×1,33),
+`game` 2 %, `zone` 50 %, `code` 14 %, `text` ×1,33 26 %.
+
+**Verdict H5 : rejetée.** Les coins font gagner le texte (+0,16 à +0,37 dB, SSIM +0,007 à +0,011 ;
+`T K2` **dépasse FSR1 sur le texte à ×2 et à ×1,33**, à 0 % de dépassement) mais perdent partout
+ailleurs : −0,7 dB au centre de l'étalon à ×2, −0,4 à ×1,33, −0,07 à −0,37 sur `game`, −0,3 sur
+`code`. Ce n'est donc pas la couverture des diagonales qui manque à l'étalon. Lecture : 71 % des
+pixels de l'étalon passent **sous `τ`** et sortent en bilinéaire pur, là où EASU filtre chaque
+pixel ; l'écart de SSIM sur les dégradés (peau, feuillage) serait dans ces 71 %, pas dans les
+contours. D'où J6 : `τ` de 0,05 à 0 sur la table, avec la part de pixels traitée et son coût.
+`TIER 1` reste une option de texte (un palier « bureau et texte » sur ordinateur), à décider en P4
+par classe d'appareil ; `W_CORNER 2` est son meilleur réglage.
+
+**FLIP sur J5** (dès ce jour : `metrics.py` passe par le venv `.flipenv`, Python 3.12 ; FLIP moyen
+LDR, plus bas = mieux ; C3 : ≤ FSR1 + 0,01) :
+
+| | `text` ×2 | étalon ×2 (image entière) | `game` ×2 |
+|---|---|---|---|
+| bilinéaire | 0,090 | — | — |
+| FSR1 | 0,068 | 0,045 | 0,017 |
+| SGSR1 | 0,067 | — | — |
+| **table (5 taps)** | **0,072** | **0,052** | **0,019** |
+| T | 0,073 | 0,056 | 0,019 |
+| T K2 | 0,076 | 0,059 | 0,020 |
+
+FLIP tranche contre les coins là où PSNR et SSIM les récompensaient sur le texte : la netteté
+supplémentaire des diagonales n'est pas perçue comme une amélioration. **La table tient C3 en FLIP
+sur les trois images** (texte 0,072 ≤ 0,078, étalon 0,052 ≤ 0,055 de justesse, `game` 0,019 ≤ 0,027) ;
+`TIER 1` ne la tient pas sur l'étalon. `TIER`/`W_CORNER` vont au nettoyage avec `SHAPE`.
+
+## 2026-10-21 — J6, le seuil du vote (`τ` de 0,05 à 0), rejeté comme explication
+
+**Hypothèse H6.** Les 71 % de pixels de l'étalon qui passent sous `τ` sortent en bilinéaire pur ;
+abaisser `τ` (jusqu'à traiter tout, `τ 0`) referme l'écart de FLIP et de SSIM avec FSR1 au prix
+du temps.
+
+| `τ` | étalon ×2 : centre PSNR / SSIM, FLIP entier, part traitée | `text` ×2 : PSNR / SSIM, FLIP, part | `game` ×2 : PSNR / SSIM, FLIP, part | étalon ×1,33 : centre, FLIP |
+|---|---|---|---|---|
+| FSR1 | 32,26 / 0,940, 0,045, 100 % | 17,57 / 0,845, 0,068 | 35,55 / 0,887, 0,017 | 35,94 / 0,976, 0,035 |
+| 0,05 (table) | 31,82 / 0,933, 0,052, 29 % | 17,42 / 0,842, 0,072, 35 % | 35,87 / 0,882, 0,019, 2 % | 36,55 / 0,978, 0,038 |
+| 0,03 | 31,84 / 0,935, 0,051 | 17,43 / 0,843, 0,071 | 35,87 / 0,882, 0,019 | 36,58 / 0,979, 0,038 |
+| 0,02 | 31,85 / 0,935, 0,051, 48 % | 17,43 / 0,843, 0,071, 37 % | 35,87 / 0,882, 0,019, 4 % | 36,58 / 0,979, 0,038 |
+| 0,01 | 31,85 / 0,936, 0,051, 61 % | 17,43 / 0,843, 0,071, 39 % | 35,89 / 0,883, 0,018, 19 % | 36,59 / 0,979, 0,038 |
+| 0 | 31,85 / 0,936, 0,051, 100 % | 17,43 / 0,843, 0,070 | 35,90 / 0,884, 0,018 | 36,59 / 0,980, 0,038 |
+
+**Verdict : rejetée.** Traiter tous les pixels rend 0,001 de FLIP et 0,003 de SSIM au centre de
+l'étalon, rien en PSNR, pour deux fois plus de quads sur le chemin contour : l'écart avec FSR1
+(FLIP 0,052 contre 0,045) tient à ce que le noyau fait **sur** les contours, pas à ce qu'il ne fait
+pas à côté. `τ 0,05` reste (il tient le coût de `game` à 2 % de pixels traités ; `τ 0,01` l'enverrait à
+19 % pour 0,001 de FLIP). Dernier tour sur la question de l'étalon (règle des trois tours, §8.3) :
+J7, le rayon en travers (`R_ACROSS` 0,75-0,85, que l'étalon préférait en J3a) contre la force, jugé
+en FLIP.
+
+## 2026-10-21 — J7, le rayon en travers contre la force, jugé en FLIP (troisième et dernier tour sur l'étalon)
+
+| variante (table sauf dit) | étalon ×2 : centre, FLIP | `text` ×2 : PSNR, FLIP | `game` ×2 : PSNR, FLIP | étalon ×1,33 : centre, FLIP | `text` ×1,33 : PSNR, FLIP |
+|---|---|---|---|---|---|
+| FSR1 | 32,26 / 0,940, 0,045 | 17,57, 0,068 | 35,55, 0,017 | 35,94 / 0,976, 0,035 | 21,45, 0,042 |
+| table (`A 0,35`) | 31,82 / 0,933, 0,052 | 17,42, 0,072 | 35,87, 0,019 | 36,55 / 0,978, 0,038 | 21,60, 0,047 |
+| **`W_ACROSS 0,3`** | **31,95 / 0,934, 0,051** | 17,41, **0,071** | 35,84, 0,019 | **36,76 / 0,979, 0,038** | 21,50, 0,047 |
+| `R_ACROSS 0,75` | 31,83 / 0,933, 0,051 | 17,18, 0,074 | 35,52, 0,019 | 36,64 / 0,979, 0,037 | 21,31, 0,047 |
+| `R_ACROSS 0,85` | 31,83 / 0,933, 0,051 | 17,29, 0,073 | 35,65, 0,019 | 36,64 / 0,979, 0,037 | 21,42, 0,047 |
+| `R_ACROSS 0,75`, `A 0,45` | 31,79 / 0,933, 0,051 | 17,18, 0,074 | 35,52, 0,019 | 36,28 / 0,978, 0,037 | 21,46, 0,046 |
+| `R_ACROSS 0,85`, `A 0,45` | 31,78 / 0,933, 0,051 | 17,29, 0,073 | 35,65, 0,019 | 36,14 / 0,977, 0,038 | 21,59, 0,046 |
+| `R_ACROSS 0,75`, `A 0,45`, `M −0,4` | 31,18 / 0,929, 0,056 | 17,06, 0,084 | 35,27, 0,020 | 36,28 / 0,978, 0,037 | 21,46, 0,046 |
+| `R_ACROSS 0,75`, `W_ALONG 0,25` | 31,86 / 0,933, 0,050 | 17,15, 0,074 | 35,52, 0,018 | 36,65 / 0,978, 0,037 | 21,23, 0,048 |
+
+**Verdict.** Le FLIP est plat autour de la table (± 0,002 sur toutes les images) : l'écart avec
+FSR1 sur l'étalon à ×2 (0,052 contre 0,045) ne se règle pas par le rayon ni par la force, il tient à
+la reconstruction à douze texels d'EASU que cinq échantillons bilinéaires n'ont pas. **Trois tours
+sur cette question (J5, J6, J7), on s'arrête** (règle du §8.3) ; C3 est tenu (étalon 0,052 ≤ 0,055).
+Un gain net et gratuit : `W_ACROSS 0,3` au lieu de 0,35 (+0,13 dB au centre de l'étalon à ×2,
++0,2 dB à ×1,33, FLIP égal ou meilleur partout, −0,01 dB sur le texte) : **la table de P2.2 prend
+`W_ACROSS 0,3`**, le reste inchangé. J8 ferme la boucle de qualité : `S_FULL` à ×1,33 et un
+contrôle à ×3.
+
+## 2026-10-21 — J8, la constante d'échelle et un contrôle à ×3 ; la table de P2.2
+
+**`S_FULL` à ×1,33** (`W_ACROSS 0,3`) : 1,5 (force 0,66 à ×1,33) donne l'étalon au centre 36,76 /
+FLIP 0,038 et le texte 21,50 / 0,047 ; 1,2 ou 1,33 (force 1) : étalon 36,08 / 0,040, texte 21,70 /
+0,047 ; 2 (force 0,33) : étalon 36,92 / 0,039, texte 21,13 / 0,051. **`S_FULL 1,5` reste** : le
+meilleur FLIP sur l'étalon, le texte à 0,2 dB de son meilleur.
+
+**×3** (848×480 → 2544×1440, le 720p sur un 4K du plan §4.3) : étalon, centre 27,97 / 0,846, FLIP
+0,076 contre FSR1 27,92 / 0,845 / 0,073 et SGSR1 27,67 / 0,841 / 0,076 ; `text` 15,02 / 0,723 / 0,111
+contre FSR1 15,16 / 0,726 / 0,111 et SGSR1 15,45 / 0,747 / 0,099 (4,3 % de dépassements). Le noyau
+tient FSR1 à ×3 sans réglage propre ; 0,3-0,4 % de dépassements y apparaissent (bords de l'image,
+où les échantillons bloqués au bord et l'empreinte de la métrique divergent), rien au centre.
+
+**La table de P2.2** (défauts de `MwsrShader.js`, le texte nettoyé des variantes rejetées) :
+`W_ALONG 0,15`, `R_ALONG 0,5`, `W_ACROSS 0,3`, `R_ACROSS 1`, `W_MIN −0,3`, `DERING 1`, `S_FULL 1,5`,
+`EARLY_OUT 1`, luma `(0,25, 0,625, 0,125)`, `τ 0,05`, netteté 1 ; repère des dérivées seul (la croix
+sur les axes, la courbe bornée et les coins sont retirés du texte : J2, J4, J5).
+
+**C3 en FLIP, table contre FSR1** (≤ FSR1 + 0,01) : `text` ×2 0,071 / 0,068 ; étalon ×2 0,051 /
+0,045 ; `game` 0,019 / 0,017 ; `zone` 0,116 / 0,107 ; `code` 0,029 / 0,024 ; étalon ×1,33 0,038 /
+0,035 ; `text` ×1,33 0,047 / 0,042 ; étalon ×3 0,076 / 0,073 ; `text` ×3 0,111 / 0,111 : **tenu
+partout**, au plus serré sur `zone` (+0,009). Dépassements 0 % (hors bords à ×3). SSIM ≥ FSR1 − 0,005
+tenu partout sauf l'étalon ×2 (−0,006) et `game` (−0,005, limite) ; PSNR : au-dessus de FSR1 sur
+`game` ×2, l'étalon ×1,33 et le texte ×1,33, en dessous de 0,15-0,45 dB ailleurs à ×2.

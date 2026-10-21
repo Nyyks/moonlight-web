@@ -1311,7 +1311,7 @@ upscalers spatiaux.
 
 **P2 — Le noyau**
 - [x] P2.1 (21/10/2026, Fable 5.1 `max`, commits `fa42a66c` et `8e9a5903`, rapport `upscaler-mwsr-p2.md` §1, journal J1-J4) : noyau de base WGSL sur `texture_2d` dans le labo — un échantillon et le vote par dérivées ; sur les contours deux échantillons le long à un demi-texel et deux en travers, cohérence marche/crête, borne des cinq puis des quatre texels (`DERING 1`) ; première table `W_ALONG 0,15`, `R_ALONG 0,5`, `W_ACROSS 0,35`, `W_MIN −0,3`, `τ 0,05` ; qualité : FSR1 à 0,15-0,45 dB près à ×2, au-dessus à ×1,33, 0 % de dépassement partout
-- [ ] P2.2 boucle d'optimisation : variantes, mesures A/B/A/B, `malioc`, journal ; SweetOpt sur le chemin contour en fin de boucle [`xhigh`]
+- [x] P2.2 (21/10/2026, rapport `upscaler-mwsr-p2.md` §2, journal J5-J8) : FLIP branché (venv 3.12), part du chemin contour par image ; coins de la grille tournée, seuil du vote, rayon et force essayés et rejetés en FLIP ; table `W_ACROSS 0,3` (le reste inchangé), texte nettoyé des variantes rejetées ; **C3 tenu en FLIP et en dépassements sur neuf cas**, ×3 compris ; `malioc` et SweetOpt reportés au jumeau GLSL (P4)
 - [ ] P2.3 couches : feed externe, `HALF`, `QUAD_UNIFORM`, `DERING_EXACT`, `EARLY_OUT` [`high`]
 - [ ] P2.4 expérience compute par tuiles sur Windows et macOS (optionnelle) [`high`]
 - [ ] Rapport P2 et porte (C1-C4 provisoires ; critère d'arrêt) [`xhigh`]
