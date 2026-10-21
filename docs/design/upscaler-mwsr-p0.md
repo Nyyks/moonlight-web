@@ -428,6 +428,34 @@ Chaîne du produit à **1:1** (2560×1440, `WebGpuRenderer` inchangé, P1) : `ch
 - Les écarts tour à tour sont larges sur les cellules sous 0,3 ms (quantification 65,5 µs et Roblox
   en barre de menus) : lire les rapports entre cellules, pas les absolus au centième.
 
+## 4 quinquies. realme Note 60 (Mali-G57 MP1, Chrome Android), 21/10 après-midi
+
+Créneau de Bruno de cinq minutes (14:26-14:31), la page servie depuis DualRTX comme pour l'iPhone
+(huit liens ; aucune règle de pare-feu à ouvrir, les règles entrantes « Python » existantes couvrent
+le port). Adaptateur `arm valhall` ; `shader-f16`, `timestamp-query`, `subgroups`,
+`float32-filterable` présents ; décodeur H.264 matériel à **sortie RGBA** (un échantillon de la texture
+externe vaut un échantillon RGBA : `ext-s1` = `tex-s1`). **Les horodatages d'un lot s'additionnent**
+sur ce GPU (lot 18,0 ms contre 18,6 à une soumission par itération) ; dispersion ≤ 2 % hors cellules
+sous 2 ms. Détail et réductions au journal J16. GPU p50 en ms :
+
+| cas | plancher | SGSR1 | FSR1 | **`mwsr`** | `half=1` | `dering=0` | passe 0 + `mwsr` |
+|---|---|---|---|---|---|---|---|
+| ×2 texte, 720p → 1440p | 3,60 | 24,5 | 83,1 | **18,0** | 16,3 | 13,2 | 18,8 |
+| ×2 jeu | 3,67 | 23,3 | 83,1 | **8,78** | 7,60 | 7,41 | 9,90 |
+| ×1,33 texte | 3,60 | 22,5 | 83,2 | **16,7** | 14,9 | 12,3 | |
+| l'écran du realme, texte, 720p → 1600×720 | 1,18 | 8,39 | 26,0 | **5,90** | 5,31 | 4,33 | 6,75 |
+
+Chaînes du produit à ×2 (une image par tampon) : `off` 4,0 ms de GPU pour 22 ms de mur par `draw()`,
+SGSR1 26,3 / 47, FSR1 85 / 110 : le chemin CPU du renderer pèse 18 ms sur ce SoC, à regarder en P5.
+
+**Ce que le realme dit.** C1 tenue sur Mali : noyau seul 0,74 × SGSR1 sur le texte, 0,38 × sur le
+jeu (critère ≤ 0,9 ; ≤ 0,8 jeu, ≤ 1,0 texte), 0,66 / 0,33 avec `half` ; à la taille de l'écran, passe
+0 + `mwsr` = 6,75 ms par image (SGSR1 9,6, FSR1 27 : les enhancers livrés font tomber des images sur
+ce téléphone). `half` −10 % (comme sur le 780M), `dering=0` −27 % sur le texte. La passe 0 coûte
+0,85-0,92 ms là où l'externe est déjà RGBA : `ext-mwsr` reste à mesurer (un lien), décision P4 par le
+format du décodeur. Réduction : l'échantillon unique à travers les vues sRGB coûte le plancher
+(1,18 ms à ×0,67, 0,98 à ×0,5), la grille 2×2 3,2 fois plus : C10 tenu en coût sur sa machine (P3 §6).
+
 ## 5. Réponses de P0 et porte
 
 | Question (§6.4) | Réponse | Démontré / attendu |
@@ -454,12 +482,15 @@ Chaîne du produit à **1:1** (2560×1440, `WebGpuRenderer` inchangé, P1) : `ch
 
 **Porte P0** : tenue pour l'ordinateur (dispersion < 5 %, coût de l'externe connu, décision passe
 0 prise), et tenue sur l'iPhone 13 Pro pour le noyau prévu. Il manque le realme Note 60 et le Mac,
-qui ne bloquent pas P1 ni P2.1 (labo sur DualRTX) mais entrent avant la porte P2.
+qui ne bloquent pas P1 ni P2.1 (labo sur DualRTX) mais entrent avant la porte P2. *[Mac fait le 21/10
+(§4 quater), realme fait le 21/10 (§4 quinquies) : la porte P0 est complète, C1 tenue sur Apple et sur
+Mali.]*
 
 ## 6. Ce qui reste de P0
 
 - ~~Le Mac~~ (fait le 21/10, §4 quater, par tunnel SSH inverse : plus besoin de règle de pare-feu quand
-  la machine a SSH). Le realme Note 60 (créneau de Bruno), et un second passage de l'iPhone avec les cas
+  la machine a SSH). ~~Le realme Note 60~~ (fait le 21/10, §4 quinquies, journal J16 ; reste `ext-mwsr`
+  sur lui, un lien). Un second passage de l'iPhone avec les cas
   `-single` (liens `/4` à `/6`) : même procédure (`scaler_lab.py --serve 0.0.0.0:8766`, règle de
   pare-feu ouverte pour le créneau et retirée après, résultat en
   `bench-out/scaler-lab/phone-*.json`). `mw-arm` en WebGL2 seulement (pas de WebGPU sur l'Adreno

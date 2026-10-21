@@ -763,7 +763,10 @@ Les trois feeds HDR existent déjà (§1.5) ; le shader doit seulement s'y compo
 - **`tonemap`, `tonemap-ext`, `browser`** : l'entrée est déjà SDR après la passe 0 ou l'import ;
   rien de particulier, le noyau tourne tel quel.
 - **`linear`** (AV1 logiciel, canvas `rgba16float` étendu, 1,0 = 203 nits, lumière de scène
-  BT.2020 → P3) : le noyau reçoit des valeurs au-delà de 1,0 et une luminance très étirée. Le
+  BT.2020 → P3) : le noyau reçoit des valeurs au-delà de 1,0 et une luminance très étirée. *[P3,
+  21/10 : la passe 0 écrit en réalité des valeurs encodées sRGB prolongées au-delà de 1,0 (1000 nits
+  ≈ 2,0) ; la compression ci-dessous est sans objet, le noyau tourne tel quel et tient C8 en qualité,
+  rapport `upscaler-mwsr-p3.md` §2.]* Le
   plan applique **une compression de dynamique réversible** autour du noyau : `y = x / (x + k)`
   par canal à l'entrée (k = 1 au blanc de référence), le vote, les poids, la borne et la netteté
   en `y`, puis `x = k · y / (1 − y)` à la sortie. Le noyau étant une combinaison convexe bornée
@@ -809,7 +812,17 @@ Les trois feeds HDR existent déjà (§1.5) ; le shader doit seulement s'y compo
   s_y)` et le noyau utilise `s` par axe.
 - `LINEAR_LIGHT` (réduction en lumière linéaire) est une option mesurée en P3 : le décodage sRGB
   par tap coûte quelques opérations, le gain en qualité est connu côté hôte (+4,6 dB au banc
-  `mw-scaler-bench` sur le N95, pour +30 % de temps) ; décision par classe d'appareil.
+  `mw-scaler-bench` sur le N95, pour +30 % de temps) ; décision par classe d'appareil. *[P3, 21/10 :
+  mesuré (J12, J14) — la lumière linéaire est le terme décisif (+2,5 à +12 dB), mais calculée elle
+  coûte : la grille 2×2 à `LINEAR_LIGHT 1` vaut 1,7 à 2,2 × le plancher sur le 780M, le sRGB exact
+  calculé (`2`) ×2,9 de plus. Et elle se fait gratuitement par le matériel : vues `-srgb` sur la
+  texture de la passe 0 et sur le canvas, l'échantillonneur décode chaque texel avant de filtrer, la
+  cible encode à l'écriture (`LINEAR_LIGHT 0`). Entre ×0,5 et 1:1 **un seul échantillon bilinéaire à
+  travers les vues** remplace la grille 2×2 — meilleur en PSNR, FLIP et aliasing, au coût du
+  plancher, donc C10 tenu en coût ; sous ×0,5 les grilles 3×3 / 4×4 à travers les vues (aliasing ÷ 5
+  contre la lumière calculée). `MWSR_DOWN_TAPS_SRGB`, `mwsrRegime(…, { srgb })` ; la table calculée
+  (2×2 / 3×3 / 4×4, `LINEAR_LIGHT 1`) reste pour les feeds sans vue sRGB (`rgba16float`). Rapport
+  `upscaler-mwsr-p3.md` §4 et §6, journal J15.]*
 - Le pinch-zoom et l'échelle de qualité changent `s` d'une image à l'autre : les pipelines des
   deux modes sont construits une fois à la création du renderer, et le choix se fait au dessin ;
   aucune compilation en cours de flux.
@@ -1301,7 +1314,7 @@ upscalers spatiaux.
 - [~] Chaîne Python : PSNR, SSIM, dépassements faits (`metrics.py`) ; FLIP attend une roue Python 3.14 ; SSIMULACRA 2, scintillement et défilement en P2 s'ils servent
 - [~] Relevé `adapter.features` / `adapter.info` : DualRTX (RTX, 780M) fait ; téléphones et Mac aux créneaux de Bruno ; `mw-arm` sans WebGPU
 - [x] Essai décisif externe contre blit + RGBA (N = 1, 5, 9, chargements, dérivées) : RTX et 780M
-- [~] Lignes de base : DualRTX fait (l'Arc A380 n'est plus énumérée) ; iPhone 13 Pro fait (20/10) ; **Mac M1 Pro fait (21/10, rapport P0 §4 quater, avec le noyau `mwsr` : C1 provisoirement tenue sur Apple, passe 0 à garder sur ce GPU)** ; `mw-arm` (WebGL2) et realme Note 60 à jouer ; Smooth2D (Canvas2D) non mesuré, hors WebGPU
+- [~] Lignes de base : DualRTX fait (l'Arc A380 n'est plus énumérée) ; iPhone 13 Pro fait (20/10) ; **Mac M1 Pro fait (21/10, rapport P0 §4 quater, avec le noyau `mwsr` : C1 provisoirement tenue sur Apple, passe 0 à garder sur ce GPU)** ; **realme Note 60 fait (21/10, rapport P0 §4 quinquies, journal J16 : C1 tenue sur Mali-G57 — noyau 0,74 × SGSR1 sur le texte, 0,38 × sur le jeu ; `half` −10 %, `dering 0` −27 % ; passe 0 + `mwsr` 6,75 ms à la taille de l'écran ; réduction par vues sRGB au coût du plancher)** ; `mw-arm` (WebGL2) à jouer ; Smooth2D (Canvas2D) non mesuré, hors WebGPU
 - [x] Rapport P0 et porte : tenue pour l'ordinateur (dispersion ≤ 2,6 %, pas de passe 0 en SDR)
 
 **P1 — Contournement 1:1** (code le 20/10/2026, commit `36edf6ec`)
@@ -1314,18 +1327,22 @@ upscalers spatiaux.
 **P2 — Le noyau**
 - [x] P2.1 (21/10/2026, Fable 5.1 `max`, commits `fa42a66c` et `8e9a5903`, rapport `upscaler-mwsr-p2.md` §1, journal J1-J4) : noyau de base WGSL sur `texture_2d` dans le labo — un échantillon et le vote par dérivées ; sur les contours deux échantillons le long à un demi-texel et deux en travers, cohérence marche/crête, borne des cinq puis des quatre texels (`DERING 1`) ; première table `W_ALONG 0,15`, `R_ALONG 0,5`, `W_ACROSS 0,35`, `W_MIN −0,3`, `τ 0,05` ; qualité : FSR1 à 0,15-0,45 dB près à ×2, au-dessus à ×1,33, 0 % de dépassement partout
 - [x] P2.2 (21/10/2026, rapport `upscaler-mwsr-p2.md` §2, journal J5-J8) : FLIP branché (venv 3.12), part du chemin contour par image ; coins de la grille tournée, seuil du vote, rayon et force essayés et rejetés en FLIP ; table `W_ACROSS 0,3` (le reste inchangé), texte nettoyé des variantes rejetées ; **C3 tenu en FLIP et en dépassements sur neuf cas**, ×3 compris ; `malioc` et SweetOpt reportés au jumeau GLSL (P4)
-- [x] P2.3 (21/10/2026, rapport `upscaler-mwsr-p2.md` §3, journal J9-J10) : feed externe contre passe 0 sur M1, 780M et RTX → **passe 0 partout** (décision n° 2 renversée par la mesure) ; `half` (f16) −9-10 % sur le 780M, rien sur NVIDIA, mêmes pixels ; borne par échantillons sans gain (retirée) ; sortie anticipée gagnante partout (`EARLY_OUT` retiré) ; `QUAD_UNIFORM` sans objet ; restent `half` et `DERING 0` à mesurer sur realme et iPhone
+- [x] P2.3 (21/10/2026, rapport `upscaler-mwsr-p2.md` §3, journal J9-J10) : feed externe contre passe 0 sur M1, 780M et RTX → **passe 0 partout** (décision n° 2 renversée par la mesure) ; `half` (f16) −9-10 % sur le 780M, rien sur NVIDIA, mêmes pixels ; borne par échantillons sans gain (retirée) ; sortie anticipée gagnante partout (`EARLY_OUT` retiré) ; `QUAD_UNIFORM` sans objet ; restent `half` et `DERING 0` à mesurer sur iPhone (realme fait le 21/10, J16 : −10 % et −27 %)
 - [ ] P2.4 expérience compute par tuiles (optionnelle) — proposée à l'abandon : le noyau est au plancher d'une passe sur ordinateur, et le canvas storage recopie sur mobile (§3.4) [`high`]
 - [ ] Rapport P2 et porte (C1-C4 provisoires ; critère d'arrêt) [`xhigh`]
 
-**P3 — HDR, 4:4:4, réduction**
-- [ ] `HDR_LINEAR` et son test (rampe, texte sur 1000 nits) [`high`]
-- [ ] `CHROMA444` et son test [`medium`]
-- [ ] Mode réduction (4 / 9 / 16 taps), `LINEAR_LIGHT` mesuré [`high`]
-- [ ] Tests dorés (images fixes, deux échelles, par variante) [`medium`]
+**P3 — HDR, 4:4:4, réduction** (21/10/2026, rapport `upscaler-mwsr-p3.md`, journal J11-J14)
+- [x] HDR : le feed `linear` est encodé sRGB étendu (pas de lumière de scène) → `HDR_LINEAR` sans objet, noyau inchangé ; mires HDR, ΔE ITP, feed `rgba16float` au labo ; **C8 qualité tenue** (ΔE ≤ FSR1 sur texte et jeu, +2 % sur la rampe ; max conservé ; 0 % au-delà du max local contre 5 % FSR1)
+- [x] `CHROMA444` (vote, cohérence et poids par canal) et ses mires `code` / `codeiso` en 4:4:4 et 4:2:0 simulé : rien sur la syntaxe ordinaire (la luma voit tout), FLIP 0,014 → 0,011 et ΔE00 −10 % sur les bords isoluminants ; **C9 : > SGSR1 partout, = FSR1 sur la syntaxe, −3 % sur l'isoluminant** ; `LUMA_SHARP` essayé et retiré
+- [x] Mode `down` (grilles 2×2 / 3×3 / 4×4 par `mwsrRegime`, étendue 1 / 1,25, `LINEAR_LIGHT` 1 par défaut, 2 en option) : lumière linéaire +2,5 à +12 dB, aliasing ≤ Smooth2D, 28-35 dB contre le Lanczos-2 de l'hôte ; **C10 qualité tenue**
+- [x] Tests dorés : `--golden` / `--golden-check` (SwiftShader, 9 cas × 4 cellules, `golden.json`)
+- [x] Temps GPU RTX et 780M (J14) : **C8 temps tenu** (`mwsr` 0,16-0,23 × FSR1 sur le feed f16), `c444=1` +7-8 %, `half` −9 % sur le 780M et les mêmes pixels en HDR ; la grille 2×2 en lumière calculée manque « ≤ bilinéaire + 30 % » (×1,7-2,2 sur le 780M, ×1,3-1,4 sur le RTX)
+- [x] Vues sRGB (J15, SwiftShader) : un échantillon bilinéaire à travers les vues entre ×0,5 et 1:1 → **C10 tenu en coût (+0 %) et en qualité** ; 3×3 à travers les vues sous ×0,5 (aliasing ÷ 5, FLIP ÷ 11) ; `MWSR_DOWN_TAPS_SRGB`, `mwsrRegime(…, { srgb })` → `linearLight` ; dorés régénérés
+- [x] Coût des cellules sRGB confirmé au RTX et au 780M (14:33) : les vues ne coûtent rien, l'échantillon unique = le plancher, la 3×3 à travers les vues = la 3×3 calculée ; et sur le realme (J16) l'échantillon unique = le plancher
+- [ ] Porte P3 : lecture du rapport `upscaler-mwsr-p3.md` par Bruno (C8-C10 tenus au labo ; regard HDR sur le M27Q en P5) [`high`]
 
 **P4 — Intégration et jumeau WebGL2**
-- [ ] `mwsr` dans `WebGpuRenderer` : pipelines par `override`, deux modes, bind groups en cache, uniformes au changement [`medium`]
+- [ ] `mwsr` dans `WebGpuRenderer` : pipelines par `override`, deux modes, bind groups en cache, uniformes au changement ; vues `-srgb` (`viewFormats` sur la texture de la passe 0 et sur le canvas SDR, à l'essai) liées en mode `down`, `mwsrRegime(…, { srgb })`, repli sur la table calculée ; `CHROMA444` sur `_yuv444` ; `half` hors NVIDIA [`medium`]
 - [ ] `gl-mwsr` dans `WebGlRenderer` ; module de constantes partagées ; test de conformité [`medium`]
 - [ ] `createRenderer`, `NO_WEBGPU_ALGOS`, `ENHANCER_LADDER` et migration de `mw_enhancer_rung`, `pickAutoEnhancer` derrière un drapeau [`medium`]
 - [ ] Menu debug, i18n (en, fr, zh), overlay, worker (`algo`, `chroma444`) [`low`]
