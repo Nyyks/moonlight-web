@@ -52,8 +52,6 @@
  * (`fragment.constants`), the laboratory per cell (`mwsr:orient=0;...`).
  */
 export const MWSR_OVERRIDE_SPEC = Object.freeze({
-    /** 1: branch after the vote; 0: no branch, same pixels (a timing A/B). */
-    EARLY_OUT: ['u32', 1],
     /** 1: paint the vote (white = edge quad, black = flat) instead of the picture. */
     SHOW: ['u32', 0],
     /** Weight of each tap along the edge, at full coherence and strength. */
@@ -140,19 +138,27 @@ fn L(c : vec2i) -> vec3f {
  * uniform block of mwsrUniforms(). Explicit LOD and clamp-to-edge sampling
  * only, so the samples may sit in the non-uniform branch; the derivatives are
  * taken before it, in uniform control flow, as WGSL requires.
- * @param {{feed?: 'tex'|'ext'}} [opts] 'tex' reads a texture_2d<f32> (HDR
- *   paths, laboratory); 'ext' the decoded frame's texture_external (SDR, no
- *   pass 0).
+ * @param {{feed?: 'tex'|'ext', half?: boolean}} [opts] 'tex' reads a
+ *   texture_2d<f32>: the product's path, after its pass 0 (the external
+ *   texture's two planes per sample made 'ext' lose to pass 0 + kernel on
+ *   the RTX, the 780M and the M1 alike, P2.3; 'ext' stays for the lab).
+ *   `half` runs the edge path's arithmetic in f16 (`enable f16`: the device
+ *   must have 'shader-f16'; worth 9-10 % on the 780M, nothing on NVIDIA); the
+ *   vote, the frame and the bound stay in f32.
  * @returns {string}
  */
-export function mwsrWgsl({ feed = 'tex' } = {}) {
+export function mwsrWgsl({ feed = 'tex', half = false } = {}) {
     const f = FEEDS[feed];
     if (!f) throw new Error('mwsr: feed ' + feed + '?');
+    const prelude = half ? 'enable f16;\n\n' : '';
+    const aliases = half
+        ? 'alias hf = f16;\nalias h3 = vec3<f16>;\nconst EPS_H : hf = 0.001h;'
+        : 'alias hf = f32;\nalias h3 = vec3<f32>;\nconst EPS_H : hf = 0.00001;';
     const overrides = Object.entries(MWSR_OVERRIDE_SPEC)
         .map(([k, [t, v]]) => `override ${k} : ${t} = ${wgslNumber(t, v)};`)
         .join('\n');
     const [lr, lg, lb] = MWSR_CONSTANTS.LUMA;
-    return `struct VSOut {
+    return `${prelude}struct VSOut {
     @builtin(position) pos : vec4f,
     @location(0) uv : vec2f,
 };
@@ -180,19 +186,24 @@ ${f.decl}
 
 ${f.sample}
 
+${aliases}
+
 ${overrides}
 
 const LUMA : vec3f = vec3f(${wgslNumber('f32', lr)}, ${wgslNumber('f32', lg)}, ${wgslNumber('f32', lb)});
-const EPS : f32 = ${wgslNumber('f32', MWSR_CONSTANTS.EPS)};
 
 fn luma(c : vec3f) -> f32 {
     return dot(c, LUMA);
 }
 
+fn lumah(c : h3) -> hf {
+    return dot(c, h3(LUMA));
+}
+
 // Five samples blended in the frame of an edge: the centre, a pair along it
 // (weight wT each, smoothing) and a pair across it (weight wX each, negative:
 // sharpening), the result bounded by the five.
-fn blend(C : vec3f, T1 : vec3f, T2 : vec3f, X1 : vec3f, X2 : vec3f, wT : f32, wX : f32) -> vec3f {
+fn blend(C : h3, T1 : h3, T2 : h3, X1 : h3, X2 : h3, wT : hf, wX : hf) -> h3 {
     let R = (C + wT * (T1 + T2) + wX * (X1 + X2)) / (1.0 + 2.0 * (wT + wX));
     let lo = min(min(C, T1), min(T2, min(X1, X2)));
     let hi = max(max(C, T1), max(T2, max(X1, X2)));
@@ -212,35 +223,38 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     if (SHOW == 1u) {
         return vec4f(vec3f(select(1.0, 0.0, flat)), 1.0);
     }
-    if (EARLY_OUT == 1u && flat) {
+    if (flat) {
         return vec4f(C, 1.0);
     }
     // Strength: none at 1:1 (the renderer copies the frame there), full from
-    // S_FULL on; none on a flat quad when there is no branch.
+    // S_FULL on.
     let smin = min(u.scale.x, u.scale.y);
-    let strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0) * select(1.0, 0.0, flat);
+    let strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
     // The taps along and across the edge the derivatives measure.
     let n = vec2f(gx, gy) * inverseSqrt(max(gx * gx + gy * gy, 1e-12));
     let dt = vec2f(-n.y, n.x) * u.texel * R_ALONG;
     let dn = n * u.texel * R_ACROSS;
-    let T1 = S(uv - dt);
-    let T2 = S(uv + dt);
-    let X1 = S(uv - dn);
-    let X2 = S(uv + dn);
-    let lT1 = luma(T1);
-    let lT2 = luma(T2);
-    let lX1 = luma(X1);
-    let lX2 = luma(X2);
+    // From here the arithmetic is hf (f32, or f16 when the module says so).
+    let Ch = h3(C);
+    let T1 = h3(S(uv - dt));
+    let T2 = h3(S(uv + dt));
+    let X1 = h3(S(uv - dn));
+    let X2 = h3(S(uv + dn));
+    let lCh = hf(lC);
+    let lT1 = lumah(T1);
+    let lT2 = lumah(T2);
+    let lX1 = lumah(X1);
+    let lX2 = lumah(X2);
     // Coherence: a step (|X2 - X1|) or a ridge (|X1 + X2 - 2C|) across,
     // against all the variation around: 1 on a clean edge or line, near
     // 0 on texture, grain and compression blocks.
     let step = abs(lX2 - lX1);
-    let ridge = abs(lX1 + lX2 - 2.0 * lC);
-    let variation = abs(lX2 - lC) + abs(lC - lX1) + abs(lT2 - lC) + abs(lC - lT1) + EPS;
-    let a = max(step, ridge) / variation * strength;
-    let wT = W_ALONG * a;
-    let wX = max(-W_ACROSS * u.sharp * a, W_MIN);
-    var R = blend(C, T1, T2, X1, X2, wT, wX);
+    let ridge = abs(lX1 + lX2 - 2.0 * lCh);
+    let variation = abs(lX2 - lCh) + abs(lCh - lX1) + abs(lT2 - lCh) + abs(lCh - lT1) + EPS_H;
+    let a = max(step, ridge) / variation * hf(strength);
+    let wT = hf(W_ALONG) * a;
+    let wX = max(-hf(W_ACROSS) * hf(u.sharp) * a, hf(W_MIN));
+    var R = vec3f(blend(Ch, T1, T2, X1, X2, wT, wX));
     if (DERING == 1u) {
         // The exact bound: the four input texels around the pixel, the
         // footprint of its bilinear sample.

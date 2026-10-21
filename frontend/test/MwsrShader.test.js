@@ -37,11 +37,28 @@ describe('the mwsr shader text', () => {
     it('takes its derivatives before the branch, and samples with an explicit level only', () => {
         const fs = tex.slice(tex.indexOf('@fragment'));
         const vote = fs.indexOf('dpdxCoarse');
-        const branch = fs.indexOf('if (EARLY_OUT == 1u && flat)');
+        const branch = fs.indexOf('if (flat) {');
         expect(vote).toBeGreaterThan(0);
         expect(branch).toBeGreaterThan(vote);
         expect(fs.slice(branch)).not.toMatch(/dpd[xy]|fwidth/);
         expect(tex).not.toMatch(/textureSample\(/);
+    });
+
+    it('has a half-precision variant for the edge path only', () => {
+        const half = mwsrWgsl({ feed: 'ext', half: true });
+        expect(half.startsWith('enable f16;')).toBe(true);
+        expect(half).toContain('alias hf = f16;');
+        expect(half).toContain('alias h3 = vec3<f16>;');
+        expect(tex.startsWith('enable')).toBe(false);
+        expect(tex).toContain('alias hf = f32;');
+        // the vote and the frame stay in f32 whatever the variant
+        for (const text of [tex, half]) {
+            expect(text).toContain('let gx = dpdxCoarse(lC) * u.scale.x;');
+            expect(text).toContain('let n = vec2f(gx, gy) * inverseSqrt(');
+            expect(text).toContain('var R = vec3f(blend(Ch, T1, T2, X1, X2, wT, wX));');
+        }
+        const kernel = (s) => s.slice(s.indexOf('override '));
+        expect(kernel(half)).toBe(kernel(mwsrWgsl({ feed: 'tex', half: true })));
     });
 
     it('uses no gather, no discard, no loop, no dynamic indexing (plan §3.4)', () => {
