@@ -1306,8 +1306,8 @@ upscalers spatiaux.
 - [x] Détection par image (`scaleRegime.js`, la règle de taille des deux renderers, partagée), copie directe (la passe 0 HDR existe dans ses deux cibles dès la création), gouverneur en pause (`passthrough` dans l'observation : les minuteries repartent de zéro), overlay « Off (1:1) », dans `WebGpuRenderer` et `WebGlRenderer`
 - [x] Tests `vitest` : `scaleRegime.test.js` (ajustement, plafond, 1:1 exact contre presque-1:1), `EnhancerGovernor.test.js` (ni descente ni remontée sur une fenêtre de copies, horloge remise à la reprise)
 - [x] Labo (`scaler_lab.py --p1`, le 20/10 sur SwiftShader puis RTX 5060 Ti, rapport `upscaler-mwsr-p1.md`) : chaîne du produit à 1:1 = 0,030-0,032 ms pour SGSR1, NIS et FSR1 comme pour `off` (avant P1 : 0,11 / 0,38 / 0,29), en lot comme à 60 i/s ; passage 1:1 ↔ ×2 à chaque image : 32 copies et 32 passages du noyau sur 64 draws, aucune image perdue, noyau à ×2 inchangé. **C7 tenue au labo** ; l'overlay reste à voir sur la `--dev`
-- [ ] Mesure plein écran DualRTX : blit WebGPU, blit WebGL2, Canvas2D, au clic → photon [`high`]
-- [ ] Décision de Bruno : blit, ou deux canvas (hors v0.4.1 sinon)
+- [x] Mesure plein écran DualRTX, clic → photon (21/10, rapport P1 §6) : à 1:1 2560×1440 à 60 Hz, décodage sur l'AMD, médianes Canvas2D 26,9 ms, copie 1:1 WebGPU 27,6 ms, copie 1:1 WebGL2 30,6 ms, égales à la dispersion série à série près (± 3 ms) ; l'overlay « Off (1:1) » vu sur la `--dev`
+- [ ] Décision de Bruno : blit, ou deux canvas (hors v0.4.1 sinon) — recommandation : **blit** (aucun écart mesurable)
 
 **P2 — Le noyau**
 - [ ] P2.1 noyau de base WGSL sur `texture_2d` dans le labo : luma, vote, direction, cohérence, fenêtre, borne, netteté fusionnée ; première table de constantes [`max`]

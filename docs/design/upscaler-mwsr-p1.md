@@ -2,9 +2,8 @@
 
 > Phase P1 du plan `upscaler-mwsr.md` (§5, §9, critère C7 du §8.1). Code le 20/10/2026
 > (`36edf6ec`), labo joué le 20/10 après-midi sur DualRTX, SwiftShader puis RTX 5060 Ti, au
-> créneau donné par la session d'orchestration. Ce rapport couvre la **moitié labo** de P1 :
-> la porte C7 mesurée sur la chaîne du produit. La mesure clic → photon plein écran et la
-> décision « blit ou deux canvas » restent à faire (§5).
+> créneau donné par la session d'orchestration ; mesure plein écran clic → photon le 21/10 au
+> matin, au créneau de Bruno (§6). Reste la décision « blit ou deux canvas » (§6).
 
 ## 1. Ce que P1 a changé dans le client
 
@@ -133,17 +132,53 @@ cellule `chain-*`.
 |---|---|
 | temps GPU du renderer = celui de `off` ± 5 % | **tenu** sur le RTX (0,030-0,032 contre 0,032, dans la dispersion), en lot et à 60 i/s ; SwiftShader concorde |
 | aucune image perdue au passage 1:1 ↔ échelle | **tenu** : 64/64 draws, alternance stricte, aucune erreur, noyau à ×2 inchangé |
-| overlay « Off (1:1) » | codé et testé (clé `stream.enhancerPassthrough`), **pas visible au labo** (pas d'overlay) : à voir sur la `--dev` de DualRTX, qui sert `e6b02c01` et donc P1 — un flux à 1:1 avec un enhancer coché doit l'afficher |
+| overlay « Off (1:1) » | codé et testé (clé `stream.enhancerPassthrough`), pas visible au labo ; **vu le 21/10 sur la `--dev` de DualRTX** (frontend `11d1e2d2` ⊃ P1) : flux 2560×1440 sur un écran 2560×1440, enhancer WebGPU coché, l'overlay lit « Enhancer: Off (1:1) » et le journal `renderer=webgpu algo=sgsr` |
 
-**Reste de P1** (plan §9) :
+## 6. Plein écran, clic → photon (DualRTX, 21/10/2026)
 
-- **La mesure plein écran DualRTX, clic → photon** : blit WebGPU (le renderer à 1:1), blit WebGL2,
-  Canvas2D, sur l'écran du produit. Les chiffres ci-dessus disent que la copie elle-même vaut
-  0,03 ms de GPU : tout l'écart entre les trois présentateurs tiendra dans la présentation
-  (soumission WebGPU de 3-4 ms de mur, `drawImage` de Canvas2D, `texSubImage2D` de WebGL2), que
-  seule cette mesure voit. C'est un créneau de banc avec écran, à décrire à la session
-  d'orchestration (Chrome dédié, M27Q, sonde clic → photon).
-- **La décision de Bruno** : blit (le contournement tel quel) ou deux canvas (hors v0.4.1 sinon) ;
-  recommandation du plan : blit si l'écart de médiane à Canvas2D est sous 1 ms.
-- Le jumeau WebGL2 n'est pas mesuré par le labo : sa détection est la même, son chemin de dessin
-  sera vu à cette mesure.
+Le créneau de 40 min donné par Bruno au matin du 21/10, la machine sans autre charge. Le
+dispositif est celui du banc de latence du dépôt (`scripts/bench/` : `kiosk.ps1`, `cdp.py`,
+`click-target.ps1`, `probe-run.ps1`, sonde `mwLatency` de `LatencyProbe.js`) :
+
+- **Hôte** : la `--dev` de DualRTX (`build\MoonlightWeb.exe --dev --autostart`, frontend servi =
+  `11d1e2d2` du worktree `mw-59dev`, qui contient P1 ; hash du fichier servi vérifié contre
+  `git show`), relancée avec `latency_flag_enabled: true` pour le créneau et remise à `false`
+  après (drapeau lu au démarrage seulement). Elle encode « Display 1 » (M27Q 2560×1440 à 120 Hz,
+  NVENC sur le RTX 5060 Ti, HEVC, 60 i/s demandés) ; une fenêtre `still.html` animée sous la bande
+  du drapeau y fait couler des images (sans elle, un bureau fixe à 2 i/s laisse la sonde sans image
+  fraîche avant la moitié des clics : « no picture to sample »).
+- **Client** : Chrome 155 de banc, profil dédié, `--mute-audio`, kiosque plein écran sur l'écran
+  principal (DISPLAY5, 2560×1440 physiques), `--use-adapter-luid=0,88263` : `chrome://gpu` dit
+  l'AMD Radeon 780M `*ACTIVE*` et `requestAdapter()` rend l'AMD (`rdna`), donc décodage et rendu sur
+  l'iGPU, jamais sur le GPU qui encode ; l'écran étant sur le RTX, la présentation traverse les
+  adaptateurs, **pareil pour les trois présentateurs**. Flux en résolution `auto` = 2560×1440 :
+  canvas 2560×1440 à 2048×1152 CSS (DPR 1,25), **1:1 exact**.
+- **Les trois présentateurs**, par les réglages du client (`mw-streaming-settings`) : Canvas2D
+  (enhancer off, le défaut) ; la copie 1:1 WebGPU (enhancer on, `sgsr` : journal
+  `renderer=webgpu algo=sgsr`, overlay « Enhancer: Off (1:1) ») ; la copie 1:1 WebGL2 (enhancer on,
+  `gl-sgsr`, `renderer=webgl2`).
+- **La mesure** : un clic de chauffe jeté, puis 10 clics espacés de 1,5 s, attente 1 s ; séries
+  entrelacées A/B/C ; pointeur hôte parqué sur la cible inerte. Les échantillons rejetés par la
+  sonde (image absente avant le clic, drapeau non vu) sont écartés et comptés.
+
+| Présentateur à 1:1 | séries (clics retenus) | médiane | moyenne | p90 | min – max | médianes par série |
+|---|---|---|---|---|---|---|
+| Canvas2D | 2 (11/20) | **26,9 ms** | 28,5 | 38,7 | 21,4 – 39,4 | 26,9 · 25,1 |
+| copie 1:1 WebGPU (P1) | 3 (20/30) | **27,6 ms** | 29,7 | 39,6 | 19,3 – 51,9 | 21,7 · 27,9 · 27,3 |
+| copie 1:1 WebGL2 | 3 (21/30) | **30,6 ms** | 29,7 | 36,4 | 20,2 – 41,5 | 31,5 · 28,1 · 24,0 |
+
+Avant la fenêtre animée (bureau fixe, une série par présentateur, 4-5 clics retenus sur 10) :
+Canvas2D 31,8, WebGPU 24,2, WebGL2 30,2 ms de médiane ; une série Canvas2D perdue quand un
+premier kiosque de contenu plein écran a masqué le drapeau.
+
+**Lecture.** Les médianes série à série d'un même présentateur bougent de ± 3 ms (la cadence de
+capture rend la distribution bimodale, comme le banc du 06/09 l'avait noté) : les trois
+présentateurs sont **égaux à cette précision**, et l'écart de 1 ms du critère du plan n'est pas
+résoluble avec 10 clics par série. La copie 1:1 WebGPU ne coûte rien de mesurable au clic → photon
+par rapport à Canvas2D ; le « 4 ms de soumission WebGPU » du labo est une latence de pipeline que
+le clic → photon absorbe à 60 i/s (le temps mur de `draw()` n'est pas sur le chemin critique du
+photon tant qu'il tient dans la période). Le jumeau WebGL2 est au même niveau.
+
+**Reste de P1** : la décision de Bruno, blit (le contournement tel quel, dans les deux
+renderers) ou deux canvas (hors v0.4.1 sinon). **Recommandation : blit** — aucun écart mesurable,
+rien à construire, et le choix de Canvas2D quand l'enhancer est éteint reste celui d'aujourd'hui.
