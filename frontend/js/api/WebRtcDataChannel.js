@@ -36,6 +36,7 @@ import { RtpStallWatch, receivedPackets, rtpStallWatchOn } from './RtpStallWatch
 import { attachRtpVideo, passEncodedAudio, rtpLegacyApi } from './RtpVideo.js';
 import { closeHidChannel, createHidChannel, sendHidFrame } from '../hid/hidWire.js';
 import { setAudioJitterBufferTarget } from '../util/AudioJitter.js';
+import { armDscpCarrier, dscpCarrierMode, prepareDscpCarrier } from '../util/DscpCarrier.js';
 
 /**
  * Describe a WebSocket close code for diagnostic logging.
@@ -1236,6 +1237,10 @@ export class WebRtcDataChannel {
             console.log('[WebRTC] Remote description set (offer)');
             await this._flushPendingCandidates();
 
+            // The bench's silent carrier (DscpCarrier.js), off by default.
+            const carrier = dscpCarrierMode();
+            prepareDscpCarrier(this.pc, carrier);
+
             // Create answer. Stereo Opus decode for the RTP audio track:
             // without stereo=1 in the answer fmtp the browser decodes MONO
             // and downmixes (L+R)/2 → ~-6 dB quieter.
@@ -1246,6 +1251,7 @@ export class WebRtcDataChannel {
             });
             await this.pc.setLocalDescription(modifiedAnswer);
             console.log('[WebRTC] Local description set (answer), sending...');
+            armDscpCarrier(this.pc, carrier);
 
             // Start ICE timeout: if ICE doesn't reach connected/completed
             // within ICE_TIMEOUT_MS, the connection has failed (likely UDP

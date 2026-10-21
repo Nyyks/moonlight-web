@@ -17,6 +17,7 @@
 #pragma once
 
 #include <array>
+#include <cstdlib>
 #include <string>
 
 // The DSCP our WebRTC packets leave with (plan « le son et la priorité des
@@ -71,6 +72,17 @@ inline std::array<unsigned int, 3> resolve(bool marking, const std::string& over
     if (i == 3) return out;
     const unsigned int v = marking ? kAf41 : 0;
     return {v, v, v};
+}
+
+/// The bench's silent carrier (MW_DSCP_CARRIER=1, off by default): the stream's
+/// sound is offered sendrecv instead of sendonly, so a browser with the bench key
+/// mw_dscp_carrier (frontend DscpCarrier.js) can answer it with a sender of its
+/// own at a high network priority, and mark what it sends on the way up. What
+/// arrives on that track is dropped.
+inline bool carrierOffered()
+{
+    const char* v = std::getenv("MW_DSCP_CARRIER");
+    return v && std::string(v) == "1";
 }
 
 /// Apply the above to libdatachannel, process-wide. Called before each peer

@@ -433,7 +433,11 @@ void MediaTrackRelay::createTracksAndChannels()
     // MONO Opus decoder and downmixes the stereo Sunshine stream (L+R)/2, which
     // plays ~-6 dB quieter than moonlight-qt and loses the stereo image.
     {
-        auto audioDesc = rtc::Description::Audio("audio", rtc::Description::Direction::SendOnly);
+        // Sendrecv only for the bench's silent carrier (PacketMarking::carrierOffered).
+        const bool carrier = PacketMarking::carrierOffered();
+        auto audioDesc =
+            rtc::Description::Audio("audio", carrier ? rtc::Description::Direction::SendRecv
+                                                     : rtc::Description::Direction::SendOnly);
         audioDesc.addOpusCodec(111, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1");
 
         // Declared before addTrack for the same reason as the video SSRC above:
@@ -451,6 +455,11 @@ void MediaTrackRelay::createTracksAndChannels()
             // RTP packet (complements Opus FEC/PLC) with a small history buffer.
             packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>(64));
             m_AudioTrack->setMediaHandler(packetizer);
+            if (carrier) {
+                // The carrier's packets carry nothing: dropped as they come.
+                m_AudioTrack->onMessage([](rtc::message_variant) {});
+                qInfo() << "[MediaTrackRelay] Audio offered sendrecv (MW_DSCP_CARRIER bench key)";
+            }
 
             m_AudioTrack->onOpen([this]() { qInfo() << "[MediaTrackRelay] Audio Track open"; });
             m_AudioTrack->onClosed([this]() { qInfo() << "[MediaTrackRelay] Audio Track closed"; });

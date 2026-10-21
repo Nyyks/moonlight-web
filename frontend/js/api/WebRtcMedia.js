@@ -32,6 +32,12 @@ import {
 import { defaultIceServers } from './IceServers.js';
 import { isViewMessage } from './hostMessages.js';
 import { setAudioJitterBufferTarget } from '../util/AudioJitter.js';
+import {
+    armDscpCarrier,
+    dscpCarrierMode,
+    prepareDscpCarrier,
+    recvonlyExceptCarrier,
+} from '../util/DscpCarrier.js';
 
 /**
  * Describe a WebSocket close code for diagnostic logging.
@@ -785,6 +791,10 @@ export class WebRtcMedia {
             console.log('[WebRtcMedia] Remote description set (offer)');
             await this._flushPendingCandidates();
 
+            // The bench's silent carrier (DscpCarrier.js), off by default.
+            const carrier = dscpCarrierMode();
+            prepareDscpCarrier(this.pc, carrier);
+
             // Create answer with receive-only constraints (lowest latency)
             const answer = await this.pc.createAnswer({
                 offerToReceiveVideo: true,
@@ -793,8 +803,9 @@ export class WebRtcMedia {
 
             // Apply low-latency SDP transformations before setLocalDescription
             let answerSdp = answer.sdp;
-            // Direction: receive only (client is viewer, never sends media)
-            answerSdp = answerSdp.replace(/a=sendrecv/g, 'a=recvonly');
+            // Direction: receive only (client is viewer, never sends media),
+            // but for the bench's silent carrier
+            answerSdp = recvonlyExceptCarrier(answerSdp, carrier);
             // Strip ULPFEC/RED (redundant FEC adds bandwidth & latency). Only the
             // FEC payload types' lines are removed — the video codec's fmtp
             // (packetization-mode/profile-level-id) is kept intact.
@@ -822,6 +833,7 @@ export class WebRtcMedia {
             });
             await this.pc.setLocalDescription(modifiedAnswer);
             console.log('[WebRtcMedia] Local description set (answer, low-latency), sending...');
+            armDscpCarrier(this.pc, carrier);
 
             // Send answer via signaling WS, signed when this browser is paired.
             const answerMsg = {
