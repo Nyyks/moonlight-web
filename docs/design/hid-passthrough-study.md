@@ -3,22 +3,17 @@
 > Étude du 29/09/2026. **Aucun code.** Elle remplace l'étude « retour de force »
 > (ex-T5 du plan radios, fusionnée le même jour à la demande de Bruno).
 >
-> **Statut au 04/10/2026** : le plan est lancé (`flickering-dazzling-feigenbaum.md`).
-> - Le code de P0 à P2 est écrit :
->   - l'encodeur et la validation des descripteurs ;
->   - le pilote « MoonlightWeb Virtual HID » (WinUHid, MIT, `backend/native-host/third_party/winuhid` et
->     `drivers/vhid`), pour l'instant **signé en mode test seulement** ;
->   - `HidPassthrough` dans le moteur natif ;
->   - le canal `hid` (id 4) dans les relais ;
->   - le panneau « Transmettre un périphérique tel quel » dans Réglages → Manettes.
-> - Vérifié : un G923 recréé sous Windows (UM790Pro en mode test) est lu par le système
->   (046D:C26E, `joyGetPosEx`).
-> - Restent :
->   - le banc `uhid` sous Linux ;
->   - l'essai en jeu de Bruno (porte P1) ;
->   - la signature du produit, puis la pose du pilote par l'installeur ;
->   - le retour de force (P3, P4).
-> - Écart à la §3.2 : SignPath a refusé MoonlightWeb (02/10).
+> **Statut au 20/10/2026** : le plan (`flickering-dazzling-feigenbaum.md`) a franchi ses portes P0, P1, P2
+> et P4.
+> - Windows : le pilote « MoonlightWeb Virtual HID » (WinUHid, MIT, `backend/native-host/third_party/winuhid`
+>   et `drivers/vhid`) est posé par l'installeur avec notre propre certificat, sans mode test, Secure Boot
+>   actif compris. Pas sur ARM64 (§3.2).
+> - Linux : `uhid`, et `uinput` pour un volant à retour de force.
+> - Essais de Bruno, sous Windows et sous Linux : le G923 dans ACC, retour de force compris, et la TX12 dans
+>   Liftoff.
+> - Le volant recréé porte ses propres identifiants PnP (§3.3, 20/10).
+> - Reste : un vrai volant HID PID (P3).
+> - Écart à la §3.2 : SignPath a refusé MoonlightWeb (02/10), et Bruno ne paie pas de signature (11/10).
 >
 > Légende : **[V]** vérifié (code Chromium, documentation officielle, dépôt du
 > projet cité ou notre propre dépôt) ; **[S]** supposition, à confirmer au banc.
@@ -247,6 +242,29 @@ utilisateur sans pilote :
   livré avec une signature de test : on le forke et on le signe.
 - Un pilote UMDF qui plante ne fait pas d'écran bleu ; il fait tomber son
   processus hôte.
+
+**Les identifiants PnP du volant recréé [V, banc UM790Pro du 20/10/2026].**
+- Sans `HardwareIDs`, VHF nomme la source `VHF\HID_DEVICE_SYSTEM_VHF`, et ses
+  collections `HID\HID_DEVICE_SYSTEM_VHF&ColNN`.
+- VHF ajoute toujours `HID_DEVICE_SYSTEM_VHF` en tête des identifiants donnés :
+  `hidvhf.inf`, le seul INF de la source, se lie donc dans tous les cas.
+- Le premier identifiant donné devient celui de l'appareil et doit porter un
+  énumérateur (`VHF\…`). Sans lui, aucun appareil n'apparaît : c'était le « aucun
+  enfant » du 04/10.
+- hidclass nomme chaque collection « HID\ », plus ce premier identifiant sans son
+  énumérateur, plus « &ColNN ».
+- L'hôte donne `VHF\MOONLIGHTWEB_VHID&VID_046D&PID_C26E`, puis
+  `VHF\VID_046D&PID_C26E` (`VhidDevice.cpp`). Résultat :
+  - les collections s'appellent `HID\MOONLIGHTWEB_VHID&VID_046D&PID_C26E&COL01` à
+    `COL03` ;
+  - elles se lient à `input.inf` comme avant et gardent tous les anciens
+    identifiants ;
+  - `HidD_GetAttributes` rend toujours 046D:C26E.
+- La chaîne de produit reste « HID VHF Driver » : c'est VHF qui la fournit.
+- Essai de Bruno : ACC garde ses commandes sans remappage, retour de force
+  compris.
+- Au passage, la bibliothèque cliente de WinUHid mesurait mal une liste de deux
+  identifiants ou plus : elle lisait au-delà du tampon. Corrigé (`7bc375b6`).
 
 **Pourquoi usbip-win2 reste en réserve.**
 - Il donne une identité USB complète : descripteurs de périphérique et de
