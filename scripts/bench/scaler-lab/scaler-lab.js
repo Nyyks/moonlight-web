@@ -66,10 +66,11 @@ const CELL_SETS = {
   ],
   chain: ["chain-off", "chain-sgsr", "chain-nis", "chain-fsr1"],
   // The mwsr kernel (plan §3.2): `mwsr[:key=val;key=val…]` sets its
-  // overrides (early, show, walong, wacross, ralong, racross, sfull, wmin, dering)
+  // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering),
+  // uniforms (tau, sharp) and half=1 (the f16 module; the page needs f16=1)
   // and uniforms (tau, sharp); `ext-mwsr` reads the external texture (no
   // pass 0), `blit+mwsr` pays the pass 0 first.
-  mwsr: ["mwsr", "mwsr:dering=0", "mwsr:early=0", "ext-mwsr"],
+  mwsr: ["mwsr", "mwsr:dering=0", "mwsr:half=1", "blit+mwsr"],
 };
 
 const VS = /* wgsl */ `
@@ -1012,7 +1013,6 @@ export async function runLab(p, log = () => {}) {
   // The mwsr kernel, one pass to `out`; the cell's options become overrides
   // (pipeline constants) and uniforms. The override defaults are the text's.
   const MWSR_KEYS = {
-    early: "EARLY_OUT",
     show: "SHOW",
     walong: "W_ALONG",
     wacross: "W_ACROSS",
@@ -1025,14 +1025,18 @@ export async function runLab(p, log = () => {}) {
   const mwsrPass = (name, feed, opts, srcView) => {
     const over = {};
     const uni = {};
+    let half = false;
     for (const [k, v] of Object.entries(opts)) {
       if (k === "tau" || k === "sharp") uni[k] = Number(v);
+      else if (k === "half") half = v === "1";
       else if (k in MWSR_KEYS) over[MWSR_KEYS[k]] = Number(v);
       else throw new Error(name + ": option " + k + "?");
     }
+    if (half && !device.features.has("shader-f16"))
+      throw new Error(name + ": the device has no shader-f16 (f16=1 asks for it)");
     const pl = pipeline(
       name,
-      mwsrWgsl({ feed }),
+      mwsrWgsl({ feed, half }),
       "out",
       ["vs", "fs"],
       feed === "ext" ? plExt : plTex,

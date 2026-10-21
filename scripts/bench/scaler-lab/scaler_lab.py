@@ -70,16 +70,16 @@ P1_CASES = [
 
 # The P2 set (--p2; upscaler-mwsr.md §3, §6, criteria C1-C2): the mwsr kernel
 # next to the floor (one, five and nine bilinear taps), with and without the
-# exact bound and the branch, on the external texture, and the shipped kernels;
+# exact bound, in f16, after pass 0, on the external texture, and the shipped kernels;
 # three pictures at ×2, text at ×1.33.
-P2_CELLS = ("tex-s1,tex-s5,tex-s9,mwsr,mwsr:dering=0,mwsr:early=0,"
-            "ext-s1,ext-s5,ext-mwsr,ext-mwsr:dering=0,sgsr-repo,fsr1,nis")
+P2_CELLS = ("tex-s1,tex-s5,tex-s9,mwsr,mwsr:dering=0,mwsr:half=1,blit%2Bmwsr,blit%2Bmwsr:half=1,"
+            "ext-s1,ext-mwsr,sgsr-repo,fsr1,nis")
 P2_CASES = [
-    ("x2-text", "in=1280x720&out=2560x1440&content=text&cells=%s&rounds=3" % P2_CELLS),
-    ("x2-ui", "in=1280x720&out=2560x1440&content=ui&cells=%s&rounds=3" % P2_CELLS),
-    ("x2-game", "in=1280x720&out=2560x1440&content=game&cells=%s&rounds=3" % P2_CELLS),
-    ("x133-text", "in=1920x1080&out=2560x1440&content=text&cells=%s&rounds=3" % P2_CELLS),
-    ("x133-game", "in=1920x1080&out=2560x1440&content=game&cells=%s&rounds=3" % P2_CELLS),
+    ("x2-text", "in=1280x720&out=2560x1440&content=text&cells=%s&rounds=3&f16=1" % P2_CELLS),
+    ("x2-ui", "in=1280x720&out=2560x1440&content=ui&cells=%s&rounds=3&f16=1" % P2_CELLS),
+    ("x2-game", "in=1280x720&out=2560x1440&content=game&cells=%s&rounds=3&f16=1" % P2_CELLS),
+    ("x133-text", "in=1920x1080&out=2560x1440&content=text&cells=%s&rounds=3&f16=1" % P2_CELLS),
+    ("x133-game", "in=1920x1080&out=2560x1440&content=game&cells=%s&rounds=3&f16=1" % P2_CELLS),
 ]
 
 
