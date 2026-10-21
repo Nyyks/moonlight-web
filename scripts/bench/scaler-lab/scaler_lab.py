@@ -421,8 +421,14 @@ def main():
                 inp = metrics.load(in_path)
                 rows = []
                 for name in res.get("dumped", []):
+                    cell = name[len(base) + 1:]
+                    if "show" in cell:
+                        # The vote painted (SHOW 1): the share of output pixels on the edge path.
+                        share = float(metrics.load(os.path.join(a.dir, name + ".png"))[..., 1].mean())
+                        print("  %-12s edge path %5.1f%% of the pixels" % (cell, 100 * share))
+                        continue
                     r = metrics.measure(gt, inp, metrics.load(os.path.join(a.dir, name + ".png")))
-                    r["cell"] = name[len(base) + 1:]
+                    r["cell"] = cell
                     rows.append(r)
                     print("  %-12s PSNR %6.2f  SSIM %.4f  SSIM Y %.4f  overshoot %5.2f%%  centre PSNR %6.2f SSIM %.4f  FLIP %s" % (
                         r["cell"], r["psnr"], r["ssim"], r["ssimY"], 100 * r["overshoot"],

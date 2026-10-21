@@ -1023,6 +1023,8 @@ export async function runLab(p, log = () => {}) {
     wmin: "W_MIN",
     dering: "DERING",
     shape: "SHAPE",
+    tier: "TIER",
+    wcorner: "W_CORNER",
     kshape: "K_SHAPE",
   };
   const mwsrPass = (name, feed, opts, srcView) => {

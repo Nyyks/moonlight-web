@@ -178,3 +178,15 @@ Mur par itération sous contre-pression (`back`) / GPU `-single` (quantum 65,5 �
 contre `blit` + `mwsr` ≈ 0,42 ; 0,23 contre 0,32 sur `game` : sur Apple, passe 0 par défaut (P2.3,
 `override`). Chaîne 1:1 du produit (P1) : une passe, 48 copies / 48, `draw()` 1,3-1,5 ms. Détail :
 `docs/design/upscaler-mwsr-p0.md` §4 quater.
+
+## 2026-10-21 — P2.2 ouverte (go de Bruno par 59) : J5, le palier qualité
+
+**Hypothèse H5.** Ce qui manque à ×2 est de la reconstruction (SSIM −0,005…−0,007 contre FSR1 sur
+l'étalon et `game`), pas de la netteté. Avec les **quatre coins de la grille 3×3 tournée** (`TIER 1`,
+neuf échantillons sur les quads de contour), pondérés en fenêtre séparable (poids en travers × poids
+le long, `W_CORNER` pour les forcer), un contour diagonal est lissé le long de lui-même et affûté en
+travers comme un contour droit : SSIM remonte sur l'étalon sans perdre le texte. À mesurer :
+`TIER 1` × `W_ALONG {0,15 ; 0,3}` × `R_ALONG {0,5 ; 1}` × `W_CORNER {1 ; 2}` contre la table, sur les
+sept cas ; puis le coût (RTX : `tex-s9` 0,085 ms sur `text` ; M1 : 0,36 ms, au niveau de SGSR1 — le
+palier qualité est un choix d'ordinateur). Outil : `mwsr:show=1` dans `--quality-cells` imprime la
+part des pixels sur le chemin contour par image.
