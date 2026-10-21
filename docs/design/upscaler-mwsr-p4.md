@@ -126,6 +126,11 @@ le journal de la page et fait échouer le cas.
   et les créneaux de Bruno pour le Mac, l'iPhone (WebGL2 seul y était la production SDR), le realme
   et `mw-arm` (WebGL2 seul : Adreno 618 sans WebGPU). C'est aussi là que le drapeau `mw_mwsr` se
   joue sur la `--dev` (l'overlay, le menu, les deux saveurs, le 1:1).
+- **La réduction du jumeau WebGL2** moyenne en lumière logicielle (grille 2×2, 1,7 à 2,2 × le
+  plancher sur le 780M, J14) là où le WebGPU a ses vues au prix du plancher. Une piste pour la porte,
+  à mesurer et non à livrer à l'aveugle : téléverser la `VideoFrame` dans une texture
+  `SRGB8_ALPHA8` (l'échantillonneur décode) et encoder la sortie dans le shader (trois `pow` par
+  pixel), si le chemin de téléversement de Chrome reste le rapide sur ce format interne.
 - **Le realme** : `ext-mwsr` (l'externe y est RGBA : la passe 0 — 0,9 ms — serait évitable sur cette
   famille d'Android, décision par `frame.format`) ; le 4×4 sous ×0,25.
 - **`malioc`** sur le texte GLSL (reporté depuis P2.2) : non installé sur DualRTX.
