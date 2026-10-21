@@ -819,3 +819,67 @@ délai (un cas sur douze côté WebGL2, 18:10) — import dynamique rapporté en
 par la règle des transitoires), et une page muette au délai est rechargée une fois. Verdict H19 :
 **à confirmer par la prochaine exécution de la CI** ; si la chaîne y reste fausse avec la texture relue
 directement, c'est le renderer sur cette plateforme et non plus la lecture.
+
+## 2026-10-21 — J20, la porte P4 sur ordinateur : WebGPU contre WebGL2 à shader égal
+
+**La question** (plan §3.6, §8.1, wiki 15.3) : avec le même algorithme dans les deux renderers du
+produit, quelle saveur en SDR par classe d'appareil ? Le jeu `--p4` (`p4_flows.py`) joue les chaînes du
+produit `off`, SGSR1, FSR1 et `mwsr` dans les deux saveurs, sur les mêmes images (douze images H.264
+décodées), à ×2 (texte, jeu, interface), ×1,33 et ×0,67 (4K → 1440p), saturé (`back`) et à 60 i/s
+(`tick`), 48 draws par chaîne en deux tours ABBA. Trois chiffres par draw : **`submit`**, le temps du
+thread principal (WebGPU : `lastDraw.submitMs` du renderer, encodage et soumission ; WebGL2 : la durée de
+`draw()`, qui ne fait qu'empiler) ; **`done`**, du début du draw à la fin du GPU (WebGPU : `draw()`
+lui-même, qui attend `onSubmittedWorkDone` ; WebGL2 : une barrière `fenceSync` sondée tâche par tâche) ;
+**`gpu`**, le temps du GPU seul (WebGPU : les passes horodatées, passe 0 et noyau ; WebGL2 :
+`EXT_disjoint_timer_query_webgl2` autour du draw, téléversement compris).
+
+Trois pièges de l'instrument, trouvés sur SwiftShader avant tout GPU : (1) **`gl.finish()` de Chrome est
+un flush** (« Intentionally a flush, not a finish » dans `webgl_rendering_context_base.cc`) : au premier
+essai `done` valait `submit` (0,16 ms) quand l'horodatage lisait 28 ms ; la barrière sondée par
+`getSyncParameter` (ce que lit le renderer lui-même pour savoir si le GPU est en retard) rend 38 ms,
+cohérent ; (2) le niveau H.264 de l'encodeur du labo (5.0, 22 080 macroblocs) refuse la 4K : niveau 5.1
+au-delà ; (3) la page `gl=1` ignorait `pace=tick`. L'horodatage WebGL2 existe sur ANGLE D3D11 (RTX,
+780M) et sur ANGLE-SwiftShader.
+
+**Passes** (go de 59, un GPU à la fois, Chrome sans tête épinglé par LUID, sonde WebGPU + WebGL2 avant
+chaque jeu) : 780M 21:44-21:45 (dix pages, une minute) puis ×0,67 à 21:49 ; RTX 21:46-21:48 ; aucun
+processus restant. À 60 i/s, p50 en ms, `done` WebGPU / WebGL2 (`gpu` entre parenthèses) :
+
+| cas | GPU | `off` | SGSR1 | FSR1 | **`mwsr`** |
+|---|---|---|---|---|---|
+| ×2 texte | RTX | 4,37 / 2,09 (0,03 / 0,12) | 4,06 / 1,77 (0,09 / 0,21) | 4,65 / 3,23 (0,57 / 1,42) | **4,29 / 2,01** (0,07 / 0,34) |
+| ×2 jeu | RTX | 4,24 / 2,08 | 3,61 / 1,64 | 4,50 / 3,06 | **3,99 / 1,77** (0,05 / 0,09) |
+| ×1,33 texte | RTX | 5,44 / 3,26 | 4,07 / 3,19 | 4,40 / 3,20 | **4,09 / 2,16** (0,14 / 0,12) |
+| ×0,67 texte | RTX | 8,49 / 1,87 | 4,45 / 1,75 | 4,04 / 1,92 | **4,59 / 3,28** (0,21 / 0,23) |
+| ×2 texte | 780M | 4,62 / 4,09 (0,53 / 0,66) | 6,84 / 6,06 (2,81 / 2,69) | 13,34 / 10,55 (9,42 / 7,92) | **5,61 / 4,75** (1,59 / 1,38) |
+| ×2 jeu | 780M | 4,34 / 3,84 | 6,59 / 5,70 | 13,75 / 11,17 | **5,00 / 4,25** (0,81 / 0,81) |
+| ×2 interface | 780M | 4,57 / 3,94 | 6,00 / 4,42 | 13,50 / 10,93 | **5,45 / 4,13** (0,84 / 0,83) |
+| ×1,33 texte | 780M | 5,05 / 5,57 | 7,75 / 7,00 | 13,78 / 12,24 | **6,30 / 5,80** (1,57 / 1,40) |
+| ×0,67 texte | 780M | 7,10 / 8,88 (0,70 / 1,57) | 9,47 / 10,27 | 16,08 / 15,12 | **7,59 / 9,30** (1,57 / 1,98) |
+
+Saturé : RTX `mwsr` 3,3-3,7 ms (WebGPU) contre 0,81-0,87 (WebGL2), 4 × ; 780M 3,4-4,7 contre 2,6-4,1,
+1,15-1,5 ×. Thread principal à 60 i/s : égal, 0,25-0,35 ms p50 des deux côtés (RTX ×1,33 : 0,28 contre
+0,44 pour WebGL2) ; le p99 de 48 draws est leur maximum, et des arrêts isolés de 100 à 300 ms
+apparaissent dans les deux saveurs (une image sur quarante-huit, pas une tendance).
+
+**Lecture.** Le shader est à égalité sur le GPU : `mwsr` WGSL et GLSL à ±15 % l'un de l'autre, le
+WebGL2 comptant en plus le téléversement de l'image. Ce qui sépare les saveurs est la chaîne autour :
+l'import de la texture externe, la soumission et l'attente `onSubmittedWorkDone` coûtent 4 ms sur le RTX
+quelle que soit la passe (`off` compris, 0,03 ms de GPU pour 4,4 ms de `done`), et 0,5 à 1,3 ms de plus
+que WebGL2 sur le 780M. L'observation du wiki 15.3 tient avec le nouveau shader : **sur ordinateur,
+WebGL2 reste la saveur SDR** (RTX 1,9-2,3 × à 60 i/s ; 780M 1,1-1,2 ×, « égalité dans les marges, la
+production reste », WebGL2 saturé). Une exception, à peser en P6 : la **réduction 4K → 1440p sur le
+780M**, où les vues sRGB (un échantillon décodé par le matériel, J15) et un import 4K moins cher donnent
+WebGPU 7,6 ms contre 9,3 (0,82 ×, GPU 1,57 contre 1,98) ; sur le RTX, où le GPU n'est pas le goulot, WebGL2
+garde l'avantage même là (1,40 ×). Verdict H20 : **WebGL2 en SDR sur RTX et 780M**, la décision par
+classe d'appareil reste ouverte pour Apple et Mali (créneaux de Bruno, mêmes liens `--serve --p4`).
+Tables complètes : `bench-out/scaler-lab/p4rtx-gate.md`, `p4amd-gate.md` (`--p4-table`).
+
+**Le drapeau `mw_mwsr` sur la `--dev` de DualRTX** (22:04-22:14, créneau de 59, `--dev` de 09e31b38
+vérifiée au hachage, deux Chrome sans tête : l'un tout SwiftShader, l'autre ANGLE sur l'AMD épinglé et
+WebGPU sur SwiftShader, décodage logiciel, flux de l'écran 1, image vive, aucune erreur console) : `auto`
++ drapeau → « WebGL MWSR » (684×384 → ×1,34) ; `auto` sans drapeau → « WebGL FSR1 » ; `gl-mwsr` choisi →
+« WebGL MWSR » ; `mwsr` choisi sans WebGPU → Canvas2D (le repli de toute saveur WebGPU) ; `mwsr` choisi
+avec WebGPU → « MWSR », renderer créé avec les vues sRGB ; flux 896×504 dans un canvas 896×504 → « Off
+(1:1) ». Le menu debug des deux saveurs n'apparaît qu'en mode debug du serveur (réglage de la `--dev`
+non touché) : couvert par les tests unitaires.

@@ -758,7 +758,11 @@ WebGL2 ? le même shader avec repli, sans alourdir le compute ? ») :
   `upscaler-mwsr-p4.md` §3, journal J18.]*
 - **Qui tourne où** : la saveur WebGL2 reste la production SDR tant que la porte P4 n'a pas
   tranché WebGPU contre WebGL2 avec le nouveau shader sur chaque classe d'appareil (le wiki 15.3
-  l'a laissé ouvert) ; WebGPU porte le HDR et, si P4 le confirme, le plein écran.
+  l'a laissé ouvert) ; WebGPU porte le HDR et, si P4 le confirme, le plein écran. *[Porte P4, 21/10 :
+  sur ordinateur (RTX, 780M) WebGL2 reste la saveur SDR — à shader égal sur le GPU, la chaîne WebGPU
+  (import, soumission, attente) finit son image 2 × plus tard sur le RTX et 1,1-1,2 × sur le 780M,
+  quelle que soit la passe ; exception, la réduction 4K → 1440p sur le 780M (vues sRGB : WebGPU 0,82 ×).
+  Apple et Mali aux créneaux de Bruno. Rapport P4 §5, journal J20.]*
 
 ---
 
@@ -1355,7 +1359,8 @@ upscalers spatiaux.
 - [x] `createRenderer` (via `WEBGL_ALGOS`), `ENHANCER_LADDER` (`mwsr` entre `sgsr` et `off`, mémoire sans migration), `pickAutoEnhancer` et le HDR d'`auto` derrière `localStorage.mw_mwsr = '1'` (`83aedfad`)
 - [x] Menu debug (deux saveurs), i18n (en, fr, zh), overlay (`MWSR`, `WebGL MWSR`), worker (`yuv444`) (`83aedfad`)
 - [x] CI : job `scaler-lab` non bloquant (conformité sur SwiftShader, les deux côtés ; chaque texte compile) (`48bb8213`) ; pas de validation statique possible sous Node (notée au rapport §4)
-- [ ] Porte WebGPU contre WebGL2 avec le nouveau shader, par classe d'appareil : RTX et 780M au go de 59 (`chain-mwsr` / `chain-gl-mwsr`, le mur par draw ; horodatages WebGL2 à brancher au besoin), Mac, iPhone, realme et `mw-arm` aux créneaux de Bruno ; le drapeau `mw_mwsr` sur la `--dev` (overlay, menu, 1:1) [`high`]
+- [x] Porte WebGPU contre WebGL2 avec le nouveau shader sur ordinateur (21/10 au soir, journal J20, rapport §5) : jeu `--p4` (`submit`, `done`, `gpu` par draw ; barrière sondée côté WebGL2, `EXT_disjoint_timer_query_webgl2`, niveau H.264 par taille), RTX et 780M au go de 59 → **WebGL2 reste la saveur SDR** (RTX 1,9-2,3 × à 60 i/s, 780M 1,1-1,2 × ; exception la réduction 4K → 1440p sur le 780M, WebGPU 0,82 ×) ; le drapeau `mw_mwsr` vérifié sur la `--dev` (overlay des deux saveurs, témoin FSR1, repli Canvas2D sans WebGPU, « Off (1:1) »)
+- [ ] La porte sur Mac, iPhone, realme et `mw-arm` aux créneaux de Bruno (`scaler_lab.py --serve 0.0.0.0:8766 --p4 [--screen WxH] [--gl]`, puis `--p4-table`) [`high`]
 
 **P5 — Campagne**
 - [ ] Matrice du §7.3 (DualRTX complet ; étoile ailleurs) [`xhigh`]

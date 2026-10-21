@@ -1,10 +1,10 @@
 # Upscaler `mwsr` — rapport de la phase P4 (intégration et jumeau WebGL2)
 
 Plan : `upscaler-mwsr.md` (§3.6 le jumeau, §4.3 les régimes, §12.1 P4). Rapports précédents :
-`upscaler-mwsr-p0.md` à `-p3.md`. Journal du labo : `scripts/bench/scaler-lab/journal.md` (J17, J18).
+`upscaler-mwsr-p0.md` à `-p3.md`. Journal du labo : `scripts/bench/scaler-lab/journal.md` (J17 à J20).
 Session « Shader Upscaler », 21/10/2026 après-midi, Fable 5.1 `max` (gardé par Bruno après le
 `/compact` de fin de P3). Commits `e965e9f9` (WebGPU), `031805ab` (jumeau GLSL et conformité),
-`83aedfad` (échelle, menu, drapeau), `48bb8213` (CI).
+`83aedfad` (échelle, menu, drapeau), `48bb8213` (CI), `18fb5409` (la porte : instrument, jeu `--p4`, tolérance CI).
 
 ## 1. Ce que P4 a construit
 
@@ -122,17 +122,16 @@ le journal de la page et fait échouer le cas.
 ## 4. Ce que P4 laisse
 
 - **La porte P4** (`high`, plan §12.1) : WebGPU contre WebGL2 avec le nouveau shader, par classe
-  d'appareil. Le labo a ce qu'il faut (`chain-mwsr`, `chain-gl-mwsr`, le jeu `glchain`, le mur par
-  draw des deux côtés ; les horodatages GPU manquent au côté WebGL2 : `EXT_disjoint_timer_query_webgl2`
-  à brancher si la porte en a besoin sur ordinateur). Elle demande le go de 59 pour le RTX et le 780M,
-  et les créneaux de Bruno pour le Mac, l'iPhone (WebGL2 seul y était la production SDR), le realme
-  et `mw-arm` (WebGL2 seul : Adreno 618 sans WebGPU). C'est aussi là que le drapeau `mw_mwsr` se
-  joue sur la `--dev` (l'overlay, le menu, les deux saveurs, le 1:1).
+  d'appareil. *[Faite sur ordinateur le 21/10 au soir, §5 : WebGL2 reste la saveur SDR sur RTX et 780M ;
+  le drapeau `mw_mwsr` vérifié sur la `--dev`. Restent le Mac, l'iPhone, le realme et `mw-arm` aux
+  créneaux de Bruno, par les liens `--serve --p4`.]*
 - **La réduction du jumeau WebGL2** moyenne en lumière logicielle (grille 2×2, 1,7 à 2,2 × le
-  plancher sur le 780M, J14) là où le WebGPU a ses vues au prix du plancher. Une piste pour la porte,
-  à mesurer et non à livrer à l'aveugle : téléverser la `VideoFrame` dans une texture
-  `SRGB8_ALPHA8` (l'échantillonneur décode) et encoder la sortie dans le shader (trois `pow` par
-  pixel), si le chemin de téléversement de Chrome reste le rapide sur ce format interne.
+  plancher sur le 780M, J14) là où le WebGPU a ses vues au prix du plancher. *[Mesuré à la porte, §5 :
+  4K → 1440p sur le 780M, GPU 1,98 ms (WebGL2) contre 1,57 (WebGPU), `done` 9,3 contre 7,6 ms — le seul
+  cas où WebGPU gagne sur ordinateur.]* Une piste, à mesurer et non à livrer à l'aveugle : téléverser la
+  `VideoFrame` dans une texture `SRGB8_ALPHA8` (l'échantillonneur décode) et encoder la sortie dans le
+  shader (trois `pow` par pixel), si le chemin de téléversement de Chrome reste le rapide sur ce format
+  interne.
 - **Le realme** : `ext-mwsr` (l'externe y est RGBA : la passe 0 — 0,9 ms — serait évitable sur cette
   famille d'Android, décision par `frame.format`) ; le 4×4 sous ×0,25.
 - **`malioc`** sur le texte GLSL (reporté depuis P2.2) : non installé sur DualRTX.
@@ -142,3 +141,66 @@ le journal de la page et fait échouer le cas.
 - **La ligne de référence des dérivées** : si P5 montre une différence visible entre GPU (le même WGSL
   sur Apple, NVIDIA, AMD, Mali), le vote pourra prendre `dpdxFine`/`dpdyFine` (le bouton existe) ou
   un gradient symétrique à deux échantillons de plus ; rien ne l'indique aujourd'hui.
+
+## 5. La porte : WebGPU contre WebGL2 à shader égal (21/10/2026 au soir)
+
+**Méthode** (journal J20, `scaler_lab.py --p4`, `p4_flows.py`, commit `18fb5409`). Les chaînes du produit `off`, SGSR1,
+FSR1 et `mwsr` dans les deux renderers, sur les mêmes images H.264 décodées, cinq cas (×2 texte, jeu,
+interface ; ×1,33 ; ×0,67 depuis la 4K), saturé et à 60 i/s, 48 draws par chaîne en deux tours ABBA.
+Trois chiffres par draw : `submit` (le thread principal), `done` (du début du draw à la fin du GPU :
+`onSubmittedWorkDone` côté WebGPU, une barrière sondée côté WebGL2 — `gl.finish()` de Chrome n'attend
+rien) et `gpu` (les passes horodatées ; `EXT_disjoint_timer_query_webgl2` côté WebGL2, téléversement
+compris). Chrome sans tête épinglé par LUID, sonde des deux API avant chaque jeu, un GPU à la fois au go
+de 59. La règle de verdict (`GATE_WIN`, `GATE_MAIN`) : une saveur gagne quand son `done` p50 est sous
+0,9 × l'autre sur ×2 texte, ×2 jeu et ×1,33 et que son thread principal n'est pas pire de plus d'un
+cinquième ou d'un quart de milliseconde ; sinon égalité, et la saveur de production reste.
+
+**Résultat** (`done` p50 à 60 i/s, WebGPU / WebGL2, ms ; `gpu` entre parenthèses) :
+
+| cas | RTX 5060 Ti | Radeon 780M |
+|---|---|---|
+| ×2 texte, `mwsr` | 4,29 / 2,01 (0,07 / 0,34) | 5,61 / 4,75 (1,59 / 1,38) |
+| ×2 jeu, `mwsr` | 3,99 / 1,77 (0,05 / 0,09) | 5,00 / 4,25 (0,81 / 0,81) |
+| ×2 interface, `mwsr` | 4,22 / 1,96 (0,05 / 0,09) | 5,45 / 4,13 (0,84 / 0,83) |
+| ×1,33 texte, `mwsr` | 4,09 / 2,16 (0,14 / 0,12) | 6,30 / 5,80 (1,57 / 1,40) |
+| ×0,67 texte, `mwsr` (réduction) | 4,59 / 3,28 (0,21 / 0,23) | **7,59 / 9,30** (1,57 / 1,98) |
+| ×2 texte, `off` (la copie) | 4,37 / 2,09 (0,03 / 0,12) | 4,62 / 4,09 (0,53 / 0,66) |
+| ×2 texte, FSR1 | 4,65 / 3,23 (0,57 / 1,42) | 13,34 / 10,55 (9,42 / 7,92) |
+| saturé, `mwsr` ×2 texte | 3,70 / 0,81 | 4,11 / 3,47 |
+| thread principal p50, `mwsr` ×2 texte | 0,33 / 0,26 | 0,31 / 0,36 |
+
+Le shader est à égalité sur le GPU (±15 %, le WebGL2 comptant le téléversement) ; ce qui sépare les
+saveurs est la chaîne autour du shader : import de la texture externe, soumission et attente de la fin
+du GPU coûtent 4 ms sur le RTX quelle que soit la passe (`off` : 0,03 ms de GPU pour 4,4 ms de `done`),
+0,5 à 1,3 ms de plus que WebGL2 sur le 780M. **Verdict ordinateur : WebGL2 reste la saveur SDR** — RTX
+1,9 à 2,3 × à 60 i/s et 4 × saturé ; 780M 1,1 à 1,2 × (égalité dans les marges, la production reste). Une
+exception à peser en P6 : la réduction 4K → 1440p sur le 780M, où les vues sRGB et un import 4K moins
+cher donnent WebGPU 18 % plus tôt (7,6 contre 9,3 ms) — sur le RTX, où le GPU n'est pas le goulot,
+WebGL2 garde l'avantage même là. C'est la réponse à la question laissée ouverte par le wiki 15.3 : elle
+ne dépendait pas du shader.
+
+**Le drapeau `mw_mwsr` sur la `--dev`** (22:04-22:14, `--dev` de 09e31b38 vérifiée au hachage, client
+Chrome sans tête tout SwiftShader puis ANGLE sur l'AMD épinglé + WebGPU sur SwiftShader, décodage
+logiciel, flux de l'écran 1) : `auto` + drapeau → « WebGL MWSR » ; `auto` sans drapeau → « WebGL FSR1 » ;
+`gl-mwsr` → « WebGL MWSR » ; `mwsr` sans WebGPU → Canvas2D ; `mwsr` avec WebGPU → « MWSR », renderer créé
+avec les vues sRGB, image vive ; flux à la taille du canvas → « Off (1:1) ». Aucune erreur console. Le
+menu debug des deux saveurs n'apparaît qu'en mode debug du serveur (non touché) : les tests unitaires le
+couvrent.
+
+**Ce que la porte laisse aux créneaux de Bruno** : les mêmes cas sur Mac M1 (tunnel SSH inverse, Chrome
+dédié), iPhone 13 Pro (WebKit : WebGPU et WebGL2, pas d'horodatage WebGL2 — `done` et `submit`
+suffisent), realme Note 60 (Chrome Android) et `mw-arm` (WebGL2 seul : `--gl`) :
+`scaler_lab.py --serve 0.0.0.0:8766 --tag <appareil> --p4 [--screen 1600x720] [--gl]`, dix liens
+`/1`-`/10` (plus huit à la taille de l'écran avec `--screen`), puis `--p4-table <appareil>` sur les
+`phone-*.json` postés. La décision par classe d'appareil (plan §9, P6) : ordinateur tranché (WebGL2) ;
+Apple et Mali après ces liens ; la réduction sur iGPU à regarder avec le résultat du 780M.
+
+**La CI** (run 39661997273, lu par 59) : sur le runner Linux, l'adaptateur logiciel forcé refuse
+d'importer une image vidéo dans WebGPU (`importExternalTexture` : « Failed to import texture from
+video » à chaque image), la chaîne WebGPU du produit n'y dessine rien ; limite de plateforme (sous
+Windows le même SwiftShader importe, dorés et conformité exacts), hors de portée d'un utilisateur
+(sans le drapeau, aucun adaptateur n'est offert et le client reste en WebGL2/Canvas2D). Le flux de
+conformité tient désormais ce refus pour « non applicable sur cet adaptateur » et juge le reste (noyau,
+jumeau WebGL2, dorés) ; le côté WebGL2 du job tourne même si le côté WebGPU a échoué. Reste un défaut de
+robustesse antérieur à P4, pour P6 : un import refusé sur une machine réelle laisse le renderer WebGPU
+journaliser à chaque image et montrer du noir au lieu de se replier.
