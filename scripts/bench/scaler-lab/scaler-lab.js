@@ -712,6 +712,10 @@ async function runGlLab(p, log, ctx) {
     renderers.set(algo, r);
     const dbg = r.gl.getExtension("WEBGL_debug_renderer_info");
     gpu = String(dbg ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : r.gl.getParameter(r.gl.RENDERER));
+    if (p.soft === "1" && !/swiftshader/i.test(gpu)) {
+      r.dispose();
+      throw new Error("soft=1 but WebGL2 runs on " + gpu);
+    }
     log("chain " + algo + ": " + r.kind + " renderer on " + gpu);
     return r;
   }
@@ -938,6 +942,17 @@ async function runLabInner(p, log) {
     `${info.vendor || "?"} ${info.architecture || ""} ${info.device || ""} ${info.description || ""}`
       .replace(/\s+/g, " ")
       .trim();
+  // soft=1 (the driver's --swiftshader): this Chrome may touch no GPU of the
+  // bench machine — the adapter must be SwiftShader's, and the WebGL2 chain
+  // cells, which would open a context on the machine's default GPU, belong to
+  // the --webgl-swiftshader Chrome (gl=1).
+  if (p.soft === "1") {
+    if (!/swiftshader/i.test(adapterName))
+      throw new Error("soft=1 but the WebGPU adapter is " + adapterName);
+    const gl = cellNames.filter((c) => c.startsWith("chain-gl-"));
+    if (gl.length)
+      throw new Error("soft=1: " + gl.join(",") + " run in the --webgl-swiftshader Chrome (gl=1)");
+  }
   log(
     `adapter: ${adapterName} | timestamps ${hasTs} f16 ${hasF16} | features ${features.join(" ")}`,
   );
@@ -1578,6 +1593,8 @@ async function runLabInner(p, log) {
     if (r.gl) {
       const dbg = r.gl.getExtension("WEBGL_debug_renderer_info");
       gpu = " on " + (dbg ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : r.gl.getParameter(r.gl.RENDERER));
+      if (p.soft === "1" && !/swiftshader/i.test(gpu))
+        throw new Error("soft=1 but WebGL2 runs" + gpu);
     }
     log("chain " + algo + ": " + r.kind + " renderer" + gpu);
     return r;

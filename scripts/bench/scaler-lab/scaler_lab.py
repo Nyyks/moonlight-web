@@ -341,9 +341,9 @@ def main():
     if a.power:
         extra += "&power=" + a.power
     if a.swiftshader:
-        extra += "&fallback=1"
+        extra += "&fallback=1&soft=1"
     if a.webgl_swiftshader:
-        extra += "&gl=1"
+        extra += "&gl=1&soft=1"
     if a.extra:
         extra += "&" + a.extra.lstrip("&")
 
