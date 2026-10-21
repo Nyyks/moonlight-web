@@ -291,7 +291,9 @@ void RendezvousClient::claim()
         if (!m_Running) return;
 
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray payload = reply->readAll();
+        // A claim cut by its transfer timeout is already closed: reading it
+        // would only earn Qt's "device not open" warning.
+        const QByteArray payload = reply->isOpen() ? reply->readAll() : QByteArray();
         const QJsonObject answer = QJsonDocument::fromJson(payload).object();
 
         if (status == 200) {
