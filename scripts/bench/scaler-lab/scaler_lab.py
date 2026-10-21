@@ -393,17 +393,33 @@ def main():
                 if msg.get("id") == mid:
                     return msg.get("result", msg)
 
-        def run_page(query):
+        def run_page(query, tries=2):
+            """The page with `query`, and its result. A page that comes back
+            without a value (a renderer gone under a large dump) or whose module
+            fetch failed on the first load is loaded again, once: the transients
+            seen on the software adapter, a case in fifty."""
             url = "http://127.0.0.1:%d/scripts/bench/scaler-lab/scaler-lab.html?%s%s" % (http_port, query, extra)
-            call("Page.navigate", url=url)
-            for _ in range(1200):
-                time.sleep(0.5)
-                ready = call("Runtime.evaluate", returnByValue=True,
-                             expression="location.href === %s && window.__labResult !== undefined" % json.dumps(url))
-                if ready.get("result", {}).get("value"):
+            res = None
+            for attempt in range(tries):
+                call("Page.navigate", url=url)
+                for _ in range(1200):
+                    time.sleep(0.5)
+                    ready = call("Runtime.evaluate", returnByValue=True,
+                                 expression="location.href === %s && window.__labResult !== undefined" % json.dumps(url))
+                    if ready.get("result", {}).get("value"):
+                        break
+                r = call("Runtime.evaluate", expression="window.__labResult", awaitPromise=True, returnByValue=True)
+                res = r.get("result", {}).get("value")
+                # no value, a module that failed to load, a dump that failed to post
+                transient = res is None or (
+                    isinstance(res, dict) and "Failed to fetch" in json.dumps([res.get("error"), res.get("errors")]))
+                if res is None:
+                    res = {"error": json.dumps(r)[:2000]}
+                if not transient:
                     break
-            r = call("Runtime.evaluate", expression="window.__labResult", awaitPromise=True, returnByValue=True)
-            res = r.get("result", {}).get("value") or {"error": json.dumps(r)[:2000]}
+                if attempt + 1 < tries:
+                    print("  the page came back without a result, loading it again:", str(res.get("error"))[:120])
+                    sys.stdout.flush()
             res["url"] = url
             return res
 
