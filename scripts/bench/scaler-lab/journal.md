@@ -160,3 +160,11 @@ l'étalon, à 0,03 dB de la seconde sur le texte, et la seule des trois qui bat 
 `game` ×2, sur l'étalon ×1,33 et sur `text` ×1,33. La netteté (uniforme `sharp`) déplace le point
 entre les deux à la demande, sans recompiler. Reste à mesurer : le temps GPU (RTX, puis 780M,
 iPhone, realme), le coût de `DERING 1` sur la texture externe (P2.3), FLIP.
+
+## 2026-10-21 — Temps GPU de la table sur le RTX 5060 Ti (`--p2`)
+
+Noyau seul (`tex`) à ×2 vers 1440p : `text` 0,051 ms, `ui` 0,029, `game` 0,028 (plancher 0,028 ;
+SGSR1 0,039-0,073 ; FSR1 0,247 ; NIS 0,31-0,44) ; à ×1,33 : 0,046 et 0,036. Sans la borne exacte :
+0,039 sur `text`. Sans la sortie anticipée : 0,086 partout (= neuf fetches par pixel). Sur la texture
+externe, sans passe 0 : 0,043-0,096 (la borne par `textureLoad` externe y coûte 0,03 : à refaire par
+échantillons, P2.3). Le détail est dans `docs/design/upscaler-mwsr-p2.md` §1.4.
