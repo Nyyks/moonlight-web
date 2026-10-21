@@ -883,3 +883,21 @@ WebGPU sur SwiftShader, décodage logiciel, flux de l'écran 1, image vive, aucu
 avec WebGPU → « MWSR », renderer créé avec les vues sRGB ; flux 896×504 dans un canvas 896×504 → « Off
 (1:1) ». Le menu debug des deux saveurs n'apparaît qu'en mode debug du serveur (réglage de la `--dev`
 non touché) : couvert par les tests unitaires.
+
+## 2026-10-21 — J21, le repli du renderer WebGPU quand l'import d'une image est refusé
+
+Décision de Bruno (relayée par 59, 22:20) : l'écran noir de la CI se corrige avant la v0.4.1. Choix :
+**copier l'image dans la texture d'entrée** plutôt que revenir à Canvas2D — l'upscaler continue de
+tourner, rien ne change à l'écran ni dans l'overlay. Dès le premier refus d'`importExternalTexture`,
+`draw()` fait `createImageBitmap(frame)` puis `copyExternalImageToTexture` dans `inputTex` (`COPY_DST`
+ajouté) : la copie tient lieu de passe 0 ; la copie nue vers le canvas (`off`, 1:1) lit `inputTex` par un
+blit `texture_2d` (`BLIT_TEX_WGSL`). L'import est retenté tous les 300 draws (un refus passager rend le
+chemin rapide de lui-même) ; un seul avertissement console ; un draw qui échoue n'est journalisé qu'une
+fois par message distinct. En HDR le bitmap est le rendu SDR du navigateur : une image, pas l'image HDR.
+
+Vérification : test `vitest` à device simulé (`WebGpuRendererImport.test.js`, cinq cas : import
+accepté, refusé puis copié avec une seule ligne, retenté 300 draws plus tard, chemin upscaler sans passe
+0, journal une fois par message) ; suite complète 1659 tests verts ; labo `importfail=1` (le crochet
+refuse l'import aux seuls devices du produit) : **dorés exacts sur les neuf cas** par le repli comme par
+l'import, conformité OK. Reste la mesure du coût du repli sur un GPU (créneau à demander à 59) : sur
+SwiftShader la chaîne `chain-mwsr` passe par le bitmap sans écart de pixel.

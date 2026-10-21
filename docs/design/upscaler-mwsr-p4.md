@@ -201,6 +201,13 @@ video » à chaque image), la chaîne WebGPU du produit n'y dessine rien ; limit
 Windows le même SwiftShader importe, dorés et conformité exacts), hors de portée d'un utilisateur
 (sans le drapeau, aucun adaptateur n'est offert et le client reste en WebGL2/Canvas2D). Le flux de
 conformité tient désormais ce refus pour « non applicable sur cet adaptateur » et juge le reste (noyau,
-jumeau WebGL2, dorés) ; le côté WebGL2 du job tourne même si le côté WebGPU a échoué. Reste un défaut de
-robustesse antérieur à P4, pour P6 : un import refusé sur une machine réelle laisse le renderer WebGPU
-journaliser à chaque image et montrer du noir au lieu de se replier.
+jumeau WebGL2, dorés) ; le côté WebGL2 du job tourne même si le côté WebGPU a échoué.
+
+**Le repli du renderer** (décision de Bruno du 21/10 au soir, relayée par 59 : avant la v0.4.1, pas en
+P6 ; journal J21). Dès le premier refus, `draw()` copie l'image par `createImageBitmap` +
+`copyExternalImageToTexture` dans sa texture d'entrée (la copie tient lieu de passe 0 ; la copie nue vers
+le canvas lit la texture par un blit `texture_2d`), retente l'import tous les 300 draws, n'écrit qu'un
+avertissement, et un draw qui échoue n'est plus journalisé qu'une fois par message. L'upscaler continue
+de tourner ; rien ne change à l'écran ni dans l'overlay. Vérifié par un test à device simulé (cinq cas)
+et au labo sur SwiftShader avec `importfail=1` : dorés exacts et conformité OK par le repli comme par
+l'import. Reste la mesure de son coût sur un GPU, au prochain créneau.

@@ -1361,6 +1361,7 @@ upscalers spatiaux.
 - [x] CI : job `scaler-lab` non bloquant (conformité sur SwiftShader, les deux côtés ; chaque texte compile) (`48bb8213`) ; pas de validation statique possible sous Node (notée au rapport §4)
 - [x] Porte WebGPU contre WebGL2 avec le nouveau shader sur ordinateur (21/10 au soir, journal J20, rapport §5) : jeu `--p4` (`submit`, `done`, `gpu` par draw ; barrière sondée côté WebGL2, `EXT_disjoint_timer_query_webgl2`, niveau H.264 par taille), RTX et 780M au go de 59 → **WebGL2 reste la saveur SDR** (RTX 1,9-2,3 × à 60 i/s, 780M 1,1-1,2 × ; exception la réduction 4K → 1440p sur le 780M, WebGPU 0,82 ×) ; le drapeau `mw_mwsr` vérifié sur la `--dev` (overlay des deux saveurs, témoin FSR1, repli Canvas2D sans WebGPU, « Off (1:1) »)
 - [ ] La porte sur Mac, iPhone, realme et `mw-arm` aux créneaux de Bruno (`scaler_lab.py --serve 0.0.0.0:8766 --p4 [--screen WxH] [--gl]`, puis `--p4-table`) [`high`]
+- [x] Repli du renderer WebGPU quand `importExternalTexture` refuse l'image (décision de Bruno du 21/10 au soir, journal J21) : copie par `ImageBitmap` dans la texture d'entrée, import retenté tous les 300 draws, console limitée ; test à device simulé, dorés et conformité exacts sur SwiftShader avec `importfail=1` ; reste son coût sur un GPU (créneau 59)
 
 **P5 — Campagne**
 - [ ] Matrice du §7.3 (DualRTX complet ; étoile ailleurs) [`xhigh`]
