@@ -4,9 +4,11 @@
     python metrics.py --gt <gt.png> --input <in.png> <cell.png> ... [--json out.json] [--md out.md]
 
 For each output: PSNR and SSIM (scikit-image; SSIM with the Gaussian window of
-Wang et al.) against the ground truth; the mean FLIP error when the
-flip-evaluator package is importable (it has no wheel for Python 3.14 yet:
-then the column stays empty, and the verdicts of C3 wait for it); and the
+Wang et al.) against the ground truth; the mean FLIP error, in process
+when the flip-evaluator package imports, else through the Python of .flipenv
+next to this file (or MW_FLIP_PYTHON): a Python 3.12 venv with the package,
+since it has no wheel for Python 3.14 (10/2026) — without either the column
+stays empty; and the
 overshoot rate, a no-reference measure of ringing: the share of output pixels
 that leave the min/max of the four input texels around them (the bilinear
 footprint) by more than 2/255 on any channel. A sharpener always overshoots a
@@ -27,6 +29,44 @@ try:
     import flip_evaluator as flip  # noqa: F401
 except Exception:  # noqa: BLE001
     flip = None
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+FLIP_PYTHON = os.environ.get("MW_FLIP_PYTHON") or next(
+    (p for p in (os.path.join(HERE, ".flipenv", "Scripts", "python.exe"),
+                 os.path.join(HERE, ".flipenv", "bin", "python")) if os.path.exists(p)), None)
+
+_FLIP_SCRIPT = '''
+import json, sys
+import numpy as np
+import flip_evaluator as flip
+gt = np.load(sys.argv[1])
+out = np.load(sys.argv[2])
+m, mean, _ = flip.evaluate(gt, out, "LDR")
+print(json.dumps({"mean": float(mean), "p99": float(np.percentile(m, 99))}))
+'''
+
+
+def flip_ldr(gt, out):
+    """(mean, p99) of the LDR FLIP error, or (None, None) when nothing can
+    compute it: in process when the package imports, else through FLIP_PYTHON
+    (the arrays go through two .npy files)."""
+    if flip is not None:
+        err_map, mean, _ = flip.evaluate(gt, out, "LDR")
+        return float(mean), float(np.percentile(err_map, 99))
+    if not FLIP_PYTHON:
+        return None, None
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        a = os.path.join(d, "gt.npy")
+        b = os.path.join(d, "out.npy")
+        np.save(a, np.ascontiguousarray(gt, dtype=np.float32))
+        np.save(b, np.ascontiguousarray(out, dtype=np.float32))
+        r = subprocess.run([FLIP_PYTHON, "-c", _FLIP_SCRIPT, a, b], capture_output=True, text=True, timeout=600)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout)[-300:])
+    j = json.loads(r.stdout.strip().splitlines()[-1])
+    return j["mean"], j["p99"]
 
 
 def load(path):
@@ -80,13 +120,13 @@ def measure(gt, inp, out):
         },
         "flip": None,
     }
-    if flip is not None:
-        try:
-            err_map, mean, _ = flip.evaluate(gt, out, "LDR")
-            r["flip"] = float(mean)
-            r["flipP99"] = float(np.percentile(err_map, 99))
-        except Exception as e:  # noqa: BLE001
-            r["flipError"] = str(e)
+    try:
+        mean, p99 = flip_ldr(gt, out)
+        if mean is not None:
+            r["flip"] = mean
+            r["flipP99"] = p99
+    except Exception as e:  # noqa: BLE001
+        r["flipError"] = str(e)
     return r
 
 
@@ -126,8 +166,8 @@ def main():
                 r["centre"]["psnr"], r["centre"]["ssim"], fmt(r["flip"]), fmt(r.get("flipP99"))))
         with open(a.md, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
-    if flip is None:
-        print("(flip-evaluator not importable: FLIP left empty)")
+    if flip is None and not FLIP_PYTHON:
+        print("(flip-evaluator not importable and no .flipenv: FLIP left empty)")
 
 
 if __name__ == "__main__":

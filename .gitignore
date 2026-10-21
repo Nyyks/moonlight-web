@@ -56,6 +56,7 @@ scripts/bench/photon/*.csv
 # and its profile showed up in `git status` — there is no reason to name them,
 # a browser profile is never source.
 scripts/bench/.chrome-*/
+scripts/bench/scaler-lab/.flipenv/
 scripts/bench/kiosk-verify.png
 __pycache__/
 
