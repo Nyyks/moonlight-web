@@ -14,7 +14,9 @@ import { t } from '../js/i18n/i18n.js';
 import {
     CRASH_RELAUNCH_MAX,
     CRASH_RELAUNCH_WINDOW_MS,
+    LIVE_RECHECK_MS,
     recordCrashRelaunch,
+    settledStreamState,
     shouldRelaunchAfterCrash,
 } from '../js/stream/CrashRelaunch.js';
 
@@ -51,6 +53,22 @@ describe('CrashRelaunch: whether a lost stream starts again', () => {
         expect(shouldRelaunchAfterCrash('crashed', history, now + CRASH_RELAUNCH_WINDOW_MS)).toBe(
             true,
         );
+    });
+
+    it('asks again once when the host still says live', async () => {
+        vi.useFakeTimers();
+        try {
+            const ask = vi.fn().mockResolvedValueOnce('live').mockResolvedValueOnce('crashed');
+            const answer = settledStreamState(ask);
+            await vi.advanceTimersByTimeAsync(LIVE_RECHECK_MS);
+            expect(await answer).toBe('crashed');
+            expect(ask).toHaveBeenCalledTimes(2);
+            const once = vi.fn().mockResolvedValue('stopped');
+            expect(await settledStreamState(once)).toBe('stopped');
+            expect(once).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('keeps only the restarts still in the window', () => {
@@ -294,14 +312,39 @@ describe('MoonlightApp: the host says how the stream ended', () => {
     });
 
     it('anything but a crash ends as it always did', async () => {
-        for (const answer of ['live', 'ended', 'stopped', 'unknown']) {
-            vi.spyOn(BackendClient, 'streamState').mockResolvedValue(answer);
+        vi.useFakeTimers();
+        try {
+            for (const answer of ['live', 'ended', 'stopped', 'unknown']) {
+                vi.spyOn(BackendClient, 'streamState').mockResolvedValue(answer);
+                const sv = liveView();
+                MoonlightApp.streamView = sv;
+                const done = MoonlightApp._onLiveLinkLost(sv);
+                await vi.advanceTimersByTimeAsync(LIVE_RECHECK_MS);
+                await done;
+                expect(sv._linkLostDefault, answer).toHaveBeenCalledTimes(1);
+            }
+            expect(relaunch).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('a crash the host had not seen yet is caught by the second question', async () => {
+        vi.useFakeTimers();
+        try {
+            vi.spyOn(BackendClient, 'streamState')
+                .mockResolvedValueOnce('live')
+                .mockResolvedValueOnce('crashed');
             const sv = liveView();
             MoonlightApp.streamView = sv;
-            await MoonlightApp._onLiveLinkLost(sv);
-            expect(sv._linkLostDefault, answer).toHaveBeenCalledTimes(1);
+            const done = MoonlightApp._onLiveLinkLost(sv);
+            await vi.advanceTimersByTimeAsync(LIVE_RECHECK_MS);
+            await done;
+            expect(relaunch).toHaveBeenCalledWith(2);
+            expect(sv._linkLostDefault).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
         }
-        expect(relaunch).not.toHaveBeenCalled();
     });
 
     it('a stream with no id is not asked about', async () => {

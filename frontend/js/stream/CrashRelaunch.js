@@ -38,6 +38,24 @@ export const CRASH_RELAUNCH_MAX = 2;
 export const CRASH_RELAUNCH_WINDOW_MS = 5 * 60 * 1000;
 /** How long the page waits for the host's answer before ending as before. */
 export const STREAM_STATE_TIMEOUT_MS = 1500;
+/** When the host still says "live", how long before it is asked again. */
+export const LIVE_RECHECK_MS = 1000;
+
+/**
+ * The host's answer, asked a second time when it is still "live". A link
+ * carried by a WebSocket (the wss rung) goes the moment the worker dies, a
+ * hair before the server has seen the process exit; a link that went with ICE
+ * is noticed seconds after, and the first answer stands.
+ * @param {() => Promise<string>} ask
+ * @param {number} [waitMs]
+ * @returns {Promise<string>}
+ */
+export async function settledStreamState(ask, waitMs = LIVE_RECHECK_MS) {
+    const first = await ask();
+    if (first !== 'live') return first;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    return ask();
+}
 
 /**
  * @param {string} state what the host says of the lost stream

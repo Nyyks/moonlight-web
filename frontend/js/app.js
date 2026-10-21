@@ -103,7 +103,11 @@ import {
     capSizeToDecoder,
 } from './util/DecoderLimit.js';
 import { startAspectProbe } from './stream/AspectProbe.js';
-import { recordCrashRelaunch, shouldRelaunchAfterCrash } from './stream/CrashRelaunch.js';
+import {
+    recordCrashRelaunch,
+    settledStreamState,
+    shouldRelaunchAfterCrash,
+} from './stream/CrashRelaunch.js';
 import * as iosAudioUnlock from './audio/iosAudioUnlock.js';
 import { init as i18nInit, applyDOM, t } from './i18n/i18n.js';
 import { escapeHtml } from './util/escapeHtml.js';
@@ -645,7 +649,9 @@ export const MoonlightApp = {
                 // it always has.
                 streamView.onLinkLost = async () => {
                     const state = streamView.streamId
-                        ? await BackendClient.playerStreamState(streamView.streamId)
+                        ? await settledStreamState(() =>
+                              BackendClient.playerStreamState(streamView.streamId),
+                          )
                         : 'unknown';
                     if (
                         this.streamView !== streamView ||
@@ -3582,7 +3588,7 @@ export const MoonlightApp = {
         const host = this._lastStreamHost;
         const state =
             sv.streamId && host
-                ? await BackendClient.streamState(host.uuid, sv.streamId)
+                ? await settledStreamState(() => BackendClient.streamState(host.uuid, sv.streamId))
                 : 'unknown';
         // Stop pressed, a notice from the host, or a relaunch that replaced
         // this view while the answer came: the ending is theirs.
@@ -4279,7 +4285,9 @@ export const MoonlightApp = {
         const host = this._lastStreamHost;
         const crashed =
             sv.streamId && host
-                ? (await BackendClient.streamState(host.uuid, sv.streamId)) === 'crashed'
+                ? (await settledStreamState(() =>
+                      BackendClient.streamState(host.uuid, sv.streamId),
+                  )) === 'crashed'
                 : false;
         if (this._standbyView !== sv) return;
         this._restoreLiveQuality();
