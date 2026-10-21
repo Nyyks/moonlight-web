@@ -25,6 +25,7 @@ add_executable(mw-d3d12-lab
     src/Queues.cpp
     src/Interop.cpp
     src/Dda11on12.cpp
+    src/Wgc.cpp
     src/HevcHeaders.cpp
     src/LabD3d12.cpp
     src/Encode.cpp
@@ -46,7 +47,7 @@ target_include_directories(mw-d3d12-lab SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/nvenc-headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/amf-headers)
 target_link_libraries(mw-d3d12-lab PRIVATE mw-native-host d3d12 d3d11 dxgi d3dcompiler ole32
-                                           version advapi32 windowscodecs)
+                                           version advapi32 windowscodecs wtsapi32)
 
 if(MSVC)
     target_compile_options(mw-d3d12-lab PRIVATE /W4 /utf-8)

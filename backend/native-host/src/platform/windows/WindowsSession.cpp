@@ -1292,10 +1292,13 @@ private:
             ddaMayReturn = static_cast<capture::DxgiDuplication&>(*m_Capture).refusalMayPass();
         }
 
-        if (!capture::WgcCapture::available()) {
+        std::string wgcWhy;
+        if (!capture::WgcCapture::available(&wgcWhy)) {
             // No fallback to offer: report the FIRST failure, which is the one
             // that describes this machine. "WGC is unavailable" would send the
-            // reader after the wrong thing entirely.
+            // reader after the wrong thing entirely — but the log says why,
+            // for the session that asked for WGC itself.
+            log::info("[native] Windows.Graphics.Capture is unavailable here: " + wgcWhy);
             error = ddaError;
             return false;
         }

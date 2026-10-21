@@ -7543,6 +7543,51 @@ client passe seul en WebGL et s'en souvient.
 - Données : `scratchpad\bench\lags\`, `bench\n95-17\{dda,wgc}.{csv,click-trace.csv}`,
   `dda11on12-{dualrtx,n95}.json` (session « N95 Freezes » du 21/10).
 
+### 8y.1 Route B, jour 1 : la sonde `wgc` (21/10/2026, 17:35-18:05)
+
+- **La question** : comment WGC nourrit la chaîne D3D12, qui ouvre la surface
+  de la duplication par un handle NT et l'ordonne par les fences A et B
+  (DdaInterop), alors que les textures du pool de WGC n'ont pas de handle.
+  Deux façons, et le témoin : `copy` (B1 : le `WgcCapture` du produit sur
+  son device D3D11, chaque image copiée sur ce contexte dans une texture à
+  nous partagée par handle NT, lue par D3D12 derrière les fences A et B
+  inchangées), `on12` (B2 : le pool sur un device D3D11On12 porté par la
+  file de la chaîne, la texture sortie par `UnwrapUnderlyingResource`, zéro
+  copie), `dda` (la duplication du produit). Sonde `mw-d3d12-lab wgc` : par
+  image l'attente, la copie ou l'unwrap, la tenue, la libération, la lecture
+  faite, les trous > 50 ms ; la lecture D3D12 comparée à l'image livrée ;
+  `--border` regarde le haut de l'écran par une duplication pendant WGC.
+- **DualRTX, écran 2 (RTX 5060 Ti, 120 Hz), au repos, jeton limité** : `dda`
+  120 i/s, `copy` **60 i/s** (WGC livre à 60 sur un écran à 120 Hz, à creuser
+  avec un contenu à 120 i/s), 601 lectures sur 601 égales à l'image livrée,
+  copie + ouverture + signal 0,11 ms, tenue 0,38 ms ; `on12` **deux images
+  puis plus rien** : les surfaces du compositeur ne passent pas par un device
+  D3D11On12, comme la duplication (8y, essai A) — **B2 écarté**. L'accès sans
+  bordure (`GraphicsCaptureAccess.RequestAccessAsync(Borderless)`, que
+  `IsBorderRequired(false)` exige sous peine d'être ignoré) est accordé à un
+  processus de bureau, et la duplication n'a vu aucun pixel jaune.
+- **N95, UHD, sous charge (clip 1080p60 en fenêtre, Steam, déplaceur),
+  REALTIME, 2 × 20 s** : `dda` 3 puis 1 trous > 50 ms (max 122 / 80 ms),
+  tenue p99 2,5 ms ; `copy` 3 puis 2 trous (max 128 / 86 ms), copie + signal +
+  Flush p99 5-6 ms (max 28-85 ms : le Flush de la copie attend lui aussi le
+  planificateur), tenue p99 8 ms. La sonde ne charge pas le GPU comme la
+  chaîne complète (elle lit deux bandes) : elle ne départage pas les trous,
+  l'A/B reste celui du produit.
+- **⚠️ WGC n'existe pas pour SYSTEM.** La sonde lancée par une tâche SYSTEM
+  et relancée dans la session console sur le même jeton (ce que fait le
+  service Worker pour le worker du stream) : `IsSupported` échoue avec
+  `0x80070424` (ERROR_SERVICE_DOES_NOT_EXIST) — WGC s'appuie sur le service
+  par utilisateur CaptureService, sans instance pour la session d'ouverture
+  SYSTEM ; l'usurpation du jeton de l'utilisateur par le fil n'y change rien.
+  Un worker SYSTEM (la prod de DualRTX, la DEV du N95) ne pourra jamais
+  capturer par WGC : il faut le worker au jeton de l'utilisateur (la voie
+  « Stream Worker » par tâche), qui ne voit pas l'écran sécurisé.
+- Choix pour la suite : B1, la copie partagée faite dans `DdaInterop::open`
+  pour une surface sans handle NT, la règle de `VideoPipelineChoice` levée,
+  clé `capture=auto|dda|wgc`, repli vers la duplication quand WGC ne démarre
+  pas, le worker au jeton de l'utilisateur sur `capture=wgc` (à l'accord de
+  Bruno : cela touche le service Worker et l'écran sécurisé).
+
 **Concrètement, pour l'utilisateur** : rien ne change encore. Sur un mini-PC
 Intel sans HAGS, un clip vidéo et un jeu à côté du flux font attendre la
 capture de l'hôte 10 à 90 ms par image, d'où les à-coups ; la conversion et

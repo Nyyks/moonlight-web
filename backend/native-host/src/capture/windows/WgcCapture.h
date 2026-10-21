@@ -77,8 +77,22 @@ public:
 
     /// Whether this machine has the API at all: Windows 10 1903 for capture,
     /// and the "can capture without a picker" support flag. Cheap, and answered
-    /// without starting anything, so the probe can call it per boot.
-    static bool available();
+    /// without starting anything, so the probe can call it per boot. @p why,
+    /// when given, says which step said no — the factory or IsSupported, with
+    /// its HRESULT — for the log of a session that asked for WGC and runs on
+    /// Desktop Duplication instead.
+    static bool available(std::string* why = nullptr);
+
+    /// Whether the session is let off the yellow capture border Windows 11
+    /// draws around a captured display: asked at start(), read back after.
+    /// False on Windows 10, which draws it regardless.
+    bool borderOff() const { return m_BorderOff; }
+
+    /// Capture on @p device rather than on one of its own: the D3D12 route's
+    /// D3D11On12 device, whose work runs on the chain's queue (plan « Gels du
+    /// lien », route B). Set before start(); the device must sit on the adapter
+    /// the capture was asked for, or start() refuses. Null takes it back.
+    void useDevice(ID3D11Device* device);
 
     bool start(std::string& error) override;
     AcquireStatus acquire(int timeoutMs, CapturedFrame& frame) override;
@@ -107,6 +121,8 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D11Device> m_Device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_Context;
+    /// The device given by useDevice(), kept across stop() and start().
+    Microsoft::WRL::ComPtr<ID3D11Device> m_Given;
 
     std::unique_ptr<Impl> d;
 
@@ -125,6 +141,7 @@ private:
     /// True between an Ok from acquire() and its release(), so the contract is
     /// enforced here rather than left to the caller's memory.
     bool m_Holding = false;
+    bool m_BorderOff = false;
 };
 
 } // namespace mw::native::capture
