@@ -114,6 +114,7 @@
 #include "streaming/TransportPriorities.h"
 #include "streaming/ConsoleSession.h"
 #include "streaming/SharedFeed.h"
+#include "streaming/StreamEnds.h"
 #include "streaming/StreamWorkerHost.h"
 #include "streaming/WorkerService.h"
 #include "streaming/worker/StreamWorkerMain.h"
@@ -1379,6 +1380,10 @@ static constexpr int kSlotHardCeiling = mw::routerports::kMediaPortCount;
 // waiting for the same browser to relaunch (see the worker's ended handler).
 // The transport chain relaunches within a second; a closed tab waits this out.
 static constexpr int kHostCancelGraceMs = 10000;
+// The same grace, and the virtual display's, when the worker crashed under a
+// healthy stream: the page learns it only when its link times out, a few
+// seconds later, then asks why and starts the stream again (StreamEnds).
+static constexpr int kCrashGraceMs = 20000;
 
 // Where a slot's two signaling ports live, and how many slots fit.
 //
@@ -2349,6 +2354,9 @@ int main(int argc, char* argv[])
         g_PendingHostCancels.erase(it);
         return true;
     };
+    // How each recent stream ended, for the page that lost its link: a worker
+    // that crashed under it is started again, anything else ends as before.
+    StreamEnds g_StreamEnds;
 
     // Close a co-op backend's session host-side once its stream is over.
     //
@@ -2379,8 +2387,8 @@ int main(int argc, char* argv[])
     // down. Suppresses the slot's normal ended-cleanup (no Sunshine /cancel:
     // take-over and standby-restart both want the Sunshine session kept alive
     // for the /resume that follows). The host object self-deletes on exit.
-    auto detachWorkerSlot = [&g_Pool, &authManager](int i, bool takenOver,
-                                                    bool sessionEnded = false) {
+    auto detachWorkerSlot = [&g_Pool, &authManager, &g_StreamEnds](int i, bool takenOver,
+                                                                   bool sessionEnded = false) {
         SessionPool::Slot& sl = g_Pool.at(i);
         StreamWorkerHost* old = g_Pool.workerAs<StreamWorkerHost>(i);
         const QString token = sl.sessionToken;
@@ -2401,6 +2409,9 @@ int main(int argc, char* argv[])
         sl.appId = 0;
         if (onVirtualDisplay) VirtualDisplayJob::instance().releaseSoon();
         if (!old) return static_cast<StreamWorkerHost*>(nullptr);
+        // Whatever its worker does next, this stream was stopped here.
+        g_StreamEnds.end(old->streamId(), StreamEnds::State::Stopped,
+                         QDateTime::currentMSecsSinceEpoch());
         QObject::disconnect(old, &StreamWorkerHost::ended, nullptr, nullptr);
         QObject::connect(old, &StreamWorkerHost::ended, qApp, [token, &authManager]() {
             authManager.setSessionStreaming(token, false);
@@ -2879,6 +2890,20 @@ int main(int argc, char* argv[])
     // after an install or an update (as Sunshine's installer gives Steam one).
     seedDetectedLaunchers(appSettings);
 
+    // How the stream this page knows as ?stream= ended (StreamEnds), asked by a
+    // page whose link went before it starts the stream again or ends it. Only
+    // the page that started it gets an answer, on the same host and session:
+    // anything else reads as unknown, which ends the stream as it always has.
+    server.router()->get("/api/hosts/:id/stream-state", [&g_StreamEnds](const HttpRequest& req) {
+        const StreamEnds::Entry e =
+            g_StreamEnds.find(req.queryParams.value("stream"), QDateTime::currentMSecsSinceEpoch());
+        const bool asker = e.hostUuid == req.pathParams.value("id") &&
+                           !ShareManager::isPlayerSlot(e.slot) &&
+                           e.sessionToken == HttpServer::sessionTokenFromRequest(req);
+        return HttpResponse::json(
+            QJsonObject{{"state", StreamEnds::name(asker ? e.state : StreamEnds::State::Unknown)}});
+    });
+
     // Phase 5: Start streaming — launch app + RTSP handshake
     server.router()->postAsync("/api/hosts/:id/start", [&computerManager, signalingPort,
                                                         &g_ActiveRelay, &g_ActiveStreamRelay,
@@ -2887,7 +2912,7 @@ int main(int argc, char* argv[])
                                                         &g_ActiveHostUuid, &g_HostAspect, &g_Pool,
                                                         &g_DualSupport, &g_SingleSessionHosts,
                                                         &g_LastStandbyStartMs, &g_LiveSunshineUids,
-                                                        &g_PendingHostCancels,
+                                                        &g_PendingHostCancels, &g_StreamEnds,
                                                         &dropPendingHostCancel, &detachWorkerSlot,
                                                         &quitsPerDevice, &quitDeviceApp,
                                                         &releaseSeatIfIdle, &slotSignalingPort,
@@ -3054,6 +3079,45 @@ int main(int argc, char* argv[])
                     qInfo() << "[Session] Host" << uuid << "differs from slot 0 ("
                             << g_Pool.at(0).hostUuid << ") — using slot" << reqSlot;
             }
+        }
+
+        // ── Back after a worker crash ──────────────────────────────────────────
+        // The page lost its link, asked why (stream-state below) and heard that
+        // the worker crashed: it starts the stream again, naming the one it
+        // lost. Checked again here, before the take-over tears anything down,
+        // since the answer may have changed meanwhile: the page only ever comes
+        // back for its own stream, and a stream started on this host after the
+        // crash (another device's) keeps the host.
+        const QString reconnectOf = standby ? QString() : body["reconnect_of"].toString();
+        if (!reconnectOf.isEmpty()) {
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            const StreamEnds::Entry lost = g_StreamEnds.find(reconnectOf, now);
+            QString refused;
+            if (lost.state != StreamEnds::State::Crashed)
+                refused = QStringLiteral("that stream did not crash (%1)")
+                              .arg(StreamEnds::name(lost.state));
+            else if (lost.hostUuid != uuid || ShareManager::isPlayerSlot(lost.slot) ||
+                     lost.sessionToken != HttpServer::sessionTokenFromRequest(req))
+                refused = QStringLiteral("that stream was not this page's");
+            for (int i = 0; refused.isEmpty() && i < kOwnerSlots; ++i) {
+                if (!g_Pool.live(i) || g_Pool.at(i).hostUuid != uuid) continue;
+                if (slotHeldByAnotherDevice(i) || slotStreamsAnotherApp(i)) continue;
+                // This browser's own: an earlier try of this very restart.
+                if (g_Pool.at(i).clientUniqueId == reqDevice) continue;
+                const auto* w = g_Pool.workerAs<StreamWorkerHost>(i);
+                const StreamEnds::Entry there =
+                    g_StreamEnds.find(w ? w->streamId() : QString(), now);
+                if (there.state == StreamEnds::State::Live && there.atMs > lost.atMs)
+                    refused = QStringLiteral("this host has streamed elsewhere since");
+            }
+            if (!refused.isEmpty()) {
+                qInfo() << "[Session] Reconnect after a worker crash refused:" << refused;
+                respond(HttpResponse::json(
+                    QJsonObject{{"error", QStringLiteral("reconnect_refused")}}, 409));
+                return;
+            }
+            qInfo() << "[Session] Reconnecting after a worker crash (host" << uuid << ", slot"
+                    << lost.slot << ")";
         }
 
         // ── Take-over: this backend streams ONE session at a time ──────────────
@@ -3994,12 +4058,21 @@ int main(int argc, char* argv[])
                 hostAppOnVirtual
                     ? NativeHostBackend::hostAppFor(appId).value("quit_command").toString()
                     : QString();
+            // Back after a crash, the app is still open where the crashed
+            // stream left it, unless that display went with the worker (a
+            // portal's), whose going closed it.
+            const bool hostAppStillOpen =
+                !reconnectOf.isEmpty() && !(hostAppOnVirtual && VirtualDisplay::livesInStream());
+            // What the page knows this stream by, to ask how it ended.
+            const QString streamId = StreamEnds::newId();
+            worker->setStreamId(streamId);
             QObject::connect(
                 worker, &StreamWorkerHost::responseReady, qApp,
                 [respond, worker, &g_Pool, &g_DualSupport, &g_SingleSessionHosts,
-                 &g_LiveSunshineUids, &authManager, &sessionMetrics, sessionFacts, sessionStartedAt,
-                 reqSlot, standby, hostUuidCopy, uid, sessionToken, hostAppCommand,
-                 hostAppOnVirtual, hostAppCloseCommand](int code, QJsonObject bodyObj) {
+                 &g_LiveSunshineUids, &g_StreamEnds, &authManager, &sessionMetrics, sessionFacts,
+                 sessionStartedAt, reqSlot, standby, hostUuidCopy, uid, sessionToken, streamId,
+                 hostAppCommand, hostAppOnVirtual, hostAppCloseCommand,
+                 hostAppStillOpen](int code, QJsonObject bodyObj) {
                     const bool ok =
                         code == 200 && bodyObj["status"].toString() == QLatin1String("streaming");
                     // Count a session once it actually carries a picture, and
@@ -4020,11 +4093,14 @@ int main(int argc, char* argv[])
                         bodyObj["slot"] = reqSlot;
                         bodyObj["dual_supported"] = g_DualSupport.value(hostUuidCopy, true) &&
                                                     !g_SingleSessionHosts.contains(hostUuidCopy);
+                        bodyObj["stream_id"] = streamId;
+                        g_StreamEnds.begin(streamId, hostUuidCopy, reqSlot, uid, sessionToken,
+                                           QDateTime::currentMSecsSinceEpoch());
                         authManager.setSessionStreaming(sessionToken, true);
                         g_LiveSunshineUids.insert(uid);
                         // A successful standby launch IS the capability probe.
                         if (standby) g_DualSupport[hostUuidCopy] = true;
-                        if (!standby && !hostAppCommand.isEmpty()) {
+                        if (!standby && !hostAppStillOpen && !hostAppCommand.isEmpty()) {
                             QString why;
                             const bool opened =
                                 hostAppOnVirtual
@@ -4068,12 +4144,26 @@ int main(int argc, char* argv[])
             QObject::connect(
                 worker, &StreamWorkerHost::ended, qApp,
                 [worker, &g_Pool, &g_DualSupport, &g_LastStandbyStartMs, &g_LiveSunshineUids,
-                 &g_PendingHostCancels, &dropPendingHostCancel, &anyOtherSlotLive, &computerManager,
-                 &authManager, &reapCoopSession, &sessionMetrics, sessionFacts, sessionStartedAt,
-                 reqSlot, host, hostUuidCopy, uid, sessionToken, coopSessionId, backendResumable,
-                 quitAppOnEnd, &quitsPerDevice, &quitDeviceApp, &releaseSeatIfIdle]() {
+                 &g_PendingHostCancels, &g_StreamEnds, &dropPendingHostCancel, &anyOtherSlotLive,
+                 &computerManager, &authManager, &reapCoopSession, &sessionMetrics, sessionFacts,
+                 sessionStartedAt, reqSlot, host, hostUuidCopy, uid, sessionToken, streamId,
+                 coopSessionId, backendResumable, quitAppOnEnd, &quitsPerDevice, &quitDeviceApp,
+                 &releaseSeatIfIdle]() {
                     qInfo() << "[main] Stream worker ended (slot" << reqSlot << ", uid=" << uid
                             << ")";
+                    // A crash under a stream that was flowing brings its page
+                    // back: it asks how this stream ended and starts it again,
+                    // and what the stream held waits longer for it below. One
+                    // that never streamed is a failed launch, as before.
+                    const qint64 endedAt = QDateTime::currentMSecsSinceEpoch();
+                    const bool comesBack =
+                        worker->crashed() &&
+                        g_StreamEnds.find(streamId, endedAt).state == StreamEnds::State::Live;
+                    g_StreamEnds.end(streamId,
+                                     worker->crashed() ? StreamEnds::State::Crashed
+                                                       : StreamEnds::State::Ended,
+                                     endedAt);
+                    const int holdMs = comesBack ? kCrashGraceMs : kHostCancelGraceMs;
                     // Pairs with the start above: a non-zero timestamp is proof
                     // this leg was the one counted.
                     if (*sessionStartedAt > 0) {
@@ -4133,7 +4223,7 @@ int main(int argc, char* argv[])
                         // rung that failed comes back within it.
                         dropPendingHostCancel(uid, hostUuidCopy);
                         QTimer::singleShot(
-                            kHostCancelGraceMs, qApp,
+                            holdMs, qApp,
                             [&g_Pool, &g_LiveSunshineUids, quitDeviceApp, releaseSeatIfIdle,
                              hostUuidCopy, uid]() {
                                 for (int i = 0; i < g_Pool.size(); ++i) {
@@ -4160,7 +4250,7 @@ int main(int argc, char* argv[])
                         dropPendingHostCancel(uid, hostUuidCopy);
                         g_LiveSunshineUids.remove(uid);
                     } else if (!siblingLive) {
-                        const int graceMs = kHostCancelGraceMs;
+                        const int graceMs = holdMs;
                         dropPendingHostCancel(uid, hostUuidCopy);
                         auto* timer = new QTimer(qApp);
                         timer->setSingleShot(true);
@@ -4232,7 +4322,8 @@ int main(int argc, char* argv[])
                     // not keep it, and nobody else would ask again. Gated on
                     // siblingLive until 04/10/2026, the virtual display stayed
                     // on behind every stream that ran beside Display 1.
-                    if (onVirtualDisplay) VirtualDisplayJob::instance().releaseSoon();
+                    if (onVirtualDisplay)
+                        VirtualDisplayJob::instance().releaseSoon(comesBack ? kCrashGraceMs : 0);
                 });
 
             const bool virtualStream = host->backendType == NativeHostBackend::typeName() &&
@@ -5180,7 +5271,8 @@ int main(int argc, char* argv[])
     auto cancelGuestHostSessionSoon = [&g_PendingHostCancels, &dropPendingHostCancel,
                                        &g_LiveSunshineUids, &computerManager, &anyOtherSlotLive,
                                        &appOutlivesStream, &g_Pool](
-                                          int slot, const QString& boundHost, const QString& uid) {
+                                          int slot, const QString& boundHost, const QString& uid,
+                                          int graceMs = kHostCancelGraceMs) {
         NvComputer* host = computerManager.getHost(boundHost);
         if (!host || uid.isEmpty() || anyOtherSlotLive(slot, boundHost)) {
             g_LiveSunshineUids.remove(uid);
@@ -5199,7 +5291,6 @@ int main(int argc, char* argv[])
             g_LiveSunshineUids.remove(uid);
             return;
         }
-        const int graceMs = kHostCancelGraceMs;
         auto* timer = new QTimer(qApp);
         timer->setSingleShot(true);
         g_PendingHostCancels.insert(uid, {timer, boundHost});
@@ -5247,13 +5338,18 @@ int main(int argc, char* argv[])
         // "streaming" forever and never be able to rejoin their own slot.
         shareManager.setStreaming(slot, false);
     };
+    shareDeps.streamState = [&g_StreamEnds](int slot, const QString& streamId) {
+        const StreamEnds::Entry e =
+            g_StreamEnds.find(streamId, QDateTime::currentMSecsSinceEpoch());
+        return StreamEnds::name(e.slot == slot ? e.state : StreamEnds::State::Unknown);
+    };
     shareDeps.startPlayerStream = [&computerManager, &g_Pool, &g_LiveSunshineUids, &shareManager,
                                    &detachWorkerSlot, &reapCoopSession, &slotSignalingPort,
                                    &slotWsPath, &server, &appSettings, &sessionMetrics,
                                    signalingPort, stunServer, &g_HostAspect, &routerPorts,
                                    &g_PlayerUids, &cancelGuestHostSessionSoon,
                                    &dropPendingHostCancel, &releaseGuestHoleSoon, &keepGuestHole,
-                                   &g_PlayerRetiring,
+                                   &g_PlayerRetiring, &g_StreamEnds,
                                    &sharedFeed](int slot, int height, QString aspect,
                                                 ShareManager::Permissions perms, QString serverHost,
                                                 int transportIndex, const HttpRequest& req,
@@ -5381,7 +5477,12 @@ int main(int argc, char* argv[])
         // rung — or the codec fallback — keeps the one the stream started
         // with, and gets back the app session it left: its /cancel is held
         // (see the ended handler) and dropped here.
-        QString uid = transportIndex > 0 || h264 ? g_PlayerUids.value(slot) : QString();
+        // So does a guest back after its worker crashed (the join route
+        // checked that it did).
+        const bool reconnect =
+            !QJsonDocument::fromJson(req.body).object().value("reconnect_of").toString().isEmpty();
+        QString uid =
+            transportIndex > 0 || h264 || reconnect ? g_PlayerUids.value(slot) : QString();
         const bool chainRelaunch = !uid.isEmpty();
         if (!chainRelaunch) uid = QUuid::createUuid().toString(QUuid::Id128);
         g_PlayerUids.insert(slot, uid);
@@ -5569,6 +5670,9 @@ int main(int argc, char* argv[])
 
         auto* worker = new StreamWorkerHost(qApp);
         QObject::connect(worker, &StreamWorkerHost::exited, worker, &QObject::deleteLater);
+        // As the owner's: what the guest's page asks about once its link goes.
+        const QString streamId = StreamEnds::newId();
+        worker->setStreamId(streamId);
 
         auto coopSessionId = std::make_shared<QString>();
         QObject::connect(worker, &StreamWorkerHost::coopSessionResolved, qApp,
@@ -5595,9 +5699,9 @@ int main(int argc, char* argv[])
                          });
 
         QObject::connect(worker, &StreamWorkerHost::responseReady, qApp,
-                         [respond, &g_LiveSunshineUids, &shareManager, &sessionMetrics,
-                          sessionFacts, sessionStartedAt, slot,
-                          uid](int code, QJsonObject bodyObj) {
+                         [respond, &g_LiveSunshineUids, &g_StreamEnds, &shareManager,
+                          &sessionMetrics, sessionFacts, sessionStartedAt, slot, uid, hostUuid,
+                          streamId](int code, QJsonObject bodyObj) {
                              const bool ok = code == 200 && bodyObj["status"].toString() ==
                                                                 QLatin1String("streaming");
                              sessionFacts->codec = bodyObj["videoCodec"].toString();
@@ -5610,6 +5714,9 @@ int main(int argc, char* argv[])
                              }
                              if (ok) {
                                  bodyObj["slot"] = slot;
+                                 bodyObj["stream_id"] = streamId;
+                                 g_StreamEnds.begin(streamId, hostUuid, slot, uid, QString(),
+                                                    QDateTime::currentMSecsSinceEpoch());
                                  g_LiveSunshineUids.insert(uid);
                                  shareManager.setStreaming(slot, true);
                              }
@@ -5618,10 +5725,20 @@ int main(int argc, char* argv[])
 
         QObject::connect(
             worker, &StreamWorkerHost::ended, qApp,
-            [worker, &g_Pool, &shareManager, &reapCoopSession, &sessionMetrics,
+            [worker, &g_Pool, &shareManager, &reapCoopSession, &sessionMetrics, &g_StreamEnds,
              &cancelGuestHostSessionSoon, &sharedFeed, sessionFacts, sessionStartedAt, slot, host,
-             uid, coopSessionId]() {
+             uid, coopSessionId, streamId]() {
                 qInfo() << "[main] Player worker ended (slot" << slot << ")";
+                // As the owner's: a crash under a flowing stream brings the
+                // guest's page back, and what the stream held waits longer.
+                const qint64 endedAt = QDateTime::currentMSecsSinceEpoch();
+                const bool comesBack =
+                    worker->crashed() &&
+                    g_StreamEnds.find(streamId, endedAt).state == StreamEnds::State::Live;
+                g_StreamEnds.end(streamId,
+                                 worker->crashed() ? StreamEnds::State::Crashed
+                                                   : StreamEnds::State::Ended,
+                                 endedAt);
                 if (*sessionStartedAt > 0) {
                     const qint64 ms = QDateTime::currentMSecsSinceEpoch() - *sessionStartedAt;
                     sessionMetrics.reportEnd(*sessionFacts, static_cast<int>(ms / 1000));
@@ -5636,7 +5753,8 @@ int main(int argc, char* argv[])
                 reapCoopSession(host->uuid, *coopSessionId);
                 // Same rule as the owner slots, and as Leave: see
                 // cancelGuestHostSessionSoon.
-                cancelGuestHostSessionSoon(slot, host->uuid, uid);
+                cancelGuestHostSessionSoon(slot, host->uuid, uid,
+                                           comesBack ? kCrashGraceMs : kHostCancelGraceMs);
                 SessionPool::Slot& sl = g_Pool.at(slot);
                 const bool onVirtualDisplay = host->backendType == NativeHostBackend::typeName() &&
                                               NativeHostBackend::usesVirtualDisplay(sl.appId);
@@ -5655,7 +5773,8 @@ int main(int argc, char* argv[])
                 // grace's own question. Not skipped for a stream on another
                 // app of this host: nobody would ask again, and the display a
                 // guest turned on stayed on under the owner's.
-                if (onVirtualDisplay) VirtualDisplayJob::instance().releaseSoon();
+                if (onVirtualDisplay)
+                    VirtualDisplayJob::instance().releaseSoon(comesBack ? kCrashGraceMs : 0);
             });
 
         // However this worker goes — ended, left, ended by the owner — its

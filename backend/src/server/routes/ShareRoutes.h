@@ -51,6 +51,11 @@ struct ShareRoutesDeps
     /// the owner pulled the plug, false when the player left on their own.
     std::function<void(int slot, bool notifyEnded)> stopPlayerStream;
 
+    /// How the stream @p streamId of @p slot ended ("live", "crashed",
+    /// "ended", "stopped"), "unknown" for one that is not that slot's. Asked by
+    /// a guest whose link went: a crash is rejoined, anything else is not.
+    std::function<QString(int slot, const QString& streamId)> streamState;
+
     /// What joining @p slot would do right now: the display name of the app the
     /// invitation leads to, and whether the guest's arrival would *launch* it
     /// rather than join something already up. Answered per slot, because an

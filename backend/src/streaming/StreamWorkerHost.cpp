@@ -18,6 +18,7 @@
 #include "StreamWorkerHost.h"
 #include "ConsoleSession.h"
 #include "HidParkingTransfer.h"
+#include "StreamEnds.h"
 #include "WorkerService.h"
 #include "common/Edition.h"
 #include "common/LinuxCapabilities.h"
@@ -315,6 +316,7 @@ void StreamWorkerHost::setInputPolicy(bool gamepad, bool keyboardMouse, bool hid
 void StreamWorkerHost::requestQuit()
 {
     if (!isRunning()) return;
+    m_StopAsked = true;
     sendCommand("quit");
     // The worker gives its relay thread ~3s to unwind; kill shortly after in
     // case it wedged (moonlight teardown can hang on a dead host).
@@ -328,6 +330,7 @@ void StreamWorkerHost::requestQuit()
 
 void StreamWorkerHost::notifyTakenOver()
 {
+    m_StopAsked = true;
     sendCommand("takenOver");
     QTimer::singleShot(5000, this, [this]() {
         if (isRunning()) killChild();
@@ -336,6 +339,7 @@ void StreamWorkerHost::notifyTakenOver()
 
 void StreamWorkerHost::notifyRevoked()
 {
+    m_StopAsked = true;
     sendCommand("revoked");
     QTimer::singleShot(5000, this, [this]() {
         if (isRunning()) killChild();
@@ -344,6 +348,7 @@ void StreamWorkerHost::notifyRevoked()
 
 void StreamWorkerHost::notifySessionEnded()
 {
+    m_StopAsked = true;
     sendCommand("sessionEnded");
     QTimer::singleShot(5000, this, [this]() {
         if (isRunning()) killChild();
@@ -431,6 +436,9 @@ void StreamWorkerHost::onFinished(int exitCode, QProcess::ExitStatus status)
     }
     if (!m_EndedEmitted) {
         m_EndedEmitted = true;
+        m_Crashed = StreamEnds::stateAfterExit(false, m_StopAsked) == StreamEnds::State::Crashed;
+        if (m_Crashed)
+            qWarning() << "[StreamWorkerHost] The worker died without ending its session — crashed";
         emit ended();
     }
     emit exited();

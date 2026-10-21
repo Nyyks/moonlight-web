@@ -101,6 +101,16 @@ public:
 
     bool isRunning() const;
 
+    /// Whether the child went without saying its session was over and without
+    /// having been asked to stop (StreamEnds::stateAfterExit): it crashed, or
+    /// something outside killed it. Settled before ended() is emitted.
+    bool crashed() const { return m_Crashed; }
+
+    /// The id this stream's page knows it by (StreamEnds), set by the
+    /// supervisor that starts it.
+    void setStreamId(const QString& id) { m_StreamId = id; }
+    const QString& streamId() const { return m_StreamId; }
+
 signals:
     /// The worker's /start HTTP reply (exactly once — synthesized 502 when the
     /// worker dies without answering).
@@ -159,6 +169,10 @@ private:
     QByteArray m_Buf;
     bool m_ResponseEmitted = false;
     bool m_EndedEmitted = false;
+    /// A quit or one of the notices was sent: whatever follows is no crash.
+    bool m_StopAsked = false;
+    bool m_Crashed = false;
+    QString m_StreamId;
     /// The kept wheels handed to this worker (HidParkingTransfer), until it
     /// says it took them; 0 when none are out.
     uint64_t m_HidBatch = 0;

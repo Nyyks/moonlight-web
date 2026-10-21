@@ -105,7 +105,6 @@ VirtualDisplayJob::VirtualDisplayJob(QObject* parent)
         fail(QStringLiteral("The elevated helper did not answer in time"));
     });
     m_Release.setSingleShot(true);
-    m_Release.setInterval(kReleaseGraceMs);
     connect(&m_Release, &QTimer::timeout, this, [this]() {
         // A take-over on the tile (another device) asks for the display —
         // cancelling the grace — BEFORE the stream it replaces is torn down,
@@ -240,7 +239,7 @@ void VirtualDisplayJob::deactivate(Callback cb)
     enqueue(Action::Deactivate, 0, 0, 0, false, std::move(cb));
 }
 
-void VirtualDisplayJob::releaseSoon()
+void VirtualDisplayJob::releaseSoon(int graceMs)
 {
     // Linux: it went with the stream's portal session — what was opened on
     // it is closed now, with nothing left to turn off.
@@ -248,7 +247,9 @@ void VirtualDisplayJob::releaseSoon()
         if (m_BeforeRelease && !(m_InUse && m_InUse())) m_BeforeRelease();
         return;
     }
-    m_Release.start();
+    const int ms = qMax(graceMs, kReleaseGraceMs);
+    if (m_Release.isActive() && m_Release.remainingTime() > ms) return;
+    m_Release.start(ms);
 }
 
 void VirtualDisplayJob::enqueue(Action action, int width, int height, int refreshMilliHz, bool hdr,

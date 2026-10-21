@@ -474,6 +474,19 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
                 return;
             }
 
+            // Back after this guest's worker crashed: only for that stream of
+            // this slot, and never over a stream that started on it since.
+            const QString reconnectOf = body.value(QStringLiteral("reconnect_of")).toString();
+            if (!reconnectOf.isEmpty() &&
+                (share.isStreaming(slot) || !deps.streamState ||
+                 deps.streamState(slot, reconnectOf) != QLatin1String("crashed"))) {
+                Logger::info(QStringLiteral("[Share] Slot %1: no rejoin after a crash").arg(slot));
+                QJsonObject obj;
+                obj[QStringLiteral("error")] = QStringLiteral("reconnect_refused");
+                respond(HttpResponse::json(obj, 409));
+                return;
+            }
+
             // Nothing running is no longer a dead end: an invitation opened cold
             // carries the app it was opened on, and the guest's arrival is what
             // starts it. startPlayerStream decides between resuming into a live
@@ -506,6 +519,18 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
 
             deps.startPlayerStream(slot, height, aspect, share.permissions(slot), serverHost,
                                    transportIndex, req, respond);
+        });
+
+    // GET /api/share/player/stream-state?stream=<id> — how the guest's stream
+    // ended, asked once its link went (see ShareRoutesDeps::streamState).
+    router->get(
+        QStringLiteral("/api/share/player/stream-state"), [&share, &deps](const HttpRequest& req) {
+            const int slot = share.slotForCookie(HttpServer::cookieFromRequest(req, kPlayerCookie));
+            if (slot < 0) return HttpResponse::error(403, "Forbidden");
+            const QString stream = req.queryParams.value(QStringLiteral("stream"));
+            const QString state =
+                deps.streamState ? deps.streamState(slot, stream) : QStringLiteral("unknown");
+            return HttpResponse::json(QJsonObject{{QStringLiteral("state"), state}});
         });
 
     // POST /api/share/player/leave — the player pressed Leave.

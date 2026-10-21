@@ -96,8 +96,11 @@ public:
     /// Turn it off (previous primary back, disable). @p cb may be null.
     void deactivate(Callback cb);
 
-    /// Turn it off in a few seconds unless activate() comes first.
-    void releaseSoon();
+    /// Turn it off in a few seconds unless activate() comes first. A longer
+    /// @p graceMs holds it for a stream that is coming back (its worker
+    /// crashed, and the page starts it again); a pending longer grace is never
+    /// cut short by a later call.
+    void releaseSoon(int graceMs = 0);
 
     /// Asked when that grace runs out: true while a stream still shows the
     /// display, which then stays on. A take-over asks for the display
