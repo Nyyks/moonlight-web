@@ -53,6 +53,7 @@ export default defineConfig({
                 'js/util/gamepadMappingsStore.js',
                 'js/stream/renderers/createRenderer.js',
                 'js/stream/renderers/scaleRegime.js',
+                'js/stream/renderers/MwsrShader.js',
                 'js/models/App.js',
                 'js/models/Host.js',
                 'js/i18n/i18n.js',
