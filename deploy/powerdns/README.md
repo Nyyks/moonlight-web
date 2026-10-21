@@ -479,7 +479,10 @@ cd ~
 
 Rolling back is the same two blocks with the previous tag. The script refuses
 a dirty tree, refuses to run outside `~/moonlight-web`, and asks nothing
-interactively — a prompt in the middle of a paste would eat the next line.
+interactively — a prompt in the middle of a paste would eat the next line. It
+reads nothing from its stdin either, so a script fed to `ssh box bash -s` can
+call it. Then check both families: see the end of "IPv6 on the Docker
+networks".
 
 **When Caddy restarts**, the order is: backup, checkout, build the images
 (everything still serving), stop `mw-rendezvous` (and staging's
@@ -593,6 +596,41 @@ Once every name has one, setting `MW_PUBLIC_IP6` in `.env` makes `init.sh`
 keep them (it adds only the AAAA a name lacks). `ns1`/`ns2` also need an IPv6
 glue at the registrar: without it, a resolver that cannot reach the IPv4 glue
 cannot reach the zone at all, AAAA or not.
+
+Two cautions before a name gets its AAAA:
+
+- **`stream.` waits for hosts that race the families.** A host before v0.4.1
+  opens its line through Qt, which tries the addresses one after the other: on
+  a network whose IPv6 is configured but silently dropped, every
+  (re)connection would first lose 21 s (Windows) to 30 s (Linux). Browsers,
+  curl and Go race the families and are not affected. `stream.dev` has carried
+  an AAAA since 2026-10-20.
+- **A new AAAA can take an hour to be seen.** The zone's SOA minimum is
+  3600 s: a resolver that asked before the record existed keeps its "no such
+  record" answer that long.
+
+**After every deploy**, check both families, whether or not a name has its
+AAAA yet (`--resolve` picks the address). Any HTTP code passes — the name is
+served with its certificate; a curl error does not. From the box, then from a
+machine outside if one is at hand:
+
+```bash
+cd ~/moonlight-web/deploy/powerdns
+D=$(grep ^MW_DOMAIN= .env | cut -d= -f2 | tr -d '[:space:]')
+V4=$(grep ^MW_PUBLIC_IP= .env | cut -d= -f2 | tr -d '[:space:]')
+V6=2001:db8::1                                                    # your address
+for a in "$V4" "[$V6]"; do
+  for h in stream.$D stream.dev.$D; do
+    printf '%s via %s: ' "$h" "$a"
+    sh mw-rendezvous/smoke.sh "https://$h" --resolve "$h:443:$a" | tail -1
+  done
+  for h in $D www.$D api.$D dnsapi.$D updates.$D metrics.$D stats.$D packages.$D; do
+    printf '%-28s %-24s ' "$h" "$a"
+    curl -sS -o /dev/null -m 10 --resolve "$h:443:$a" -w '%{http_code}\n' "https://$h/"
+  done
+done
+cd ~
+```
 
 ### Cold backup and restore
 
