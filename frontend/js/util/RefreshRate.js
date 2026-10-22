@@ -61,10 +61,18 @@
  * half the frames are skipped, the median is the doubled period and the
  * mean mixes the two; a frame shown between two refreshes' worth lands in the
  * mean as well. Either way the good deltas are no longer one tight cluster.
- * So a reading LOWER than the last one is believed only when it is clean —
- * its deltas within SPREAD_MAX of the period, few of them left out: a window
- * that really moved to a slower screen reads clean, a page under load does
- * not. A higher reading is always believed: no load makes a screen faster.
+ * So a reading LOWER than the last one is dropped when it is not clean — its
+ * deltas within SPREAD_MAX of the period, few of them left out: a window that
+ * really moved to a slower screen reads clean, a page under load mostly does
+ * not. Mostly: Chrome on the same iPhone, held to 60 Hz, read 57.5, 44.0, 50.7
+ * and 57.3 clean, and the host followed it down to 51 fps (22/10/2026). A
+ * clean lower reading is therefore only a candidate until twelve seconds of
+ * rAF sit on its grid (the slope of "To the millihertz", within a percent of
+ * it): a slower screen's refreshes do, a loaded page's frames, landing where
+ * the page lets them, do not. Until then, and when they do not, the last
+ * reading stands; a real move to a slower screen reaches the host twelve
+ * seconds late. A higher reading is always believed: no load makes a screen
+ * faster.
  */
 
 import { IS_LOW_MEMORY, IS_TV } from './BrowserDetect.js';
@@ -101,6 +109,11 @@ const PRECISE_KEY = 'mw_refresh_precise_mhz';
 let _preciseMilliHz = 0;
 /** @type {boolean} A precise reading is being taken. */
 let _preciseRunning = false;
+/** @type {number} A lower reading waiting for its twelve seconds ("Under
+ *  load"), millihertz. 0 = none. */
+let _pendingMilliHz = 0;
+/** @type {Promise<number> | null} Its confirmation, in flight. */
+let _confirming = null;
 
 /** The precise reading this browser kept, 0 when none (or no storage). */
 function _storedPrecise() {
@@ -212,6 +225,19 @@ function _settle(stamps) {
         );
         return _milliHz;
     }
+    // Lower and clean: a candidate, until twelve seconds sit on its grid.
+    if (_milliHz > 0 && mhz < _milliHz * (1 - CHANGE_THRESHOLD)) {
+        if (mhz !== _pendingMilliHz) {
+            console.info(
+                `[RefreshRate] ${(mhz / 1000).toFixed(1)} Hz read, ` +
+                    `${(_milliHz / 1000).toFixed(1)} Hz kept until twelve seconds confirm it`,
+            );
+        }
+        _pendingMilliHz = mhz;
+        _confirmPending();
+        return _milliHz;
+    }
+    _pendingMilliHz = 0;
     // The same screen as the precise reading (this page's, else this
     // browser's last): that one stands — it is the better number of the two.
     if (!_preciseMilliHz) {
@@ -220,6 +246,12 @@ function _settle(stamps) {
     }
     if (_agrees(mhz, _preciseMilliHz)) mhz = _preciseMilliHz;
     else _preciseMilliHz = 0;
+    _publish(mhz);
+    return mhz;
+}
+
+/** Make @p mhz the reading, and tell the listeners when it moved. */
+function _publish(mhz) {
     const before = _milliHz;
     _milliHz = mhz;
     if (before === 0 || Math.abs(mhz - before) > before * CHANGE_THRESHOLD) {
@@ -231,7 +263,50 @@ function _settle(stamps) {
             }
         }
     }
-    return mhz;
+}
+
+/**
+ * Follow rAF for the pending lower reading's twelve seconds ("Under load"),
+ * unless they are being followed already or a precise reading holds rAF (it
+ * starts this when it ends). Its refreshes on one grid within a percent of
+ * the candidate: a slower screen, taken at the slope's value. Anything else —
+ * no grid, another grid, a hidden tab — leaves the last reading standing. A
+ * candidate replaced meanwhile is followed in turn; one cleared by a reading
+ * back at the last one is dropped.
+ */
+function _confirmPending() {
+    if (_confirming || _preciseRunning || !_pendingMilliHz) return;
+    const candidate = _pendingMilliHz;
+    _confirming = _follow(1e6 / candidate, PRECISE_MS).then((mhz) => {
+        _confirming = null;
+        if (_pendingMilliHz !== candidate) {
+            _confirmPending();
+            return _milliHz;
+        }
+        _pendingMilliHz = 0;
+        const seen = (candidate / 1000).toFixed(1);
+        if (mhz > 0 && Math.abs(mhz - candidate) <= candidate * CHANGE_THRESHOLD) {
+            console.info(`[RefreshRate] ${seen} Hz confirmed, ${(mhz / 1000).toFixed(3)} Hz`);
+            _preciseMilliHz = mhz;
+            _storePrecise(mhz);
+            _publish(mhz);
+        } else {
+            console.info(
+                `[RefreshRate] ${seen} Hz not confirmed, ` +
+                    `${(_milliHz / 1000).toFixed(1)} Hz kept`,
+            );
+        }
+        return _milliHz;
+    });
+}
+
+/**
+ * The lower reading being confirmed ("Under load"), resolving with the
+ * reading that stands once it is decided; null when none is. For the tests.
+ * @returns {Promise<number> | null}
+ */
+export function refreshConfirmation() {
+    return _confirming;
 }
 
 /**
@@ -301,10 +376,34 @@ export function slopePeriodMs(stamps, approxMs) {
  */
 export function measureRefreshRatePrecisely(opts = {}) {
     if (IS_TV || _preciseRunning || !(_milliHz > 0)) return Promise.resolve(0);
+    const before = _milliHz;
+    return _follow(1e6 / before, opts.durationMs || PRECISE_MS).then((mhz) => {
+        if (!mhz || before !== _milliHz || Math.abs(mhz - _milliHz) > _milliHz * PRECISE_AGREES) {
+            // A lower reading that came meanwhile waited for rAF ("Under load").
+            _confirmPending();
+            return 0;
+        }
+        // Twelve seconds on this screen's grid: a lower reading taken meanwhile
+        // was the page, not another screen.
+        _pendingMilliHz = 0;
+        _preciseMilliHz = mhz;
+        _milliHz = mhz;
+        _storePrecise(mhz);
+        return mhz;
+    });
+}
+
+/**
+ * Follow rAF for @p durationMs and read the period off its stamps' slope on a
+ * grid of about @p approxMs (slopePeriodMs), in millihertz. 0 when the tab is
+ * or goes hidden, or the stamps sit on no such grid. Holds _preciseRunning.
+ * @param {number} approxMs
+ * @param {number} durationMs
+ * @returns {Promise<number>}
+ */
+function _follow(approxMs, durationMs) {
     if (typeof document !== 'undefined' && document.hidden) return Promise.resolve(0);
     if (typeof requestAnimationFrame !== 'function') return Promise.resolve(0);
-    const durationMs = opts.durationMs || PRECISE_MS;
-    const approxMs = 1e6 / _milliHz;
     _preciseRunning = true;
     return new Promise((resolve) => {
         /** @type {number[]} */
@@ -325,15 +424,7 @@ export function measureRefreshRatePrecisely(opts = {}) {
             _preciseRunning = false;
             // The first stamps after a request may land mid-refresh.
             const period = slopePeriodMs(stamps.slice(4), approxMs);
-            const mhz = period > 0 ? Math.round(1e6 / period) : 0;
-            if (!mhz || Math.abs(mhz - _milliHz) > _milliHz * PRECISE_AGREES) {
-                resolve(0);
-                return;
-            }
-            _preciseMilliHz = mhz;
-            _milliHz = mhz;
-            _storePrecise(mhz);
-            resolve(mhz);
+            resolve(period > 0 ? Math.round(1e6 / period) : 0);
         };
         requestAnimationFrame(tick);
     });
