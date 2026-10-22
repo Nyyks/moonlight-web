@@ -222,7 +222,9 @@ Proposition de décision par classe (plan §9, P6, à Bruno) : ordinateur Window
 WebGL2 (`gl-mwsr`) ; Apple mobile (WebKit) → WebGPU (`mwsr`) quand il est là, `gl-mwsr` sinon ; Snapdragon
 → `gl-mwsr` à la place de SGSR1 dans l'Auto. Mali reste en WebGL2 selon la règle, mais la mesure à la
 taille de l'écran rend WebGPU défendable sur Mali aussi (2 à 6 ms de moins par image, 18 quand le flux
-dépasse l'écran) : au choix de Bruno. Le labo n'a pas mesuré Safari macOS.
+dépasse l'écran) : au choix de Bruno. Le labo n'a pas mesuré Safari macOS. *[Décidée par Bruno le
+22/10 (plan §9), après le clic-photon ci-dessous : la proposition, sauf pour les Mali d'entrée de
+gamme, sans upscaler automatique et présentés par WebGPU.]*
 
 **Clic-photon des téléphones** (22/10, journal J28, go de Bruno après J27). La sonde `mwLatency` est
 biaisée sur téléphone (WebGL2 relit ses pixels de façon synchrone après chaque dessin) : mesure refaite
@@ -236,8 +238,8 @@ sans relecture, un flash dans la page au clic, l'écran du téléphone enregistr
   960×540, meilleur en WebGPU à 1080p (53-55 i/s contre 30). Passe maintenue de force au labo : `mwsr`
   arrive une image après `gl-mwsr` (médianes 41 contre 33 ms à ×1,33, 49 contre 33 en 1080p) mais montre
   presque deux fois plus d'images en 1080p ; deux séries identiques diffèrent elles aussi d'une image.
-- **À Bruno** (P6) : WebGPU sur iPhone ; sur ce Mali, aucune saveur ne garde la passe, la question devient
-  un `auto` sans upscaler pour cette classe et le choix du présentateur simple.
+- **Décision de Bruno** (22/10, plan §9) : WebGPU sur iPhone ; sur les Mali d'entrée de gamme, aucun
+  upscaler dans l'`auto` et le présentateur simple en WebGPU, amélioration activée ou non ; appliqué en P6.
 
 **La CI** (run 39661997273, lu par 59) : sur le runner Linux, l'adaptateur logiciel forcé refuse
 d'importer une image vidéo dans WebGPU (`importExternalTexture` : « Failed to import texture from
@@ -245,7 +247,9 @@ video » à chaque image), la chaîne WebGPU du produit n'y dessine rien ; limit
 Windows le même SwiftShader importe, dorés et conformité exacts), hors de portée d'un utilisateur
 (sans le drapeau, aucun adaptateur n'est offert et le client reste en WebGL2/Canvas2D). Le flux de
 conformité tient désormais ce refus pour « non applicable sur cet adaptateur » et juge le reste (noyau,
-jumeau WebGL2, dorés) ; le côté WebGL2 du job tourne même si le côté WebGPU a échoué.
+jumeau WebGL2, dorés) ; le côté WebGL2 du job tourne même si le côté WebGPU a échoué. *[Décision de
+Bruno du 22/10 (plan §9) : le job sortira en 0 quand ses seuls problèmes sont « non applicable », en 1
+pour une vraie différence ou un dump manquant.]*
 
 **Le repli du renderer** (décision de Bruno du 21/10 au soir, relayée par 59 : avant la v0.4.1, pas en
 P6 ; journal J21). Dès le premier refus, `draw()` copie l'image par `createImageBitmap` +
@@ -259,3 +263,5 @@ conditions que la porte) : `done` p50 de la chaîne `mwsr` ×1,2-1,3 celui de l'
 (≈ +1 ms par image), ×1,8 avec une entrée 4K (le bitmap d'une image 4K, +5 à 6 ms), le fil principal pas
 plus chargé (la création du bitmap est asynchrone) ; les cellules WebGL2 des deux passes, que le repli ne
 touche pas, dérivent de 0,91 à 1,21. Un chemin de secours, jamais le chemin normal : acceptable.
+*[Troisième repli décidé par Bruno le 22/10 (plan §9) : `VideoFrame.copyTo` vers RGBA puis
+`writeTexture` ; après N échecs de suite, `gl-<algo>`, puis Canvas2D, au lieu du noir.]*

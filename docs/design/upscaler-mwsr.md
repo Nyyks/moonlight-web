@@ -765,11 +765,13 @@ WebGL2 ? le même shader avec repli, sans alourdir le compute ? ») :
   Appareils de Bruno le 22/10 : iPhone 13 Pro → WebGPU (0,25-0,53 ×, l'envoi `texImage2D` de WebKit coûte
   3-24 ms de fil principal) ; Mac M1 Pro dans Chrome → égalité à 60 i/s, WebGL2 reste ; realme (Mali-G57)
   → égalité selon la règle, WebGL2 reste (à la taille de son écran, WebGPU 0,76-0,90 ×, réduction
-  0,50 ×) ; `mw-arm` (Adreno 618) → WebGL2 seul, `gl-mwsr` 0,63-0,77 × SGSR1. La décision
-  par classe (§9, P6) reste à trancher par Bruno. Clic-photon des téléphones le 22/10 (J28), le labo
-  s'arrêtant à la fin du GPU (J27) : iPhone → WebGPU confirmé, sans régression au photon et à cadence
-  plus stable ; realme → l'échelle coupe la passe dans les deux saveurs à ×1,33, il reste le présentateur
-  simple (égal à 960×540, WebGPU 53-55 i/s contre 30 à 1080p). Rapport P4 §5, journaux J20 et J23-J28.]*
+  0,50 ×) ; `mw-arm` (Adreno 618) → WebGL2 seul, `gl-mwsr` 0,63-0,77 × SGSR1. Clic-photon des
+  téléphones le 22/10 (J28), le labo s'arrêtant à la fin du GPU (J27) : iPhone → WebGPU confirmé, sans
+  régression au photon et à cadence plus stable ; realme → l'échelle coupe la passe dans les deux saveurs
+  à ×1,33, il reste le présentateur simple (égal à 960×540, WebGPU 53-55 i/s contre 30 à 1080p). Rapport
+  P4 §5, journaux J20 et J23-J28. Décision par classe de Bruno le 22/10 (§9) : `gl-mwsr` sur PC et Mac,
+  `mwsr` sur iPhone, `gl-mwsr` à la place de SGSR1 sur Snapdragon, aucun upscaler automatique sur les
+  Mali d'entrée de gamme, dont le présentateur simple passe à WebGPU ; appliquée en P6.]*
 
 ---
 
@@ -1179,6 +1181,28 @@ seul). P0 précède tout (sans lignes de base, pas de verdict). P2.4 (compute) n
 Chaque porte se termine par un `/compact` et un rapport à la session d'orchestration avec
 l'effort conseillé de la phase suivante, comme pour les autres plans.
 
+**Décisions de Bruno du 22/10/2026**, après la porte P4 et le clic-photon des téléphones (rapport P4
+§5, journal J28) ; relayées par 59 vers 13:05, le présentateur des Mali choisi ensuite dans la session.
+Elles fixent ce que P6 appliquera sur les résultats de P5 ; rien ne devient défaut avant.
+- **L'`auto` par classe d'appareil** : PC et Mac → WebGL2 (`gl-mwsr`) ; iPhone (iOS 26) → WebGPU
+  (`mwsr`) quand WebGPU est là, `gl-mwsr` sinon ; Snapdragon et Adreno → `gl-mwsr` à la place de
+  SGSR1 ; Mali d'entrée de gamme (le realme Note 60, Mali-G57 MP1) → aucun upscaler automatique.
+- **Le présentateur simple de ces Mali** : WebGPU dès qu'il existe, amélioration activée ou non
+  (Canvas2D puis WebGL2 sinon) ; une exception, sur cette seule classe, au Canvas2D par défaut du
+  03/09. Au photon sur le realme : égal à 960×540, 53-55 i/s au lieu de 30 en 1080p réduit — ce que
+  la résolution Auto envoie à un téléphone, l'écran de l'hôte jusqu'à 1440 lignes —, même réactivité
+  à une image près. La batterie se mesure en P5.
+- **Le troisième repli de l'import WebGPU**, avant la v0.4.1 comme le deuxième (rapport P4 §5) :
+  après `importExternalTexture` et l'`ImageBitmap`, `VideoFrame.copyTo` vers RGBA puis
+  `writeTexture` ; si tout échoue N fois de suite, le renderer bascule sur `gl-<algo>`, puis
+  Canvas2D, au lieu de rester noir.
+- **Le job CI « Upscaler lab »** sort en 0 quand ses seuls problèmes sont « non applicable »
+  (annotations `::warning::`), en 1 seulement pour une vraie différence ou un dump manquant ; ses
+  déclencheurs ne changent pas.
+- **Reste ouvert pour P6** : la frontière de la classe « Mali d'entrée de gamme », et les GPU
+  mobiles qu'aucun banc n'a vus (Mali haut de gamme, Xclipse, PowerVR), en SGSR1 dans l'Auto
+  aujourd'hui.
+
 ---
 
 ## 10. Sources, licences et règles de réutilisation
@@ -1368,18 +1392,20 @@ upscalers spatiaux.
 - [x] CI : job `scaler-lab` non bloquant (conformité sur SwiftShader, les deux côtés ; chaque texte compile) (`48bb8213`) ; pas de validation statique possible sous Node (notée au rapport §4)
 - [x] Porte WebGPU contre WebGL2 avec le nouveau shader sur ordinateur (21/10 au soir, journal J20, rapport §5) : jeu `--p4` (`submit`, `done`, `gpu` par draw ; barrière sondée côté WebGL2, `EXT_disjoint_timer_query_webgl2`, niveau H.264 par taille), RTX et 780M au go de 59 → **WebGL2 reste la saveur SDR** (RTX 1,9-2,3 × à 60 i/s, 780M 1,1-1,2 × ; exception la réduction 4K → 1440p sur le 780M, WebGPU 0,82 ×) ; le drapeau `mw_mwsr` vérifié sur la `--dev` (overlay des deux saveurs, témoin FSR1, repli Canvas2D sans WebGPU, « Off (1:1) »)
 - [x] La porte sur les appareils de Bruno (22/10 au matin, journaux J23-J26, rapport §5) : **iPhone 13 Pro → WebGPU** (`done` 0,25-0,53 × WebGL2 partout : l'envoi `texImage2D` de WebKit coûte 3-24 ms de fil principal) ; **Mac M1 Pro (Chrome) → WebGL2 reste** (égalité à 60 i/s, WebGPU 0,5-0,6 × saturé) ; **`mw-arm` (Adreno 618) → WebGL2 par nécessité, `gl-mwsr` 0,63-0,77 × SGSR1**, C1 tenue (8 cas, mw-arm hors réseau ensuite) ; **realme Note 60 → égalité, WebGL2 reste** (0,78-0,98 × ; à 1440p de sortie aucune saveur ne tient 60 i/s) ; proposition de décision par classe au rapport §5, à trancher par Bruno (plan §9, P6) ; cas à la taille de l'écran du realme faits ensuite (WebGPU 0,76-0,90 ×, réduction 0,50 ×, la règle au seuil sur le texte ×2 : Mali défendable en WebGPU, au choix de Bruno)
-- [x] Clic-photon sur les téléphones avant P6 (22/10, go de Bruno, journal J28, rapport §5) : la sonde `mwLatency` est biaisée sur téléphone (relecture synchrone en WebGL2) → flash dans la page au clic, écran enregistré, flash → drapeau ; **iPhone 13 Pro → WebGPU confirmé** (`mwsr` − `gl-mwsr` : −6 ms en 720p, +4 en 1080p, intervalles contenant zéro ; en 1080p WebGPU garde le flux à 60 i/s verrouillé, WebGL le fait tomber à 56-58) ; **realme → l'échelle coupe la passe en 2 s dans les deux saveurs à ×1,33**, reste le présentateur simple (égal à 960×540, WebGPU 53-55 i/s contre 30 à 1080p) ; passe forcée au labo : `mwsr` une image après `gl-mwsr` ; piège de la mémoire de l'échelle (`mw_enhancer_rung`) noté ; la mesure du rafraîchissement sous charge signalée à 59 pour la cadence ; décision par classe à Bruno (P6)
+- [x] Clic-photon sur les téléphones avant P6 (22/10, go de Bruno, journal J28, rapport §5) : la sonde `mwLatency` est biaisée sur téléphone (relecture synchrone en WebGL2) → flash dans la page au clic, écran enregistré, flash → drapeau ; **iPhone 13 Pro → WebGPU confirmé** (`mwsr` − `gl-mwsr` : −6 ms en 720p, +4 en 1080p, intervalles contenant zéro ; en 1080p WebGPU garde le flux à 60 i/s verrouillé, WebGL le fait tomber à 56-58) ; **realme → l'échelle coupe la passe en 2 s dans les deux saveurs à ×1,33**, reste le présentateur simple (égal à 960×540, WebGPU 53-55 i/s contre 30 à 1080p) ; passe forcée au labo : `mwsr` une image après `gl-mwsr` ; piège de la mémoire de l'échelle (`mw_enhancer_rung`) noté ; la mesure du rafraîchissement sous charge signalée à 59 pour la cadence ; décision par classe de Bruno le 22/10 (§9)
 - [x] Repli du renderer WebGPU quand `importExternalTexture` refuse l'image (décision de Bruno du 21/10 au soir, journal J21) : copie par `ImageBitmap` dans la texture d'entrée, import retenté tous les 300 draws, console limitée ; test à device simulé, dorés et conformité exacts sur SwiftShader avec `importfail=1` ; coût mesuré le 22/10 sur le 780M : `done` ×1,2-1,3 à ×2 (≈ +1 ms par image), ×1,8 en entrée 4K, fil principal égal (journal J21)
+- [ ] Troisième repli de l'import WebGPU (décision de Bruno du 22/10, §9) : `VideoFrame.copyTo` vers RGBA puis `writeTexture` ; après N échecs de suite, bascule sur `gl-<algo>` puis Canvas2D au lieu du noir ; test à device simulé, SwiftShader d'abord [`xhigh`]
+- [ ] Job CI « Upscaler lab » : sortie 0 quand les seuls problèmes sont « non applicable » (`::warning::`), 1 pour une vraie différence ou un dump manquant ; déclencheurs inchangés (décision du 22/10, §9) [`medium`]
 
 **P5 — Campagne**
 - [ ] Matrice du §7.3 (DualRTX complet ; étoile ailleurs) [`xhigh`]
-- [ ] Énergie : `powermetrics` sur M1, décharge iPhone, occupation GPU `mw-arm` [`xhigh`]
+- [ ] Énergie : `powermetrics` sur M1, décharge iPhone, occupation GPU `mw-arm` ; décharge du realme, présentateur WebGPU contre WebGL2 (décision du 22/10, §9) [`xhigh`]
 - [ ] `/bench` avec `mwsr` ; clic → photon plein écran [`high`]
 - [ ] A/B subjectif de Bruno (texte, bureau, jeu ; LAN et Internet ; HDR sur le M27Q)
 - [ ] Rapport : objectif par objectif, démontré / attendu, non mesurables [`xhigh`]
 
 **P6 — Défauts, documentation, release**
-- [ ] Bascule de `auto` par classe d'appareil (ou non) ; `README.next.md` ; wiki ; notes de release ; mémoires [`medium`]
+- [ ] Bascule de `auto` par classe d'appareil selon les décisions du 22/10 (§9 : `gl-mwsr` sur PC et Mac, `mwsr` sur iPhone, `gl-mwsr` sur Snapdragon, Mali d'entrée de gamme sans upscaler et présentés par WebGPU), sur les résultats de P5 ; `README.next.md` ; wiki ; notes de release ; mémoires [`medium`]
 
 **Hors v0.4.1 — étude optionnelle (§14, proposée le 21/10/2026, à la décision de Bruno)**
 - [ ] P7.0 Mode séquence du labo et expérience décisive de la mémoire temporelle : panoramique sous-pixel des images de référence, arrêt, coupure, passés par la boucle WebCodecs à deux débits ; FLIP et PSNR par image, scintillement, traînée, avec et sans histoire ; porte go/no-go du §14.3 [`high`]
