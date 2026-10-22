@@ -1095,3 +1095,62 @@ disait le clic-photon déjà mesuré ? Sa crainte : une régression si l'on ne r
   le realme) et 1080p (réduction) ; séries de 10 clics entrelacées ; le realme piloté par adb sans fil et
   DevTools (Bruno autorise la manipulation), l'iPhone par l'inspecteur web de Safari du Mac de Léo en
   Wi-Fi ; caméra au ralenti (repère gris de la sonde) si un écart reste ambigu. Créneau via 59.
+
+## 2026-10-22 — J28, le clic-photon des téléphones : la sonde biaisée, l'échelle qui coupe, pas de régression WebGPU
+
+Créneau de 59 (10:52, priorité donnée par Bruno), `--dev` de DualRTX sur `da7468f0` avec le drapeau et le
+mode debug, Display 1 capturé (kiosque `still.html?anim=1`, pointeur parqué sur `click-target`). Scripts et
+vidéos dans le scratchpad de la session (`photon/`) ; rien du produit n'a changé.
+
+- **La sonde se mesure elle-même sur téléphone.** Pendant qu'elle guette le drapeau, WebGL2 relit ses
+  trois pixels par un `readPixels` synchrone après chaque dessin, Canvas2D par `getImageData`, WebGPU en
+  asynchrone (`copyTextureToBuffer` + `mapAsync`). Sur le realme, `mwLatency.run` donnait WebGPU 43-46 ms
+  contre WebGL2 74-77 et le présentateur simple 72-90 : un artefact de la relecture, abandonné.
+- **Méthode sans relecture.** La page envoie le clic (`mwLatency._sendClick(null)`) et montre au même
+  instant un flash coloré dans le DOM (trois rAF) ; l'écran composé est enregistré (`adb shell
+  screenrecord` sur le realme, ~52 i/s ; l'enregistrement d'écran d'iOS sur l'iPhone, 60 i/s) et l'on lit,
+  par clic, le délai du flash au drapeau (`rec_analyse2/4.py` : zone du drapeau trouvée dans l'image,
+  flashs groupés par mesure). Le dernier saut du compositeur, commun au DOM et au canvas, s'annule : les
+  absolus sont sous le vrai clic → photon, les écarts valent. Pas de 120 Hz résolu : l'unité est l'image
+  d'enregistrement (16,7 ms), lissée par des clics non synchronisés.
+- **Piège : la mémoire de l'échelle.** `EnhancerGovernor` retient par appareil où l'échelle est descendue
+  (`localStorage.mw_enhancer_rung`) ; les séries de sonde l'avaient fait descendre, et toute la première
+  matrice du realme (11:08-11:18) a démarré amélioration coupée : `Enhancer starts at off (setting
+  gl-mwsr)` au journal client, rien à l'écran. Cette matrice (v1) compare donc les présentateurs simples.
+  Ensuite : clé effacée avant chaque lancement, relue après (les descentes sont muettes dans la console).
+- **realme Note 60, Chrome 155, 60 Hz, sortie 1280×720 (v1, présentateurs sans amélioration, 2 × 14
+  clics).** WebGL sans passe deux fois (réglage `off`, et réglage `gl-mwsr` démarré à `off`), WebGPU sans
+  passe une fois (réglage `mwsr` démarré à `off`). 960×540 : 38,7 ms (séries 38,7 / 38,7) et 42,9 (38,6 /
+  47,1) pour WebGL, 43,3 (47,9 / 38,7) pour WebGPU, tous à 52 i/s. 1920×1080 : 43,2 et 45,5 pour WebGL à
+  30 i/s, 38,8 pour WebGPU à 53-55 i/s. Le fil principal de WebGL sature en 1080p : une image sur deux
+  n'est pas présentée.
+- **L'échelle coupe l'upscaler sur le realme, dans les deux saveurs (v2, 12:25).** Avec la mémoire
+  effacée, `gl-mwsr` comme `mwsr` sont descendus à `off` pendant la série, en 2 s : la passe ne tient pas
+  une image à ×1,33 (le labo P4 mesurait 21-25 ms par image à la taille de l'écran). Dans le produit, sur
+  ce téléphone, la saveur ne choisit donc que le présentateur simple qui reste : v1.
+- **Upscaler maintenu (v3, 12:29-12:38, labo seulement).** L'échelle neutralisée sur la page de test
+  (`EnhancerGovernor.prototype.update` → `null` par un import du même module ; vérifié après chaque série :
+  mémoire vide, correctif en place), 2 × 14 clics par saveur, une série témoin. 960×540 (×1,33) :
+  `gl-mwsr` 35,7 ms (31,8 / 39,6 ; médiane 32,7), `mwsr` 45,3 (46,0 / 44,5 ; médiane 41,1), témoin 51,3
+  (médiane 48,8). 1920×1080 (réduction) : `gl-mwsr` 40,6 (40,6 / 40,6 ; médiane 32,7) à 30 i/s, `mwsr` 68,8
+  (93,4 avec deux à-coups de 458 et 280 ms / 44,3 ; médiane 48,7) à 50-58 i/s, témoin 53,0 à 30 i/s. Forcé,
+  WebGPU arrive environ une image plus tard que WebGL2, mais montre presque deux fois plus d'images en
+  1080p. L'écart entre deux séries identiques atteint lui aussi une image (témoin 960 : médiane 33,5 en v1,
+  48,8 en v3) : la phase entre la cadence de l'hôte et l'écran du téléphone tient toute une série.
+- **iPhone 13 Pro, Safari d'iOS 26.5, 120 Hz, canvas 1445×813 (11:49-11:54, Bruno au signet).** 120
+  drapeaux vus, 100 clics appariés (un flash de trois rAF à 120 Hz échappe parfois à l'enregistrement à
+  60 i/s, au hasard). 1280×720 (×1,13) : `gl-mwsr` 34,4 ms (15 clics), `mwsr` 28,1 (19). 1920×1080 (×0,75) :
+  WebGL simple 38,6 (19 ; 36,9 sur les réglages de Bruno, 14), `gl-mwsr` 33,3 (14), `mwsr` 37,7 (19).
+  WebGPU − WebGL2 : −6,4 ms en 720p (IC 90 % −13,4 à 0), +4,4 en 1080p (−1,0 à +10,0). Pas de régression,
+  et aucune descente de l'échelle pendant les six mesures.
+- **La mesure du rafraîchissement sous charge.** En 1080p WebGL, le client annonce un écran plus lent que
+  le vrai : 35-39 Hz sur le realme (l'hôte, sans diviseur proche, reste à 60 i/s), 112-115 Hz sur l'iPhone
+  (l'hôte passe à 56-58 i/s et perd son verrou de cadence). Avec `mwsr` sur WebGPU, l'iPhone reste mesuré à
+  120 Hz et le flux à 60 i/s verrouillé. Hors du chantier : signalé à 59 pour la cadence.
+- **Verdict.** iPhone : WebGPU confirmé, sans régression au photon et avec une cadence plus stable.
+  realme : à ×1,33, l'upscaler ne survit à l'échelle dans aucune saveur (la réduction n'a pas été rejouée
+  échelle active) ; il reste le présentateur simple, égal à
+  960×540 et meilleur en WebGPU à 1080p (×1,8 images) ; forcé, `mwsr` coûte une image de plus que
+  `gl-mwsr`. La décision par classe reste à Bruno (plan §9, P6). Incident : `stream.dev` et
+  `stream.moonlightweb.top` injoignables de 11:39 à 11:44 (ligne rendez-vous de la `--dev` perdue puis
+  reprise), signalé à 59.

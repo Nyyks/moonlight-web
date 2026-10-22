@@ -224,11 +224,20 @@ WebGL2 (`gl-mwsr`) ; Apple mobile (WebKit) → WebGPU (`mwsr`) quand il est là,
 taille de l'écran rend WebGPU défendable sur Mali aussi (2 à 6 ms de moins par image, 18 quand le flux
 dépasse l'écran) : au choix de Bruno. Le labo n'a pas mesuré Safari macOS.
 
-**À confirmer au clic-photon avant P6** (journal J27, go de Bruno du 22/10). La règle de la porte juge le
-`done` du labo, du début du draw à la fin du GPU, pas le trajet jusqu'à l'écran ; elle est relative (10 %
-de 2 ms sur le RTX, de 20 à 37 ms sur le realme) et juge des sorties 1440p, plus de trois écrans du
-realme. Aucune classe ne change de saveur sur la foi du labo seul : le clic-photon des deux téléphones,
-WebGPU `mwsr` contre WebGL2 `gl-mwsr` avec Canvas2D pour témoin, tranche d'abord.
+**Clic-photon des téléphones** (22/10, journal J28, go de Bruno après J27). La sonde `mwLatency` est
+biaisée sur téléphone (WebGL2 relit ses pixels de façon synchrone après chaque dessin) : mesure refaite
+sans relecture, un flash dans la page au clic, l'écran du téléphone enregistré, flash → drapeau.
+- **iPhone 13 Pro** : pas de régression de WebGPU au photon (`mwsr` contre `gl-mwsr` : −6 ms en 720p
+  ×1,13, +4 en 1080p réduit, intervalles à 90 % contenant zéro). En 1080p, WebGPU garde l'écran mesuré à
+  120 Hz et le flux à 60 i/s verrouillé, quand WebGL le fait tomber à 56-58 i/s. « iPhone → WebGPU » tient.
+- **realme** : l'échelle de l'amélioration coupe la passe en 2 s dans les deux saveurs à ×1,33 (elle ne
+  tient pas une image ; la réduction n'a pas été rejouée échelle active, le labo P4 l'y place aussi
+  au-delà d'une image). La saveur n'y choisit que le présentateur simple : égal à
+  960×540, meilleur en WebGPU à 1080p (53-55 i/s contre 30). Passe maintenue de force au labo : `mwsr`
+  arrive une image après `gl-mwsr` (médianes 41 contre 33 ms à ×1,33, 49 contre 33 en 1080p) mais montre
+  presque deux fois plus d'images en 1080p ; deux séries identiques diffèrent elles aussi d'une image.
+- **À Bruno** (P6) : WebGPU sur iPhone ; sur ce Mali, aucune saveur ne garde la passe, la question devient
+  un `auto` sans upscaler pour cette classe et le choix du présentateur simple.
 
 **La CI** (run 39661997273, lu par 59) : sur le runner Linux, l'adaptateur logiciel forcé refuse
 d'importer une image vidéo dans WebGPU (`importExternalTexture` : « Failed to import texture from

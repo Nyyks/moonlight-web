@@ -766,8 +766,10 @@ WebGL2 ? le même shader avec repli, sans alourdir le compute ? ») :
   3-24 ms de fil principal) ; Mac M1 Pro dans Chrome → égalité à 60 i/s, WebGL2 reste ; realme (Mali-G57)
   → égalité selon la règle, WebGL2 reste (à la taille de son écran, WebGPU 0,76-0,90 ×, réduction
   0,50 ×) ; `mw-arm` (Adreno 618) → WebGL2 seul, `gl-mwsr` 0,63-0,77 × SGSR1. La décision
-  par classe (§9, P6) reste à trancher par Bruno, après un clic-photon par classe : le labo s'arrête à
-  la fin du GPU, avant le compositeur (J27). Rapport P4 §5, journaux J20 et J23-J27.]*
+  par classe (§9, P6) reste à trancher par Bruno. Clic-photon des téléphones le 22/10 (J28), le labo
+  s'arrêtant à la fin du GPU (J27) : iPhone → WebGPU confirmé, sans régression au photon et à cadence
+  plus stable ; realme → l'échelle coupe la passe dans les deux saveurs à ×1,33, il reste le présentateur
+  simple (égal à 960×540, WebGPU 53-55 i/s contre 30 à 1080p). Rapport P4 §5, journaux J20 et J23-J28.]*
 
 ---
 
@@ -1366,7 +1368,7 @@ upscalers spatiaux.
 - [x] CI : job `scaler-lab` non bloquant (conformité sur SwiftShader, les deux côtés ; chaque texte compile) (`48bb8213`) ; pas de validation statique possible sous Node (notée au rapport §4)
 - [x] Porte WebGPU contre WebGL2 avec le nouveau shader sur ordinateur (21/10 au soir, journal J20, rapport §5) : jeu `--p4` (`submit`, `done`, `gpu` par draw ; barrière sondée côté WebGL2, `EXT_disjoint_timer_query_webgl2`, niveau H.264 par taille), RTX et 780M au go de 59 → **WebGL2 reste la saveur SDR** (RTX 1,9-2,3 × à 60 i/s, 780M 1,1-1,2 × ; exception la réduction 4K → 1440p sur le 780M, WebGPU 0,82 ×) ; le drapeau `mw_mwsr` vérifié sur la `--dev` (overlay des deux saveurs, témoin FSR1, repli Canvas2D sans WebGPU, « Off (1:1) »)
 - [x] La porte sur les appareils de Bruno (22/10 au matin, journaux J23-J26, rapport §5) : **iPhone 13 Pro → WebGPU** (`done` 0,25-0,53 × WebGL2 partout : l'envoi `texImage2D` de WebKit coûte 3-24 ms de fil principal) ; **Mac M1 Pro (Chrome) → WebGL2 reste** (égalité à 60 i/s, WebGPU 0,5-0,6 × saturé) ; **`mw-arm` (Adreno 618) → WebGL2 par nécessité, `gl-mwsr` 0,63-0,77 × SGSR1**, C1 tenue (8 cas, mw-arm hors réseau ensuite) ; **realme Note 60 → égalité, WebGL2 reste** (0,78-0,98 × ; à 1440p de sortie aucune saveur ne tient 60 i/s) ; proposition de décision par classe au rapport §5, à trancher par Bruno (plan §9, P6) ; cas à la taille de l'écran du realme faits ensuite (WebGPU 0,76-0,90 ×, réduction 0,50 ×, la règle au seuil sur le texte ×2 : Mali défendable en WebGPU, au choix de Bruno)
-- [ ] Clic-photon sur les téléphones avant P6 (go de Bruno du 22/10, journal J27) : WebGPU `mwsr` contre WebGL2 `gl-mwsr`, Canvas2D pour témoin, flux 720p et 1080p, séries de 10 clics entrelacées ; `--dev` de DualRTX avec `latency_flag_enabled` et le mode debug (la console du téléphone remonte au journal client de l'hôte) ; realme par adb sans fil et DevTools, iPhone par l'inspecteur web de Safari du Mac de Léo ; créneau via 59 ; caméra au ralenti si un écart reste ambigu
+- [x] Clic-photon sur les téléphones avant P6 (22/10, go de Bruno, journal J28, rapport §5) : la sonde `mwLatency` est biaisée sur téléphone (relecture synchrone en WebGL2) → flash dans la page au clic, écran enregistré, flash → drapeau ; **iPhone 13 Pro → WebGPU confirmé** (`mwsr` − `gl-mwsr` : −6 ms en 720p, +4 en 1080p, intervalles contenant zéro ; en 1080p WebGPU garde le flux à 60 i/s verrouillé, WebGL le fait tomber à 56-58) ; **realme → l'échelle coupe la passe en 2 s dans les deux saveurs à ×1,33**, reste le présentateur simple (égal à 960×540, WebGPU 53-55 i/s contre 30 à 1080p) ; passe forcée au labo : `mwsr` une image après `gl-mwsr` ; piège de la mémoire de l'échelle (`mw_enhancer_rung`) noté ; la mesure du rafraîchissement sous charge signalée à 59 pour la cadence ; décision par classe à Bruno (P6)
 - [x] Repli du renderer WebGPU quand `importExternalTexture` refuse l'image (décision de Bruno du 21/10 au soir, journal J21) : copie par `ImageBitmap` dans la texture d'entrée, import retenté tous les 300 draws, console limitée ; test à device simulé, dorés et conformité exacts sur SwiftShader avec `importfail=1` ; coût mesuré le 22/10 sur le 780M : `done` ×1,2-1,3 à ×2 (≈ +1 ms par image), ×1,8 en entrée 4K, fil principal égal (journal J21)
 
 **P5 — Campagne**
