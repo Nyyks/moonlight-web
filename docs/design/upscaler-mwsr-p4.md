@@ -207,11 +207,18 @@ ouvertes par Bruno), un Chrome sans tête piloté par `--remote-cdp` à travers 
   fil principal égal → WebGL2 reste sur Mali ; seule la réduction 4K → 1440p donne WebGPU (0,39 ×, vues
   sRGB). À 1440p de sortie (3,2 écrans de ce téléphone) aucune saveur ne tient 60 i/s : le plancher de la
   chaîne y est 22 ms et `mwsr` ajoute 7-15 ms ; à sa taille, `mwsr` vaut 5,9 ms (J16). Dix-sept pages,
-  ouvertes sur les liens de l'iPhone en parallèle de lui (cas « écran » à 2532×1170).
+  ouvertes sur les liens de l'iPhone en parallèle de lui, puis les huit cas à la taille de son écran
+  (1600×720, journal J26, addendum) : là **WebGPU passe devant partout**, 0,87-0,90 × à ×2, 0,76-0,86 ×
+  à ×1,33, 0,50 × en réduction depuis 2400×1080 (2 à 6 ms de moins par image, 18 en réduction), fil
+  principal égal. L'avance vient du plancher de la chaîne (`off` 15 ms contre 19 : l'import et la
+  présentation), pas du shader ; la règle y dirait encore « égalité », de justesse (texte ×2 à 0,90), et
+  aucune des deux ne finit son image sous 16,7 ms (`done` 18-21 ms contre 20-37).
 
 Proposition de décision par classe (plan §9, P6, à Bruno) : ordinateur Windows, Mac dans Chrome et Mali →
 WebGL2 (`gl-mwsr`) ; Apple mobile (WebKit) → WebGPU (`mwsr`) quand il est là, `gl-mwsr` sinon ; Snapdragon
-→ `gl-mwsr` à la place de SGSR1 dans l'Auto. Le labo n'a pas mesuré Safari macOS.
+→ `gl-mwsr` à la place de SGSR1 dans l'Auto. Mali reste en WebGL2 selon la règle, mais la mesure à la
+taille de l'écran rend WebGPU défendable sur Mali aussi (2 à 6 ms de moins par image, 18 quand le flux
+dépasse l'écran) : au choix de Bruno. Le labo n'a pas mesuré Safari macOS.
 
 **La CI** (run 39661997273, lu par 59) : sur le runner Linux, l'adaptateur logiciel forcé refuse
 d'importer une image vidéo dans WebGPU (`importExternalTexture` : « Failed to import texture from

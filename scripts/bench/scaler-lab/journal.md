@@ -1039,5 +1039,29 @@ Verdict de la règle : **égalité dans les marges** dans les deux régimes (Web
 une sortie 1440p (3,7 Mpx) vaut 3,2 écrans de ce téléphone, le plancher de la chaîne (`off`, copie et
 présentation) y est déjà 22-23 ms et `mwsr` ajoute 7 à 15 ms de GPU (18 ms horodatés sur le texte, 9,7 sur
 le jeu) : aucune saveur n'y tient 60 i/s, alors qu'à sa taille `mwsr` coûte 5,9 ms (J16). Manque la page
-18 (réduction à 1,5 × l'écran de l'iPhone), sans incidence ; les cas à la taille du realme restent à faire
-si Bruno y tient (liens `--tag realme --screen 1600x720`, /11 à /18, cinq minutes).
+18 (réduction à 1,5 × l'écran de l'iPhone), sans incidence ; les cas à la taille du realme, refaits
+ensuite, sont à l'addendum.
+
+**Addendum (10:12-10:16), les huit cas à la taille du realme.** Bruno a ouvert les liens /11 à /18 sur le
+realme seulement, servis par `--tag realme --p4 --screen 1600x720` (port 8768) : huit pages au premier plan
+(`hiddenMs` 0), sans erreur, 15-21 s chacune. La table de la porte écarte désormais un fichier posté à une
+autre taille ou dans un autre régime que le cas (`_posted_shape`, `p4_flows.py`) : les sept pages « écran »
+à la taille de l'iPhone et une page de P0 du 21/10 n'y entrent plus. `done` p50 en ms, WebGPU / WebGL2,
+`mwsr` :
+
+| cas | saturé | 60 i/s |
+|---|---|---|
+| écran ×2 texte 800×360 → 1600×720 | 20,8 / 23,1 | 20,8 / 23,1 |
+| écran ×2 jeu | 18,1 / 20,7 | 18,1 / 20,5 |
+| écran ×1,33 texte 1200×536 → 1600×720 | 21,4 / 24,8 | 19,3 / 25,4 |
+| écran ×0,67 texte 2400×1080 → 1600×720 | 18,6 / 37,3 | 19,0 / 36,7 |
+
+À la taille de son écran, **WebGPU passe devant partout** : 0,87-0,90 × à ×2, 0,76-0,86 × à ×1,33,
+0,50-0,52 × en réduction (2,2-2,6 ms de moins par image à ×2, 3,4-6,1 à ×1,33, 18 en réduction), fil
+principal égal (1,9-2,3 ms des deux côtés ; 3,1 en WebGL2 sur la réduction). L'avance vient du plancher de
+la chaîne, pas du shader : `off` 14,6-15,8 ms en WebGPU contre 18,4-20,3 en WebGL2 (35 ms sur la réduction,
+l'envoi d'une image 2400×1080), et au-dessus de son plancher `mwsr` ajoute 2,4-6,3 ms en WebGPU, 1,1-5,8 en
+WebGL2 ; GPU horodaté 4,1-6,9 ms, 0,45-0,74 × SGSR1 en agrandissement (C1 tenue). Aucune des deux ne finit
+son image sous 16,7 ms. La règle, jugée sur les tailles standard, reste « égalité » ; appliquée à ces cas,
+elle le resterait de justesse (texte ×2 à 0,901 et 0,903). Pour la décision par classe : sur Mali, WebGPU
+gagne 2 à 6 ms par image à la taille de l'écran, 18 ms quand le flux est plus grand que l'écran.

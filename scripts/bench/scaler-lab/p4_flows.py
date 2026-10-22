@@ -358,6 +358,17 @@ def _best_posted(files, want_cells=()):
     return best
 
 
+def _posted_shape(path):
+    """A posted run's sizes and regime, as its page read them from the URL."""
+    import json
+    try:
+        with open(path, encoding="utf-8") as f:
+            p = json.load(f).get("params") or {}
+    except Exception:  # noqa: BLE001
+        return None
+    return {"in": p.get("in"), "out": p.get("out"), "pace": p.get("pace") or "back"}
+
+
 def _gate_files(a, tag):
     """case name -> the run's result (a desktop run's <tag>-<case>.json, or the
     latest phone-<tag>-<case>-<time>.json a phone posted)."""
@@ -365,13 +376,22 @@ def _gate_files(a, tag):
     import json
     found = {}
     for name, query in gate_cases(a):
-        want = [c for c in (dict(kv.split("=", 1) for kv in query.split("&")).get("cells") or "").split(",") if c]
+        q = dict(kv.split("=", 1) for kv in query.split("&"))
+        want = [c for c in (q.get("cells") or "").split(",") if c]
+        # a run posted under the same tag and case name at another size is not
+        # this case: another phone on the same links, or --screen changed
+        shape = {"in": q.get("in"), "out": q.get("out"), "pace": q.get("pace") or "back"}
         p = os.path.join(a.dir, "%s-%s.json" % (tag, name))
         # phone-<tag>-x2-text-*.json also matches the -tick case's files: keep
         # the ones whose suffix is the posting time alone
         head = "phone-%s-%s-" % (tag, name)
         posted = sorted(f for f in glob.glob(os.path.join(a.dir, head + "*.json"))
                         if os.path.basename(f)[len(head):-len(".json")].isdigit())
+        same = [f for f in posted if _posted_shape(f) == shape]
+        if len(same) < len(posted):
+            print("  %d posted for %s at another size or regime, left out (the case is %s->%s %s)" % (
+                len(posted) - len(same), head[:-1], shape["in"], shape["out"], shape["pace"]))
+        posted = same
         if posted:
             p = _best_posted(posted, want)
         if os.path.exists(p):
