@@ -2361,7 +2361,10 @@ doublé en D3D12 (35-36 ms contre 17-20), autant de trous > 50 ms (19-20 contre
 appels de la duplication. **Le défaut reste `auto`, la duplication** ;
 `capture=wgc` reste une clé de banc, et le worker au jeton de l'utilisateur ne
 sert qu'à elle. Le 15 contre 94 trous du 21/10 opposait deux chaînes (WGC en
-D3D11, la duplication en D3D12), pas deux captures.
+D3D11, la duplication en D3D12), pas deux captures. **Décision de Bruno (22/10,
+~08:50) : la duplication reste le défaut, WGC n'est qu'un secours par la clé
+`capture=wgc` ; la vérification visuelle de WGC (bordure, pointeur) est
+abandonnée.**
 
 ## 18. oneVPL : audit sans matériel (04/09/2026)
 
@@ -6065,6 +6068,18 @@ La première construction le découvre avant de faire la conversion, et le
 processus s'en souvient, un worker étant une session. Les constructions
 suivantes choisissent D3D11 d'emblée, au lieu de faire puis défaire une chaîne
 D3D12 à chaque reconstruction.
+
+**Mesuré sous charge le 22/10/2026 (banc §8y.4).** Sur le N95 chargé (un clip
+1080p60 et le pointeur en mouvement pendant le stream), six passes de 70 s par
+chaîne en bras alternés, la duplication des deux côtés : la chaîne D3D11
+(oneVPL) fait moins de trous > 50 ms entre deux bitstreams dans les six manches
+(15,3 ± 4,9 contre 22,0 ± 1,8 par passe), mais chaque image part plus tard
+(présent → bitstream p50 7,1 contre 5,5 ms, l'encodage 7,0 contre 4,5) et son
+p99 est un peu plus haut (23,3 contre 21,1). Les blocages changent d'appel sans
+disparaître (oneVPL et ReleaseFrame en D3D11, Signal + Flush en D3D12), et la
+moitié des trous sont des réveils où la duplication ne livre rien. La mesure ne
+change pas ce défaut ; un défaut D3D11 sous charge sur Intel est à la décision
+de Bruno, « D3D11 » dans l'admin restant la voie à la main.
 
 **Concrètement, pour l'utilisateur** : sur un PC à carte ou à puce graphique
 Intel, rien à régler. L'image part plus vite de l'hôte (deux fois plus vite
