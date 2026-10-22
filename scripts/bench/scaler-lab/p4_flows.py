@@ -331,6 +331,31 @@ def gate_cases(a):
     return out
 
 
+def _best_posted(files):
+    """The run to read among a case's posted files: a complete, error-free one
+    first; then one the page ran in the foreground (`hiddenMs` 0: a page Safari
+    preloads behind the address bar runs hidden, throttled, and posts a second,
+    slower result, iPhone 22/10); then the quickest (a page from before that
+    field: the hidden run is the one that took thirty seconds)."""
+    import json
+
+    def rank(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                r = json.load(f)
+        except Exception:  # noqa: BLE001
+            return (3, 1, 0, path)
+        complete = 0 if r.get("cells") and not r.get("errors") else 1
+        hidden = r.get("hiddenMs")
+        foreground = 0 if hidden is None or hidden == 0 else 1
+        return (complete, foreground, r.get("elapsedMs") or 0, path)
+    best = min(files, key=rank)
+    if len(files) > 1:
+        print("  %d posted for %s, reading %s" % (
+            len(files), os.path.basename(best).rsplit("-", 1)[0], os.path.basename(best)))
+    return best
+
+
 def _gate_files(a, tag):
     """case name -> the run's result (a desktop run's <tag>-<case>.json, or the
     latest phone-<tag>-<case>-<time>.json a phone posted)."""
@@ -345,7 +370,7 @@ def _gate_files(a, tag):
         posted = sorted(f for f in glob.glob(os.path.join(a.dir, head + "*.json"))
                         if os.path.basename(f)[len(head):-len(".json")].isdigit())
         if posted:
-            p = posted[-1]
+            p = _best_posted(posted)
         if os.path.exists(p):
             with open(p, encoding="utf-8") as f:
                 found[name] = json.load(f)

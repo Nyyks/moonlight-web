@@ -1897,6 +1897,30 @@ async function runLabInner(p, log) {
     const seq = r % 2 ? [...cells].reverse() : cells;
     for (const c of seq) if (c) order.push([c, r]);
   }
+  // A page Safari preloads behind the address bar (iPhone, 22/10) runs hidden,
+  // throttled to half rate, and posts a second, slower result: measure only
+  // once the page is seen, and tell how long it was hidden meanwhile.
+  if (document.hidden) {
+    log("page hidden: waiting to be shown before measuring");
+    await new Promise((resolve) => {
+      const onShown = () => {
+        if (document.hidden) return;
+        document.removeEventListener("visibilitychange", onShown);
+        resolve();
+      };
+      document.addEventListener("visibilitychange", onShown);
+    });
+  }
+  let hiddenMs = 0;
+  let hiddenSince = 0;
+  const onVisibility = () => {
+    if (document.hidden) hiddenSince = performance.now();
+    else if (hiddenSince) {
+      hiddenMs += performance.now() - hiddenSince;
+      hiddenSince = 0;
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibility);
   const t0 = performance.now();
   for (const [cell, r] of order) {
     const e0 = errors.length;
@@ -1962,6 +1986,9 @@ async function runLabInner(p, log) {
       errors[i] = "[" + cell.name + "] " + errors[i];
   }
   const elapsed = performance.now() - t0;
+  document.removeEventListener("visibilitychange", onVisibility);
+  if (hiddenSince) hiddenMs += performance.now() - hiddenSince;
+  if (hiddenMs) log(`page hidden ${hiddenMs.toFixed(0)} ms during the run`);
 
   const out = [];
   for (const [name, r] of results) {
@@ -2084,6 +2111,7 @@ async function runLabInner(p, log) {
     },
     frames: frameInfo,
     elapsedMs: elapsed,
+    hiddenMs: Math.round(hiddenMs),
     cells: out,
     shots,
     dumped,
