@@ -73,6 +73,7 @@ if(WIN32)
         src/convert/windows/ConvertShaders.cpp
         src/convert/windows/d3d12/ColorConvert12.cpp
         src/input/windows/Win32Input.cpp
+        src/input/windows/WinTextKeys.cpp
         src/input/windows/VigemGamepad.cpp
         third_party/vigem-client/src/ViGEmClient.cpp
         src/encode/windows/NvencApi.cpp
@@ -141,7 +142,7 @@ if(WIN32)
     # dwmapi: the compositor's timing, read by the bench's click trace only.
     target_link_libraries(mw-native-host PRIVATE dxgi d3d11 d3d12 d3dcompiler user32 gdi32 setupapi
                                                  avrt ole32 oleaut32 runtimeobject mfuuid
-                                                 strmiids dwmapi wtsapi32)
+                                                 strmiids dwmapi wtsapi32 imm32)
 elseif(APPLE)
     set(MW_NATIVE_PLATFORM "macos")
     # ScreenCaptureKit → VideoToolbox, with no conversion stage in between:
@@ -548,6 +549,7 @@ if(MW_BUILD_TESTS)
         tests/test_encoder_configs.cpp
         tests/test_vendor_encode12.cpp
         tests/test_win32_cursor.cpp
+        tests/test_win_text_keys.cpp
         tests/test_host_mute.cpp
         tests/test_evdev_keymap.cpp
         tests/test_pointer_clamp.cpp

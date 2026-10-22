@@ -31,6 +31,7 @@ void run_video_encode12_tests();
 void run_encoder_configs_tests();
 void run_vendor_encode12_tests();
 void run_win32_cursor_tests();
+void run_win_text_keys_tests();
 void run_host_mute_tests();
 void run_evdev_keymap_tests();
 void run_pointer_clamp_tests();
@@ -217,6 +218,7 @@ int main(int argc, char** argv)
     // D3D12 device on that GPU with it.
     RUN(color_convert12_gpu);
     RUN(win32_cursor);
+    RUN(win_text_keys);
     RUN(host_mute);
     RUN(evdev_keymap);
     RUN(pointer_clamp);
