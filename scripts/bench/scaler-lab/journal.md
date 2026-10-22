@@ -929,3 +929,115 @@ n'a pas accès au périphérique. (3) Couper le bac à sable du processus GPU n'
 l'accord de Bruno. La porte `mw-arm` se fait donc avec sa console ouverte (Bruno connecté) : la tâche
 `Interactive` du 06/09 marche alors, et la même recette `--remote-cdp` s'applique. Tout rendu à 00:38 :
 0 Chrome, tâche et profil effacés, tunnel fermé, aucun GPU de DualRTX pris.
+
+## 2026-10-22 — J23, la porte P4 sur l'iPhone 13 Pro (Safari, iOS 26.5) : WebGPU gagne partout
+
+Créneau de Bruno (08:51-09:31, liens servis depuis DualRTX, `--tag iphone --p4 --screen 2532x1170`,
+18 pages, consignes relayées par 59). Les deux chaînes du produit sur WebKit (adaptateur `apple`, WebGPU
+avec horodatages, WebGL2 sans timer). `done` p50 en ms, WebGPU / WebGL2, `mwsr` :
+
+| cas | saturé | 60 i/s |
+|---|---|---|
+| ×2 texte 720p → 1440p | 2,96 / 7,40 | 3,76 / 7,12 |
+| ×2 jeu | 2,26 / 7,00 | 3,06 / 7,62 |
+| ×2 interface | 2,06 / 6,68 | 3,14 / 7,58 |
+| ×1,33 texte | 2,70 / 10,96 | 3,12 / 12,38 |
+| ×0,67 texte (entrée 4K) | 2,82 / 29,08 | 3,80 / 29,26 |
+| écran ×2 texte 1264×584 → 2532×1170 | 2,58 / 6,32 | 3,52 / 6,80 |
+| écran ×2 jeu | 2,42 / 6,34 | 3,44 / 6,78 |
+| écran ×1,33 texte | 2,80 / 9,74 | 3,06 / 10,52 |
+| écran ×0,67 texte | 2,90 / 23,56 | 3,66 / 23,14 |
+
+Verdict de la règle : **WebGPU** dans les deux régimes (`done` 0,25-0,53 ×, fil principal 0,01-0,05 ×).
+La cause est l'envoi de l'image : sur WebKit, `texImage2D` d'une VideoFrame coûte au fil principal 2,5 ms
+à 540p, 3,1 à 720p, 6,7 à 1080p et 19-24 ms à 4K (`submit` des `chain-gl-*`), quand l'import WebGPU vaut
+0,02-0,16 ms ; le GPU lui-même (`mwsr` 1,3-2,4 ms horodatés à ×2) n'est pas en cause. Conséquence : en
+WebGL2, l'iPhone ne tient pas 60 i/s dès une entrée 1080p. Proposition pour Bruno (plan §9, classe Apple
+mobile) : la saveur SDR y est WebGPU quand il est là (iOS 26), `gl-mwsr` sinon.
+
+Deux pièges de passe. (1) Chaque page a été postée deux fois : la seconde, plus lente (28-32 s au lieu de
+3-7), était le **realme sur les mêmes liens**, ouvert en parallèle par Bruno (reconnu à l'agent
+utilisateur, fichiers renommés `phone-realme-*`, journal J26) ; cru d'abord un préchargement de Safari, la
+page attend désormais d'être visible avant de mesurer et compte le temps caché (`hiddenMs`), et la table
+lit, parmi les fichiers postés d'un cas, une passe complète (toutes les cellules du cas, aucune erreur) au
+premier plan, la plus courte à défaut (`_best_posted`) : les fichiers de P0 du même tag ne comptent plus.
+(2) Le motif `phone-<tag>-<cas>-*.json` attrapait aussi les fichiers du cas `-tick` : corrigé avant la
+passe.
+
+## 2026-10-22 — J24, la porte P4 sur le Mac M1 Pro (Chrome 155 sans tête, `metal-3`)
+
+Créneau de Bruno (09:15-09:16, Mac rendu à 09:18) : Chrome de labo lancé par SSH dans la session de Léo
+(`open -na "Google Chrome" --args --headless=new --remote-debugging-port=9223 …`, profil jetable,
+`--mute-audio`), piloté depuis DualRTX par `scaler_lab.py --remote-cdp 9223 --http-port 8769 --p4
+--screen 3600x2338` à travers `ssh -L 9223 -R 8769` ; mot pour Léo par osascript (launchd gui/501),
+retiré à la fin ; 16 cas sur 18 (les deux « réduction à 1,5 × l'écran », entrée 5400×3504, sans encodeur
+H.264 au niveau 5.1 : limite du labo). `done` p50 en ms, WebGPU / WebGL2, `mwsr` :
+
+| cas | saturé | 60 i/s |
+|---|---|---|
+| ×2 texte | 1,46 / 2,43 | 4,48 / 3,21 |
+| ×2 jeu | 1,05 / 2,12 | 3,70 / 3,54 |
+| ×2 interface | 1,05 / 2,03 | 4,08 / 3,86 |
+| ×1,33 texte | 1,48 / 2,76 | 4,75 / 3,97 |
+| ×0,67 texte (entrée 4K) | 1,37 / 5,63 | 4,79 / 5,68 |
+| écran ×2 texte 1800×1168 → 3600×2338 | 2,23 / 4,14 | 5,57 / 4,51 |
+| écran ×2 jeu | 1,77 / 3,17 | 5,04 / 3,45 |
+| écran ×1,33 texte | 1,60 / 4,94 | 5,57 / 5,08 |
+
+Verdict de la règle : saturé, **WebGPU** (0,50-0,60 ×, fil principal 0,03 contre 0,10 ms) ; à 60 i/s,
+**égalité dans les marges** (WebGPU 1,05-1,40 × WebGL2, son fil principal 0,54-0,67 ms contre 0,19-0,25)
+→ la saveur de production, WebGL2, reste sur Mac dans Chrome. Même lecture que sur RTX et 780M : la chaîne
+WebGPU cadencée paie l'attente de présentation, pas le shader (GPU horodaté égal). Réduction ×0,67 à
+60 i/s : WebGPU 0,84 ×. Safari macOS non mesuré (le labo pilote Chrome).
+
+## 2026-10-22 — J25, la porte P4 sur mw-arm (Adreno 618, WebGL2 seul) : 8 cas, puis hors réseau
+
+Créneau de 59 (09:15-09:26), Bruno connecté à la console : la tâche planifiée `Interactive` lance un Chrome
+sans tête avec DevTools, piloté par `--remote-cdp 9222 --http-port 8767 --gl --screen 1920x1080` à travers
+le tunnel (la recette de J22 marche dès qu'une session console existe : WebGL2 sur l'Adreno,
+`EXT_disjoint_timer_query_webgl2` présent). À 09:26 mw-arm a quitté le réseau (DevTools puis SSH coupés) :
+8 cas sur 18, les tailles standard sauf la réduction 4K, aucun cas à la taille de l'écran ; le ménage
+(Chrome, tâche, profil, scripts) attend son retour. GPU p50 en ms par image, 720p → 1440p (machine qui
+pagine : p99 de 0,3 à 9 s sur toutes les cellules, à lire sur les p50 seulement) :
+
+| cas, saturé / 60 i/s | `gl-off` | `gl-sgsr` | `gl-fsr1` | `gl-mwsr` | mwsr / SGSR1 |
+|---|---|---|---|---|---|
+| ×2 texte | 2,57 / 2,61 | 10,61 / 10,62 | 21,33 / 21,38 | 8,15 / 7,01 | 0,77 / 0,66 |
+| ×2 jeu | 2,60 / 2,59 | 8,24 / 8,37 | 21,43 / 21,50 | 5,20 / 6,26 | 0,63 / 0,75 |
+| ×2 interface | 2,55 / 2,57 | 5,70 / 7,69 | 21,40 / 21,36 | 6,35 / 6,42 | 1,11 / 0,83 |
+| ×1,33 texte | 2,61 / 2,82 | 10,94 / 10,89 | 21,70 / 21,74 | 6,97 / 7,02 | 0,64 / 0,64 |
+
+`done` p50 : `gl-mwsr` 14-17 ms, `gl-off` 12-15, `gl-fsr1` 29-35. Verdict : pas de WebGPU, donc WebGL2
+par nécessité ; `gl-mwsr` y tourne sans erreur, tient 60 i/s (FSR1 non) et coûte 0,63-0,77 × SGSR1 (le
+choix Auto actuel sur Snapdragon, `isSnapdragonGpu()`) sur texte, jeu et ×1,33, égal sur l'interface
+(1,11 saturé, 0,83 à 60 i/s : le bruit de cette machine) : **C1 tenue sur l'Adreno 618**. Proposition pour
+Bruno : l'Auto Snapdragon passe à `gl-mwsr` avec le drapeau. Les cas manquants ne changent pas cette
+lecture ; mw-arm n'est pas redemandé pour eux.
+
+## 2026-10-22 — J26, la porte P4 sur le realme Note 60 (Mali-G57 MP1, Chrome Android) : égalité
+
+Bruno a ouvert les liens de l'iPhone sur le realme en même temps (09:14-09:31) : 17 pages sur 18 postées
+sous le tag `iphone` (les 21 fichiers Android, reconnus à l'agent utilisateur, renommés `phone-realme-*`),
+les cas « écran » donc à la taille de l'iPhone (2532×1170), pas à la sienne (1600×720) ; le serveur
+préparé pour lui (port 8768) n'a pas servi. Deux téléphones en parallèle ne se gênent pas : chacun mesure
+son GPU et son fil principal, le serveur ne fait que livrer la page et recevoir le JSON. `done` p50 en ms,
+WebGPU / WebGL2, `mwsr` :
+
+| cas | saturé | 60 i/s |
+|---|---|---|
+| ×2 texte 720p → 1440p | 37,3 / 38,0 | 37,3 / 38,4 |
+| ×2 jeu | 29,0 / 30,7 | 29,2 / 31,2 |
+| ×2 interface | 30,1 / 31,8 | 29,4 / 31,8 |
+| ×1,33 texte | 36,4 / 46,8 | 38,0 / 46,4 |
+| ×0,67 texte (entrée 4K) | 38,1 / 97,5 | 38,1 / 97,0 |
+| 1264×584 → 2532×1170 texte | 32,6 / 34,2 | 32,6 / 34,1 |
+| 1264×584 → 2532×1170 jeu | 29,5 / 30,0 | 29,9 / 30,8 |
+
+Verdict de la règle : **égalité dans les marges** dans les deux régimes (WebGPU 0,78-0,98 ×, fil principal
+égal, 2,1-2,4 ms des deux côtés) → la saveur de production, WebGL2, reste sur Mali ; la réduction 4K →
+1440p est la seule où WebGPU s'impose (0,39 ×, vues sRGB contre la grille 2×2). À lire avec la taille :
+une sortie 1440p (3,7 Mpx) vaut 3,2 écrans de ce téléphone, le plancher de la chaîne (`off`, copie et
+présentation) y est déjà 22-23 ms et `mwsr` ajoute 7 à 15 ms de GPU (18 ms horodatés sur le texte, 9,7 sur
+le jeu) : aucune saveur n'y tient 60 i/s, alors qu'à sa taille `mwsr` coûte 5,9 ms (J16). Manque la page
+18 (réduction à 1,5 × l'écran de l'iPhone), sans incidence ; les cas à la taille du realme restent à faire
+si Bruno y tient (liens `--tag realme --screen 1600x720`, /11 à /18, cinq minutes).

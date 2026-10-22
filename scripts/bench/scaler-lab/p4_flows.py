@@ -331,12 +331,13 @@ def gate_cases(a):
     return out
 
 
-def _best_posted(files):
-    """The run to read among a case's posted files: a complete, error-free one
-    first; then one the page ran in the foreground (`hiddenMs` 0: a page Safari
-    preloads behind the address bar runs hidden, throttled, and posts a second,
-    slower result, iPhone 22/10); then the quickest (a page from before that
-    field: the hidden run is the one that took thirty seconds)."""
+def _best_posted(files, want_cells=()):
+    """The run to read among a case's posted files: one with every cell the
+    case asks for and no error first (an older run of the same tag and case
+    name, from another set of cells, does not count); then one the page ran in
+    the foreground (`hiddenMs` 0); then the quickest (a page from before that
+    field: a second, throttled run of the same page takes thirty seconds, the
+    one watched three to seven)."""
     import json
 
     def rank(path):
@@ -345,7 +346,8 @@ def _best_posted(files):
                 r = json.load(f)
         except Exception:  # noqa: BLE001
             return (3, 1, 0, path)
-        complete = 0 if r.get("cells") and not r.get("errors") else 1
+        names = {c.get("name") for c in r.get("cells") or []}
+        complete = 0 if names and not r.get("errors") and set(want_cells) <= names else 1
         hidden = r.get("hiddenMs")
         foreground = 0 if hidden is None or hidden == 0 else 1
         return (complete, foreground, r.get("elapsedMs") or 0, path)
@@ -362,7 +364,8 @@ def _gate_files(a, tag):
     import glob
     import json
     found = {}
-    for name, _ in gate_cases(a):
+    for name, query in gate_cases(a):
+        want = [c for c in (dict(kv.split("=", 1) for kv in query.split("&")).get("cells") or "").split(",") if c]
         p = os.path.join(a.dir, "%s-%s.json" % (tag, name))
         # phone-<tag>-x2-text-*.json also matches the -tick case's files: keep
         # the ones whose suffix is the posting time alone
@@ -370,7 +373,7 @@ def _gate_files(a, tag):
         posted = sorted(f for f in glob.glob(os.path.join(a.dir, head + "*.json"))
                         if os.path.basename(f)[len(head):-len(".json")].isdigit())
         if posted:
-            p = _best_posted(posted)
+            p = _best_posted(posted, want)
         if os.path.exists(p):
             with open(p, encoding="utf-8") as f:
                 found[name] = json.load(f)

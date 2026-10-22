@@ -187,16 +187,31 @@ avec les vues sRGB, image vive ; flux à la taille du canvas → « Off (1:1) »
 menu debug des deux saveurs n'apparaît qu'en mode debug du serveur (non touché) : les tests unitaires le
 couvrent.
 
-**Ce que la porte laisse aux créneaux de Bruno** : les mêmes cas sur Mac M1 (tunnel SSH inverse, Chrome
-dédié), iPhone 13 Pro (WebKit : WebGPU et WebGL2, pas d'horodatage WebGL2 — `done` et `submit`
-suffisent), realme Note 60 (Chrome Android) et `mw-arm` (WebGL2 seul : `--gl`) :
-`scaler_lab.py --serve 0.0.0.0:8766 --tag <appareil> --p4 [--screen 1600x720] [--gl]`, dix liens
-`/1`-`/10` (plus huit à la taille de l'écran avec `--screen`), puis `--p4-table <appareil>` sur les
-`phone-*.json` postés. La décision par classe d'appareil (plan §9, P6) : ordinateur tranché (WebGL2) ;
-Apple et Mali après ces liens ; la réduction sur iGPU à regarder avec le résultat du 780M. `mw-arm` à
-distance (22/10, journal J22) : un Chrome lancé par SSH (séance 0) n'y a pas de GPU utilisable et la tâche
-planifiée interactive attend une session console ; ce banc se fait avec Bruno connecté à sa console, par
-la recette `--remote-cdp` à travers un tunnel SSH.
+**La porte sur les appareils de Bruno (22/10 au matin, journaux J23-J26).** Mêmes cas, mêmes règles,
+`--screen` à la taille de chaque écran ; les liens servis pour les téléphones (`--serve`, dix-huit pages
+ouvertes par Bruno), un Chrome sans tête piloté par `--remote-cdp` à travers un tunnel SSH pour le Mac et
+`mw-arm`.
+
+- **iPhone 13 Pro (Safari, iOS 26.5) : WebGPU gagne partout**, `done` 0,25-0,53 × WebGL2 dans les deux
+  régimes et à la taille de l'écran, 0,13 × en réduction 4K. La cause est l'envoi de l'image : sur WebKit,
+  `texImage2D` d'une VideoFrame coûte au fil principal 3,1 ms à 720p, 6,7 à 1080p, 19-24 ms à 4K, quand
+  l'import WebGPU est quasi gratuit ; en WebGL2 l'iPhone ne tient pas 60 i/s dès une entrée 1080p.
+- **Mac M1 Pro (Chrome 155) : WebGL2 reste.** Saturé, WebGPU 0,50-0,60 × ; à 60 i/s égalité dans les
+  marges (WebGPU 1,05-1,40 ×, fil principal 0,54-0,67 ms contre 0,19-0,25) → la saveur de production
+  reste ; même lecture que sur RTX et 780M. Safari macOS non mesuré.
+- **`mw-arm` (Adreno 618) : WebGL2 par nécessité**, pas de WebGPU ; `gl-mwsr` y tourne sans erreur, tient
+  60 i/s (FSR1 non) et coûte 0,63-0,77 × SGSR1 sur texte, jeu et ×1,33, égal sur l'interface : C1 tenue.
+  Huit cas sur dix-huit, mw-arm ayant quitté le réseau en cours de passe ; les manquants ne changent pas
+  la lecture.
+- **realme Note 60 (Mali-G57 MP1, Chrome Android) : égalité**, WebGPU 0,78-0,98 × dans les deux régimes,
+  fil principal égal → WebGL2 reste sur Mali ; seule la réduction 4K → 1440p donne WebGPU (0,39 ×, vues
+  sRGB). À 1440p de sortie (3,2 écrans de ce téléphone) aucune saveur ne tient 60 i/s : le plancher de la
+  chaîne y est 22 ms et `mwsr` ajoute 7-15 ms ; à sa taille, `mwsr` vaut 5,9 ms (J16). Dix-sept pages,
+  ouvertes sur les liens de l'iPhone en parallèle de lui (cas « écran » à 2532×1170).
+
+Proposition de décision par classe (plan §9, P6, à Bruno) : ordinateur Windows, Mac dans Chrome et Mali →
+WebGL2 (`gl-mwsr`) ; Apple mobile (WebKit) → WebGPU (`mwsr`) quand il est là, `gl-mwsr` sinon ; Snapdragon
+→ `gl-mwsr` à la place de SGSR1 dans l'Auto. Le labo n'a pas mesuré Safari macOS.
 
 **La CI** (run 39661997273, lu par 59) : sur le runner Linux, l'adaptateur logiciel forcé refuse
 d'importer une image vidéo dans WebGPU (`importExternalTexture` : « Failed to import texture from
