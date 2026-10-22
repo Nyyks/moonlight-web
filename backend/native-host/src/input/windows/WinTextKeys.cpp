@@ -212,8 +212,9 @@ bool layoutFile(uintptr_t hkl, std::wstring& file, std::string& why)
 struct Mods
 {
     bool shift = false;
-    bool ctrl = false;
-    bool alt = false;
+    bool ctrl = false;  ///< the left Ctrl
+    bool alt = false;   ///< the left Alt
+    bool altGr = false; ///< the right Alt, over the left Ctrl
 };
 
 /// What has to be down for a key at @p level, beside what the viewer holds.
@@ -226,12 +227,19 @@ struct Mods
 /// Option, when the client says they chose the character (altLevel). Held
 /// otherwise they are a shortcut the viewer asked for — Ctrl+A, Ctrl+Alt+T —
 /// and stay.
+///
+/// The AltGr level is pressed as a keyboard has it, the left Ctrl and the
+/// RIGHT Alt. A left Ctrl+Alt types the same in Notepad, but Windows Terminal
+/// takes Ctrl+Alt+2 for "go to tab 2" and PSReadLine a dead key under it for
+/// a shortcut: on an AZERTY host, # { [ ~ \ | never reached the terminal, and
+/// a tilde came out "é~" in PowerShell (P3, 22/10/2026).
 Mods wantFor(uint8_t level, const WinHeldMods& held)
 {
     Mods want;
     want.shift = (level & 1) != 0;
-    want.ctrl = (level & 2) != 0 || (held.ctrl && !held.altLevel);
-    want.alt = (level & 4) != 0 || (held.alt && !held.altLevel);
+    want.altGr = (level & 6) == 6;
+    want.ctrl = want.altGr || (held.ctrl && !held.altLevel);
+    want.alt = held.alt && !held.altLevel;
     return want;
 }
 
@@ -269,17 +277,26 @@ void mask(std::vector<WinKeyEvent>& out)
 /// Ctrl, Windows reads Alt as an ordinary key, which opens nothing.
 void transition(Mods& now, const Mods& want, std::vector<WinKeyEvent>& out)
 {
-    const bool letsGo =
-        (now.shift && !want.shift) || (now.alt && !want.alt) || (now.ctrl && !want.ctrl);
+    const bool letsGo = (now.shift && !want.shift) || (now.alt && !want.alt) ||
+                        (now.altGr && !want.altGr) || (now.ctrl && !want.ctrl);
     if (letsGo && now.alt && !now.ctrl) mask(out);
     if (now.shift && !want.shift) pushKey(out, VK_SHIFT, kShiftScan, false, true);
     if (now.alt && !want.alt) pushKey(out, VK_MENU, kAltScan, false, true);
+    if (now.altGr && !want.altGr) {
+        pushKey(out, VK_MENU, kAltScan, true, true);
+        // On a layout with AltGr, Windows lets go with the right Alt of the
+        // Ctrl it puts under it: the Ctrl wanted goes back down, and one not
+        // wanted is let go again, whoever pressed it.
+        pushKey(out, VK_CONTROL, kCtrlScan, false, !want.ctrl);
+        now.ctrl = want.ctrl;
+    }
     if (now.ctrl && !want.ctrl) pushKey(out, VK_CONTROL, kCtrlScan, false, true);
     if (!now.ctrl && want.ctrl) pushKey(out, VK_CONTROL, kCtrlScan, false, false);
     if (!now.alt && want.alt) {
         pushKey(out, VK_MENU, kAltScan, false, false);
         if (!want.ctrl) mask(out);
     }
+    if (!now.altGr && want.altGr) pushKey(out, VK_MENU, kAltScan, true, false);
     if (!now.shift && want.shift) pushKey(out, VK_SHIFT, kShiftScan, false, false);
     now = want;
 }

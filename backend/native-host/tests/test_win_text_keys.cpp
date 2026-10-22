@@ -170,7 +170,8 @@ std::u32string typeOut(const WinKeyLayout& layout, const std::vector<WinKeyEvent
 }
 
 /// No key left down and no modifier left pressed: every down has its up, and
-/// the plan ends on what the viewer holds.
+/// the plan ends on what the viewer holds. A modifier is down or up — pressed
+/// again, it stays down, as Windows has it.
 bool balanced(const std::vector<WinKeyEvent>& plan, WinHeldMods held)
 {
     int down[256] = {};
@@ -179,11 +180,11 @@ bool balanced(const std::vector<WinKeyEvent>& plan, WinHeldMods held)
         if (e.kind != WinKeyEvent::Kind::Key) continue;
         const int delta = e.up ? -1 : 1;
         if (e.vk == VK_SHIFT)
-            mods[0] += delta;
+            mods[0] = e.up ? 0 : 1;
         else if (e.vk == VK_CONTROL)
-            mods[1] += delta;
+            mods[1] = e.up ? 0 : 1;
         else if (e.vk == VK_MENU)
-            mods[2] += delta;
+            mods[2] = e.up ? 0 : 1;
         else
             down[e.vk] += delta;
         if (down[e.vk] < 0 || down[e.vk] > 1) return false;
@@ -286,17 +287,53 @@ void frenchLegacy(const WinKeyLayout& fr)
     // A digit chord keeps its key and no Shift: Ctrl+1 is Ctrl+VK_1.
     CHECK(fr.chordKey(U'1', key) && key.vk == '1' && key.mods == 0);
 
-    // A Mac's Option for { on the French host: AltGr+4 there, so the Alt it
-    // holds stays and Ctrl joins it for the press — the case that worked by
-    // chance before.
+    // A Mac's Option for { on the French host: AltGr+4 there. Its left Alt is
+    // let go (masked, it is alone) for the right Alt of an AltGr, over the
+    // left Ctrl, and comes back after (masked again).
     {
         WinHeldMods option;
         option.alt = true;
         option.altLevel = true;
         std::vector<WinKeyEvent> down;
         planKeyEdge(fr.recipe(U'{', false).key, true, option, down);
-        CHECK(down.size() == 3 && down[0].vk == VK_CONTROL && !down[0].up && down[1].vk == '4' &&
-              !down[1].up && down[2].vk == VK_CONTROL && down[2].up);
+        CHECK(down.size() == 11);
+        if (down.size() == 11) {
+            CHECK(down[0].vk == kWinMaskVk && down[1].vk == kWinMaskVk && down[1].up);
+            CHECK(down[2].vk == VK_MENU && down[2].up && !down[2].extended);
+            CHECK(down[3].vk == VK_CONTROL && !down[3].up);
+            CHECK(down[4].vk == VK_MENU && !down[4].up && down[4].extended);
+            CHECK(down[5].vk == '4' && !down[5].up);
+            CHECK(down[6].vk == VK_MENU && down[6].up && down[6].extended);
+            CHECK(down[7].vk == VK_CONTROL && down[7].up);
+            CHECK(down[8].vk == VK_MENU && !down[8].up && !down[8].extended);
+            CHECK(down[9].vk == kWinMaskVk && down[10].vk == kWinMaskVk && down[10].up);
+        }
+        std::vector<WinKeyEvent> both = down;
+        planKeyEdge(fr.recipe(U'{', false).key, false, option, both);
+        CHECK(typeOut(fr, both, false, option) == U"{");
+        CHECK(balanced(both, option));
+    }
+
+    // A French AltGr held for "|", the same layout on both sides: its left Alt
+    // gives way to the right one for the key, and its Ctrl is put back after
+    // the right Alt, which Windows lets go of with it.
+    {
+        WinHeldMods altGr;
+        altGr.ctrl = altGr.alt = altGr.altLevel = true;
+        std::vector<WinKeyEvent> plan;
+        planKeyEdge(fr.recipe(U'|', false).key, true, altGr, plan);
+        CHECK(plan.size() == 6);
+        if (plan.size() == 6) {
+            CHECK(plan[0].vk == VK_MENU && plan[0].up && !plan[0].extended);
+            CHECK(plan[1].vk == VK_MENU && !plan[1].up && plan[1].extended);
+            CHECK(plan[2].vk == '6' && !plan[2].up);
+            CHECK(plan[3].vk == VK_MENU && plan[3].up && plan[3].extended);
+            CHECK(plan[4].vk == VK_CONTROL && !plan[4].up);
+            CHECK(plan[5].vk == VK_MENU && !plan[5].up && !plan[5].extended);
+        }
+        planKeyEdge(fr.recipe(U'|', false).key, false, altGr, plan);
+        CHECK(typeOut(fr, plan, false, altGr) == U"|");
+        CHECK(balanced(plan, altGr));
     }
 
     // Keys rolled over each other: a US keyboard's "1", then its "a" before
@@ -347,14 +384,16 @@ void frenchLegacy(const WinKeyLayout& fr)
               plan[2].vk == 'E' && plan[3].up);
     }
     {
-        // @: Ctrl and Alt around the à key, released after it.
+        // @: the left Ctrl and the RIGHT Alt around the à key, as AltGr is on
+        // a keyboard, released after it.
         std::vector<WinKeyEvent> plan;
         planText(fr, U"@", false, WinHeldMods{}, plan);
         CHECK_EQ(plan.size(), static_cast<size_t>(6));
         CHECK(plan.size() == 6 && plan[0].vk == VK_CONTROL && plan[0].scan == 0x1D &&
-              plan[1].vk == VK_MENU && plan[1].scan == 0x38 && plan[2].vk == '0' &&
-              plan[2].scan == 0x0B && plan[4].vk == VK_MENU && plan[4].up &&
-              plan[5].vk == VK_CONTROL && plan[5].up);
+              !plan[0].extended && plan[1].vk == VK_MENU && plan[1].scan == 0x38 &&
+              plan[1].extended && plan[2].vk == '0' && plan[2].scan == 0x0B &&
+              plan[4].vk == VK_MENU && plan[4].up && plan[4].extended && plan[5].vk == VK_CONTROL &&
+              plan[5].up);
     }
     {
         // "aA": Shift only around the capital.
