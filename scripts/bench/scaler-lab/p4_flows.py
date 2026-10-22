@@ -75,22 +75,34 @@ def dump_path(a, base, cell):
     return os.path.join(a.dir, base + "-" + re.sub(r"[^\w.+-]", "_", cell) + ".png")
 
 
+def annotate(level, message):
+    """A line on the run's summary page under GitHub Actions (::warning::,
+    ::error::); nothing more elsewhere, the log says it already."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print("::%s title=Upscaler lab::%s" % (level, message.replace("\n", " ")))
+
+
 def conformity(a, run_page):
     """Each golden case rendered by this Chrome's cells, the quality pictures
-    too, then every pair whose two dumps exist. Exit 1 when a pair is out of
-    tolerance or a run failed; a pair whose other side has not run yet is only
-    pending."""
+    too, then every pair whose two dumps exist. Exit 1 for a real difference
+    (a pair out of tolerance, a twin of another quality) or a picture missing
+    (a page or a cell that failed, a dump not on disk); exit 0 when the only
+    problems are chains not applicable on this adapter, each one a warning
+    annotation under GitHub Actions (Bruno, 22/10/2026). Their pairs are
+    pending, like those whose other side has not run yet."""
     from scaler_lab import make_input  # the driver's own, lazily (it imports this module)
 
     gl_side = getattr(a, "webgl_swiftshader", False)
     bad = 0
     adapter = None
-    # The WebGPU chain cannot run where the browser refuses to import a video
-    # frame into WebGPU (Chrome on Linux with the forced software adapter, CI
-    # 39661997273: "Failed to import texture from video" on every frame, the
-    # kernel cells sound). A platform limit, not a conformity problem: the
-    # chain's pairs are then not applicable and the rest is judged.
-    na = set()
+    # A WebGPU chain is not applicable where no frame reaches the product's
+    # renderer on this adapter: no way takes a frame in, or the renderer gives
+    # up (WebGpuRenderer.failed; the page would then move the picture to
+    # WebGL2, which the other side judges). A platform limit, not a conformity
+    # problem. The chains draw into the lab's textures (nopresent=1): a WebGPU
+    # canvas cannot present on Linux with the software adapter, and Chrome
+    # drops the page's whole WebGPU instance when one tries (CI 39737555924).
+    na = {}
 
     def page(query, key):
         nonlocal bad, adapter
@@ -102,16 +114,26 @@ def conformity(a, run_page):
         adapter = (res.get("adapter") or {}).get("name", adapter)  # a gt=1 page names none
         # what the renderers said: the chain's kind and GPU, every console warning
         log = str(res.get("pageLog", ""))
+        why = "no way took a frame in"
         for line in log.splitlines():
             if line.startswith("chain ") or line.startswith("console."):
                 print("   ", key, "|", line[:200])
+            if "[WebGpuRenderer] the readback failed too (" in line:
+                refused = line.split("failed too (", 1)[1].rsplit("): ", 1)[0]
+                why = "import, ImageBitmap and readback refused: " + refused[:160]
+            if "[WebGpuRenderer] giving up: " in line:
+                why = "the renderer gave up: " + line.split("giving up: ", 1)[1][:160]
         errors = list(res.get("errors") or [])
-        if "importExternalTexture" in log or any("importExternalTexture" in e for e in errors):
-            for e in errors:
-                if e.startswith("[chain-") or e.startswith("[dump chain-"):
-                    na.add(e.split("]")[0].replace("[dump ", "[").strip("[]"))
-            errors = [e for e in errors if not (e.startswith("[chain-") or e.startswith("[dump chain-"))]
-            print(key, "WebGPU chain not applicable on this adapter: importExternalTexture refused")
+        gave_up = [e for e in errors if (e.startswith("[chain-") or e.startswith("[dump chain-"))
+                   and "no frame reached the renderer's canvas" in e]
+        for e in gave_up:
+            cell = e.split("]")[0].replace("[dump ", "[").strip("[]")
+            if cell not in na:
+                na[cell] = why
+                annotate("warning", "%s not applicable on %s: %s" % (cell, adapter or "this adapter", why))
+        if gave_up:
+            print(key, "WebGPU chain not applicable on this adapter:", why)
+        errors = [e for e in errors if e not in gave_up]
         if errors:
             print(key, "errors:", errors[:5])
             bad += 1
@@ -128,7 +150,7 @@ def conformity(a, run_page):
                 cells = [c for c in cells if c not in GL_CELLS]
         base = "conf-%s-%s-%s" % (content, size_in, size_out)
         key = "%s %s->%s" % (content, size_in, size_out)
-        res = page("in=%s&out=%s&content=%s&codec=none&cells=%s&dump=all%s&tag=%s" % (
+        res = page("in=%s&out=%s&content=%s&codec=none&cells=%s&dump=all%s&nopresent=1&tag=%s" % (
             size_in, size_out, content, ",".join(cells), p3_flows.QUICK, base), key)
         if res is None:
             continue
@@ -155,7 +177,7 @@ def conformity(a, run_page):
                 continue
             make_input(gt_path, in_path, (iw, ih))
             cells = list(QUALITY_CELLS) + ([] if a.swiftshader else GL_CELLS)
-        res = page("in=%s&out=%s&content=img:/__dir/%s-in.png&codec=none&cells=%s&dump=all%s&tag=%s" % (
+        res = page("in=%s&out=%s&content=img:/__dir/%s-in.png&codec=none&cells=%s&dump=all%s&nopresent=1&tag=%s" % (
             QUALITY_IN, QUALITY_OUT, base, ",".join(cells), p3_flows.QUICK, base), base)
         if res is None:
             continue
@@ -165,8 +187,8 @@ def conformity(a, run_page):
             bad += 1
         sys.stdout.flush()
     print("side %s (%s) rendered; comparing the dumps on disk" % ("WebGL2" if gl_side else "WebGPU", adapter))
-    if na:
-        print("not applicable on this adapter (video import refused):", sorted(na))
+    for cell, why in sorted(na.items()):
+        print("not applicable on this adapter:", cell, "-", why)
 
     # ── the pixel table ──
     rows = []
@@ -241,7 +263,10 @@ def conformity(a, run_page):
     if qpending:
         print("  %d quality case(s) pending: the other side has not run yet" % qpending)
     print("conformity: %s%s" % ("OK" if not bad else "%d problem(s)" % bad,
-                                 " (WebGPU chain not applicable on this adapter)" if na else ""))
+                                 " (not applicable on this adapter: %s)" % ", ".join(sorted(na)) if na else ""))
+    if bad:
+        annotate("error", "conformity of the %s side: %d problem(s), a real difference or a picture missing"
+                 " (the step's log has them)" % ("WebGL2" if gl_side else "WebGPU", bad))
 
     if a.md and (rows or qrows):
         path = os.path.join(a.dir, a.tag + "-conformity.md")

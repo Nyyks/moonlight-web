@@ -22,6 +22,13 @@
 //   importfail=1                 the product's renderer gets every video import
 //                                refused (its ImageBitmap fallback, as on a
 //                                machine that cannot share frames with WebGPU)
+//   importfail=2                 …and its ImageBitmap copy too (the readback:
+//                                VideoFrame.copyTo, then writeTexture)
+//   importfail=3                 …and the readback too: no way in, and the
+//                                chain cells fail saying so
+//   nopresent=1                  the product's WebGPU chains draw into textures
+//                                of the lab's, never into their canvas' swap
+//                                chain (see HOOK.noPresent)
 //
 // Three feeds (§7.1, rule 1): `ext` reads the decoded VideoFrame through a
 // texture_external (no pass 0); `tex` reads an rgba8unorm texture already
@@ -1022,7 +1029,8 @@ async function runLabInner(p, log) {
   if (p.power) adapterOpts.powerPreference = p.power;
   if (p.fallback === "1") adapterOpts.forceFallbackAdapter = true;
   installHooks(adapterOpts);
-  HOOK.importFail = p.importfail === "1";
+  HOOK.importFail = +p.importfail || 0;
+  HOOK.noPresent = p.nopresent === "1";
   const adapter = await navigator.gpu.requestAdapter(adapterOpts);
   if (!adapter) throw new Error("requestAdapter returned null");
   const info = adapter.info || {};
@@ -1755,6 +1763,15 @@ async function runLabInner(p, log) {
       passSeq.push(np);
     }
     if (flip) r.setOutputSize(outW, outH);
+    // No frame reached its canvas: every way in refused the last one (its
+    // path ends in `+lost`), or the renderer gave up (WebGpuRenderer.failed;
+    // the page would move the picture to another renderer). Nothing to time
+    // or dump.
+    const lost = /\+lost$/.test((r.lastDraw && r.lastDraw.path) || "");
+    if (r.failed || lost)
+      throw new Error(
+        cell.name + ": no frame reached the renderer's canvas (" + (r.failed ? "it gave up" : "no way in") + ")",
+      );
     if (tq) {
       // the WebGL2 renderer's GPU time per draw, as one pass each
       const ms = await readGlQueries(r.gl, tq, queries);
@@ -2214,8 +2231,21 @@ const HOOK = {
   productErrors: [],
   /** While set, getCurrentTexture hands the renderer a texture of ours (chainToOut). */
   capture: null,
-  /** importfail=1: the product's devices get every video import refused. */
-  importFail: false,
+  /**
+   * importfail=N: the product's devices get every video import refused (1),
+   * and their ImageBitmap copies (2), and the readback of the frames (3).
+   */
+  importFail: 0,
+  /**
+   * nopresent=1: every draw of a product's WebGPU canvas gets a texture of
+   * ours from getCurrentTexture (the `sink`), as a capture does. On Linux with
+   * the software adapter a WebGPU canvas cannot present: its swap chain finds
+   * no shared image to allocate, and Chrome destroys the device and drops the
+   * page's whole WebGPU instance, the lab's device with it (22/10/2026, CI
+   * 39737555924). The renderer's draw is the same either way.
+   */
+  noPresent: false,
+  sink: null,
 };
 let hooked = false;
 function installHooks(adapterOpts) {
@@ -2230,9 +2260,25 @@ function installHooks(adapterOpts) {
   // shared with WebGPU (the Linux runner of CI 39661997273).
   const origImport = GPUDevice.prototype.importExternalTexture;
   GPUDevice.prototype.importExternalTexture = function (d) {
-    if (HOOK.importFail && this !== HOOK.labDevice)
+    if (HOOK.importFail >= 1 && this !== HOOK.labDevice)
       throw new DOMException("Failed to import texture from video (lab importfail=1)", "OperationError");
     return origImport.call(this, d);
+  };
+  // importfail=2: their copies of an ImageBitmap too (the lab's own queue
+  // copies pictures in, and keeps doing so).
+  const origCopyExt = GPUQueue.prototype.copyExternalImageToTexture;
+  GPUQueue.prototype.copyExternalImageToTexture = function (src, dst, size) {
+    if (HOOK.importFail >= 2 && (!HOOK.labDevice || this !== HOOK.labDevice.queue))
+      throw new DOMException("Failed to copy content from external image (lab importfail=2)", "OperationError");
+    return origCopyExt.call(this, src, dst, size);
+  };
+  // importfail=3: and a VideoFrame read back in another format (the lab never
+  // reads one back itself).
+  const origCopyTo = VideoFrame.prototype.copyTo;
+  VideoFrame.prototype.copyTo = function (dst, opts) {
+    if (HOOK.importFail >= 3 && opts && opts.format)
+      return Promise.reject(new DOMException("copyTo refused (lab importfail=3)", "NotSupportedError"));
+    return origCopyTo.call(this, dst, opts);
   };
   const origDev = GPUAdapter.prototype.requestDevice;
   GPUAdapter.prototype.requestDevice = function (desc) {
@@ -2257,11 +2303,11 @@ function installHooks(adapterOpts) {
   };
   const origCur = GPUCanvasContext.prototype.getCurrentTexture;
   GPUCanvasContext.prototype.getCurrentTexture = function () {
-    const cap = HOOK.capture;
+    const cap = HOOK.capture || (HOOK.noPresent ? (HOOK.sink ||= {}) : null);
     if (!cap || !this.__cfg) return origCur.call(this);
     const w = this.canvas.width;
     const h = this.canvas.height;
-    if (!cap.texture || cap.ctx !== this || cap.w !== w || cap.h !== h) {
+    if (!cap.texture || cap.ctx !== this || cap.device !== this.__cfg.device || cap.w !== w || cap.h !== h) {
       if (cap.texture) cap.texture.destroy();
       cap.ctx = this;
       cap.w = w;
