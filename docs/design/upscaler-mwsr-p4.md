@@ -172,12 +172,16 @@ cinquième ou d'un quart de milliseconde ; sinon égalité, et la saveur de prod
 Le shader est à égalité sur le GPU (±15 %, le WebGL2 comptant le téléversement) ; ce qui sépare les
 saveurs est la chaîne autour du shader : import de la texture externe, soumission et attente de la fin
 du GPU coûtent 4 ms sur le RTX quelle que soit la passe (`off` : 0,03 ms de GPU pour 4,4 ms de `done`),
-0,5 à 1,3 ms de plus que WebGL2 sur le 780M. **Verdict ordinateur : WebGL2 reste la saveur SDR** — RTX
+0,5 à 1,3 ms de plus que WebGL2 sur le 780M. **Verdict ordinateur au labo : WebGL2 reste la saveur SDR** — RTX
 1,9 à 2,3 × à 60 i/s et 4 × saturé ; 780M 1,1 à 1,2 × (égalité dans les marges, la production reste). Une
 exception à peser en P6 : la réduction 4K → 1440p sur le 780M, où les vues sRGB et un import 4K moins
 cher donnent WebGPU 18 % plus tôt (7,6 contre 9,3 ms) — sur le RTX, où le GPU n'est pas le goulot,
-WebGL2 garde l'avantage même là. C'est la réponse à la question laissée ouverte par le wiki 15.3 : elle
-ne dépendait pas du shader.
+WebGL2 garde l'avantage même là. Ce n'est **pas** la réponse à la question laissée ouverte par le wiki
+15.3 (corrigé le 22/10, journal J27) : le labo s'arrête à la fin du GPU, avant le compositeur, alors que
+le wiki mesurait au clic-photon, où le plein écran ×2 donnait WebGPU 5 à 10 ms devant WebGL2 ; à 1:1, les
+trois présentateurs y sont égaux à 3 ms près et les 4 ms de soumission WebGPU du labo n'y paraissent pas
+(rapport P1 §6). Ce que le labo établit : à shader égal sur le GPU, l'écart entre les saveurs ne vient pas
+du shader. Le choix de la saveur, lui, se prend au clic-photon.
 
 **Le drapeau `mw_mwsr` sur la `--dev`** (22:04-22:14, `--dev` de 09e31b38 vérifiée au hachage, client
 Chrome sans tête tout SwiftShader puis ANGLE sur l'AMD épinglé + WebGPU sur SwiftShader, décodage
@@ -219,6 +223,12 @@ WebGL2 (`gl-mwsr`) ; Apple mobile (WebKit) → WebGPU (`mwsr`) quand il est là,
 → `gl-mwsr` à la place de SGSR1 dans l'Auto. Mali reste en WebGL2 selon la règle, mais la mesure à la
 taille de l'écran rend WebGPU défendable sur Mali aussi (2 à 6 ms de moins par image, 18 quand le flux
 dépasse l'écran) : au choix de Bruno. Le labo n'a pas mesuré Safari macOS.
+
+**À confirmer au clic-photon avant P6** (journal J27, go de Bruno du 22/10). La règle de la porte juge le
+`done` du labo, du début du draw à la fin du GPU, pas le trajet jusqu'à l'écran ; elle est relative (10 %
+de 2 ms sur le RTX, de 20 à 37 ms sur le realme) et juge des sorties 1440p, plus de trois écrans du
+realme. Aucune classe ne change de saveur sur la foi du labo seul : le clic-photon des deux téléphones,
+WebGPU `mwsr` contre WebGL2 `gl-mwsr` avec Canvas2D pour témoin, tranche d'abord.
 
 **La CI** (run 39661997273, lu par 59) : sur le runner Linux, l'adaptateur logiciel forcé refuse
 d'importer une image vidéo dans WebGPU (`importExternalTexture` : « Failed to import texture from

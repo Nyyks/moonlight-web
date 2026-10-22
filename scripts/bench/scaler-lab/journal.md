@@ -1065,3 +1065,33 @@ WebGL2 ; GPU horodaté 4,1-6,9 ms, 0,45-0,74 × SGSR1 en agrandissement (C1 tenu
 son image sous 16,7 ms. La règle, jugée sur les tailles standard, reste « égalité » ; appliquée à ces cas,
 elle le resterait de justesse (texte ×2 à 0,901 et 0,903). Pour la décision par classe : sur Mali, WebGPU
 gagne 2 à 6 ms par image à la taille de l'écran, 18 ms quand le flux est plus grand que l'écran.
+
+## 2026-10-22 — J27, la porte P4 relue : le labo s'arrête à la fin du GPU, la saveur se choisira au clic-photon
+
+Question de Bruno (10:33) : pourquoi « WebGL2 reste » sur le realme avec 6 et 18 ms de gain, et que
+disait le clic-photon déjà mesuré ? Sa crainte : une régression si l'on ne regarde pas la chaîne entière.
+
+- **La règle** (`GATE_WIN` 0,9, `GATE_MAIN` 1,2 ou 0,25 ms, `p4_flows.py`) a été posée par la session le
+  21/10 en écrivant la porte, pas par Bruno. Trois limites : elle est relative (10 % de 2 ms sur le RTX,
+  de 20 à 37 ms sur le realme) ; elle juge des sorties 1440p, 3,2 écrans du realme ; elle juge `done`,
+  du début du draw à la fin du GPU, avant le compositeur.
+- **Le clic-photon déjà mesuré**, sonde `mwLatency`, toujours sur ordinateur. Wiki 15.3 (septembre, RTX) :
+  en fenêtre ×1,07, WebGL2 13,9-15,1 ms contre WebGPU 14,0-15,7, égaux à la médiane, WebGL2 meilleur de
+  1-2 ms au p90 ; en plein écran ×2, WebGL2 34,2-37,2 contre WebGPU 26,8-29,5, WebGPU devant de 5-10 ms
+  avec 20-40 ms de dispersion sur dix clics. Rapport P1 §6 (21/10, 780M, plein écran 1:1) : Canvas2D
+  26,9, WebGPU 27,6, WebGL2 30,6 ms, égaux à ± 3 ms ; les 4 ms de soumission WebGPU du labo y sont
+  absorbées tant que l'image tient dans la période.
+- **Lecture.** Sur ordinateur, le labo (WebGL2 deux fois plus tôt sur le RTX) et le photon plein écran
+  (WebGPU devant) se contredisent ; le rapport P4 disait avoir répondu à la question du wiki 15.3, c'est
+  corrigé (§5). Sur le realme, une image prend 18 à 37 ms, plus que la période : le dessin y est sur le
+  chemin critique et l'écart du labo a plus de chances de passer au photon, sans preuve. Sur mobile,
+  `desynchronized` n'aurait pas d'effet d'après `BrowserDetect.js` (les compositeurs mobiles
+  resynchronisent) : l'asymétrie WebGL2/WebGPU du dernier saut n'y jouerait pas, et la sonde, qui lit
+  l'image dessinée dans la page et pas l'écran, y serait plus juste que sur ordinateur.
+- **Décision de Bruno (go 10:42)** : aucune classe ne change de saveur sur la foi du labo seul ; d'abord
+  le clic-photon des deux téléphones. Protocole : la `--dev` de DualRTX avec `latency_flag_enabled` et le
+  mode debug (`ClientLog` remonte alors la console du téléphone au journal client de l'hôte) ; WebGPU
+  `mwsr` contre WebGL2 `gl-mwsr` par `video_enhancement_algo`, Canvas2D pour témoin ; flux 720p (×1,25 sur
+  le realme) et 1080p (réduction) ; séries de 10 clics entrelacées ; le realme piloté par adb sans fil et
+  DevTools (Bruno autorise la manipulation), l'iPhone par l'inspecteur web de Safari du Mac de Léo en
+  Wi-Fi ; caméra au ralenti (repère gris de la sonde) si un écart reste ambigu. Créneau via 59.
