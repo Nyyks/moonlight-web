@@ -27,6 +27,24 @@
 
 class FrameSentSink;
 
+/// What a keystroke says about itself beside its character
+/// (IMediaEngine::sendKeyChar). Outside the engine on purpose: a nested class
+/// with member initializers is not complete enough for a default argument
+/// (`= {}`) inside its enclosing class, which GCC and Clang reject.
+struct CharKeyHints
+{
+    /// A chord of the touch keyboard's bar (Ctrl latched, then z): the host
+    /// key carrying the character, under whatever modifiers are held, none
+    /// added and none lifted.
+    bool chord = false;
+    /// The key's US position, for a host whose layout has no key for the
+    /// character — a chord on a Cyrillic layout keeps its shortcut.
+    short positionVk = 0;
+    /// AltGr, or a Mac's Option, chose the character on the client: the Ctrl
+    /// and Alt the viewer holds are a level for the host, not a shortcut.
+    bool altGraph = false;
+};
+
 /**
  * How this host can be made to type the character the client's keyboard layout
  * produced, rather than whatever its own layout puts at that key's position.
@@ -186,19 +204,7 @@ public:
     /// which left the macOS backend with no way to notice that its own idea
     /// of the modifiers had drifted.
     /// `hints` is what else the keystroke says about itself (CharKeyHints).
-    struct CharKeyHints
-    {
-        /// A chord of the touch keyboard's bar (Ctrl latched, then z): the
-        /// host key carrying the character, under whatever modifiers are
-        /// held, none added and none lifted.
-        bool chord = false;
-        /// The key's US position, for a host whose layout has no key for the
-        /// character — a chord on a Cyrillic layout keeps its shortcut.
-        short positionVk = 0;
-        /// A Mac's Option composed the character, as AltGr does: the Alt the
-        /// viewer holds is a level for the host, not an Alt+ chord.
-        bool altGraph = false;
-    };
+    using CharKeyHints = ::CharKeyHints;
     virtual void sendKeyChar(const QString& ch, bool down, char modifiers = 0,
                              const CharKeyHints& hints = {}) = 0;
 
