@@ -8006,3 +8006,78 @@ au bureau. L'hôte peut servir à quelqu'un d'autre pendant ce temps, même en
 session X11. Les apps de l'owner, déclarées dans la page d'administration, font
 de même.
 - **Sunshine et Wolf** : inchangés (un encodeur par invité, trois qualités).
+## 36. Le clavier : le texte d'un téléphone en vraies touches, le clavier physique selon le mode souris (22/10/2026)
+
+Signalement d'Odin (Discord) : depuis son téléphone, rien ne s'écrivait dans un PowerShell
+administrateur. Reproduit sur DualRTX : **la console classique (conhost) ignore un caractère
+injecté comme tel** (`KEYEVENTF_UNICODE`), administrateur ou non, alors que les vraies touches
+(Entrée, Retour arrière, Tab et Ctrl+V de la barre) passent. Ce n'était pas une question de droits
+(§31 : le worker est SYSTEM). Plan `texte-tactile-touches-reelles.md`.
+
+### 36.1 La table d'une disposition (`input/windows/WinTextKeys`)
+
+- **Relue, jamais supposée.** `VkKeyScanExW` ne connaît ni le Verr. Maj ni les touches mortes, et se
+  trompe : sur la disposition française Apple, il nomme la touche é pour É, qui tape é. La table de
+  chaque disposition est donc relue touche par touche par `ToUnicodeEx` (bit 2 de `wFlags` : l'état
+  des touches mortes de la personne à l'hôte n'est pas touché), aux quatre niveaux qu'on tape
+  (rien, Maj, AltGr, Maj+AltGr) et aux deux états de Verr. Maj. Ce qui y est, la touche le tape
+  vraiment. Le scancode vient de la même disposition (`MapVirtualKeyExW`), jamais de la table US.
+- **Ctrl seul ou Alt seul n'entrent pas** : ces niveaux font des caractères de contrôle, et un
+  0x03 dans un texte collé ne doit pas devenir Ctrl+C.
+- **Touches mortes** : ce qu'une touche morte compose ne se demande pas à `ToUnicodeEx` sans
+  changer l'état du clavier. La table `DEADKEY` de la DLL de la disposition (`KbdLayerDescriptor`,
+  `KBDFR.DLL`…) le dit, retrouvée par le registre (`Keyboard Layouts\<KLID>`, « Layout Id » pour
+  une variante `0xFnnn`) et chargée depuis System32 seulement. ê = ^ mort puis e ; un ~ seul =
+  la touche morte puis Espace.
+- **Repli Unicode** pour ce qu'aucune touche ne tape (un emoji, É sur l'AZERTY classique), et
+  pour tout le texte quand une méthode de saisie est ouverte (japonais, chinois, coréen) ou
+  qu'aucune fenêtre au premier plan ne dit sa disposition. Dans conhost, ces caractères-là restent
+  perdus : limite connue.
+- Tests : `test_win_text_keys.cpp`, sur l'AZERTY classique, l'AFNOR, l'US, l'allemand,
+  l'US-International et la disposition Apple quand elle est là ; une disposition absente est
+  chargée pour le test (`KLF_NOTELLSHELL`, jamais activée) puis déchargée.
+
+### 36.2 Le texte (`planText`, `Win32Input::injectText`)
+
+- Chaque caractère devient les touches qui le tapent ; la disposition décide Maj et AltGr. Une Maj
+  ou un AltGr que le spectateur tient et que le caractère ne veut pas est relâché le temps de la
+  touche, puis remis ; un Ctrl ou un Alt tenu seul est un raccourci voulu, gardé.
+- Entrée et Tab sont leurs touches (`\n`, `\r`, `\r\n`), les autres caractères de contrôle sont
+  jetés.
+- Un `SendInput` par morceau de 256 caractères : un collage garde son ordre, sans appel géant.
+- Rien de ce chemin n'entre dans `m_HeldKeys`. Une ligne par session dans le journal du worker :
+  combien de caractères en touches, par touche morte, en Unicode et pourquoi — jamais un caractère —
+  et la classe de la fenêtre qui a reçu le premier texte.
+
+### 36.3 Les accords de la barre du clavier tactile
+
+Une lettre tapée avec un modificateur verrouillé de la barre partait comme la position US de la
+lettre : sur un hôte AZERTY, Maj puis a tapait Q, Ctrl+z devenait Ctrl+W (l'onglet se fermait). Le
+client envoie maintenant le caractère, marqué `chord`. L'hôte natif presse la touche qui le porte
+dans sa disposition, sans toucher aux modificateurs tenus (Ctrl+Maj+T reste Ctrl+Maj+T) ; Sunshine
+pour Windows reçoit une lettre en VK non normalisé ; les autres hôtes gardent la position. Ce
+chemin ne dépend pas de `keyboard_layout_fidelity`.
+
+### 36.4 Le clavier physique : « auto », « always », « never »
+
+- `"auto"` (défaut) : en mode souris **Bureau**, les caractères de la disposition du client ; en
+  mode **Jeu**, les positions. `"always"` garde les caractères en Jeu, `"never"` les positions
+  partout. La clé était un booléen semé à `false` depuis le 19/09 : au démarrage `true` devient
+  `"always"` et `false` devient `"auto"`.
+- Le mode souris n'existe que dans le client : chaque appui le porte (`gaming`), son relâchement et
+  le battement `inputstate` rejouent celui de l'appui. En Jeu, une touche morte part par sa
+  position (l'hôte compose) et la touche suivante n'attend plus la composition du navigateur.
+- Sunshine pour Windows reçoit au Bureau **toutes** les lettres en VK non normalisé, plus seulement
+  celles qu'un clavier US n'aurait pas données (un QWERTY sur un Sunshine AZERTY tapait q pour a).
+- **L'Option du Mac** compose comme AltGr ({ [ | ~ €) : le client le marque (`altGraph`), l'hôte
+  Windows ou Linux relâche l'Alt du spectateur pour la touche quand sa disposition n'en veut pas.
+- La valeur passe au worker dans sa config (`StreamWorkerHost::prepare`), avec `keyboard_debug` :
+  un worker SYSTEM lit le settings.json de systemprofile, jamais celui du propriétaire.
+
+### 36.5 Les invités et les fenêtres administrateur
+
+La règle « policy » (§30) ferme les fenêtres administrateur aux invités. La clé
+`share_guests_admin_windows` (défaut `false`, sans interface) les ouvre à tous ceux qui ont clavier
+ou souris, bureau sécurisé compris ; le worker de l'invité le dit dans son journal. Le bouton
+« Minimise the host's windows » est offert à l'invité aussi (décision du 22/10) : un jeu lancé en
+administrateur qui remplit l'écran ne lui laisse rien d'autre à cliquer. Wiki : Sécurité §6.4c.
