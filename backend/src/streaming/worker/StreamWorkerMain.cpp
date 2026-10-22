@@ -686,6 +686,12 @@ int runStreamWorker(QCoreApplication& app)
         session->setInputPolicy(policy);
         qInfo() << "[StreamWorker] Input policy: gamepad=" << policy.gamepad
                 << "keyboardMouse=" << policy.keyboardMouse << "hid=" << policy.hid;
+        // A guest let into the host's administrator windows by the owner's
+        // settings file, said once: read afterwards, the log shows why this
+        // invited player could drive one.
+        if (cfg["viewerAdmin"].toBool(false))
+            qInfo() << "[StreamWorker] administrator windows open to this invited player"
+                       " (share_guests_admin_windows)";
     }
     // What the media path revealed about the host's OS. Only the parent keeps a
     // host list, so this is the only way the observation outlives the stream —

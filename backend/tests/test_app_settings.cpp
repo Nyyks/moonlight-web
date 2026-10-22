@@ -476,6 +476,32 @@ void run_app_settings_tests()
     s.audioTimeStretch(); // exercised (value documented as true by default)
     CHECK(s.readAll().contains("native_host_enabled"));
 
+    // The host's administrator windows stay closed to invited players unless
+    // the owner wrote a real true: seeded as false so it can be found, absent
+    // reads as false, and nothing short of a JSON true opens them.
+    {
+        CHECK(s.readAll().contains("share_guests_admin_windows"));
+        CHECK_EQ(s.readAll().value("share_guests_admin_windows").toBool(true), false);
+        CHECK(!s.shareGuestsAdminWindows());
+        QJsonObject obj = s.readAll();
+        obj["share_guests_admin_windows"] = true;
+        s.writeAll(obj);
+        CHECK(s.shareGuestsAdminWindows());
+        // The seed never takes the owner's choice back.
+        s.seedDocumentedDefaults();
+        CHECK(s.shareGuestsAdminWindows());
+        obj["share_guests_admin_windows"] = "true";
+        s.writeAll(obj);
+        CHECK(!s.shareGuestsAdminWindows());
+        obj["share_guests_admin_windows"] = 1;
+        s.writeAll(obj);
+        CHECK(!s.shareGuestsAdminWindows());
+        obj.remove("share_guests_admin_windows");
+        s.writeAll(obj);
+        CHECK(!s.shareGuestsAdminWindows());
+        s.seedDocumentedDefaults();
+    }
+
     // The native host is offered unless someone says otherwise — and an absent
     // key says nothing, which is the state every install before this setting is
     // in. Only an explicit false hides the card.

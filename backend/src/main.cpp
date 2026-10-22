@@ -5592,9 +5592,13 @@ int main(int argc, char* argv[])
         // What this player may send. Enforced in the worker, where a forged
         // datachannel message cannot get around it.
         cfg["inputPolicy"] = perms.toJson();
-        // An invited player is never this machine's administrator, whatever
-        // the owner ticked: the host's administrator windows stay closed.
-        cfg["viewerAdmin"] = false;
+        // An invited player is not this machine's administrator, whatever the
+        // owner ticked on the board: the host's administrator windows stay
+        // closed to them — unless the owner opened them to every guest in the
+        // settings file (share_guests_admin_windows, wiki Security §6.4c). The
+        // policy above still decides whether they have a keyboard and a mouse
+        // at all; this only lifts the "policy" gate for those who do.
+        cfg["viewerAdmin"] = appSettings.shareGuestsAdminWindows();
         // See the owner path. The consent belongs to the MACHINE, not to the
         // viewer, so an invited player's session replays it too — otherwise
         // the host's own screen would raise a dialog nobody is there to answer.

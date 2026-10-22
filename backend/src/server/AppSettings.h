@@ -119,6 +119,27 @@ public:
 
     bool sharedFeedEnabled() const;
 
+    // ── Invited players and administrator windows ─────────────────────────────
+    //
+    // Whether an invited player (a share link) may drive the host's windows that
+    // run as administrator. Off, the native host drops their keyboard and mouse
+    // presses on such a window (the "policy" gate, InputGate in NativeHost.h);
+    // the owner's own sessions are never held back. On, the guest is let in like
+    // the owner — and since a SYSTEM worker reaches the secure desktop, that
+    // includes answering a UAC prompt and typing on the lock screen: whoever
+    // holds the link and its PIN, with keyboard or mouse ticked, is then an
+    // administrator of this PC. One switch, no levels: a guest who can drive an
+    // administrator console already is one, so nothing in between would protect
+    // anything. Only guests with keyboard or mouse are concerned; a gamepad is
+    // never gated.
+    //
+    // File-only setting (no UI, no write route): stored as JSON bool
+    // "share_guests_admin_windows", DEFAULT false, seeded so it can be found,
+    // read when each guest's worker is launched. Explained to owners in the
+    // wiki, Security §6.4c.
+
+    bool shareGuestsAdminWindows() const;
+
     // ── Keyboard layout fidelity ──────────────────────────────────────────────
     //
     // On: what the host types is the character the CLIENT's keyboard layout

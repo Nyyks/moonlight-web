@@ -374,6 +374,10 @@ void AppSettings::seedDocumentedDefaults()
         obj["keyboard_layout_fidelity"] = false;
         changed = true;
     }
+    if (!obj.contains("share_guests_admin_windows")) {
+        obj["share_guests_admin_windows"] = false;
+        changed = true;
+    }
     if (!obj.contains("stream_worker_enabled")) {
         obj["stream_worker_enabled"] = true;
         changed = true;
@@ -655,6 +659,14 @@ bool AppSettings::sharedFeedEnabled() const
 {
     QJsonObject obj = readAll();
     return obj.value("shared_feed_enabled").toBool(true);
+}
+
+bool AppSettings::shareGuestsAdminWindows() const
+{
+    QJsonObject obj = readAll();
+    // Only a real true opens them: a value someone typed as "true" (a string)
+    // or 1 is not a decision to make a stranger administrator.
+    return obj.value("share_guests_admin_windows").toBool(false);
 }
 
 bool AppSettings::keyboardLayoutFidelity() const
