@@ -253,7 +253,8 @@ public:
                       bool hold = false) override;
     void sendUtf8Text(const QString& text) override;
     void sendSecureAttention() override;
-    void sendKeyChar(const QString& ch, bool down, char modifiers = 0) override;
+    void sendKeyChar(const QString& ch, bool down, char modifiers = 0,
+                     const CharKeyHints& hints = {}) override;
     void sendMouseMove(short deltaX, short deltaY) override;
     void sendMousePosition(short x, short y, short referenceWidth, short referenceHeight) override;
     void sendMouseButton(bool down, int button, bool hold = false) override;

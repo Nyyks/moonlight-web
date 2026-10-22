@@ -779,10 +779,12 @@ void MoonlightShim::sendSecureAttention()
     sendKeyEvent(kCtrl, false, 0, 0);
 }
 
-void MoonlightShim::sendKeyChar(const QString& ch, bool down, char /*modifiers*/)
+void MoonlightShim::sendKeyChar(const QString& ch, bool down, char /*modifiers*/,
+                                const CharKeyHints& /*hints*/)
 {
     // The modifier mask is dropped on purpose: on GameStream the modifier
-    // state belongs to the host, and a text event carries none anyway.
+    // state belongs to the host, and a text event carries none anyway. So are
+    // the hints: no plan sends a chord here as text (InputMsg::resolveKey).
     // Only the press: the text event types the character outright, so acting on
     // the release too would double every keystroke.
     if (down) sendUtf8Text(ch);

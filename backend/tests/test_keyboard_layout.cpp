@@ -59,7 +59,7 @@ void run_keyboard_layout_tests()
     // Arrows, F-keys, Enter, the modifiers: nothing to correct, nothing to
     // choose. The position goes out untouched whatever the host is.
     for (KeyboardMode mode : allModes) {
-        const KeyPlan plan = resolveKey(key(kVkUp, "ArrowUp"), mode);
+        const KeyPlan plan = resolveKey(key(kVkUp, "ArrowUp"), mode, LayoutFidelity::Always);
         CHECK(!plan.isText());
         CHECK_EQ(plan.keyCode, static_cast<short>(kVkUp));
         CHECK_EQ(plan.flags, static_cast<char>(0));
@@ -68,7 +68,8 @@ void run_keyboard_layout_tests()
     // Opting out in the settings file lands in the same place: the character is
     // ignored and the position goes out, exactly as it did before any of this.
     {
-        const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Positional);
+        const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Positional,
+                                        LayoutFidelity::Always);
         CHECK(!plan.isText());
         CHECK_EQ(plan.keyCode, static_cast<short>(kVkQ));
         CHECK_EQ(plan.flags, static_cast<char>(0));
@@ -81,16 +82,16 @@ void run_keyboard_layout_tests()
     // active layout. It stays a real key press, which is why letters never go
     // through text here.
     {
-        const KeyPlan plan =
-            resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::SunshineWindows);
+        const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::SunshineWindows,
+                                        LayoutFidelity::Always);
         CHECK(!plan.isText());
         CHECK_EQ(plan.keyCode, static_cast<short>(kVkA));
         CHECK_EQ(plan.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
     }
     {
         // Case is carried by the modifiers, not by the VK: VK_A either way.
-        const KeyPlan plan =
-            resolveKey(key(kVkQ, "KeyQ", "A", true), KeyboardMode::SunshineWindows);
+        const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "A", true), KeyboardMode::SunshineWindows,
+                                        LayoutFidelity::Always);
         CHECK_EQ(plan.keyCode, static_cast<short>(kVkA));
     }
     {
@@ -99,8 +100,8 @@ void run_keyboard_layout_tests()
         // thread's layout, where the normalized path uses a fixed table — asking
         // for it here would trade a scancode we can predict for one we cannot,
         // and buy nothing.
-        const KeyPlan plan =
-            resolveKey(key(kVkQ, "KeyQ", "q", false), KeyboardMode::SunshineWindows);
+        const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "q", false),
+                                        KeyboardMode::SunshineWindows, LayoutFidelity::Always);
         CHECK(!plan.isText());
         CHECK_EQ(plan.keyCode, static_cast<short>(kVkQ));
         CHECK_EQ(plan.flags, static_cast<char>(0));
@@ -115,8 +116,8 @@ void run_keyboard_layout_tests()
     // key for a stateless one and stop a shooter's weapon slots answering, for
     // a character that was never wrong. So it stays positional.
     {
-        const KeyPlan plan =
-            resolveKey(key(kVk1, "Digit1", "&", true), KeyboardMode::SunshineWindows);
+        const KeyPlan plan = resolveKey(key(kVk1, "Digit1", "&", true),
+                                        KeyboardMode::SunshineWindows, LayoutFidelity::Always);
         CHECK(!plan.isText());
         CHECK_EQ(plan.keyCode, static_cast<short>(kVk1));
         CHECK_EQ(plan.flags, static_cast<char>(0));
@@ -124,8 +125,8 @@ void run_keyboard_layout_tests()
     {
         // An accented letter is not a letter either as far as the VK path goes:
         // no US virtual key carries it. Positional, for the same reason.
-        const KeyPlan plan =
-            resolveKey(key(kVk1, "Digit2", "é", true), KeyboardMode::SunshineWindows);
+        const KeyPlan plan = resolveKey(key(kVk1, "Digit2", "é", true),
+                                        KeyboardMode::SunshineWindows, LayoutFidelity::Always);
         CHECK(!plan.isText());
     }
 
@@ -144,12 +145,14 @@ void run_keyboard_layout_tests()
     // What is pinned: the exact keystrokes that vanished leave as positions,
     // never as text, under the mode a macOS host now gets.
     {
-        const KeyPlan a = resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Positional);
+        const KeyPlan a = resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Positional,
+                                     LayoutFidelity::Always);
         CHECK(!a.isText());
         CHECK_EQ(a.keyCode, static_cast<short>(kVkQ));
         CHECK_EQ(a.flags, static_cast<char>(0));
 
-        const KeyPlan q = resolveKey(key(kVkA, "KeyA", "q", true), KeyboardMode::Positional);
+        const KeyPlan q = resolveKey(key(kVkA, "KeyA", "q", true), KeyboardMode::Positional,
+                                     LayoutFidelity::Always);
         CHECK(!q.isText());
         CHECK_EQ(q.keyCode, static_cast<short>(kVkA));
         CHECK_EQ(q.flags, static_cast<char>(0));
@@ -162,12 +165,14 @@ void run_keyboard_layout_tests()
     // the two layouts match the resolution lands on the very key the viewer
     // pressed, so nothing is lost by asking.
     {
-        const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Native);
+        const KeyPlan plan =
+            resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Native, LayoutFidelity::Always);
         CHECK(plan.isText());
         CHECK_EQ(plan.text.toStdString(), std::string("a"));
     }
     {
-        const KeyPlan plan = resolveKey(key(kVk1, "Digit1", "&", true), KeyboardMode::Native);
+        const KeyPlan plan = resolveKey(key(kVk1, "Digit1", "&", true), KeyboardMode::Native,
+                                        LayoutFidelity::Always);
         CHECK(plan.isText());
     }
     {
@@ -176,7 +181,8 @@ void run_keyboard_layout_tests()
         // means "q", and diverges from nothing — yet the position types "a".
         // What the position must be compared against is the host's layout, and
         // only the host can make that comparison.
-        const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "q", false), KeyboardMode::Native);
+        const KeyPlan plan =
+            resolveKey(key(kVkQ, "KeyQ", "q", false), KeyboardMode::Native, LayoutFidelity::Always);
         CHECK(plan.isText());
         CHECK_EQ(plan.text.toStdString(), std::string("q"));
     }
@@ -191,20 +197,24 @@ void run_keyboard_layout_tests()
     {
         QJsonObject msg = key(kVk1 + 1, "Digit2");
         msg["dead"] = true;
-        const KeyPlan native = resolveKey(msg, KeyboardMode::Native);
+        const KeyPlan native = resolveKey(msg, KeyboardMode::Native, LayoutFidelity::Always);
         CHECK(native.skip);
         CHECK(!native.isText());
 
         for (KeyboardMode mode : {KeyboardMode::Positional, KeyboardMode::SunshineWindows}) {
-            const KeyPlan plan = resolveKey(msg, mode);
+            const KeyPlan plan = resolveKey(msg, mode, LayoutFidelity::Always);
             CHECK(!plan.skip);
             CHECK_EQ(plan.keyCode, static_cast<short>(kVk1 + 1));
         }
 
         QJsonObject beat;
         beat["keys"] = QJsonArray{msg};
-        CHECK(InputMsg::parseHeldKeys(beat, KeyboardMode::Native).isEmpty());
-        CHECK_EQ(InputMsg::parseHeldKeys(beat, KeyboardMode::SunshineWindows).size(), 1);
+        CHECK(
+            InputMsg::parseHeldKeys(beat, KeyboardMode::Native, LayoutFidelity::Always).isEmpty());
+        CHECK_EQ(
+            InputMsg::parseHeldKeys(beat, KeyboardMode::SunshineWindows, LayoutFidelity::Always)
+                .size(),
+            1);
     }
 
     // ── International keys keep their own rule, in every mode ────────────────
@@ -212,12 +222,13 @@ void run_keyboard_layout_tests()
     // They have no US virtual key at all, so they are sent as raw VKs whatever
     // the layout policy says — and a stray character must not override that.
     for (KeyboardMode mode : allModes) {
-        const KeyPlan iso = resolveKey(key(0, "IntlBackslash", "<", true), mode);
+        const KeyPlan iso =
+            resolveKey(key(0, "IntlBackslash", "<", true), mode, LayoutFidelity::Always);
         CHECK(!iso.isText());
         CHECK_EQ(iso.keyCode, static_cast<short>(0xE2));
         CHECK_EQ(iso.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
 
-        const KeyPlan ro = resolveKey(key(0, "IntlRo", "\\", true), mode);
+        const KeyPlan ro = resolveKey(key(0, "IntlRo", "\\", true), mode, LayoutFidelity::Always);
         CHECK(!ro.isText());
         CHECK_EQ(ro.keyCode, static_cast<short>(0xC1));
         CHECK_EQ(ro.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
@@ -234,8 +245,8 @@ void run_keyboard_layout_tests()
         QJsonObject down = key(kVkQ, "KeyQ", "a", true);
         QJsonObject up = down;
         up["type"] = "keyup";
-        const KeyPlan a = resolveKey(down, KeyboardMode::SunshineWindows);
-        const KeyPlan b = resolveKey(up, KeyboardMode::SunshineWindows);
+        const KeyPlan a = resolveKey(down, KeyboardMode::SunshineWindows, LayoutFidelity::Always);
+        const KeyPlan b = resolveKey(up, KeyboardMode::SunshineWindows, LayoutFidelity::Always);
         CHECK_EQ(a.keyCode, b.keyCode);
         CHECK_EQ(a.flags, b.flags);
     }
@@ -256,7 +267,7 @@ void run_keyboard_layout_tests()
 
         // Windows: nothing resolves to text, so the whole set is reported.
         const QVector<IMediaEngine::HeldKey> held =
-            InputMsg::parseHeldKeys(beat, KeyboardMode::SunshineWindows);
+            InputMsg::parseHeldKeys(beat, KeyboardMode::SunshineWindows, LayoutFidelity::Always);
         CHECK_EQ(held.size(), 3);
         CHECK_EQ(held[0].keyCode, static_cast<short>(kVkA));
         CHECK_EQ(held[0].flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
@@ -266,7 +277,7 @@ void run_keyboard_layout_tests()
         // Native: every printable character IS a character, so only the key
         // that never had one survives the filter.
         const QVector<IMediaEngine::HeldKey> nativeHeld =
-            InputMsg::parseHeldKeys(beat, KeyboardMode::Native);
+            InputMsg::parseHeldKeys(beat, KeyboardMode::Native, LayoutFidelity::Always);
         CHECK_EQ(nativeHeld.size(), 1);
         CHECK_EQ(nativeHeld[0].keyCode, static_cast<short>(kVkUp));
     }
@@ -290,13 +301,13 @@ void run_keyboard_layout_tests()
         viewer.keyboardMouse = false;
         viewer.gamepad = false;
         const InputMsg::HeldState none =
-            InputMsg::readHeldState(beat, KeyboardMode::Native, viewer);
+            InputMsg::readHeldState(beat, KeyboardMode::Native, LayoutFidelity::Always, viewer);
         CHECK_EQ(none.keys.size(), 0);
         CHECK_EQ(none.buttons, 0u);
 
         // A guest allowed the keyboard keeps their held keys and buttons.
-        const InputMsg::HeldState full =
-            InputMsg::readHeldState(beat, KeyboardMode::Native, InputMsg::Policy{});
+        const InputMsg::HeldState full = InputMsg::readHeldState(
+            beat, KeyboardMode::Native, LayoutFidelity::Always, InputMsg::Policy{});
         CHECK_EQ(full.keys.size(), 1);
         CHECK_EQ(full.buttons, 1u);
         CHECK(full.buttonsHold);
@@ -319,15 +330,17 @@ void run_keyboard_layout_tests()
         // Nothing about an arrow depends on a layout. Diagnosing it would put a
         // line under every keystroke of a game and bury the ones that matter.
         for (KeyboardMode mode : allModes)
-            CHECK(describeKey(key(kVkUp, "ArrowUp"), mode, resolveKey(key(kVkUp, "ArrowUp"), mode))
+            CHECK(describeKey(key(kVkUp, "ArrowUp"), mode,
+                              resolveKey(key(kVkUp, "ArrowUp"), mode, LayoutFidelity::Always))
                       .line.isEmpty());
     }
     {
         // A corrected letter on Sunshine/Windows: exact AND still a real key.
         // The one case where both answers are yes, so no warning.
         const QJsonObject msg = key(kVkQ, "KeyQ", "a", true);
-        const InputMsg::KeyDiag diag = describeKey(msg, KeyboardMode::SunshineWindows,
-                                                   resolveKey(msg, KeyboardMode::SunshineWindows));
+        const InputMsg::KeyDiag diag =
+            describeKey(msg, KeyboardMode::SunshineWindows,
+                        resolveKey(msg, KeyboardMode::SunshineWindows, LayoutFidelity::Always));
         CHECK(!diag.warn);
         CHECK(diag.line.contains(QStringLiteral("Notepad: OK 'a'")));
         CHECK(diag.line.contains(QStringLiteral("Game: OK real key")));
@@ -338,8 +351,9 @@ void run_keyboard_layout_tests()
         // nothing here can read it. Warned, because this is the case the
         // fidelity feature exists for and could not fix.
         const QJsonObject msg = key(kVk1, "Digit1", "&", true);
-        const InputMsg::KeyDiag diag = describeKey(msg, KeyboardMode::SunshineWindows,
-                                                   resolveKey(msg, KeyboardMode::SunshineWindows));
+        const InputMsg::KeyDiag diag =
+            describeKey(msg, KeyboardMode::SunshineWindows,
+                        resolveKey(msg, KeyboardMode::SunshineWindows, LayoutFidelity::Always));
         CHECK(diag.warn);
         CHECK(diag.line.contains(QStringLiteral("Notepad: KO")));
         // The key a game sees is named in US terms, which is the vocabulary
@@ -351,8 +365,9 @@ void run_keyboard_layout_tests()
         // run on. Reported, not warned: flagging it would put a warning under
         // every keystroke of a US viewer and drown the lines that matter.
         const QJsonObject msg = key(kVkQ, "KeyQ", "q", false);
-        const InputMsg::KeyDiag diag = describeKey(msg, KeyboardMode::SunshineWindows,
-                                                   resolveKey(msg, KeyboardMode::SunshineWindows));
+        const InputMsg::KeyDiag diag =
+            describeKey(msg, KeyboardMode::SunshineWindows,
+                        resolveKey(msg, KeyboardMode::SunshineWindows, LayoutFidelity::Always));
         CHECK(!diag.warn);
         CHECK(diag.line.contains(QStringLiteral("Notepad: OK 'q'")));
     }
@@ -378,7 +393,8 @@ void run_keyboard_layout_tests()
         // warning either, since nothing has been found wrong.
         const QJsonObject msg = key(kVkQ, "KeyQ", "a", true);
         const InputMsg::KeyDiag diag =
-            describeKey(msg, KeyboardMode::Native, resolveKey(msg, KeyboardMode::Native));
+            describeKey(msg, KeyboardMode::Native,
+                        resolveKey(msg, KeyboardMode::Native, LayoutFidelity::Always));
         CHECK(!diag.warn);
         CHECK(diag.line.contains(QStringLiteral("host verdict below")));
         CHECK(!diag.line.contains(QStringLiteral("OK")));
@@ -389,7 +405,8 @@ void run_keyboard_layout_tests()
         // host never learns — it is handed a character, not a position. That is
         // what makes the two lines worth reading together.
         const QJsonObject msg = key(kVkQ, "KeyQ", "a", true);
-        CHECK(describeKey(msg, KeyboardMode::Native, resolveKey(msg, KeyboardMode::Native))
+        CHECK(describeKey(msg, KeyboardMode::Native,
+                          resolveKey(msg, KeyboardMode::Native, LayoutFidelity::Always))
                   .line.contains(QStringLiteral("KeyQ")));
     }
     {
@@ -411,7 +428,7 @@ void run_keyboard_layout_tests()
                 if (text.startsWith(QStringLiteral("[KBD]"))) ++lines;
             });
         const QJsonObject msg = key(kVk1, "Digit1", "1");
-        const KeyPlan plan = resolveKey(msg, KeyboardMode::SunshineWindows);
+        const KeyPlan plan = resolveKey(msg, KeyboardMode::SunshineWindows, LayoutFidelity::Always);
         InputMsg::setDebug(true);
         InputMsg::logKey(msg, KeyboardMode::SunshineWindows, plan, true);
         CHECK_EQ(lines, 1);
@@ -436,7 +453,7 @@ void run_keyboard_layout_tests()
         QJsonObject msg = key(kVkQ, "KeyQ", "a", true);
         msg["metaKey"] = true;
         msg["shiftKey"] = true;
-        CHECK(resolveKey(msg, KeyboardMode::Native).isText());
+        CHECK(resolveKey(msg, KeyboardMode::Native, LayoutFidelity::Always).isText());
         CHECK_EQ(static_cast<int>(InputMsg::modifierMask(msg)), 0x08 | 0x01);
         // And "nothing is held" is a statement too, not an absence.
         CHECK_EQ(static_cast<int>(InputMsg::modifierMask(key(kVkQ, "KeyQ", "a", true))), 0);
@@ -446,5 +463,80 @@ void run_keyboard_layout_tests()
         CHECK_EQ(InputMsg::usKeyLabel(kVkQ).toStdString(), std::string("Q"));
         CHECK_EQ(InputMsg::usKeyLabel(0xBF).toStdString(), std::string("/"));
         CHECK_EQ(InputMsg::usKeyLabel(0x20).toStdString(), std::string("Space"));
+    }
+
+    // ── The owner chose the positions ────────────────────────────────────────
+    //
+    // keyboard_layout_fidelity off: every key by its position, on every host,
+    // the native one included; and a dead key goes as its position too — the
+    // host composes it in its own layout, as with Moonlight.
+    {
+        const KeyPlan a =
+            resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Native, LayoutFidelity::Never);
+        CHECK(!a.isText());
+        CHECK_EQ(a.keyCode, static_cast<short>(kVkQ));
+        QJsonObject dead = key(kVk1 + 1, "Digit2");
+        dead["dead"] = true;
+        const KeyPlan d = resolveKey(dead, KeyboardMode::Native, LayoutFidelity::Never);
+        CHECK(!d.skip);
+        CHECK_EQ(d.keyCode, static_cast<short>(kVk1 + 1));
+        const KeyPlan s = resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::SunshineWindows,
+                                     LayoutFidelity::Never);
+        CHECK_EQ(s.keyCode, static_cast<short>(kVkQ));
+        CHECK_EQ(s.flags, static_cast<char>(0));
+    }
+
+    // ── A chord of the touch keyboard's bar ──────────────────────────────────
+    //
+    // Ctrl latched on the bar, then z on the phone's keyboard. It names a
+    // shortcut, so it is resolved by its character whatever the owner chose for
+    // the physical keyboard: sent as the US position of Z, it was Ctrl+W on an
+    // AZERTY host, which closed the tab, and Shift+a typed Q (22/10/2026).
+    {
+        QJsonObject z = key(0x5A, "", "z");
+        z["chord"] = true;
+        z["ctrlKey"] = true;
+        for (LayoutFidelity f :
+             {LayoutFidelity::Never, LayoutFidelity::Always, LayoutFidelity::Auto}) {
+            // The native host presses the key carrying it, the US position
+            // riding along for a layout that has none.
+            const KeyPlan native = resolveKey(z, KeyboardMode::Native, f);
+            CHECK(native.isText());
+            CHECK(native.chord);
+            CHECK_EQ(native.text.toStdString(), std::string("z"));
+            CHECK_EQ(native.keyCode, static_cast<short>(0x5A));
+            // Sunshine for Windows: the letter's own VK, non-normalized, which
+            // its active layout puts on the right key.
+            const KeyPlan windows = resolveKey(z, KeyboardMode::SunshineWindows, f);
+            CHECK(!windows.isText());
+            CHECK_EQ(windows.keyCode, static_cast<short>(0x5A));
+            CHECK_EQ(windows.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
+            // Any other host: the position, as before.
+            const KeyPlan other = resolveKey(z, KeyboardMode::Positional, f);
+            CHECK(!other.isText());
+            CHECK_EQ(other.keyCode, static_cast<short>(0x5A));
+            CHECK_EQ(other.flags, static_cast<char>(0));
+        }
+        // A digit chord on Sunshine stays at its position: Ctrl+1 is VK_1 on
+        // any layout as far as a shortcut is concerned.
+        QJsonObject one = key(kVk1, "", "1");
+        one["chord"] = true;
+        const KeyPlan digit = resolveKey(one, KeyboardMode::SunshineWindows, LayoutFidelity::Never);
+        CHECK_EQ(digit.keyCode, static_cast<short>(kVk1));
+        CHECK_EQ(digit.flags, static_cast<char>(0));
+        // Never re-pressed by the watchdog on the native host: it would type
+        // the character again.
+        QJsonObject beat;
+        beat["keys"] = QJsonArray{z};
+        CHECK(InputMsg::parseHeldKeys(beat, KeyboardMode::Native, LayoutFidelity::Never).isEmpty());
+        // The diagnostic says it is a chord.
+        const KeyPlan native = resolveKey(z, KeyboardMode::Native, LayoutFidelity::Never);
+        CHECK(describeKey(z, KeyboardMode::Native, native).line.contains(QStringLiteral("chord")));
+    }
+    {
+        // The session's line names the owner's choice.
+        CHECK(QString(InputMsg::layoutFidelityName(LayoutFidelity::Auto)).startsWith("auto"));
+        CHECK(QString(InputMsg::layoutFidelityName(LayoutFidelity::Always)).startsWith("always"));
+        CHECK(QString(InputMsg::layoutFidelityName(LayoutFidelity::Never)).startsWith("never"));
     }
 }

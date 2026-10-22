@@ -908,15 +908,7 @@ void SignalingServer::handleWsFallbackInput(const QString& message)
         // The shared codec, like the other three transports: this copy used to
         // reimplement the international-key rules by hand and would have missed
         // the client's keyboard layout entirely.
-        const InputMsg::KeyPlan plan = InputMsg::resolveKey(msg, m_Shim->keyboardMode());
-        InputMsg::logKey(msg, m_Shim->keyboardMode(), plan, down);
-        if (plan.skip) {
-            // A dead key on the native host: its character comes with the next key.
-        } else if (plan.isText()) {
-            m_Shim->sendKeyChar(plan.text, down, InputMsg::modifierMask(msg));
-        } else {
-            m_Shim->sendKeyEvent(plan.keyCode, down, InputMsg::modifierMask(msg), plan.flags);
-        }
+        InputMsg::sendKey(*m_Shim, msg, down, /*withHold=*/false);
     } else if (type == "mousemove") {
         short dx = static_cast<short>(msg["dx"].toInt(0));
         short dy = static_cast<short>(msg["dy"].toInt(0));

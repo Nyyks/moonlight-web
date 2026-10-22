@@ -1260,7 +1260,8 @@ void NativeMediaEngine::sendUtf8Text(const QString& text)
     m_Session->sendInput(event);
 }
 
-void NativeMediaEngine::sendKeyChar(const QString& ch, bool down, char modifiers)
+void NativeMediaEngine::sendKeyChar(const QString& ch, bool down, char modifiers,
+                                    const CharKeyHints& hints)
 {
     if (!m_Session) return;
     // The one host where a character can stay a real key: the platform layer
@@ -1274,6 +1275,10 @@ void NativeMediaEngine::sendKeyChar(const QString& ch, bool down, char modifiers
     event.text = ch.toStdString();
     event.modifiers = static_cast<uint8_t>(modifiers);
     event.modifiersKnown = true;
+    // A chord of the touch keyboard's bar: the key carrying the character,
+    // its US position the fallback for a layout with none.
+    event.chord = hints.chord;
+    event.keyCode = hints.positionVk;
     m_Session->sendInput(event);
 }
 

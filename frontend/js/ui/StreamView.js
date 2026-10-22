@@ -10841,6 +10841,8 @@ export class StreamView {
                 nonUs: !!msg.nonUs,
                 dead: !!msg.dead,
                 hold: !!msg.hold,
+                // A toolbar chord releases the key its press resolved to.
+                chord: !!msg.chord,
             });
         } else {
             this._heldPhysKeys.delete(id);

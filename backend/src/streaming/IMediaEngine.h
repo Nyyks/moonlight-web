@@ -35,6 +35,11 @@ class FrameSentSink;
  * does: it is a property of the host that the session establishes once and the
  * input path then reads. What each value means, and why the host's source code
  * says so, is documented on the enum in InputMessageCodec.h.
+ *
+ * What the host CAN do, whatever the owner chose: the choice is
+ * LayoutFidelity, beside it. A toolbar chord (Ctrl+z from the touch keyboard's
+ * bar) is resolved by its character on every host that can, whatever that
+ * choice says — it names a shortcut, not a position.
  */
 enum class KeyboardMode
 {
@@ -43,6 +48,22 @@ enum class KeyboardMode
     SunshineWindows,
     // No SunshineMacos: a Sunshine host on macOS stays Positional, on purpose.
     // InputMessageCodec.h says why.
+};
+
+/**
+ * When the characters of the client's layout win over key positions — the
+ * owner's choice, keyboard_layout_fidelity in settings.json.
+ */
+enum class LayoutFidelity
+{
+    /// The desktop types the client's characters; gaming mode plays by key
+    /// positions, as a keyboard plugged into the host would.
+    Auto,
+    /// The client's characters, gaming mode included.
+    Always,
+    /// Key positions everywhere, the host's layout decides — as every
+    /// Moonlight client does.
+    Never,
 };
 
 /**
@@ -164,7 +185,19 @@ public:
     /// same encoding as sendKeyEvent's. The character path used to drop it,
     /// which left the macOS backend with no way to notice that its own idea
     /// of the modifiers had drifted.
-    virtual void sendKeyChar(const QString& ch, bool down, char modifiers = 0) = 0;
+    /// `hints` is what else the keystroke says about itself (CharKeyHints).
+    struct CharKeyHints
+    {
+        /// A chord of the touch keyboard's bar (Ctrl latched, then z): the
+        /// host key carrying the character, under whatever modifiers are
+        /// held, none added and none lifted.
+        bool chord = false;
+        /// The key's US position, for a host whose layout has no key for the
+        /// character — a chord on a Cyrillic layout keeps its shortcut.
+        short positionVk = 0;
+    };
+    virtual void sendKeyChar(const QString& ch, bool down, char modifiers = 0,
+                             const CharKeyHints& hints = {}) = 0;
 
     /// Ctrl+Alt+Suppr on the host.
     ///
@@ -290,6 +323,18 @@ public:
         m_KeyboardMode.store(mode, std::memory_order_relaxed);
     }
     KeyboardMode keyboardMode() const { return m_KeyboardMode.load(std::memory_order_relaxed); }
+
+    /// When the client's characters win over key positions on this session —
+    /// the owner's choice, set once per session beside the mode. Defaults to
+    /// Never, the positions, for the same reason.
+    void setLayoutFidelity(LayoutFidelity fidelity)
+    {
+        m_LayoutFidelity.store(fidelity, std::memory_order_relaxed);
+    }
+    LayoutFidelity layoutFidelity() const
+    {
+        return m_LayoutFidelity.load(std::memory_order_relaxed);
+    }
 
     /// Snapshot the host's real lock-key state. Only possible when the streamed
     /// host IS this machine — which is always true for a native engine and
@@ -447,4 +492,5 @@ protected:
     /// Written once by the session thread at stream start, read on every
     /// keystroke by whichever thread owns the input channel — hence atomic.
     std::atomic<KeyboardMode> m_KeyboardMode{KeyboardMode::Positional};
+    std::atomic<LayoutFidelity> m_LayoutFidelity{LayoutFidelity::Never};
 };

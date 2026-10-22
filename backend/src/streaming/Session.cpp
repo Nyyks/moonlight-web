@@ -1078,10 +1078,11 @@ void StreamSession::applyKeyboardMode(HostOsProbe::HostOs os)
 {
     if (!m_Engine) return;
 
+    // What the host can do, whatever the owner chose: a toolbar chord is
+    // resolved by its character wherever that is possible (InputMsg::
+    // resolveKey), so the mode no longer folds the setting in.
     KeyboardMode mode = KeyboardMode::Positional;
-    if (!AppSettings().keyboardLayoutFidelity()) {
-        mode = KeyboardMode::Positional; // opted out in the settings file
-    } else if (qobject_cast<NativeMediaEngine*>(m_Engine)) {
+    if (qobject_cast<NativeMediaEngine*>(m_Engine)) {
         // Our own host, whatever the OS: it resolves the character in its own
         // layout and presses the key that carries it.
         mode = KeyboardMode::Native;
@@ -1095,8 +1096,13 @@ void StreamSession::applyKeyboardMode(HostOsProbe::HostOs os)
         default: mode = KeyboardMode::Positional; break;
         }
     }
+    // And what the owner chose for the physical keyboard.
+    const LayoutFidelity fidelity =
+        AppSettings().keyboardLayoutFidelity() ? LayoutFidelity::Always : LayoutFidelity::Never;
     m_Engine->setKeyboardMode(mode);
-    qInfo() << "[Session] Keyboard layout fidelity:" << InputMsg::keyboardModeName(mode);
+    m_Engine->setLayoutFidelity(fidelity);
+    qInfo() << "[Session] Keyboard:" << InputMsg::keyboardModeName(mode)
+            << "| layout fidelity:" << InputMsg::layoutFidelityName(fidelity);
 }
 
 void StreamSession::sampleHostIpTtl()

@@ -653,22 +653,13 @@ void StreamRelay::onWsTextMessage(const QString& message)
         // Shared codec, so this transport resolves IntlBackslash/IntlRo and the
         // client's keyboard layout like the others instead of passing the raw
         // VK through.
-        const InputMsg::KeyPlan plan = InputMsg::resolveKey(msg, m_Shim->keyboardMode());
-        InputMsg::logKey(msg, m_Shim->keyboardMode(), plan, down);
-        if (plan.skip) {
-            // A dead key on the native host: its character comes with the next key.
-        } else if (plan.isText()) {
-            m_Shim->sendKeyChar(plan.text, down, InputMsg::modifierMask(msg));
-        } else {
-            m_Shim->sendKeyEvent(plan.keyCode, down, InputMsg::modifierMask(msg), plan.flags,
-                                 msg["hold"].toBool(false));
-        }
+        InputMsg::sendKey(*m_Shim, msg, down);
     } else if (type == "inputstate") {
         // Client heartbeat of its held-input state — full contract in
         // IMediaEngine's input-watchdog contract. Filtered by the guest's
         // policy, or a viewer could press keys with it.
-        const InputMsg::HeldState held =
-            InputMsg::readHeldState(msg, m_Shim->keyboardMode(), m_InputPolicy);
+        const InputMsg::HeldState held = InputMsg::readHeldState(
+            msg, m_Shim->keyboardMode(), m_Shim->layoutFidelity(), m_InputPolicy);
         m_Shim->syncHeldInputs(held.keys, held.buttons, held.buttonsHold);
     } else if (type == "mousemove") {
         // Absolute mouse position (non-gaming mode) — same handling as

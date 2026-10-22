@@ -2141,28 +2141,13 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
 
     if (type == "keydown" || type == "keyup") {
         bool down = (type == "keydown");
-        const InputMsg::KeyPlan plan = InputMsg::resolveKey(msg, m_Shim->keyboardMode());
-        InputMsg::logKey(msg, m_Shim->keyboardMode(), plan, down);
-        if (plan.skip) {
-            // A dead key on the native host: its character comes with the next key.
-        } else if (plan.isText()) {
-            // The client's layout puts a character here that this key's US
-            // position would not produce. The engine decides what it can do
-            // with that: a real press/release on the native host, a one-shot
-            // text injection on Sunshine (where the release has nothing to do).
-            m_Shim->sendKeyChar(plan.text, down, InputMsg::modifierMask(msg));
-        } else {
-            // `hold`: a movement key the client wants kept down through a brief
-            // stall instead of released at the short grace period (see the shim).
-            m_Shim->sendKeyEvent(plan.keyCode, down, InputMsg::modifierMask(msg), plan.flags,
-                                 msg["hold"].toBool(false));
-        }
+        InputMsg::sendKey(*m_Shim, msg, down);
     } else if (type == "inputstate") {
         // Client heartbeat: its authoritative held-input state, sent while (and
         // only while) something is held. Re-presses whatever the watchdog
         // released during a stall but the user is genuinely still holding.
-        const InputMsg::HeldState held =
-            InputMsg::readHeldState(msg, m_Shim->keyboardMode(), m_InputPolicy);
+        const InputMsg::HeldState held = InputMsg::readHeldState(
+            msg, m_Shim->keyboardMode(), m_Shim->layoutFidelity(), m_InputPolicy);
         m_Shim->syncHeldInputs(held.keys, held.buttons, held.buttonsHold);
     } else if (type == "mousemove") {
         // Absolute mouse position (non-gaming mode)

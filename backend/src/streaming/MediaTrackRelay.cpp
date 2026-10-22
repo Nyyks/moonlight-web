@@ -839,25 +839,14 @@ void MediaTrackRelay::onInputMessage(const std::string& message)
 
     if (type == "keydown" || type == "keyup") {
         bool down = (type == "keydown");
-        const InputMsg::KeyPlan plan = InputMsg::resolveKey(msg, m_Shim->keyboardMode());
-        InputMsg::logKey(msg, m_Shim->keyboardMode(), plan, down);
-        if (plan.skip) {
-            // A dead key on the native host: its character comes with the next key.
-        } else if (plan.isText()) {
-            m_Shim->sendKeyChar(plan.text, down, InputMsg::modifierMask(msg));
-        } else {
-            // `hold`: a movement key the client wants kept down through a brief
-            // stall instead of released at the short grace period (see the shim).
-            m_Shim->sendKeyEvent(plan.keyCode, down, InputMsg::modifierMask(msg), plan.flags,
-                                 msg["hold"].toBool(false));
-        }
+        InputMsg::sendKey(*m_Shim, msg, down);
     } else if (type == "inputstate") {
         // Client heartbeat: its authoritative held-input state, sent while (and
         // only while) something is held. Re-presses whatever the watchdog
         // released during a stall but the user is genuinely still holding —
         // filtered by the guest's policy, or a viewer could press keys with it.
-        const InputMsg::HeldState held =
-            InputMsg::readHeldState(msg, m_Shim->keyboardMode(), m_InputPolicy);
+        const InputMsg::HeldState held = InputMsg::readHeldState(
+            msg, m_Shim->keyboardMode(), m_Shim->layoutFidelity(), m_InputPolicy);
         m_Shim->syncHeldInputs(held.keys, held.buttons, held.buttonsHold);
     } else if (type == "mousemove") {
         // Absolute mouse position (non-gaming mode)

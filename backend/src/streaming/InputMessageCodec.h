@@ -101,7 +101,18 @@ inline const char* keyboardModeName(KeyboardMode mode)
     case KeyboardMode::SunshineWindows: return "Sunshine/Windows, letters as non-normalized VKs";
     case KeyboardMode::Positional: break;
     }
-    return "off — key positions, host layout decides";
+    return "key positions only, host layout decides";
+}
+
+/// The owner's choice, for the same log line.
+inline const char* layoutFidelityName(LayoutFidelity fidelity)
+{
+    switch (fidelity) {
+    case LayoutFidelity::Auto: return "auto — the client's characters, positions in gaming mode";
+    case LayoutFidelity::Always: return "always — the client's characters";
+    case LayoutFidelity::Never: break;
+    }
+    return "never — key positions";
 }
 
 /// What to do with one key message: press a key, or type a character.
@@ -114,6 +125,10 @@ struct KeyPlan
     QString text;
     /// Send nothing at all: a dead key on the native host (see resolveKey).
     bool skip = false;
+    /// The text is a toolbar chord's character: the host presses the key that
+    /// carries it under the held modifiers, and keyCode is its US position for
+    /// a layout that has none.
+    bool chord = false;
 
     bool isText() const { return !text.isEmpty(); }
 };
@@ -135,11 +150,19 @@ inline short letterVk(const QString& ch)
 /// no US VK at all and must be sent as raw VKs whatever the mode: IntlBackslash
 /// (the ISO key beside left Shift) and IntlRo (the JIS \ key).
 ///
-/// `char` carries the character the client's layout produced, and is present
-/// ONLY when it differs from what the US layout puts at that position — so a
-/// US client, and every agreeing key of any other client, takes the untouched
-/// positional path below.
-inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode)
+/// `char` carries the character the client's layout produced, for every
+/// printable key; `nonUs` says whether the US layout puts something else at
+/// that position (StreamView.clientChar).
+///
+/// `chord` marks a chord of the touch keyboard's bar: a letter or a digit
+/// typed while one of its modifiers is latched (Ctrl, then z). It names a
+/// shortcut, so every host that can resolves it by its character, whatever
+/// the owner chose for the physical keyboard: sent as a US position, Ctrl+z
+/// was Ctrl+W on an AZERTY host, which closed the tab (22/10/2026). On the
+/// native host the key carrying it is pressed under the held modifiers; on
+/// Sunshine for Windows a letter goes as its virtual key, non-normalized; a
+/// digit, and every other host, keep the position.
+inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidelity fidelity)
 {
     KeyPlan plan;
     const QString code = msg["code"].toString();
@@ -158,20 +181,42 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode)
     plan.keyCode = static_cast<short>(msg["keyCode"].toInt(0));
     plan.flags = 0;
 
+    const QString ch = msg["char"].toString();
+    if (msg["chord"].toBool(false) && !ch.isEmpty()) {
+        switch (mode) {
+        case KeyboardMode::Native:
+            plan.text = ch;
+            plan.chord = true;
+            break;
+        case KeyboardMode::SunshineWindows:
+            if (const short vk = letterVk(ch)) {
+                plan.keyCode = vk;
+                plan.flags = SS_KBE_FLAG_NON_NORMALIZED;
+            }
+            break;
+        case KeyboardMode::Positional: break;
+        }
+        return plan;
+    }
+
+    // The owner's choice: positions everywhere, as Moonlight does — or a host
+    // that can do nothing else.
+    const bool positional = mode == KeyboardMode::Positional || fidelity == LayoutFidelity::Never;
+
     // A dead key (the client's layout waits for the next key to compose: the
     // tilde of AltGr+2 on a French keyboard). Its composed character arrives
     // with that next key, and the native host types it in its own layout — so
     // the dead key itself must not reach it. Pressed as a position, it typed
     // what the host's layout has there without the client's AltGr: "é" on a
     // French host, then "~" with the space, "é~" for one tilde (12/10/2026).
-    // A Sunshine host composes nothing from text and keeps the position.
-    if (mode == KeyboardMode::Native && msg["dead"].toBool(false)) {
+    // A Sunshine host composes nothing from text and keeps the position, and
+    // so does a key sent by position: the host composes it in its layout.
+    if (mode == KeyboardMode::Native && !positional && msg["dead"].toBool(false)) {
         plan.skip = true;
         return plan;
     }
 
-    const QString ch = msg["char"].toString();
-    if (ch.isEmpty() || mode == KeyboardMode::Positional) return plan;
+    if (ch.isEmpty() || positional) return plan;
     // Whether the client's character differs from the one the US layout puts at
     // this position. Only the Sunshine modes care: see below.
     const bool nonUs = msg["nonUs"].toBool(false);
@@ -240,14 +285,15 @@ inline char modifierMask(const QJsonObject& msg)
 /// would not re-assert a held key, it would type the letter ten times. Their
 /// release comes from the real key-up, and from the client's own
 /// release-everything on focus loss, which sends one too.
-inline QVector<IMediaEngine::HeldKey> parseHeldKeys(const QJsonObject& msg, KeyboardMode mode)
+inline QVector<IMediaEngine::HeldKey> parseHeldKeys(const QJsonObject& msg, KeyboardMode mode,
+                                                    LayoutFidelity fidelity)
 {
     QVector<IMediaEngine::HeldKey> keys;
     const QJsonArray arr = msg["keys"].toArray();
     keys.reserve(arr.size());
     for (const QJsonValue& v : arr) {
         const QJsonObject k = v.toObject();
-        const KeyPlan plan = resolveKey(k, mode);
+        const KeyPlan plan = resolveKey(k, mode, fidelity);
         if (plan.isText() || plan.skip) continue;
         IMediaEngine::HeldKey held;
         held.keyCode = plan.keyCode;
@@ -273,10 +319,11 @@ struct HeldState
 /// unfiltered one lets a guest who may only watch press keys and click on the
 /// host. Only DataChannelRelay filtered it until 01/10/2026; webrtc-media and
 /// WSS passed it straight through.
-inline HeldState readHeldState(const QJsonObject& msg, KeyboardMode mode, const Policy& p)
+inline HeldState readHeldState(const QJsonObject& msg, KeyboardMode mode, LayoutFidelity fidelity,
+                               const Policy& p)
 {
     HeldState s;
-    s.keys = parseHeldKeys(msg, mode);
+    s.keys = parseHeldKeys(msg, mode, fidelity);
     s.buttons = static_cast<quint32>(msg["buttons"].toInt(0));
     s.buttonsHold = msg["buttonsHold"].toBool(false);
     filterHeldState(p, s.keys, s.buttons);
@@ -402,7 +449,8 @@ inline KeyDiag describeKey(const QJsonObject& msg, KeyboardMode mode, const KeyP
         // The host is us. It reads the character in its own layout and presses
         // the key that carries it, then says so on the next line — a verdict
         // here would only be a guess competing with an answer.
-        sent = QStringLiteral("character, host resolves");
+        sent = plan.chord ? QStringLiteral("chord, host presses the key carrying it")
+                          : QStringLiteral("character, host resolves");
         notepad = QStringLiteral("-- host verdict below");
         game = QStringLiteral("-- host verdict below");
     } else if (plan.isText()) {
@@ -458,6 +506,34 @@ inline void logKey(const QJsonObject& msg, KeyboardMode mode, const KeyPlan& pla
         qWarning().noquote() << diag.line;
     else
         qInfo().noquote() << diag.line;
+}
+
+/// One key message, resolved, logged and handed to the engine — the way every
+/// transport does it, so the four of them cannot drift apart on what a key
+/// becomes. @p withHold passes the client's `hold` (a movement key kept down
+/// through a brief stall in gaming mode); the WSS fallback has never honoured
+/// it, and keeps not doing so.
+inline void sendKey(IMediaEngine& engine, const QJsonObject& msg, bool down, bool withHold = true)
+{
+    const KeyboardMode mode = engine.keyboardMode();
+    const KeyPlan plan = resolveKey(msg, mode, engine.layoutFidelity());
+    logKey(msg, mode, plan, down);
+    // A dead key on the native host: its character comes with the next key.
+    if (plan.skip) return;
+    if (plan.isText()) {
+        // A character the host must honour instead of its position: a real
+        // press and release on the native host, a one-shot text injection on
+        // Sunshine (where the release has nothing to do).
+        IMediaEngine::CharKeyHints hints;
+        hints.chord = plan.chord;
+        hints.positionVk = plan.keyCode;
+        engine.sendKeyChar(plan.text, down, modifierMask(msg), hints);
+        return;
+    }
+    // `hold`: a movement key the client wants kept down through a brief stall
+    // instead of released at the short grace period (see the shim).
+    engine.sendKeyEvent(plan.keyCode, down, modifierMask(msg), plan.flags,
+                        withHold && msg["hold"].toBool(false));
 }
 
 } // namespace InputMsg

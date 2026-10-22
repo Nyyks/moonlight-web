@@ -125,11 +125,14 @@ export class StreamViewKeyboard {
             // Gboard composition has no usable data → falls through to the diff.
             const it = e && e.inputType;
             // With a latched toolbar modifier, route a typed character through a
-            // key event so the modifier applies (Ctrl+C, Alt+F4, Win+R, …).
+            // key event so the modifier applies (Ctrl+C, Alt+F4, Win+R, …). The
+            // character rides along as a chord: the host presses the key that
+            // carries it on its own layout. Its US position alone was Ctrl+W
+            // for Ctrl+z on an AZERTY host, and Shift+a typed Q (22/10/2026).
             if (this._anyModHeld() && it === 'insertText' && e.data != null) {
                 const vk = StreamViewKeyboard.charToVk(e.data);
                 if (vk != null) {
-                    this._sendToolbarKey(vk);
+                    this._sendToolbarKey(vk, e.data);
                     this._resetKbdCapture();
                     return;
                 }
@@ -479,10 +482,20 @@ export class StreamViewKeyboard {
 
     /** Send a toolbar action key (down+up) with the current latched mods, then
      *  release the latches (one-shot sticky keys: Shift/Ctrl/Alt apply to the
+     *  next key only and auto-clear once it fires).
+     *  `ch`, for a letter or a digit typed under a latched modifier, makes it a
+     *  chord: `char` and `chord: true` beside the US position, so a host that
+     *  can resolves the shortcut by its character (InputMsg::resolveKey).
      * @this {StreamViewInstance}
-     *  next key only and auto-clear once it fires). */
-    _sendToolbarKey(vk) {
+     * @param {number} vk
+     * @param {string} [ch] */
+    _sendToolbarKey(vk, ch) {
+        /** @type {Record<string, unknown>} */
         const base = { keyCode: vk, code: '', key: '', ...this._modFlags() };
+        if (ch) {
+            base.char = ch;
+            base.chord = true;
+        }
         this._sendKeyEvent({ type: 'keydown', ...base });
         this._sendKeyEvent({ type: 'keyup', ...base });
         this._releaseLatchedMods();
