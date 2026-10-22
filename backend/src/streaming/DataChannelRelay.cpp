@@ -1923,10 +1923,21 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
     }
 
     if (type == "unblockinput") {
-        // The viewer is locked out — an elevated window holds the foreground
-        // and Windows refuses every event, the pointer's included, so they
-        // cannot click their way to another window. This asks the shell to
-        // minimise the desktop, which is not input and so is not refused.
+        // The viewer is held back by an administrator window that has the
+        // host's foreground. This asks the shell to minimise the desktop,
+        // which is not input and so is not refused.
+        //
+        // Two cases, and the client offers the button in both. Windows' own
+        // refusal (UIPI): every event is dropped, the pointer's included, so
+        // there is no other window to click. And our policy: an invited
+        // player is not let into administrator windows (viewerAdmin, unless
+        // the owner set share_guests_admin_windows). Their pointer still
+        // works there, but a game run as administrator that fills the screen
+        // leaves nothing else to click, and Win+D is held back with the rest.
+        // So a guest with keyboard or mouse may minimise the host's windows,
+        // the owner's game included, mid-play. Bruno's decision of 22/10/2026,
+        // what 0.3.1 and 0.4.0 already did; the wiki tells the owner
+        // (Security §6.4c).
         //
         // Behind the keyboard/mouse policy above, deliberately: it moves the
         // host's windows about, which is exactly what a view-only guest may

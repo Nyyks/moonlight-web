@@ -539,6 +539,11 @@ public:
     /// window in the way, and minus any other elevated window, which cannot be
     /// restored for the same reason it could not be minimised alone.
     ///
+    /// The client offers it under the policy gate as well (an invited player
+    /// before an administrator window, 22/10/2026): the pointer works there,
+    /// but a game run as administrator that fills the screen leaves nothing
+    /// else to click. The same act, the owner's game minimised with the rest.
+    ///
     /// The gate is re-reported when it is over, so a viewer who is not touching
     /// anything still learns whether it worked. Returns false when the gate is
     /// not closed, and where the platform has no such thing — today, everywhere

@@ -339,6 +339,7 @@ body.streaming-active::after {
    this takes it back, so nothing else about the picture changes. Sized for a
    thumb: it is pressed on a phone, one-handed, by someone already stuck. */
 .stream-input-gate-release {
+    /* By choice: under the text, and shown whenever the strip is (both reasons). */
     display: block;
     margin: 8px auto 0;
     pointer-events: auto;

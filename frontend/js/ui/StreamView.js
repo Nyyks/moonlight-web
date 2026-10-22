@@ -7796,7 +7796,9 @@ export class StreamView {
      * the whole injection is refused while that window holds the foreground,
      * the pointer included: there is no "somewhere else" to click, because the
      * pointer will not go there. That is a dead end, so the strip carries the
-     * way out of it — see _releaseInputBlock.
+     * way out of it — see _releaseInputBlock. It carries it under our own
+     * policy too: a game run as administrator that fills the host's screen
+     * leaves an invited player nothing else to click either.
      *
      * Kept up for a few seconds at least, even if the host says "open" right
      * after: a dropped click on a window off to the side closes and reopens
@@ -7815,11 +7817,16 @@ export class StreamView {
             if (btn) {
                 btn.textContent = t('stream.inputGateRelease');
                 btn.disabled = false;
-                // Offered only where the pointer itself is stuck. Under our own
-                // policy the viewer keeps their pointer and can click their way
-                // out, so minimising the host's windows for them would be an
-                // act nobody asked for.
-                btn.hidden = !stuck;
+                // Offered in both cases (decision of 22/10/2026). Where the
+                // pointer itself is stuck it is the only way out. Under our own
+                // policy (an invited player, an administrator window) the
+                // pointer still works, but a game run as administrator that
+                // fills the host's screen leaves nothing else to click, and
+                // Win+D is held back with the rest — so the guest may minimise
+                // the host's windows, the owner's game included. The stylesheet
+                // had shown it there since 0.3.1 anyway (its display outranks
+                // the attribute); this says so.
+                btn.hidden = false;
             }
             el.hidden = false;
             this._inputGateShownAt = performance.now();
@@ -7844,7 +7851,8 @@ export class StreamView {
 
     /**
      * Ask the host to minimise its desktop, the one way out of a gate closed
-     * by Windows itself.
+     * by Windows itself — and of an administrator window that fills the
+     * screen in front of an invited player.
      *
      * The button exists because the alternative is a session the viewer can
      * only end: while an elevated window holds the foreground, injection is
