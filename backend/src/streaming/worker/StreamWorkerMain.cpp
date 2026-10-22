@@ -509,7 +509,9 @@ int runStreamWorker(QCoreApplication& app)
     // default, the switch was on in the one process that never sees a key.
     // Same trap, same shape as the latency flag: anything an input or capture
     // path reads has to be read again on this side of the fork.
-    if (AppSettings().keyboardDebug()) {
+    // From the server's config too: a SYSTEM worker's own AppSettings reads
+    // SYSTEM's profile, where nobody wrote it.
+    if (AppSettings().keyboardDebug() || cfg[QStringLiteral("keyboardDebug")].toBool(false)) {
         InputMsg::setDebug(true);
         InputMsg::setQuietProbe(&mw::native::NativeHost::secureDesktopHasInput);
         mw::native::NativeHost::setKeyboardDiagnostics(true);
@@ -634,6 +636,8 @@ int runStreamWorker(QCoreApplication& app)
     // Absent (an older parent) → not an administrator: the safe reading,
     // since the only thing it grants is the host's administrator windows.
     session->setViewerAdmin(cfg["viewerAdmin"].toBool(false));
+    // Absent (an older parent) → this process reads the file, as before.
+    session->setKeyboardLayoutFidelity(cfg["keyboardLayoutFidelity"].toString());
     // Absent (an older parent, or a machine that never met a portal) → empty,
     // and the user is asked. Never a failure: a dialog is the fallback.
     session->setPortalRestoreToken(cfg["portalRestoreToken"].toString());

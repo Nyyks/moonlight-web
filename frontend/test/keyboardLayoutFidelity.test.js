@@ -392,3 +392,67 @@ describe('an AltGr dead key that Chrome does not name', () => {
         expect(v.sent[0]).toMatchObject({ code: 'Digit2', char: 'é', dead: false });
     });
 });
+
+describe('the mouse mode of a key', () => {
+    // Under keyboard_layout_fidelity "auto" (the default since 22/10/2026), the
+    // host types the client's characters at the desktop and plays gaming mode
+    // by key positions. Only the client knows its mouse mode, so each press
+    // says it, and its release and the heartbeat replay the press's.
+    it('marks a press in gaming mode, and one at the desktop', () => {
+        const desk = keySink();
+        desk.handleKeyDown(ev('KeyQ', 'a'));
+        expect(desk.sent[0]).toMatchObject({ type: 'keydown', gaming: false, char: 'a' });
+
+        const game = keySink({ _gamingMode: true });
+        game.handleKeyDown(ev('KeyQ', 'a'));
+        expect(game.sent[0]).toMatchObject({ type: 'keydown', gaming: true, char: 'a' });
+    });
+
+    it('releases a key by the mode it was pressed in', () => {
+        // Pressed at the desktop, let go after a switch to gaming mode: the
+        // host resolved the press by its character, the release must match.
+        const v = keySink();
+        v.handleKeyDown(ev('KeyQ', 'a'));
+        v._gamingMode = true;
+        v.sent.length = 0;
+        v.handleKeyUp(ev('KeyQ', 'a'));
+        expect(v.sent[0]).toMatchObject({ type: 'keyup', gaming: false, char: 'a' });
+    });
+
+    it("says each held key's mode, and a chord, in the heartbeat", () => {
+        const v = keySink({ _gamingMode: true });
+        v.handleKeyDown(ev('KeyW', 'z'));
+        v._sendKeyEvent({
+            type: 'keydown',
+            keyCode: 0x41,
+            code: '',
+            key: '',
+            char: 'a',
+            chord: true,
+        });
+        v.sent.length = 0;
+        v._sendInputState();
+        expect(v.sent[0].keys).toEqual([
+            expect.objectContaining({ code: 'KeyW', gaming: true, chord: false }),
+            expect.objectContaining({ keyCode: 0x41, gaming: false, chord: true }),
+        ]);
+    });
+
+    it('never holds a key back after a dead key in gaming mode', () => {
+        // At the desktop the key after a dead key waits up to 50 ms for the
+        // browser's composition. A game's key does not wait: there the dead
+        // key goes by its position, and the host composes.
+        const v = keySink({ _gamingMode: true });
+        v.handleKeyDown(ev('BracketLeft', 'Dead'));
+        const next = ev('KeyE', 'e');
+        let prevented = false;
+        next.preventDefault = () => (prevented = true);
+        v.handleKeyDown(next);
+        expect(prevented).toBe(true);
+        expect(v._composedKey).toBeNull();
+        expect(v.sent.find((m) => m.type === 'keydown' && m.code === 'KeyE')).toMatchObject({
+            gaming: true,
+            char: 'e',
+        });
+    });
+});

@@ -169,6 +169,12 @@ public:
     /// of the host's windows that run as administrator (InputGate).
     void setViewerAdmin(bool admin) { m_ViewerAdmin = admin; }
 
+    /// keyboard_layout_fidelity as the server read it ("auto", "always",
+    /// "never"), handed over in the worker's config: a SYSTEM worker would read
+    /// another profile's settings.json. Empty: read the file here, which is the
+    /// right one for a session in the server's own process.
+    void setKeyboardLayoutFidelity(const QString& fidelity) { m_KeyboardLayoutFidelity = fidelity; }
+
     /// The desktop portal consent this installation already holds, replayed so
     /// the user is not asked again. Only the native engine acts on it, and only
     /// on the Linux portal route; empty everywhere else, which simply means the
@@ -541,6 +547,7 @@ private:
     /// caller sets it; a worker whose parent predates the field is the owner
     /// path, which is the host's own administrator anyway.
     bool m_ViewerAdmin = true;
+    QString m_KeyboardLayoutFidelity;
 
     /// See setPortalRestoreToken. Empty is the honest default: a session that
     /// does not know of a consent asks for one.

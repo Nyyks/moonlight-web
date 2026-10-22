@@ -10248,7 +10248,9 @@ export class StreamView {
         // composition, and Chrome on Windows does not put that in this event —
         // e.key still reads ' ' for the Space of "~", 'n' for the n of "ñ". It
         // comes in the keypress, which only fires if this keydown is left alone.
-        if (this._deadPending && !dead && cc && !e.ctrlKey && !e.metaKey) {
+        // Never in gaming mode: a game's key does not wait, and there the dead
+        // key itself goes by its position and the host composes (C.2).
+        if (this._deadPending && !dead && cc && !e.ctrlKey && !e.metaKey && !this._gamingMode) {
             this._deadPending = false;
             this._deferComposedKey(e, vkCode, cc);
             return;
@@ -10276,6 +10278,7 @@ export class StreamView {
                 char,
                 nonUs,
                 dead,
+                gaming: !!this._gamingMode,
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
@@ -10300,6 +10303,9 @@ export class StreamView {
             nonUs,
             dead,
             hold: this._holdsThroughStall(e.code),
+            // The client's mouse mode at the press: under "auto" the host
+            // plays gaming mode by key positions (InputMsg::resolveKey).
+            gaming: !!this._gamingMode,
             ctrlKey: e.ctrlKey,
             shiftKey: e.shiftKey,
             altKey: e.altKey,
@@ -10332,6 +10338,7 @@ export class StreamView {
                 nonUs: cc.nonUs,
                 dead: false,
                 hold: this._holdsThroughStall(e.code),
+                gaming: !!this._gamingMode,
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
@@ -10475,6 +10482,7 @@ export class StreamView {
             char: this._heldPhysKeys.get(e.code)?.char ?? null,
             nonUs: this._heldPhysKeys.get(e.code)?.nonUs ?? false,
             dead: this._heldPhysKeys.get(e.code)?.dead ?? false,
+            gaming: this._heldPhysKeys.get(e.code)?.gaming ?? false,
             ctrlKey: e.ctrlKey,
             shiftKey: e.shiftKey,
             altKey: e.altKey,
@@ -10843,6 +10851,10 @@ export class StreamView {
                 hold: !!msg.hold,
                 // A toolbar chord releases the key its press resolved to.
                 chord: !!msg.chord,
+                // So does a key pressed in one mouse mode and let go in the
+                // other: under "auto" the host resolved it by its position in
+                // gaming mode, by its character at the desktop.
+                gaming: !!msg.gaming,
             });
         } else {
             this._heldPhysKeys.delete(id);
@@ -11018,6 +11030,8 @@ export class StreamView {
                 nonUs: !!payload.nonUs,
                 dead: !!payload.dead,
                 hold: !!payload.hold,
+                chord: !!payload.chord,
+                gaming: !!payload.gaming,
                 ...mods,
             });
         }

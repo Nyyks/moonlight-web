@@ -1096,9 +1096,11 @@ void StreamSession::applyKeyboardMode(HostOsProbe::HostOs os)
         default: mode = KeyboardMode::Positional; break;
         }
     }
-    // And what the owner chose for the physical keyboard.
-    const LayoutFidelity fidelity =
-        AppSettings().keyboardLayoutFidelity() ? LayoutFidelity::Always : LayoutFidelity::Never;
+    // And what the owner chose for the physical keyboard: from the server, in
+    // a worker; from the file, in the server's own process.
+    const LayoutFidelity fidelity = InputMsg::parseLayoutFidelity(
+        m_KeyboardLayoutFidelity.isEmpty() ? AppSettings().keyboardLayoutFidelity()
+                                           : m_KeyboardLayoutFidelity);
     m_Engine->setKeyboardMode(mode);
     m_Engine->setLayoutFidelity(fidelity);
     qInfo() << "[Session] Keyboard:" << InputMsg::keyboardModeName(mode)

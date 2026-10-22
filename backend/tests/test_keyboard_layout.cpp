@@ -95,16 +95,17 @@ void run_keyboard_layout_tests()
         CHECK_EQ(plan.keyCode, static_cast<short>(kVkA));
     }
     {
-        // A US client's letter agrees with its position, so it is left alone.
-        // Sunshine derives the scancode of a non-normalized VK from its OWN
-        // thread's layout, where the normalized path uses a fixed table — asking
-        // for it here would trade a scancode we can predict for one we cannot,
-        // and buy nothing.
+        // A US client's letter agrees with its position, and still goes as its
+        // VK, non-normalized (Bruno's decision of 22/10/2026). Left alone, it
+        // was the mirror case: on an AZERTY Sunshine the key marked A, meaning
+        // "a", typed "q". The price — Sunshine derives that scancode from its
+        // own thread's layout — is a thread whose layout differs from the
+        // foreground window's, which is rare.
         const KeyPlan plan = resolveKey(key(kVkQ, "KeyQ", "q", false),
                                         KeyboardMode::SunshineWindows, LayoutFidelity::Always);
         CHECK(!plan.isText());
         CHECK_EQ(plan.keyCode, static_cast<short>(kVkQ));
-        CHECK_EQ(plan.flags, static_cast<char>(0));
+        CHECK_EQ(plan.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
     }
 
     // ── The rule that keeps games working: never trade a key for text ────────
@@ -363,13 +364,14 @@ void run_keyboard_layout_tests()
     {
         // A key that agrees with US is the assumption the protocol has always
         // run on. Reported, not warned: flagging it would put a warning under
-        // every keystroke of a US viewer and drown the lines that matter.
-        const QJsonObject msg = key(kVkQ, "KeyQ", "q", false);
+        // every keystroke of a US viewer and drown the lines that matter. A
+        // digit, since a letter now goes as its VK on Sunshine for Windows.
+        const QJsonObject msg = key(kVk1, "Digit1", "1", false);
         const InputMsg::KeyDiag diag =
             describeKey(msg, KeyboardMode::SunshineWindows,
                         resolveKey(msg, KeyboardMode::SunshineWindows, LayoutFidelity::Always));
         CHECK(!diag.warn);
-        CHECK(diag.line.contains(QStringLiteral("Notepad: OK 'q'")));
+        CHECK(diag.line.contains(QStringLiteral("Notepad: OK '1'")));
     }
     {
         // Text on a remote host types the character perfectly and presses
@@ -538,5 +540,84 @@ void run_keyboard_layout_tests()
         CHECK(QString(InputMsg::layoutFidelityName(LayoutFidelity::Auto)).startsWith("auto"));
         CHECK(QString(InputMsg::layoutFidelityName(LayoutFidelity::Always)).startsWith("always"));
         CHECK(QString(InputMsg::layoutFidelityName(LayoutFidelity::Never)).startsWith("never"));
+    }
+
+    // ── "auto": the client's characters at the desktop, positions in a game ──
+    //
+    // keyboard_layout_fidelity's default since 22/10/2026 (Bruno's rule): in
+    // the desktop mouse mode a key types what the client's layout put on it,
+    // in gaming mode it plays by its place — ZQSD and the weapon slots stay
+    // where they are, whatever the two keyboards. The client marks the press
+    // (`gaming`); a key without the mark is a desktop key.
+    {
+        QJsonObject desk = key(kVkQ, "KeyQ", "a", true);
+        desk["gaming"] = false;
+        QJsonObject game = desk;
+        game["gaming"] = true;
+
+        const KeyPlan nativeDesk = resolveKey(desk, KeyboardMode::Native, LayoutFidelity::Auto);
+        CHECK(nativeDesk.isText());
+        CHECK_EQ(nativeDesk.text.toStdString(), std::string("a"));
+        const KeyPlan nativeGame = resolveKey(game, KeyboardMode::Native, LayoutFidelity::Auto);
+        CHECK(!nativeGame.isText());
+        CHECK_EQ(nativeGame.keyCode, static_cast<short>(kVkQ));
+        CHECK_EQ(nativeGame.flags, static_cast<char>(0));
+
+        // Sunshine for Windows: every letter as its VK at the desktop, the
+        // position in a game.
+        const KeyPlan winDesk =
+            resolveKey(desk, KeyboardMode::SunshineWindows, LayoutFidelity::Auto);
+        CHECK_EQ(winDesk.keyCode, static_cast<short>(kVkA));
+        CHECK_EQ(winDesk.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
+        const KeyPlan winGame =
+            resolveKey(game, KeyboardMode::SunshineWindows, LayoutFidelity::Auto);
+        CHECK_EQ(winGame.keyCode, static_cast<short>(kVkQ));
+        CHECK_EQ(winGame.flags, static_cast<char>(0));
+
+        // "always" keeps the characters in a game; "never" the positions at
+        // the desktop.
+        CHECK(resolveKey(game, KeyboardMode::Native, LayoutFidelity::Always).isText());
+        CHECK(!resolveKey(desk, KeyboardMode::Native, LayoutFidelity::Never).isText());
+
+        // A dead key in a game goes by its position: the host composes it in
+        // its own layout, as with Moonlight. At the desktop it is left out.
+        QJsonObject dead = key(kVk1 + 1, "Digit2");
+        dead["dead"] = true;
+        dead["gaming"] = true;
+        const KeyPlan deadGame = resolveKey(dead, KeyboardMode::Native, LayoutFidelity::Auto);
+        CHECK(!deadGame.skip);
+        CHECK_EQ(deadGame.keyCode, static_cast<short>(kVk1 + 1));
+        dead["gaming"] = false;
+        CHECK(resolveKey(dead, KeyboardMode::Native, LayoutFidelity::Auto).skip);
+
+        // A chord stays a chord in a game: Ctrl+z still means undo.
+        QJsonObject z = key(0x5A, "", "z");
+        z["chord"] = true;
+        z["gaming"] = true;
+        CHECK(resolveKey(z, KeyboardMode::Native, LayoutFidelity::Auto).chord);
+
+        // The heartbeat replays each key with its own press's mode: the game's
+        // key is re-asserted by position, the desktop's character is not
+        // re-pressed (it would type again).
+        QJsonObject beat;
+        beat["keys"] = QJsonArray{desk, game};
+        const QVector<IMediaEngine::HeldKey> held =
+            InputMsg::parseHeldKeys(beat, KeyboardMode::Native, LayoutFidelity::Auto);
+        CHECK_EQ(held.size(), 1);
+        CHECK(held.size() == 1 && held[0].keyCode == static_cast<short>(kVkQ));
+
+        // And the diagnostic says which mode the key came from.
+        CHECK(describeKey(game, KeyboardMode::Native, nativeGame)
+                  .line.endsWith(QStringLiteral("| mode: gaming")));
+        CHECK(describeKey(desk, KeyboardMode::Native, nativeDesk)
+                  .line.endsWith(QStringLiteral("| mode: desktop")));
+    }
+    {
+        // As settings.json spells the choice; anything else is the default.
+        CHECK(InputMsg::parseLayoutFidelity("always") == LayoutFidelity::Always);
+        CHECK(InputMsg::parseLayoutFidelity("never") == LayoutFidelity::Never);
+        CHECK(InputMsg::parseLayoutFidelity("auto") == LayoutFidelity::Auto);
+        CHECK(InputMsg::parseLayoutFidelity("") == LayoutFidelity::Auto);
+        CHECK(InputMsg::parseLayoutFidelity("true") == LayoutFidelity::Auto);
     }
 }

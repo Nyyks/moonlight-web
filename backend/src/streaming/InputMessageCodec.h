@@ -115,6 +115,15 @@ inline const char* layoutFidelityName(LayoutFidelity fidelity)
     return "never — key positions";
 }
 
+/// The owner's choice as settings.json spells it (AppSettings::
+/// keyboardLayoutFidelity); anything unknown is the default.
+inline LayoutFidelity parseLayoutFidelity(const QString& text)
+{
+    if (text == QLatin1String("always")) return LayoutFidelity::Always;
+    if (text == QLatin1String("never")) return LayoutFidelity::Never;
+    return LayoutFidelity::Auto;
+}
+
 /// What to do with one key message: press a key, or type a character.
 struct KeyPlan
 {
@@ -152,7 +161,11 @@ inline short letterVk(const QString& ch)
 ///
 /// `char` carries the character the client's layout produced, for every
 /// printable key; `nonUs` says whether the US layout puts something else at
-/// that position (StreamView.clientChar).
+/// that position (StreamView.clientChar) — read by the diagnostic line alone
+/// now that Sunshine for Windows gets every letter.
+///
+/// `gaming` marks a key pressed in the client's gaming mouse mode, which under
+/// "auto" goes by its position (below).
 ///
 /// `chord` marks a chord of the touch keyboard's bar: a letter or a digit
 /// typed while one of its modifiers is latched (Ctrl, then z). It names a
@@ -199,9 +212,15 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
         return plan;
     }
 
-    // The owner's choice: positions everywhere, as Moonlight does — or a host
-    // that can do nothing else.
-    const bool positional = mode == KeyboardMode::Positional || fidelity == LayoutFidelity::Never;
+    // By position: the owner's choice (never), a host that can do nothing
+    // else — or gaming mode under "auto", which the client marks on the press
+    // (`gaming`) and replays on its release and in the heartbeat, so a key
+    // pressed at the desktop and let go in gaming mode lets go of what it
+    // pressed. In gaming mode a key plays by its place: the movement keys and
+    // the weapon slots stay where they are whatever the two keyboards, as a
+    // keyboard plugged into the host would (Bruno's rule of 22/10/2026).
+    const bool positional = mode == KeyboardMode::Positional || fidelity == LayoutFidelity::Never ||
+                            (fidelity == LayoutFidelity::Auto && msg["gaming"].toBool(false));
 
     // A dead key (the client's layout waits for the next key to compose: the
     // tilde of AltGr+2 on a French keyboard). Its composed character arrives
@@ -217,9 +236,6 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
     }
 
     if (ch.isEmpty() || positional) return plan;
-    // Whether the client's character differs from the one the US layout puts at
-    // this position. Only the Sunshine modes care: see below.
-    const bool nonUs = msg["nonUs"].toBool(false);
 
     switch (mode) {
     case KeyboardMode::Native:
@@ -248,17 +264,18 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
         // for a character that was never wrong. Being mistyped on a mismatched
         // host is the pre-existing behaviour; breaking a key that worked is not.
         //
-        // And only when the character differs from the US one. Sunshine derives
-        // the scancode for a non-normalized VK from ITS OWN thread's layout
-        // (MapVirtualKeyW, windows_backend.cpp:1433), where the normalized path
-        // is a fixed table — so asking for it when the client is already US
-        // would trade a deterministic scancode for one we cannot predict, and
-        // buy nothing.
-        if (nonUs) {
-            if (const short vk = letterVk(ch)) {
-                plan.keyCode = vk;
-                plan.flags = SS_KBE_FLAG_NON_NORMALIZED;
-            }
+        // EVERY letter, agreeing ones included (Bruno's decision of
+        // 22/10/2026). Until then only a letter that differs from the US one,
+        // to keep the fixed scancode Sunshine derives for a normalized VK —
+        // the non-normalized one comes from ITS OWN thread's layout
+        // (MapVirtualKeyW, windows_backend.cpp:1433). That left the mirror case
+        // wrong: a QWERTY viewer on an AZERTY Sunshine presses the key marked
+        // A, means "a", agrees with US, and the position typed "q". The one
+        // loss is a Sunshine thread whose layout differs from the foreground
+        // window's, which is rare. In gaming mode the position stays (above).
+        if (const short vk = letterVk(ch)) {
+            plan.keyCode = vk;
+            plan.flags = SS_KBE_FLAG_NON_NORMALIZED;
         }
         break;
     case KeyboardMode::Positional: break; // handled above
@@ -488,6 +505,11 @@ inline KeyDiag describeKey(const QJsonObject& msg, KeyboardMode mode, const KeyP
     diag.line = QStringLiteral("[KBD] %1 client '%2'%3 -> %4 | Notepad: %5 | Game: %6")
                     .arg(msg["code"].toString(), ch,
                          nonUs ? QStringLiteral(" (non-US)") : QString(), sent, notepad, game);
+    // The client's mouse mode, which decides positions or characters under
+    // "auto". Last, so a reader of the verdicts above is not thrown.
+    if (msg.contains(QLatin1String("gaming")))
+        diag.line += msg["gaming"].toBool(false) ? QStringLiteral(" | mode: gaming")
+                                                 : QStringLiteral(" | mode: desktop");
     return diag;
 }
 
@@ -516,7 +538,21 @@ inline void logKey(const QJsonObject& msg, KeyboardMode mode, const KeyPlan& pla
 inline void sendKey(IMediaEngine& engine, const QJsonObject& msg, bool down, bool withHold = true)
 {
     const KeyboardMode mode = engine.keyboardMode();
-    const KeyPlan plan = resolveKey(msg, mode, engine.layoutFidelity());
+    const LayoutFidelity fidelity = engine.layoutFidelity();
+    // One line when the client's keys move between its two mouse modes: under
+    // "auto" that is when they go from characters to positions, or back.
+    if (down && msg.contains(QLatin1String("gaming"))) {
+        const bool gaming = msg["gaming"].toBool(false);
+        if (engine.noteGamingKeys(gaming))
+            qInfo().noquote() << "[Input] keys from the client's"
+                              << (gaming ? "gaming mode" : "desktop mouse mode") << "—"
+                              << (mode == KeyboardMode::Positional ||
+                                          fidelity == LayoutFidelity::Never ||
+                                          (gaming && fidelity == LayoutFidelity::Auto)
+                                      ? "by position"
+                                      : "by the client's characters");
+    }
+    const KeyPlan plan = resolveKey(msg, mode, fidelity);
     logKey(msg, mode, plan, down);
     // A dead key on the native host: its character comes with the next key.
     if (plan.skip) return;

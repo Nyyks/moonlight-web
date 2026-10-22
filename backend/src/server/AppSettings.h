@@ -142,23 +142,29 @@ public:
 
     // ── Keyboard layout fidelity ──────────────────────────────────────────────
     //
-    // On: what the host types is the character the CLIENT's keyboard layout
-    // produced, whatever layout the host itself runs — an AZERTY viewer types
-    // "azerty" on a QWERTY host and reads "azerty". The mechanism, and what each
-    // kind of host can honour, is documented in InputMessageCodec.h.
+    // When the host types the character the CLIENT's keyboard layout produced,
+    // whatever layout the host itself runs — an AZERTY viewer types "azerty" on
+    // a QWERTY host and reads "azerty" — and when it gets the key's physical
+    // POSITION instead, the host's own layout deciding the character, as every
+    // Moonlight client does. The mechanism, and what each kind of host can
+    // honour, is documented in InputMessageCodec.h.
     //
-    // Off: the historical behaviour of every Moonlight client — the key's
-    // physical POSITION is sent and the host's own layout decides the character.
+    //   "auto"   (default) the desktop mouse mode types the client's characters,
+    //            gaming mode plays by positions: movement keys and weapon slots
+    //            stay where they are, whatever the keyboard. Bruno's rule of
+    //            22/10/2026.
+    //   "always" the client's characters, gaming mode included.
+    //   "never"  positions everywhere.
     //
-    // File-only setting (no UI, no write route): stored as JSON bool
-    // "keyboard_layout_fidelity", DEFAULT false, read at each stream start. A
-    // fresh installation keeps the historical behaviour because of one case: on
-    // a Sunshine host, a divergent key that is not a letter is typed as text and
-    // so carries no key state, which a game reading the raw keyboard cannot see.
-    // Turn it on and the characters are the viewer's own, at the cost of that
-    // key state on the keys the two layouts disagree about.
+    // File-only setting (no UI, no write route), read at each stream start and
+    // handed to the stream worker in its config (a SYSTEM worker reads another
+    // profile's settings.json). It was a boolean until 0.4.0, seeded false
+    // since 19/09/2026 for a reason gone by then (Sunshine no longer types a
+    // non-letter as text), so a stored value cannot tell a choice from the
+    // seed: seedDocumentedDefaults() moves true to "always" and false to
+    // "auto". Anything else reads as "auto".
 
-    bool keyboardLayoutFidelity() const;
+    QString keyboardLayoutFidelity() const;
 
     // ── Keyboard diagnostics ──────────────────────────────────────────────────
     //

@@ -370,9 +370,22 @@ void AppSettings::seedDocumentedDefaults()
         obj["latency_flag_enabled"] = false;
         changed = true;
     }
-    if (!obj.contains("keyboard_layout_fidelity")) {
-        obj["keyboard_layout_fidelity"] = false;
-        changed = true;
+    // A boolean until 0.4.0, seeded false: a stored value cannot tell a choice
+    // from the seed, so false moves to the new default and true to the value
+    // that keeps its meaning (AppSettings.h).
+    {
+        const QJsonValue fidelity = obj.value("keyboard_layout_fidelity");
+        if (fidelity.isBool()) {
+            const QString moved =
+                fidelity.toBool() ? QStringLiteral("always") : QStringLiteral("auto");
+            Logger::info(QString("settings.json: keyboard_layout_fidelity %1 -> \"%2\"")
+                             .arg(fidelity.toBool() ? "true" : "false", moved));
+            obj["keyboard_layout_fidelity"] = moved;
+            changed = true;
+        } else if (!fidelity.isString()) {
+            obj["keyboard_layout_fidelity"] = QStringLiteral("auto");
+            changed = true;
+        }
     }
     if (!obj.contains("share_guests_admin_windows")) {
         obj["share_guests_admin_windows"] = false;
@@ -669,10 +682,14 @@ bool AppSettings::shareGuestsAdminWindows() const
     return obj.value("share_guests_admin_windows").toBool(false);
 }
 
-bool AppSettings::keyboardLayoutFidelity() const
+QString AppSettings::keyboardLayoutFidelity() const
 {
-    QJsonObject obj = readAll();
-    return obj.value("keyboard_layout_fidelity").toBool(false);
+    const QJsonValue value = readAll().value("keyboard_layout_fidelity");
+    // Read as the startup migration writes it, for a file not yet migrated.
+    if (value.isBool()) return value.toBool() ? QStringLiteral("always") : QStringLiteral("auto");
+    const QString text = value.toString().trimmed().toLower();
+    if (text == QLatin1String("always") || text == QLatin1String("never")) return text;
+    return QStringLiteral("auto");
 }
 
 bool AppSettings::keyboardDebug() const

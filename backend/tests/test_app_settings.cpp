@@ -476,6 +476,40 @@ void run_app_settings_tests()
     s.audioTimeStretch(); // exercised (value documented as true by default)
     CHECK(s.readAll().contains("native_host_enabled"));
 
+    // keyboard_layout_fidelity: three values, "auto" by default. A boolean from
+    // 0.4.0 or before cannot tell a choice from the seed (false since 19/09),
+    // so false moves to the new default, and true to the value that keeps its
+    // meaning; the file is rewritten once, and an owner's word is kept.
+    {
+        QJsonObject obj = s.readAll();
+        CHECK_EQ(obj.value("keyboard_layout_fidelity").toString(), QString("auto"));
+        CHECK_EQ(s.keyboardLayoutFidelity(), QString("auto"));
+        obj["keyboard_layout_fidelity"] = false;
+        s.writeAll(obj);
+        CHECK_EQ(s.keyboardLayoutFidelity(), QString("auto")); // read before any migration
+        s.seedDocumentedDefaults();
+        CHECK_EQ(s.readAll().value("keyboard_layout_fidelity").toString(), QString("auto"));
+        obj["keyboard_layout_fidelity"] = true;
+        s.writeAll(obj);
+        CHECK_EQ(s.keyboardLayoutFidelity(), QString("always"));
+        s.seedDocumentedDefaults();
+        CHECK_EQ(s.readAll().value("keyboard_layout_fidelity").toString(), QString("always"));
+        obj["keyboard_layout_fidelity"] = "never";
+        s.writeAll(obj);
+        s.seedDocumentedDefaults();
+        CHECK_EQ(s.keyboardLayoutFidelity(), QString("never"));
+        obj["keyboard_layout_fidelity"] = " Always ";
+        s.writeAll(obj);
+        CHECK_EQ(s.keyboardLayoutFidelity(), QString("always"));
+        obj["keyboard_layout_fidelity"] = "sometimes";
+        s.writeAll(obj);
+        CHECK_EQ(s.keyboardLayoutFidelity(), QString("auto"));
+        obj["keyboard_layout_fidelity"] = 1;
+        s.writeAll(obj);
+        s.seedDocumentedDefaults();
+        CHECK_EQ(s.readAll().value("keyboard_layout_fidelity").toString(), QString("auto"));
+    }
+
     // The host's administrator windows stay closed to invited players unless
     // the owner wrote a real true: seeded as false so it can be found, absent
     // reads as false, and nothing short of a JSON true opens them.

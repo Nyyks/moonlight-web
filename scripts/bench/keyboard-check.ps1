@@ -78,7 +78,10 @@ if (-not (Test-Path $SettingsPath)) {
 }
 $originalSettings = [System.IO.File]::ReadAllText($SettingsPath)
 $settings = $originalSettings | ConvertFrom-Json
-$fidelity = [bool](Get-Prop $settings 'keyboard_layout_fidelity' $false)
+# "auto" (the default), "always" or "never" since 22/10/2026; a boolean from
+# 0.4.0 or before reads as the server reads it: true "always", false "auto".
+$fidelityRaw = Get-Prop $settings 'keyboard_layout_fidelity' 'auto'
+$fidelity = if ($fidelityRaw -is [bool]) { if ($fidelityRaw) { 'always' } else { 'auto' } } else { "$fidelityRaw" }
 $debugOn = [bool](Get-Prop $settings 'keyboard_debug' $false)
 $restore = $false
 
@@ -243,7 +246,7 @@ try {
             if ($rec.host -match '\| Notepad: (.*?) \| Game:') { $noteText = $Matches[1] }
             $row.note = $noteText
             $row.noteOk = [bool]($noteText -match '^OK')
-            # Positional mode (keyboard_layout_fidelity off, the product default)
+            # Positional mode (keyboard_layout_fidelity "never", or gaming mode under "auto")
             # sends no character, so the host has nothing to check against - but
             # it says what its layout typed for that position, and this side knows
             # what the client's layout meant: compare the two. The host names the

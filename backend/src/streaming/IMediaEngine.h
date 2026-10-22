@@ -336,6 +336,15 @@ public:
         return m_LayoutFidelity.load(std::memory_order_relaxed);
     }
 
+    /// Whether the client's key presses come from its gaming mouse mode, as
+    /// their `gaming` flag says. True when that changed: the session logs one
+    /// line per change, since under "auto" it decides positions or characters.
+    bool noteGamingKeys(bool gaming)
+    {
+        const int now = gaming ? 1 : 0;
+        return m_GamingKeys.exchange(now, std::memory_order_relaxed) != now;
+    }
+
     /// Snapshot the host's real lock-key state. Only possible when the streamed
     /// host IS this machine — which is always true for a native engine and
     /// conditional for GameStream, hence the parameter.
@@ -493,4 +502,5 @@ protected:
     /// keystroke by whichever thread owns the input channel — hence atomic.
     std::atomic<KeyboardMode> m_KeyboardMode{KeyboardMode::Positional};
     std::atomic<LayoutFidelity> m_LayoutFidelity{LayoutFidelity::Never};
+    std::atomic<int> m_GamingKeys{-1};
 };

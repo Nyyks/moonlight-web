@@ -68,6 +68,14 @@ void StreamWorkerHost::prepare(const QJsonObject& config, QStringList& args,
     // Same road for verbose logs: this process's DEBUG threshold is the one
     // the worker's own lines have to pass before they are relayed here.
     if (mw::run::verbose()) withSettings[QStringLiteral("verbose")] = true;
+    // And for the keyboard's settings: a worker started as SYSTEM reads the
+    // settings.json of SYSTEM's profile, never the owner's, so it would type
+    // by the default whatever the owner chose, and never log the keys.
+    {
+        const AppSettings settings;
+        withSettings[QStringLiteral("keyboardLayoutFidelity")] = settings.keyboardLayoutFidelity();
+        if (settings.keyboardDebug()) withSettings[QStringLiteral("keyboardDebug")] = true;
+    }
     configLine = QJsonDocument(withSettings).toJson(QJsonDocument::Compact) + "\n";
 }
 
