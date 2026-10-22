@@ -100,7 +100,7 @@ private:
     /// carries it rather than typed and let go — so it is a real key with a
     /// real repeat, unlike injectText. Falls back to injectText for a character
     /// only a dead-key pair can reach, which no single key can hold.
-    void injectChar(const std::string& utf8, bool down);
+    void injectChar(const std::string& utf8, bool down, bool altGraph = false);
 
     /// Compile the host's keymap on first use. False when it is unreadable, in
     /// which case nothing character-based can be typed at all.

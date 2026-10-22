@@ -96,7 +96,7 @@ private:
     void frame(Device* device);
     void key(uint16_t code, bool down);
     void text(const std::string& utf8);
-    void character(const std::string& utf8, bool down);
+    void character(const std::string& utf8, bool down, bool altGraph = false);
     bool ensureTextMap();
     void releaseAll();
 

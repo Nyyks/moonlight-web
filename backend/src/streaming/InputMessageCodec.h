@@ -563,6 +563,7 @@ inline void sendKey(IMediaEngine& engine, const QJsonObject& msg, bool down, boo
         IMediaEngine::CharKeyHints hints;
         hints.chord = plan.chord;
         hints.positionVk = plan.keyCode;
+        hints.altGraph = msg["altGraph"].toBool(false);
         engine.sendKeyChar(plan.text, down, modifierMask(msg), hints);
         return;
     }

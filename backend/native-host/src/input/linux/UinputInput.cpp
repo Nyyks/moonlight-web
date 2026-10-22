@@ -389,7 +389,7 @@ bool UinputInput::ensureTextMap()
     return m_TextMap.isOpen();
 }
 
-void UinputInput::injectChar(const std::string& utf8, bool down)
+void UinputInput::injectChar(const std::string& utf8, bool down, bool altGraph)
 {
     if (utf8.empty() || !ensureTextMap()) return;
 
@@ -440,13 +440,17 @@ void UinputInput::injectChar(const std::string& utf8, bool down)
     const auto wants = [&stroke](uint16_t mod) {
         return stroke.mods[0] == mod || stroke.mods[1] == mod;
     };
-    uint16_t lift[3] = {0, 0, 0}; // held by the viewer, unwanted by the stroke
+    uint16_t lift[4] = {0, 0, 0, 0}; // held by the viewer, unwanted by the stroke
     int lifts = 0;
     if (!wants(KEY_LEFTSHIFT)) {
         if (m_HeldKeys.count(KEY_LEFTSHIFT)) lift[lifts++] = KEY_LEFTSHIFT;
         if (m_HeldKeys.count(KEY_RIGHTSHIFT)) lift[lifts++] = KEY_RIGHTSHIFT;
     }
     if (!wants(KEY_RIGHTALT) && m_HeldKeys.count(KEY_RIGHTALT)) lift[lifts++] = KEY_RIGHTALT;
+    // A Mac's Option composed this character, as AltGr does: its Alt is a
+    // level here, not the chord a left Alt otherwise is.
+    if (altGraph && !wants(KEY_LEFTALT) && m_HeldKeys.count(KEY_LEFTALT))
+        lift[lifts++] = KEY_LEFTALT;
 
     uint16_t mine[2] = {0, 0}; // wanted by the stroke, not held by the viewer
     int count = 0;
@@ -611,13 +615,13 @@ void UinputInput::inject(const InputEvent& event)
         if (event.chord)
             injectKey(event, true);
         else
-            injectChar(event.text, true);
+            injectChar(event.text, true, event.altGraph);
         break;
     case Type::CharUp:
         if (event.chord)
             injectKey(event, false);
         else
-            injectChar(event.text, false);
+            injectChar(event.text, false, event.altGraph);
         break;
     case Type::Utf8Text: injectText(event.text); break;
     case Type::MouseButtonDown: injectButton(event, true); break;

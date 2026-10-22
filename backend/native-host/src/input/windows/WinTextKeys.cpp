@@ -230,7 +230,7 @@ Mods wantFor(uint8_t level, const WinHeldMods& held)
     Mods want;
     want.shift = (level & 1) != 0;
     want.ctrl = (level & 2) != 0 || (held.ctrl && !held.alt);
-    want.alt = (level & 4) != 0 || (held.alt && !held.ctrl);
+    want.alt = (level & 4) != 0 || (held.alt && !held.ctrl && !held.altLevel);
     return want;
 }
 

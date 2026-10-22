@@ -10243,13 +10243,19 @@ export class StreamView {
         const cc = dead ? null : StreamView.clientChar(e);
         const char = cc ? cc.char : null;
         const nonUs = cc ? cc.nonUs : false;
+        // A Mac's Option composes characters as AltGr does ({ [ | ~ € on its
+        // AZERTY). Said so, the host lets the Alt go for the key when its own
+        // layout does not need it: Alt+Shift+[ was a shortcut on a US host,
+        // not "{". Option with a key that types nothing (Tab, F4, an arrow)
+        // stays Alt.
+        const altGraph = !!(this._appleKeyboard && e.altKey && !e.ctrlKey && !e.metaKey && cc);
 
         // The printable key after a dead key: what it types is the browser's
         // composition, and Chrome on Windows does not put that in this event —
         // e.key still reads ' ' for the Space of "~", 'n' for the n of "ñ". It
         // comes in the keypress, which only fires if this keydown is left alone.
         // Never in gaming mode: a game's key does not wait, and there the dead
-        // key itself goes by its position and the host composes (C.2).
+        // key itself goes by its position and the host composes.
         if (this._deadPending && !dead && cc && !e.ctrlKey && !e.metaKey && !this._gamingMode) {
             this._deadPending = false;
             this._deferComposedKey(e, vkCode, cc);
@@ -10306,6 +10312,7 @@ export class StreamView {
             // The client's mouse mode at the press: under "auto" the host
             // plays gaming mode by key positions (InputMsg::resolveKey).
             gaming: !!this._gamingMode,
+            altGraph,
             ctrlKey: e.ctrlKey,
             shiftKey: e.shiftKey,
             altKey: e.altKey,
@@ -10339,6 +10346,7 @@ export class StreamView {
                 dead: false,
                 hold: this._holdsThroughStall(e.code),
                 gaming: !!this._gamingMode,
+                altGraph: !!(this._appleKeyboard && e.altKey && !e.ctrlKey && !e.metaKey),
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
@@ -10483,6 +10491,7 @@ export class StreamView {
             nonUs: this._heldPhysKeys.get(e.code)?.nonUs ?? false,
             dead: this._heldPhysKeys.get(e.code)?.dead ?? false,
             gaming: this._heldPhysKeys.get(e.code)?.gaming ?? false,
+            altGraph: this._heldPhysKeys.get(e.code)?.altGraph ?? false,
             ctrlKey: e.ctrlKey,
             shiftKey: e.shiftKey,
             altKey: e.altKey,
@@ -10855,6 +10864,7 @@ export class StreamView {
                 // other: under "auto" the host resolved it by its position in
                 // gaming mode, by its character at the desktop.
                 gaming: !!msg.gaming,
+                altGraph: !!msg.altGraph,
             });
         } else {
             this._heldPhysKeys.delete(id);

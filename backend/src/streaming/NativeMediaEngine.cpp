@@ -1279,6 +1279,7 @@ void NativeMediaEngine::sendKeyChar(const QString& ch, bool down, char modifiers
     // its US position the fallback for a layout with none.
     event.chord = hints.chord;
     event.keyCode = hints.positionVk;
+    event.altGraph = hints.altGraph;
     m_Session->sendInput(event);
 }
 

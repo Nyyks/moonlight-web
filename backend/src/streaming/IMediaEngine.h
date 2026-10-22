@@ -195,6 +195,9 @@ public:
         /// The key's US position, for a host whose layout has no key for the
         /// character — a chord on a Cyrillic layout keeps its shortcut.
         short positionVk = 0;
+        /// A Mac's Option composed the character, as AltGr does: the Alt the
+        /// viewer holds is a level for the host, not an Alt+ chord.
+        bool altGraph = false;
     };
     virtual void sendKeyChar(const QString& ch, bool down, char modifiers = 0,
                              const CharKeyHints& hints = {}) = 0;

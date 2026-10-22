@@ -456,3 +456,28 @@ describe('the mouse mode of a key', () => {
         });
     });
 });
+
+describe("a Mac's Option key", () => {
+    // Option composes characters on a Mac as AltGr does on Windows ({ [ | ~ €
+    // on the Mac's AZERTY). Sent as Alt and a character, a US host typed
+    // Alt+Shift+[ — a shortcut — for "{". The press says Option chose it.
+    it('marks a character Option composed', () => {
+        const v = keySink({ _appleKeyboard: true });
+        v.handleKeyDown(ev('Digit5', '{', { altKey: true }));
+        expect(v.sent[0]).toMatchObject({ type: 'keydown', char: '{', altGraph: true });
+        v.handleKeyUp(ev('Digit5', '(', { altKey: true }));
+        expect(v.sent[1]).toMatchObject({ type: 'keyup', char: '{', altGraph: true });
+    });
+
+    it('leaves Option with a key that types nothing an Alt', () => {
+        const v = keySink({ _appleKeyboard: true });
+        v.handleKeyDown(ev('Tab', 'Tab', { altKey: true }));
+        expect(v.sent[0].altGraph).toBe(false);
+    });
+
+    it('never marks a Windows client, whose AltGr says so itself', () => {
+        const v = keySink();
+        v.handleKeyDown(ev('KeyE', '€', { ctrlKey: true, altKey: true }));
+        expect(v.sent[0].altGraph).toBe(false);
+    });
+});

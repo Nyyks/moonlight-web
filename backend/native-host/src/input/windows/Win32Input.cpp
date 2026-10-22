@@ -1203,12 +1203,16 @@ void Win32Input::injectChar(const InputEvent& event, bool down)
         m_CharKeys.erase(it);
         m_HeldKeys.erase(key.vk);
         m_HeldScan.erase(key.vk);
-        planKeyEdge(key, false, heldModsLocked(), plan);
+        WinHeldMods held = heldModsLocked();
+        held.altLevel = event.altGraph;
+        planKeyEdge(key, false, held, plan);
     } else {
         const bool caps = (::GetKeyState(VK_CAPITAL) & 0x0001) != 0;
         const WinRecipe recipe = layout && !layout->ime() ? layout->recipe(ch, caps) : WinRecipe{};
         std::lock_guard<std::mutex> lock(m_HeldMutex);
-        const WinHeldMods held = heldModsLocked();
+        WinHeldMods held = heldModsLocked();
+        // A Mac's Option composed it, as AltGr does: its Alt is a level here.
+        held.altLevel = event.altGraph;
         if (recipe.kind == WinRecipe::Kind::Key) {
             // Held like the key it is, and repeating like one. Nothing pressed
             // here is ever recorded as the viewer's own modifier: m_HeldKeys

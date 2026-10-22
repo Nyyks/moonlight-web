@@ -284,6 +284,17 @@ void frenchLegacy(const WinKeyLayout& fr)
     // A digit chord keeps its key and no Shift: Ctrl+1 is Ctrl+VK_1.
     CHECK(fr.chordKey(U'1', key) && key.vk == '1' && key.mods == 0);
 
+    // A Mac's Option for { on the French host: AltGr+4 there, so the Alt it
+    // holds stays and Ctrl joins it — the case that worked by chance before.
+    {
+        WinHeldMods option;
+        option.alt = true;
+        option.altLevel = true;
+        std::vector<WinKeyEvent> down;
+        planKeyEdge(fr.recipe(U'{', false).key, true, option, down);
+        CHECK(down.size() == 2 && down[0].vk == VK_CONTROL && !down[0].up && down[1].vk == '4');
+    }
+
     // Plans.
     {
         // ê: the dead key and e, nothing held, nothing left down.
@@ -415,6 +426,29 @@ void unitedStates(const WinKeyLayout& us)
     CHECK(us.recipe(U'\u00E9', false).kind == WinRecipe::Kind::Unicode);
     WinStroke key;
     CHECK(us.chordKey(U'z', key) && key.vk == 'Z' && key.scan == 0x2C);
+
+    // A Mac's Option composes { on its AZERTY, as AltGr would: the viewer's
+    // Alt is a level, let go for the key — Shift+[ on a US host. Kept as a
+    // chord, it was Alt+Shift+[, a shortcut. A plain left Alt stays a chord.
+    {
+        const WinRecipe brace = us.recipe(U'{', false);
+        CHECK(isKey(brace, kVkOem4, 1));
+        WinHeldMods option;
+        option.alt = true;
+        option.altLevel = true;
+        std::vector<WinKeyEvent> down, up;
+        planKeyEdge(brace.key, true, option, down);
+        planKeyEdge(brace.key, false, option, up);
+        CHECK(down.size() == 3 && down[0].vk == VK_MENU && down[0].up && down[1].vk == VK_SHIFT &&
+              !down[1].up && down[2].vk == kVkOem4 && !down[2].up);
+        CHECK(up.size() == 3 && up[0].vk == kVkOem4 && up[0].up && up[1].vk == VK_SHIFT &&
+              up[1].up && up[2].vk == VK_MENU && !up[2].up);
+        WinHeldMods chord;
+        chord.alt = true;
+        std::vector<WinKeyEvent> kept;
+        planKeyEdge(brace.key, true, chord, kept);
+        CHECK(kept.size() == 2 && kept[0].vk == VK_SHIFT && kept[1].vk == kVkOem4);
+    }
     roundTripTable(us, "US");
 }
 

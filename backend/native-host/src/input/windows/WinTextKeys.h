@@ -88,6 +88,10 @@ struct WinHeldMods
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
+    /// The Alt held is a level, not a chord: a Mac's Option composed the
+    /// character, as AltGr does, so it is let go when the layout does not
+    /// need it — "{" is Shift+[ on a US host, not Alt+Shift+[.
+    bool altLevel = false;
 };
 
 /// What a plan did, for the session's one line of log. Never a character.

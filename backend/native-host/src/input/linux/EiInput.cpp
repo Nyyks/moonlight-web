@@ -81,6 +81,7 @@ uint32_t buttonCode(int button)
 constexpr uint16_t kKeyLeftShift = 42;
 constexpr uint16_t kKeyRightShift = 54;
 constexpr uint16_t kKeyRightAlt = 100;
+constexpr uint16_t kKeyLeftAlt = 56;
 
 } // namespace
 
@@ -379,7 +380,7 @@ bool EiInput::ensureTextMap()
     return m_TextMap.isOpen();
 }
 
-void EiInput::character(const std::string& utf8, bool down)
+void EiInput::character(const std::string& utf8, bool down, bool altGraph)
 {
     if (utf8.empty() || !ensureTextMap()) return;
     std::vector<char32_t> points;
@@ -402,6 +403,9 @@ void EiInput::character(const std::string& utf8, bool down)
         if (m_HeldKeys.count(kKeyRightShift)) lift.push_back(kKeyRightShift);
     }
     if (!wants(kKeyRightAlt) && m_HeldKeys.count(kKeyRightAlt)) lift.push_back(kKeyRightAlt);
+    // A Mac's Option composed this character, as AltGr does (InputEvent).
+    if (altGraph && !wants(kKeyLeftAlt) && m_HeldKeys.count(kKeyLeftAlt))
+        lift.push_back(kKeyLeftAlt);
     std::vector<uint16_t> mine;
     for (uint16_t mod : stroke.mods)
         if (mod != 0 && !m_HeldKeys.count(mod)) mine.push_back(mod);
@@ -472,13 +476,13 @@ void EiInput::inject(const InputEvent& event)
         if (event.chord)
             key(evdevKeyCode(event.keyCode), true);
         else
-            character(event.text, true);
+            character(event.text, true, event.altGraph);
         break;
     case Type::CharUp:
         if (event.chord)
             key(evdevKeyCode(event.keyCode), false);
         else
-            character(event.text, false);
+            character(event.text, false, event.altGraph);
         break;
     case Type::Utf8Text: text(event.text); break;
 
