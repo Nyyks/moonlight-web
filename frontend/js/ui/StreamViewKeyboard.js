@@ -541,7 +541,8 @@ export class StreamViewKeyboard {
      * @this {StreamViewInstance}
      *  Must run inside a user gesture (button tap / 3-finger tap). */
     _showVirtualKeyboard() {
-        if (!this._kbdCapture) return;
+        // A guest without keyboard: the 3-finger tap opens nothing either.
+        if (!this._kbdCapture || !this._mouseAllowed) return;
         this._resetKbdCapture();
         try {
             this._kbdCapture.focus({ preventScroll: true });

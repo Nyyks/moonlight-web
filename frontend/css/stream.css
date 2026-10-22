@@ -1120,6 +1120,10 @@ body.streaming-active::after {
     white-space: nowrap;
     user-select: none;
 }
+/* inline-flex above outranks the browser's own [hidden] handling. */
+.btn-stream-kbd[hidden] {
+    display: none;
+}
 .btn-stream-kbd:hover {
     background: rgba(255, 255, 255, 0.12);
     color: #fff;

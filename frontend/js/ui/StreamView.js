@@ -2526,6 +2526,9 @@ export class StreamView {
             this._kbdBtn.className = 'btn-stream-kbd stream-ctl-prestart';
             this._kbdBtn.innerHTML = Icons.keyboard;
             this._kbdBtn.title = t('stream.showKeyboard');
+            // A guest invited to watch has no keyboard to open: the keys would
+            // reach nothing. Shown again if the owner hands them input.
+            this._kbdBtn.hidden = !this._mouseAllowed;
             this._kbdBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this._toggleVirtualKeyboard();
@@ -9468,7 +9471,9 @@ export class StreamView {
         if (this._mouseAllowed === allowed) return;
         this._mouseAllowed = allowed;
         console.log(`[StreamView] Mouse ${allowed ? 'given to' : 'taken from'} this viewer`);
+        if (this._kbdBtn) this._kbdBtn.hidden = !allowed;
         if (allowed) return;
+        this._hideVirtualKeyboard();
         if (document.pointerLockElement === this.inputEl) document.exitPointerLock();
         if (this.inputEl) this.inputEl.style.cursor = 'default';
     }
