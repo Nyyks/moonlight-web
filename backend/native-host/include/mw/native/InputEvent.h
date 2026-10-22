@@ -85,6 +85,12 @@ struct InputEvent
     /// UTF-8 payload for Type::Utf8Text, and the single character for
     /// Type::CharDown / Type::CharUp.
     std::string text;
+    /// CharDown / CharUp: a chord the touch keyboard's bar made (Ctrl latched,
+    /// then z typed): the host key that carries the character, pressed under
+    /// whatever modifiers the viewer holds, none added and none lifted —
+    /// a shortcut is a key, not a character. keyCode is then the character's
+    /// US position, for a layout with no key for it (a Cyrillic one).
+    bool chord = false;
 
     // ── Mouse ────────────────────────────────────────────────────────────────
     int16_t deltaX = 0;

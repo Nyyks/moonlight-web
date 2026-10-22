@@ -24,15 +24,18 @@
 #include "../VirtualHid.h"
 #include "../../core/ClickTrace.h"
 #include "VigemGamepad.h"
+#include "WinTextKeys.h"
 
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <thread>
+#include <unordered_map>
 
 namespace mw::native::input {
 
@@ -111,10 +114,22 @@ private:
     void injectKey(const InputEvent& event, bool down);
     /// One character the client's layout produced, pressed and released as the
     /// real key of the HOST's layout that carries it — so the scancode exists
-    /// and games see a key, unlike injectText's Unicode path (which is the
-    /// fallback here for a character no local key can reach).
-    void injectChar(const std::string& utf8, bool down);
+    /// and games see a key. A character the layout reaches through a dead key
+    /// is typed whole on the press, and Unicode is the fallback for one no
+    /// local key can reach (WinTextKeys.h).
+    void injectChar(const InputEvent& event, bool down);
+    /// A chord of the touch keyboard's bar: the key carrying the character,
+    /// nothing else touched (WinTextKeys planChordEdge).
+    void injectChord(const InputEvent& event, char32_t ch, const WinKeyLayout* layout, bool down);
+    /// Text from a soft keyboard: the keys of the host's layout, in one
+    /// SendInput per piece, Unicode only where no key types a character.
     void injectText(const std::string& utf8);
+    /// Count what a text did, for the session's line at stop(); the first one
+    /// also says which kind of window took it. Never a character.
+    void noteText(const WinTextCounts& counts, const std::string& unicodeWhy, void* window,
+                  uintptr_t hkl);
+    /// The modifiers the viewer holds, read off m_HeldKeys. Under m_HeldMutex.
+    WinHeldMods heldModsLocked() const;
     void injectMouseMove(int deltaX, int deltaY);
     /// Warp the pointer to the nearest point of the captured display if it is
     /// on another screen. A relative move applied from there is visible.
@@ -269,6 +284,23 @@ private:
     std::mutex m_HeldMutex;
     std::set<int> m_HeldKeys;    ///< virtual-key codes
     std::set<int> m_HeldButtons; ///< browser button numbers, 1..5
+    /// The scancode a held key went down with, when the host's layout chose
+    /// it rather than the US table (a character's key), E0 in the high byte:
+    /// what releaseAll lets go of is the key that went down, not its VK's US
+    /// position — on AZERTY those are different keys.
+    std::map<int, uint16_t> m_HeldScan;
+    /// The key each character went down on, so its release lets go of that
+    /// key whatever the layout says by then. Only for characters held as one
+    /// key: a dead-key pair or Unicode is typed whole on the press.
+    std::unordered_map<char32_t, WinStroke> m_CharKeys;
+
+    /// What the session's text did, for one line at stop(): counts and why
+    /// Unicode was needed, never a character. Guarded: the follower thread
+    /// types while stop() reads.
+    std::mutex m_TextMutex;
+    WinTextCounts m_Text;
+    std::set<std::string> m_TextUnicodeWhy;
+    bool m_TextWindowSaid = false;
 
     /// Events applied since start(), and which InputEvent::Type values have
     /// been seen at least once (one bit each). Only ever read for the log

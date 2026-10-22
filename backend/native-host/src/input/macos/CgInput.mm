@@ -362,6 +362,12 @@ void CgInput::inject(const InputEvent& event)
     case InputEvent::Type::KeyUp: injectKey(event, false); break;
     case InputEvent::Type::CharDown:
     case InputEvent::Type::CharUp:
+        // A chord of the touch keyboard's bar keeps its US position here, as
+        // it always went: the Windows host alone resolves it by its character.
+        if (event.chord) {
+            injectKey(event, event.type == InputEvent::Type::CharDown);
+            break;
+        }
         // A character is never a modifier itself, so the client's mask is the
         // whole truth about what is held around it.
         if (event.modifiersKnown) reconcileModifiers(event.modifiers);

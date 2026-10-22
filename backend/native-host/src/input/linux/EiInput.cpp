@@ -466,8 +466,20 @@ void EiInput::inject(const InputEvent& event)
     switch (event.type) {
     case Type::KeyDown: key(evdevKeyCode(event.keyCode), true); break;
     case Type::KeyUp: key(evdevKeyCode(event.keyCode), false); break;
-    case Type::CharDown: character(event.text, true); break;
-    case Type::CharUp: character(event.text, false); break;
+    // A chord of the touch keyboard's bar keeps its US position here, as it
+    // always went: the Windows host alone resolves it by its character.
+    case Type::CharDown:
+        if (event.chord)
+            key(evdevKeyCode(event.keyCode), true);
+        else
+            character(event.text, true);
+        break;
+    case Type::CharUp:
+        if (event.chord)
+            key(evdevKeyCode(event.keyCode), false);
+        else
+            character(event.text, false);
+        break;
     case Type::Utf8Text: text(event.text); break;
 
     case Type::MouseButtonDown:

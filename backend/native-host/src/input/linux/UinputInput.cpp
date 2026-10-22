@@ -605,8 +605,20 @@ void UinputInput::inject(const InputEvent& event)
     switch (event.type) {
     case Type::KeyDown: injectKey(event, true); break;
     case Type::KeyUp: injectKey(event, false); break;
-    case Type::CharDown: injectChar(event.text, true); break;
-    case Type::CharUp: injectChar(event.text, false); break;
+    // A chord of the touch keyboard's bar keeps its US position here, as it
+    // always went: the Windows host alone resolves it by its character.
+    case Type::CharDown:
+        if (event.chord)
+            injectKey(event, true);
+        else
+            injectChar(event.text, true);
+        break;
+    case Type::CharUp:
+        if (event.chord)
+            injectKey(event, false);
+        else
+            injectChar(event.text, false);
+        break;
     case Type::Utf8Text: injectText(event.text); break;
     case Type::MouseButtonDown: injectButton(event, true); break;
     case Type::MouseButtonUp: injectButton(event, false); break;
