@@ -96,6 +96,7 @@ import {
     NO_WEBGPU_ALGOS,
     plainPicture,
     presentsOnVsync,
+    rendererAfterFailure,
 } from '../stream/renderers/createRenderer.js';
 import {
     RendererFallback,
@@ -933,6 +934,8 @@ export class StreamView {
         /** @type {RendererFallback|null} made with the main-thread renderer */
         this._rendererFallback = null;
         this._swappingRenderer = false;
+        /** The renderer that gave up and was replaced (_checkRendererFailed). */
+        this._failedRenderer = null;
         /** A renderer's fresh canvas, put in place at its first draw. */
         this._nextCanvas = null;
         this._workerLastDecoded = 0;
@@ -2409,6 +2412,7 @@ export class StreamView {
         // read the same counters, whether the stats show or not.
         this._overlayInterval = setInterval(() => {
             this._checkSilentDecoder();
+            this._checkRendererFailed();
             this._checkRendererCost();
             this._runPipelineGovernors(performance.now());
             this._updateOverlay();
@@ -4539,12 +4543,90 @@ export class StreamView {
             }
             return;
         }
+        this._takeOverRenderer(r, el);
+    }
+
+    /**
+     * A renderer that gave up (VideoRenderer.failed: a WebGPU renderer no
+     * frame could reach, or whose device did not come back) hands the picture
+     * over, on the 500 ms tick and once. The main-thread path only: the
+     * worker's canvas stays the worker's, its renderer gives up all the same
+     * and says so in the console.
+     */
+    _checkRendererFailed() {
+        const r = this._renderer;
+        if (!r || !r.failed || r === this._failedRenderer) return;
+        if (this._quitting || this._swappingRenderer) return;
+        this._failedRenderer = r;
+        this._replaceFailedRenderer();
+    }
+
+    /**
+     * Move the picture off the renderer that gave up (rendererAfterFailure):
+     * the pass it ran onto its WebGL2 twin, the plain copy where the setting
+     * has no pass, Canvas2D where WebGL2 refuses, rather than black. The new
+     * renderer gets a fresh copy of the canvas, as in _swapPlainRenderer, and
+     * the ladder starts again from the rung the old one stood on.
+     */
+    async _replaceFailedRenderer() {
+        const from = this._renderer.kind;
+        const next = rendererAfterFailure({
+            ceiling: ladderRung(this._enhancerCeiling),
+            pass: ladderRung(this._videoEnhancementAlgo),
+            plainWebGl: this._plainWebGl,
+        });
+        this._swappingRenderer = true;
+        const el = /** @type {HTMLCanvasElement} */ (this.canvas.cloneNode(false));
+        let r = null;
+        try {
+            r = await createVideoRenderer(el, {
+                desynchronized: this._tearing,
+                videoCodec: this.videoCodec,
+                isChromeWindowsHevc: this._isChromeWindowsHevc,
+                webgpu: false,
+                yuv444: this._yuv444,
+                ...next,
+            });
+        } catch (e) {
+            console.warn(
+                '[StreamView] Renderer: nothing took over from ' + from + ': ' + e.message,
+            );
+        }
+        this._swappingRenderer = false;
+        if (!r || this._quitting || !this.renderRunning) {
+            if (r) r.dispose();
+            return;
+        }
+        console.warn(
+            '[StreamView] Renderer: ' +
+                from +
+                ' gave up, the picture goes on ' +
+                r.kind +
+                (r.kind === 'webgl' && next.algo !== 'off' ? ' (' + next.algo + ')' : ''),
+        );
+        const gov = this._governor;
+        this._enhancerStart =
+            gov && gov.degraded ? { rung: gov.level, recoverAfterMs: gov.recoverAfterMs } : null;
+        if (next.ceiling !== 'off') this._enhancerCeiling = next.ceiling;
+        this._videoEnhancementAlgo = r.kind === 'webgl' ? next.algo : 'off';
+        this._wantWebGpu = false;
+        this._takeOverRenderer(r, el);
+        this._enhancerDegraded = !!(this._governor && this._governor.degraded);
+    }
+
+    /**
+     * A renderer made on a fresh copy of the canvas (`el`) takes the old one's
+     * place: it draws from the next frame on, and its canvas goes on the page
+     * at its first picture (_showNextCanvas). Until then the old renderer's
+     * canvas stays.
+     */
+    _takeOverRenderer(r, el) {
         const old = this._renderer;
         this._renderer = r;
         this._nextCanvas = el;
         this._activeRendererKind = r.kind;
         this._notePresentation(r.kind);
-        this._rendererHdrActive = false;
+        this._rendererHdrActive = !!r.hdrActive;
         this._governor = null;
         this._createEnhancerGovernor(r);
         this._contentAge.attach(r);

@@ -26,8 +26,11 @@
  * fetches a sample, which lost to pass 0 + kernel on every GPU measured,
  * upscaler-mwsr-p2.md §3.) A browser that refuses the import (Chrome on a
  * machine whose decoded frames cannot be shared with WebGPU) gets the frame
- * copied through an ImageBitmap into inputTex instead, and the picture stays
- * on screen (see _importFrame).
+ * copied through an ImageBitmap into inputTex instead, or, where that copy
+ * is refused too, read back as RGBA and written into a texture pass 0 copies
+ * from, and the picture stays on screen (see _importFrame, _copyFrame). A
+ * renderer that gets no frame onto its canvas for a while gives up (`failed`)
+ * and the page moves the picture to another one.
  *
  * mwsr (algo 'mwsr'): 2 passes — Pass 0 blit, Pass 1 mwsr inputTex → canvas.
  *   MoonlightWeb's own upscaler (MwsrShader.js, docs/design/upscaler-mwsr.md).
@@ -119,9 +122,9 @@ fn fs(in : VSOut) -> @location(0) vec4f {
 }
 `;
 
-// The same copy from inputTex: the plain copy to the canvas when the frame
-// came in through an ImageBitmap (the import fallback) instead of an
-// external texture.
+// The same copy from a texture: the plain copy to the canvas when the frame
+// came in another way than the import (an ImageBitmap into inputTex, or the
+// readback into readbackTex, see _copyFrame), and the readback's pass 0.
 const BLIT_TEX_WGSL =
     FULLSCREEN_VS +
     /* wgsl */ `
@@ -135,8 +138,13 @@ fn fs(in : VSOut) -> @location(0) vec4f {
 `;
 
 // After a refused import, the import is tried again this many draws later:
-// a refusal that was transient ends the slower ImageBitmap path by itself.
+// a refusal that was transient ends the slower copies by itself.
 const IMPORT_RETRY_FRAMES = 300;
+
+// Frames in a row that never reached the canvas (no way in took them, the
+// draw threw, or their work did not complete) before the renderer gives up
+// and the page moves the picture to another renderer: half a second at 60 fps.
+const LOST_FRAMES_LIMIT = 30;
 
 // HDR tone-map (Pass 0 replacement). Reads the decoded 10/12-bit YUV planes
 // (frame.copyTo readback) instead of importExternalTexture — the only way to get
@@ -1031,6 +1039,17 @@ export class WebGpuRenderer extends VideoRenderer {
         r._importRefused = false;
         r._importRefusedAt = 0;
         r._importWarned = false;
+        // Its two copies (see _copyFrame): the bitmap's refusal, asked again
+        // with the import, and the readback's buffer.
+        r._bitmapRefused = false;
+        r._bitmapWarned = false;
+        r._readbackBuf = null;
+        r._readbackWarned = false;
+        // Frames that never reached the canvas, in a row; frames drawn on
+        // this device; whether the renderer gave up (see _noteFrame).
+        r._lostFrames = 0;
+        r._framesOnDevice = 0;
+        r._failed = false;
         r._drawCount = 0;
         r._drawErrors = new Set();
         r._adapter = adapter;
@@ -1116,6 +1135,22 @@ export class WebGpuRenderer extends VideoRenderer {
     /** True HDR is active (rgba16float canvas accepted). Read by the overlay. */
     get hdrActive() {
         return !!this._hdr;
+    }
+
+    /** See VideoRenderer.failed: given up, for the page to move the picture (_noteFrame). */
+    get failed() {
+        return this._failed;
+    }
+
+    /**
+     * See VideoRenderer.serialDrawsOnly. The import path may be pipelined: its
+     * commands run in submission order. A frame copied in instead (see
+     * _copyFrame) awaits before it is drawn: two such draws could resolve out
+     * of order and present the older frame last, and the readback reuses one
+     * buffer.
+     */
+    get serialDrawsOnly() {
+        return this._importRefused;
     }
 
     /**
@@ -1430,6 +1465,12 @@ export class WebGpuRenderer extends VideoRenderer {
             primitive: { topology: 'triangle-list' },
         });
         this._texBlitBindGroup = null;
+        // The readback's texture and pass 0, made at its first frame.
+        this._readbackTex = null;
+        this._readbackW = 0;
+        this._readbackH = 0;
+        this._readbackBindGroup = null;
+        this._texPass0Pipeline = null;
     }
 
     _buildSgsrResources() {
@@ -1924,11 +1965,58 @@ export class WebGpuRenderer extends VideoRenderer {
         });
     }
 
+    // readbackTex = the frame read back as RGBA (see _copyFrame), what pass 0
+    // or the plain copy to the canvas reads in place of the external texture;
+    // its pass 0 targets inputTex's format (float in HDR).
+    _ensureReadbackTex(w, h) {
+        if (this._readbackTex && this._readbackW === w && this._readbackH === h) return;
+        if (this._readbackTex) {
+            try {
+                this._readbackTex.destroy();
+            } catch (e) {}
+        }
+        const device = this._device;
+        this._readbackTex = device.createTexture({
+            size: { width: w, height: h },
+            format: 'rgba8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        this._readbackW = w;
+        this._readbackH = h;
+        this._readbackBindGroup = device.createBindGroup({
+            layout: this._texBlitLayout,
+            entries: [
+                { binding: 0, resource: this._sampler },
+                { binding: 1, resource: this._readbackTex.createView() },
+            ],
+        });
+        if (!this._texPass0Pipeline) {
+            const module = device.createShaderModule({ code: BLIT_TEX_WGSL });
+            this._texPass0Pipeline = device.createRenderPipeline({
+                layout: device.createPipelineLayout({ bindGroupLayouts: [this._texBlitLayout] }),
+                vertex: { module, entryPoint: 'vs' },
+                fragment: { module, entryPoint: 'fs', targets: [{ format: this._interFormat }] },
+                primitive: { topology: 'triangle-list' },
+            });
+        }
+    }
+
     _armDeviceLost() {
         this._device.lost.then((info) => {
-            if (this._disposed || info.reason === 'destroyed') return;
+            if (this._disposed) return;
             console.warn('[WebGpuRenderer] device lost (' + info.reason + '): ' + info.message);
             this._ready = false;
+            // A device that never finished a frame would not do better a
+            // second time. Chrome destroys the device of a canvas it cannot
+            // give a texture to present, and every new one the same way: Linux
+            // on the software adapter, where the swap chain finds no shared
+            // image to allocate and the page's whole WebGPU instance goes with
+            // the device (22/10/2026, CI 39737555924). The loss is then the
+            // browser's: 'destroyed' is only this renderer's own once disposed.
+            if (this._framesOnDevice === 0) {
+                this._giveUp('its device was lost before it finished a frame');
+                return;
+            }
             this._recover();
         });
     }
@@ -1940,6 +2028,7 @@ export class WebGpuRenderer extends VideoRenderer {
             this._adapter = adapter;
             this._device = await WebGpuRenderer._requestDevice(adapter);
             this._mwsrHalf = this._device.features.has('shader-f16');
+            this._framesOnDevice = 0;
             this._armDeviceLost();
             this._configure();
             this._buildResources(); // resets size-dependent textures (recreated on next draw)
@@ -1947,6 +2036,7 @@ export class WebGpuRenderer extends VideoRenderer {
             console.log('[WebGpuRenderer] device recovered');
         } catch (e) {
             console.error('[WebGpuRenderer] device recovery failed:', e.message);
+            this._giveUp('its device could not be recovered');
         }
     }
 
@@ -2008,16 +2098,19 @@ export class WebGpuRenderer extends VideoRenderer {
      * WebGPU (a Linux runner on the software adapter, 21/10/2026) threw
      * "Failed to import texture from video" on every frame, and the canvas
      * stayed black while the console filled up. From the first refusal on,
-     * draw() copies the frames through an ImageBitmap instead (one extra copy,
-     * the WebGL renderer's own fallback for a refused VideoFrame) and tries the
-     * import again every IMPORT_RETRY_FRAMES draws, in case the refusal was
-     * transient. One console line in all. In HDR the bitmap is the browser's
-     * SDR rendering of the frame: a picture, not the HDR one.
+     * draw() copies the frames in instead (_copyFrame) and tries the import
+     * again every IMPORT_RETRY_FRAMES draws, in case the refusal was
+     * transient — at once after a frame that got in by no way at all, there
+     * being nothing to lose. One console line in all.
      * @param {VideoFrame} frame
      * @returns {GPUExternalTexture|null}
      */
     _importFrame(frame) {
-        if (this._importRefused && this._drawCount - this._importRefusedAt < IMPORT_RETRY_FRAMES)
+        if (
+            this._importRefused &&
+            this._lostFrames === 0 &&
+            this._drawCount - this._importRefusedAt < IMPORT_RETRY_FRAMES
+        )
             return null;
         try {
             const tex = this._device.importExternalTexture({
@@ -2032,16 +2125,65 @@ export class WebGpuRenderer extends VideoRenderer {
                 console.warn(
                     '[WebGpuRenderer] importExternalTexture refused the frame (' +
                         e.message +
-                        '): the frames go through an ImageBitmap from now on',
+                        '): the frames are copied in from now on',
                 );
             }
             this._importRefused = true;
             this._importRefusedAt = this._drawCount;
+            // Asked again with the import: the bitmap may work now too.
+            this._bitmapRefused = false;
             return null;
         }
     }
 
-    /** The import fallback's pass 0: the frame, as an ImageBitmap, copied into inputTex. */
+    /**
+     * A frame the import refused, copied in another way: through an
+     * ImageBitmap into inputTex (one GPU copy, the WebGL renderer's own
+     * fallback for a refused VideoFrame), else read back by the browser as
+     * RGBA and written into readbackTex (a round trip through memory, the
+     * slowest), which pass 0 copies as it would the external texture (Bruno's
+     * third fallback, 22/10/2026). A refused bitmap is asked again with the
+     * import. In HDR either copy is the browser's SDR rendering of the frame:
+     * a picture, not the HDR one.
+     * @param {VideoFrame} frame
+     * @returns {Promise<''|'bitmap'|'readback'>} the way that took the frame,
+     *   '' when neither did: the frame is lost (_noteFrame).
+     */
+    async _copyFrame(frame, inW, inH) {
+        if (!this._bitmapRefused) {
+            try {
+                this._ensureInputTex(inW, inH);
+                await this._copyFrameThroughBitmap(frame, inW, inH);
+                return 'bitmap';
+            } catch (e) {
+                this._bitmapRefused = true;
+                if (!this._bitmapWarned) {
+                    this._bitmapWarned = true;
+                    console.warn(
+                        '[WebGpuRenderer] the ImageBitmap copy failed too (' +
+                            e.message +
+                            '): the frames are read back (VideoFrame.copyTo) instead',
+                    );
+                }
+            }
+        }
+        try {
+            await this._copyFrameThroughReadback(frame);
+            return 'readback';
+        } catch (e) {
+            if (!this._readbackWarned) {
+                this._readbackWarned = true;
+                console.warn(
+                    '[WebGpuRenderer] the readback failed too (' +
+                        e.message +
+                        '): no way in for the frame',
+                );
+            }
+            return '';
+        }
+    }
+
+    /** The bitmap copy's pass 0: the frame, as an ImageBitmap, copied into inputTex. */
     async _copyFrameThroughBitmap(frame, inW, inH) {
         const bmp = await createImageBitmap(frame);
         try {
@@ -2053,6 +2195,69 @@ export class WebGpuRenderer extends VideoRenderer {
         } finally {
             bmp.close();
         }
+    }
+
+    /**
+     * The readback: the frame as RGBA in memory (VideoFrame.copyTo, the
+     * browser's own conversion of the decoded picture, in sRGB), written into
+     * readbackTex. copyTo converts only where the browser knows the `format`
+     * member — WebIDL reads every member it knows, so the getter tells — and
+     * would otherwise hand back the frame's own planes, NV12 or I420, for the
+     * texture to show as colours.
+     * @param {VideoFrame} frame
+     */
+    async _copyFrameThroughReadback(frame) {
+        let converts = false;
+        const asked = {
+            get format() {
+                converts = true;
+                return 'RGBA';
+            },
+        };
+        const size = frame.allocationSize(asked);
+        if (!converts) throw new Error('VideoFrame.copyTo has no RGBA conversion here');
+        if (!this._readbackBuf || this._readbackBuf.byteLength < size)
+            this._readbackBuf = new ArrayBuffer(size);
+        const [plane] = await frame.copyTo(this._readbackBuf, { format: 'RGBA' });
+        const rect = frame.visibleRect;
+        const w = rect ? rect.width : frame.codedWidth;
+        const h = rect ? rect.height : frame.codedHeight;
+        this._ensureReadbackTex(w, h);
+        this._device.queue.writeTexture(
+            { texture: this._readbackTex },
+            this._readbackBuf,
+            { offset: plane.offset, bytesPerRow: plane.stride, rowsPerImage: h },
+            { width: w, height: h },
+        );
+    }
+
+    /**
+     * Count the frames that never reached the canvas: no way in took them,
+     * the draw threw, or their work did not complete on a device that stayed
+     * up. LOST_FRAMES_LIMIT of them in a row and the renderer gives up (Bruno,
+     * 22/10/2026: the picture moves to the same pass on WebGL2, else to
+     * Canvas2D, rather than stay black); a frame drawn starts the count again.
+     * @param {boolean} drawn
+     * @param {string} [why] what kept the frame off the canvas
+     */
+    _noteFrame(drawn, why) {
+        if (drawn) {
+            this._lostFrames = 0;
+            this._framesOnDevice++;
+            return;
+        }
+        this._lostFrames++;
+        if (this._lostFrames >= LOST_FRAMES_LIMIT)
+            this._giveUp(
+                this._lostFrames + ' frames in a row did not reach the canvas (' + why + ')',
+            );
+    }
+
+    /** See VideoRenderer.failed: once, and said in the console. */
+    _giveUp(why) {
+        if (this._failed) return;
+        this._failed = true;
+        console.warn('[WebGpuRenderer] giving up: ' + why);
     }
 
     async draw(frame) {
@@ -2070,8 +2275,13 @@ export class WebGpuRenderer extends VideoRenderer {
         // what a rising framerate turns into). See VideoRenderer.lastDraw.
         const drawStart = performance.now();
         let uploadMs = 0;
-        // Set when the frame came in through an ImageBitmap (see _importFrame).
-        let viaBitmap = false;
+        // Set when the frame came in another way than the import (see
+        // _copyFrame): 'bitmap' into inputTex, 'readback' into readbackTex.
+        let copied = '';
+        // The frame's device, and whether its work went in (see _noteFrame).
+        const device = this._device;
+        let submitted = false;
+        let lostWhy = 'their work did not complete';
 
         const inW = frame.displayWidth || frame.codedWidth || 0;
         const inH = frame.displayHeight || frame.codedHeight || 0;
@@ -2127,17 +2337,22 @@ export class WebGpuRenderer extends VideoRenderer {
             // The external texture feeds either the plain blit or, on a browser
             // that did not tone-map it on import, the ext tone-map pass.
             const useExt = !useYuv && this._hdrExtTonemap && !!this._extPipeline;
-            // A refused import: the frame is copied through an ImageBitmap into
-            // inputTex here (pass 0 done), and the plain copy to the canvas
-            // reads inputTex (see _importFrame).
+            // A refused import: the frame is copied in here (_copyFrame), into
+            // inputTex (pass 0 done) or readbackTex (pass 0 reads it), and the
+            // plain copy to the canvas reads that texture. A frame no way took
+            // in is lost.
             if (!useYuv) {
                 const externalTex = this._importFrame(frame);
                 if (!externalTex) {
-                    viaBitmap = true;
                     const uploadStart = performance.now();
-                    this._ensureInputTex(inW, inH);
-                    await this._copyFrameThroughBitmap(frame, inW, inH);
+                    copied = await this._copyFrame(frame, inW, inH);
                     uploadMs += performance.now() - uploadStart;
+                    if (!copied) {
+                        frame.close();
+                        this._noteFrame(false, 'no way in');
+                        this._noteDraw(drawStart, uploadMs, this._algo + '+lost');
+                        return;
+                    }
                 } else {
                     if (useExt) {
                         this._readHdrKnobs();
@@ -2184,9 +2399,12 @@ export class WebGpuRenderer extends VideoRenderer {
                 if (useYuv) {
                     pass.setPipeline(this._yuvCanvasPipeline);
                     pass.setBindGroup(0, this._yuvBindGroup);
-                } else if (viaBitmap) {
+                } else if (copied) {
                     pass.setPipeline(this._texBlitPipeline);
-                    pass.setBindGroup(0, this._texBlitBindGroup);
+                    pass.setBindGroup(
+                        0,
+                        copied === 'bitmap' ? this._texBlitBindGroup : this._readbackBindGroup,
+                    );
                 } else {
                     pass.setPipeline(useExt ? this._extCanvasPipeline : this._passthroughPipeline);
                     pass.setBindGroup(0, blitBindGroup);
@@ -2196,21 +2414,25 @@ export class WebGpuRenderer extends VideoRenderer {
                 const probing =
                     this._probeActive && this._queueProbeRead(encoder, canvasTex, cw, ch);
                 this._device.queue.submit([encoder.finish()]);
+                submitted = true;
                 if (probing) this._mapProbeRead();
                 frame.close();
                 // Backpressure: resolve only when the GPU finished, so the caller's
                 // render guard reflects real GPU throughput (drop-to-latest then
                 // discards the backlog instead of letting it grow → no lag creep).
                 const gpuStart = performance.now();
+                let done = false;
                 try {
-                    await this._device.queue.onSubmittedWorkDone();
+                    await device.queue.onSubmittedWorkDone();
+                    done = true;
                 } catch (e) {}
+                this._noteFrame(done && device === this._device && this._ready, lostWhy);
                 this._noteDraw(
                     drawStart,
                     uploadMs + (performance.now() - gpuStart),
                     (this._passthrough ? '1:1' : 'off') +
                         (useYuv ? '+yuv' : '') +
-                        (viaBitmap ? '+bitmap' : ''),
+                        (copied ? '+' + copied : ''),
                 );
                 return;
             }
@@ -2218,8 +2440,9 @@ export class WebGpuRenderer extends VideoRenderer {
             this._ensureInputTex(inW, inH);
 
             // Pass 0: external → inputTex (frame res). Already done by the copy
-            // when the frame came in through an ImageBitmap.
-            if (!viaBitmap) {
+            // when the frame came in through an ImageBitmap; from readbackTex
+            // when it was read back.
+            if (copied !== 'bitmap') {
                 const p0 = encoder.beginRenderPass({
                     colorAttachments: [
                         {
@@ -2234,6 +2457,9 @@ export class WebGpuRenderer extends VideoRenderer {
                     // HDR YUV → SDR (ACES) tone-map into inputTex.
                     p0.setPipeline(this._yuvPipeline);
                     p0.setBindGroup(0, this._yuvBindGroup);
+                } else if (copied === 'readback') {
+                    p0.setPipeline(this._texPass0Pipeline);
+                    p0.setBindGroup(0, this._readbackBindGroup);
                 } else {
                     // Plain blit, or the same ACES tone-map fed by the external texture.
                     p0.setPipeline(useExt ? this._extPipeline : this._blitPipeline);
@@ -2401,10 +2627,12 @@ export class WebGpuRenderer extends VideoRenderer {
 
             const probing = this._probeActive && this._queueProbeRead(encoder, canvasTex, cw, ch);
             this._device.queue.submit([encoder.finish()]);
+            submitted = true;
             if (probing) this._mapProbeRead();
         } catch (e) {
             // Once per distinct message: a frame that fails is every frame.
             const msg = String(e && e.message);
+            lostWhy = 'the draw threw: ' + msg;
             if (!this._drawErrors.has(msg)) {
                 this._drawErrors.add(msg);
                 console.error(
@@ -2421,13 +2649,17 @@ export class WebGpuRenderer extends VideoRenderer {
         // VSync-off / worker path submits faster than the GPU presents and the
         // backlog grows unbounded → progressive latency (4K + FSR1 + zoom).
         const gpuStart = performance.now();
+        let done = false;
         try {
-            await this._device.queue.onSubmittedWorkDone();
+            await device.queue.onSubmittedWorkDone();
+            done = true;
         } catch (e) {}
+        // Drawn: its work went in and completed on a device that stayed up.
+        this._noteFrame(submitted && done && device === this._device && this._ready, lostWhy);
         this._noteDraw(
             drawStart,
             uploadMs + (performance.now() - gpuStart),
-            this._algo + (useYuv ? '+yuv' : '') + (viaBitmap ? '+bitmap' : ''),
+            this._algo + (useYuv ? '+yuv' : '') + (copied ? '+' + copied : ''),
         );
     }
 
@@ -2448,6 +2680,11 @@ export class WebGpuRenderer extends VideoRenderer {
         try {
             if (this._intermTex) this._intermTex.destroy();
         } catch (e) {}
+        try {
+            if (this._readbackTex) this._readbackTex.destroy();
+        } catch (e) {}
+        this._readbackTex = null;
+        this._readbackBuf = null;
         try {
             if (this._nisCoefTex) this._nisCoefTex.destroy();
         } catch (e) {}

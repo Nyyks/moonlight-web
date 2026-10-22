@@ -89,6 +89,27 @@ export function plainPicture(s) {
 }
 
 /**
+ * Where the picture goes when its renderer gives up (VideoRenderer.failed):
+ * the pass it ran, on its WebGL2 twin, under the setting as the ladder's
+ * ceiling; the plain copy where the setting has no pass, on the presenter the
+ * page would use for one (plainWebGl). createVideoRenderer answers with
+ * Canvas2D where WebGL2 refuses (Bruno, 22/10/2026: `gl-<algo>`, then
+ * Canvas2D, rather than black).
+ * @param {{ceiling: string, pass: string, plainWebGl?: boolean}} s
+ *   ceiling the setting and pass the rung the renderer was on, as rungs
+ *   ('fsr1', 'nis', 'sgsr', 'mwsr' or 'off'; see EnhancerGovernor.ladderRung)
+ * @returns {{algo: string, ceiling: string, plainWebGl: boolean}}
+ *   the options of createVideoRenderer that change
+ */
+export function rendererAfterFailure(s) {
+    const twin = 'gl-' + s.ceiling;
+    if (!WEBGL_ALGOS.includes(twin))
+        return { algo: 'off', ceiling: 'off', plainWebGl: s.plainWebGl === true };
+    const pass = 'gl-' + s.pass;
+    return { algo: WEBGL_ALGOS.includes(pass) ? pass : 'off', ceiling: twin, plainWebGl: false };
+}
+
+/**
  * Whether this view's frames wait for the screen's vsync: what the native host
  * is told (`client_vsync` at /start, then `clientrefresh`), to run the stream
  * at a divisor of this screen's refresh and to open its window after a press

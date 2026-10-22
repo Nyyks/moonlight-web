@@ -147,6 +147,17 @@ export class VideoRenderer {
         return true;
     }
 
+    /**
+     * True once the renderer has given up putting frames on its canvas: the
+     * WebGPU one, when no frame has reached it for a run of frames or its
+     * device was lost for good (WebGpuRenderer._noteFrame). The page then
+     * moves the picture to another renderer rather than leave it black
+     * (StreamView._replaceFailedRenderer). The others never set it.
+     */
+    get failed() {
+        return false;
+    }
+
     /** Renderer kind for the stats overlay: 'canvas2d' | 'webgpu'. */
     get kind() {
         return 'base';

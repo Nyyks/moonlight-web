@@ -27,6 +27,7 @@ import {
     iosPresentsOnPlainWebGl,
     plainPicture,
     presentsOnVsync,
+    rendererAfterFailure,
 } from '../js/stream/renderers/createRenderer.js';
 import { Canvas2DRenderer } from '../js/stream/renderers/Canvas2DRenderer.js';
 import { WebGpuRenderer } from '../js/stream/renderers/WebGpuRenderer.js';
@@ -196,5 +197,63 @@ describe('presentsOnVsync', () => {
 
     it('keeps the setting until the renderer is made', () => {
         expect(presentsOnVsync({ ...tears, kind: null })).toBe(false);
+    });
+});
+
+/**
+ * Where the picture goes when its WebGPU renderer gives up (Bruno, 22/10/2026:
+ * `gl-<algo>`, then Canvas2D — the second is createVideoRenderer's own answer
+ * to a refused WebGL2).
+ */
+describe('rendererAfterFailure', () => {
+    it('keeps the pass, on its WebGL2 twin, under the setting as ceiling', () => {
+        for (const rung of ['fsr1', 'nis', 'sgsr', 'mwsr'])
+            expect(rendererAfterFailure({ ceiling: rung, pass: rung })).toEqual({
+                algo: 'gl-' + rung,
+                ceiling: 'gl-' + rung,
+                plainWebGl: false,
+            });
+    });
+
+    it('keeps the rung the ladder stood on, below the setting', () => {
+        expect(rendererAfterFailure({ ceiling: 'fsr1', pass: 'mwsr' })).toEqual({
+            algo: 'gl-mwsr',
+            ceiling: 'gl-fsr1',
+            plainWebGl: false,
+        });
+        // stepped down to no pass: the WebGL2 renderer all the same, to climb back
+        expect(rendererAfterFailure({ ceiling: 'fsr1', pass: 'off' })).toEqual({
+            algo: 'off',
+            ceiling: 'gl-fsr1',
+            plainWebGl: false,
+        });
+    });
+
+    it('puts the plain copy on the presenter the page uses for one', () => {
+        expect(rendererAfterFailure({ ceiling: 'off', pass: 'off', plainWebGl: false })).toEqual({
+            algo: 'off',
+            ceiling: 'off',
+            plainWebGl: false,
+        });
+        expect(rendererAfterFailure({ ceiling: 'off', pass: 'off', plainWebGl: true })).toEqual({
+            algo: 'off',
+            ceiling: 'off',
+            plainWebGl: true,
+        });
+    });
+
+    it('lands where createVideoRenderer puts those options', async () => {
+        WebGlRenderer.create.mockClear();
+        Canvas2DRenderer.create.mockClear();
+        const next = rendererAfterFailure({ ceiling: 'mwsr', pass: 'mwsr' });
+        const r = await createVideoRenderer(canvas, { webgpu: false, ...next });
+        expect(r.kind).toBe('webgl');
+        expect(WebGlRenderer.create.mock.calls[0][1]).toMatchObject({ algo: 'gl-mwsr' });
+        // WebGL2 refused: Canvas2D
+        WebGlRenderer.create.mockRejectedValueOnce(new Error('WebGL2 unavailable'));
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const r2 = await createVideoRenderer(canvas, { webgpu: false, ...next });
+        expect(r2.kind).toBe('canvas2d');
+        console.warn.mockRestore();
     });
 });
