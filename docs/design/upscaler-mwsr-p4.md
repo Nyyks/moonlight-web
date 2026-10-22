@@ -249,7 +249,12 @@ Windows le même SwiftShader importe, dorés et conformité exacts), hors de por
 conformité tient désormais ce refus pour « non applicable sur cet adaptateur » et juge le reste (noyau,
 jumeau WebGL2, dorés) ; le côté WebGL2 du job tourne même si le côté WebGPU a échoué. *[Décision de
 Bruno du 22/10 (plan §9) : le job sortira en 0 quand ses seuls problèmes sont « non applicable », en 1
-pour une vraie différence ou un dump manquant.]*
+pour une vraie différence ou un dump manquant.]* *[Fait le 22/10 (journal J29), avec la CI rejouée sous
+Linux dans le WSL de DualRTX : le noir venait du canvas WebGPU, qui ne peut pas présenter sur cette
+plateforme (Chrome détruit le device et l'instance WebGPU de la page, le noyau du labo compris). Les
+chaînes dessinent désormais dans une texture du labo : la chaîne WebGPU, entrée par le bitmap, y est
+exacte sur les neuf cas. Reste une vraie différence propre à Linux, la réduction de la zone plate du
+jumeau WebGL2 (l'échantillonnage WebGPU de SwiftShader y diffère, bilinéaire nu compris) : à Bruno.]*
 
 **Le repli du renderer** (décision de Bruno du 21/10 au soir, relayée par 59 : avant la v0.4.1, pas en
 P6 ; journal J21). Dès le premier refus, `draw()` copie l'image par `createImageBitmap` +
@@ -264,4 +269,7 @@ conditions que la porte) : `done` p50 de la chaîne `mwsr` ×1,2-1,3 celui de l'
 plus chargé (la création du bitmap est asynchrone) ; les cellules WebGL2 des deux passes, que le repli ne
 touche pas, dérivent de 0,91 à 1,21. Un chemin de secours, jamais le chemin normal : acceptable.
 *[Troisième repli décidé par Bruno le 22/10 (plan §9) : `VideoFrame.copyTo` vers RGBA puis
-`writeTexture` ; après N échecs de suite, `gl-<algo>`, puis Canvas2D, au lieu du noir.]*
+`writeTexture` ; après N échecs de suite, `gl-<algo>`, puis Canvas2D, au lieu du noir.]* *[Fait le 22/10
+(journal J29) : la lecture après le bitmap ; 30 images perdues de suite, ou un device perdu avant sa
+première image ou qui ne revient pas, et la page passe sur `gl-<algo>`, Canvas2D si WebGL2 refuse.
+Dorés exacts par la lecture sous Windows et sous Linux.]*

@@ -1154,3 +1154,77 @@ vidéos dans le scratchpad de la session (`photon/`) ; rien du produit n'a chang
   `gl-mwsr`. La décision par classe reste à Bruno (plan §9, P6). Incident : `stream.dev` et
   `stream.moonlightweb.top` injoignables de 11:39 à 11:44 (ligne rendez-vous de la `--dev` perdue puis
   reprise), signalé à 59.
+
+## 2026-10-22 — J29, le troisième repli de l'import, l'abandon du renderer, la CI rejouée sous Linux
+
+Décisions de Bruno du 22/10 (plan §9) : un troisième repli de l'import (`VideoFrame.copyTo` vers RGBA
+puis `writeTexture`), la bascule sur `gl-<algo>` puis Canvas2D quand tout échoue N fois de suite, et la
+règle de sortie du job CI « Upscaler lab ». Codés au go de Bruno, après le `/compact`.
+
+- **Ce que disait la CI du 22/10 au matin (run 39737555924, la première avec le repli bitmap de J21).**
+  Côté WebGPU, 24 problèmes : l'import refusé, puis « Failed to copy content from external image » sur
+  la copie du bitmap, puis les cellules du noyau et leurs dumps en « A valid external Instance reference
+  no longer exists ». Rejoué à l'identique dans le WSL Debian de DualRTX (Chrome 156 stable, SwiftShader,
+  sans GPU : `/dev/dxg` masqué dans un espace de montage à part, le chargeur Vulkan réduit à l'ICD
+  SwiftShader de Chrome, `CI=1` comme sur le runner).
+- **Le vrai coupable : le canvas, pas la copie.** Une page de sonde nue sur la même plateforme : l'import
+  est refusé, mais la copie du bitmap et `copyTo` → `writeTexture` marchent (pixels exacts, toutes les
+  tailles du labo, isolation cross-origin ou non). Ce qui casse, c'est le **canvas WebGPU** : à son premier
+  `getCurrentTexture`, la swap chain ne trouve aucune mémoire partagée à allouer (stderr : « Could not find
+  SharedImageBackingFactory … WebgpuSwapChainTexture », « SharedImageStub: Unable to create shared
+  image »), Chrome détruit le device (`lost` : « destroyed », « Device was destroyed. ») et coupe
+  l'instance WebGPU de toute la page (tous les autres devices, celui du labo compris) ; un nouveau
+  `requestAdapter` repart. Le 21/10, le dessin mourait à l'import, avant le canvas : le noyau était
+  épargné. Le repli bitmap de J21 a mené le dessin jusqu'au canvas, et l'instance est tombée avec lui.
+  Le renderer du produit ignorait la perte « destroyed » : sur cette plateforme il restait noir pour de bon.
+- **Le produit (`WebGpuRenderer`).** Trois voies d'entrée : l'import, puis la copie du bitmap dans
+  `inputTex`, puis la lecture (`copyTo` en RGBA, `writeTexture` dans `readbackTex`, que la passe 0 copie
+  comme la texture externe ; pipeline fait à la première lecture, au format d'`inputTex`, flottant en HDR).
+  Un `copyTo` qui ne sait pas convertir est reconnu par l'accesseur du membre `format` (WebIDL lit tous
+  les membres qu'il connaît) : sinon il rendrait les plans NV12 de l'image, vus comme des couleurs. Le
+  refus du bitmap se redemande avec l'import (tous les 300 draws, et tout de suite après une image
+  perdue). Une image est perdue quand aucune voie ne l'a prise, que le dessin a levé une exception ou
+  que son travail ne s'est pas achevé sur un device resté debout ; 30 de suite (une demi-seconde à 60 i/s)
+  et le renderer abandonne (`failed`). Il abandonne aussi quand son device est perdu avant d'avoir fini
+  une image (le cas Linux : chaque nouveau device subirait le même sort) ou ne revient pas. Une perte
+  « destroyed » n'est plus ignorée : elle n'est la sienne qu'une fois le renderer libéré. Pendant que les
+  images sont copiées, un dessin à la fois (`serialDrawsOnly`) : deux dessins qui attendent pourraient
+  arriver dans le désordre, et la lecture n'a qu'un tampon.
+- **La page (`StreamView`).** Au tick de 500 ms, un renderer qui a abandonné passe la main, une fois :
+  `rendererAfterFailure` donne la passe qu'il faisait sur son jumeau WebGL2 (le réglage en plafond,
+  l'échelle reprise à son barreau), la copie simple sur le présentateur que la page prend pour elle, et
+  `createVideoRenderer` répond par Canvas2D si WebGL2 refuse. Fil principal seulement : dans le worker
+  (option de debug, coupée par défaut) le renderer abandonne mais reste, son `OffscreenCanvas` est le sien.
+- **Le labo.** `importfail=2` refuse aussi la copie du bitmap, `importfail=3` la lecture ; `nopresent=1`
+  fait dessiner les chaînes WebGPU dans une texture du labo à chaque image (le crochet des dumps de J19,
+  étendu), et la conformité le passe toujours ; une chaîne dont la dernière image n'est entrée par aucune
+  voie, ou dont le renderer a abandonné, échoue en le disant. **La règle du job (`p4_flows.conformity`)** :
+  sortie 0 quand les seuls problèmes sont des chaînes non applicables, chacune une annotation
+  `::warning::` sous GitHub Actions ; sortie 1 pour une vraie différence ou une image manquante, avec une
+  annotation `::error::`.
+- **Vérifications.** `vitest` : `WebGpuRendererImport.test.js` 17 cas (les cinq de J21, la lecture, ses
+  refus, l'abandon par images perdues, par travail inachevé, par device détruit, par reprise impossible,
+  la reprise d'un device qui avait dessiné), `rendererAfterFailure` 4, `StreamViewRendererFailed.test.js`
+  6 ; suite complète 1686 tests verts, couverture 94,0 % ; deux mutations (limite à 31, « destroyed » de
+  nouveau ignoré) attrapées. SwiftShader sous Windows (Chrome 155) : conformité OK des deux côtés ;
+  `importfail=1` et `2`, 9 paires dorées exactes sur 9 ; `importfail=3`, non applicable, sortie 0. Sous
+  Linux (WSL, Chrome 156, la plateforme du runner) : côté WebGPU, conformité OK, la chaîne entrée par le
+  bitmap (import refusé) exacte sur les 9 cas et de qualité identique sur les 3 vérités terrain ; par la
+  lecture (`importfail=2`) exacte aussi ; `importfail=3` sous `GITHUB_ACTIONS` : une annotation
+  `::warning::`, sortie 0.
+- **Une vraie différence, révélée sous Linux.** Les paires du jumeau WebGL2 se comparent pour la
+  première fois sous Linux (jusqu'ici les dumps du noyau manquaient) : **zone plate 2560×1440 → 1280×720,
+  `chain-gl-mwsr` contre `mwsr`, max 45/255, 1,01 % des pixels au-dessus de 2/255 : hors tolérance**,
+  sortie 1 au pas WebGL2 (sous Windows : 3/255, 0,009 %). Les dumps d'une plateforme à l'autre : le
+  jumeau GL est identique au bit près sous Linux et sous Windows ; c'est le côté WebGPU qui bouge, et pas
+  le noyau : le bilinéaire nu du labo (`tex-s1`) diffère déjà de 36/255 sur 1,4 % des pixels (la moitié
+  droite, où la mire approche Nyquist), `mwsr` de 45, les vues sRGB de 49. Chrome 155 et 156 sous Linux
+  donnent les mêmes images au bit près (Chrome for Testing 155.0.8059.84) : c'est la plateforme, pas la
+  version. Piste : l'interpolation des varyings du triangle plein écran côté WebGPU de SwiftShader
+  (le jumeau GL, identique partout, ne dépend pas d'elle de la même façon) ; non vérifiée. Le texte, lui,
+  diffère partout entre les deux plateformes : l'entrée elle-même, les polices du système.
+- **Verdict.** Le troisième repli et la bascule sont en place et vérifiés ; la chaîne WebGPU du produit
+  redevient jugeable sur le runner. Avec la règle décidée, le job sortira en 1 au pas WebGL2 sur la
+  seule réduction de la zone plate. À Bruno : la garder comme différence connue, ou juger cette paire
+  contre l'écart des deux bilinéaires nus des deux API sur les mêmes pixels (un changement de méthode
+  de C11).
