@@ -7748,6 +7748,70 @@ qui lit une vidéo pendant le stream, l'ancienne chaîne (« D3D11 » dans
 l'admin) fait près d'un tiers d'à-coups en moins, mais chaque image part
 1,6 ms plus tard, et le stream saccade dans les deux cas.
 
+### 8y.5 La bascule vers le mode jeu sur un bureau immobile, et ce que coûte la copie du bureau (22/10/2026, 16:16-16:37)
+
+**Le défaut, lu dans la trace de Bruno du 21/10** (bascules jeu ↔ bureau,
+« lags de plusieurs secondes »). D'abord une précaution de lecture : les
+lignes `frame` du click trace ne comptent pas les renvois (`traceFrame` est
+sauté pour un `resend`), donc un « trou entre bitstreams » sur un bureau
+immobile est normal et invisible chez le client. La plupart des trous de 0,8
+à 1,9 s de cette trace en sont : que des réveils `timeout`, ou `pointer` en
+mode bureau, où le client dessine lui-même le curseur. Un seul est un vrai
+défaut, juste après la bascule bureau → jeu de 15:00:59.392 : rien ne bouge
+pendant 0,6 s, puis **36 réveils « pointeur seul » sans aucune image** (0,36 s
+de mouvements), jusqu'à une présentation ; ensuite chaque mouvement donne bien
+une image. Cause : en mode jeu, l'hôte dessine le pointeur dans l'image et le
+redessine, sur un mouvement seul, à partir d'une copie du bureau. Cette copie
+(`retain`, `WindowsSession.cpp`) n'est faite **qu'en mode jeu**, pour ne rien
+coûter en mode bureau. Après la bascule, sur un bureau immobile, il n'y en a
+pas : le mouvement est ignoré (`!hasHeld()`), et le keyframe forcé par la
+bascule renvoie la dernière image convertie, sans pointeur. **Sur un bureau
+tout à fait immobile, le pointeur reste invisible et figé jusqu'à ce que
+l'écran change.** Défaut voisin : la copie n'est jamais lâchée en repassant
+en mode bureau, donc jeu → bureau → l'écran change → jeu peut redessiner
+l'écran d'avant. Linux et macOS gardent leur dernière image dans les deux
+modes ; seul Windows a le défaut.
+
+**Ce que coûte la copie, sur le N95** (`--native-bench` 1080p HEVC 60 i/s
+30 Mbit/s, chaîne D3D12, le clip 1080p60 en fenêtre, 70 s par passe, bras
+alternés, exe de banc `575879fe…` de build\ à dbe80d31). Bras « copie » : le
+pointeur immobile sur Display 1, celui qu'on capture. Bras « sans copie » : le
+pointeur garé sur Display 2 huit secondes après le démarrage, puisque l'hôte
+remet au milieu de l'écran capturé un pointeur trouvé ailleurs au départ
+(« put in the middle (once per session) »). La position est relue au début et
+à la fin de chaque passe ; le temps est pris sur les images après +10 s.
+
+| bras | présent → bitstream p50 (ms) | moyenne | p99 |
+|---|---|---|---|
+| copie (pointeur sur Display 1) | 5,17 / 5,15 | 5,90 | 15,2 |
+| sans copie (pointeur sur Display 2) | 4,27 / 4,25 | 4,93 | 14,7 |
+
+**La copie coûte +0,89 ms au p50** (+0,97 en moyenne) sur cet iGPU, soit 21 %
+de la latence de l'hôte : elle déplace plus d'octets que la conversion elle-même
+(16,6 Mo lus et écrits par image 1080p, contre ~11 pour la conversion). Une
+première série à 16:16 ne compte pas : le pointeur garé avant le démarrage avait
+été recentré par l'hôte, et ses deux bras copiaient (5,13 contre 5,14 ms). Les
+temps GPU par image (`gputiming=1`) sont trop rares dans la trace (10 à 70 images
+par passe) pour ce genre d'écart ; le p50 sur ~3 500 images varie, lui, de
+±0,05 ms d'une passe à l'autre.
+
+**Ce que ça décide.** Garder la copie en mode bureau aussi (correctif A, une
+condition) ajouterait ~0,9 ms à chaque image en mode bureau sur un mini-PC
+Intel, négligeable sur une carte dédiée. Le correctif B ne coûte rien en régime
+établi : à la bascule vers le mode jeu sans copie fraîche, rouvrir la
+duplication, dont la première image est le bureau entier, pour ~10 à 50 ms une
+fois par bascule. Les deux lâchent aussi une copie périmée. Choix de Bruno ;
+recommandation B. Le mode jeu avec un pointeur visible paie déjà ces 0,9 ms
+aujourd'hui sur le N95.
+
+Dépouillement : `scratchpad\ptr_sum.py` ; données `bench\n95-day3\pon{1,2}b`,
+`poff{1,2}b` (`*.out.txt`, `*.csv`, `*.click-trace.csv`, `*.park.txt`), trace
+de Bruno `bench\bruno\`. N95 rendu propre à 16:37, pointeur remis où il était.
+
+**Concrètement, pour l'utilisateur** : aujourd'hui, passer en mode jeu sur un
+bureau immobile peut laisser le pointeur invisible et figé jusqu'à ce que
+l'écran change. Le correctif est à choisir.
+
 ## 9. Pour l'A/B
 
 Le banc encode vers un puits ; l'A/B se fait sur un vrai flux. Une session
