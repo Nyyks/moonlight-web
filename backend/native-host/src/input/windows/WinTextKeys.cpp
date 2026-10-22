@@ -218,19 +218,20 @@ struct Mods
 
 /// What has to be down for a key at @p level, beside what the viewer holds.
 ///
-/// Shift and AltGr are the host layout's decision, not the viewer's hand's:
-/// the viewer pressed Shift for their own layout, where 1 on AZERTY is
-/// Shift+&, and on a US host that character is VK_1 with nothing held. Left in
-/// place, the viewer's Shift turned every AZERTY digit into a US symbol on the
-/// way through (10/09/2026). A Ctrl or an Alt the viewer holds ALONE is a
-/// chord they asked for and stays; held together they are AltGr, a level like
-/// Shift.
+/// Shift is the host layout's decision, not the viewer's hand's: the viewer
+/// pressed Shift for their own layout, where 1 on AZERTY is Shift+&, and on a
+/// US host that character is VK_1 with nothing held. Left in place, the
+/// viewer's Shift turned every AZERTY digit into a US symbol on the way
+/// through (10/09/2026). So are the Ctrl and Alt of an AltGr, or a Mac's
+/// Option, when the client says they chose the character (altLevel). Held
+/// otherwise they are a shortcut the viewer asked for — Ctrl+A, Ctrl+Alt+T —
+/// and stay.
 Mods wantFor(uint8_t level, const WinHeldMods& held)
 {
     Mods want;
     want.shift = (level & 1) != 0;
-    want.ctrl = (level & 2) != 0 || (held.ctrl && !held.alt);
-    want.alt = (level & 4) != 0 || (held.alt && !held.ctrl && !held.altLevel);
+    want.ctrl = (level & 2) != 0 || (held.ctrl && !held.altLevel);
+    want.alt = (level & 4) != 0 || (held.alt && !held.altLevel);
     return want;
 }
 
@@ -251,15 +252,34 @@ void tap(std::vector<WinKeyEvent>& out, const WinStroke& s)
     pushKey(out, s.vk, s.scan, s.extended, true);
 }
 
+/// A tap of an unassigned virtual key (AutoHotkey's menu mask is the same
+/// key). An Alt that goes down and up with no other key between is a tap of
+/// Alt to Windows, which hands the keys to the menu bar; with Shift, Alt+Shift
+/// switches the input language. A Mac's Option is exactly that Alt, let go
+/// and put back alone here.
+void mask(std::vector<WinKeyEvent>& out)
+{
+    pushKey(out, kWinMaskVk, 0, false, false);
+    pushKey(out, kWinMaskVk, 0, false, true);
+}
+
 /// From the modifiers that are down to the ones wanted: let go first, then
-/// press, so a level is never briefly both.
+/// press, so a level is never briefly both. An Alt down without Ctrl is masked
+/// before anything under it is let go, and after it is pressed alone. Under a
+/// Ctrl, Windows reads Alt as an ordinary key, which opens nothing.
 void transition(Mods& now, const Mods& want, std::vector<WinKeyEvent>& out)
 {
+    const bool letsGo =
+        (now.shift && !want.shift) || (now.alt && !want.alt) || (now.ctrl && !want.ctrl);
+    if (letsGo && now.alt && !now.ctrl) mask(out);
     if (now.shift && !want.shift) pushKey(out, VK_SHIFT, kShiftScan, false, true);
     if (now.alt && !want.alt) pushKey(out, VK_MENU, kAltScan, false, true);
     if (now.ctrl && !want.ctrl) pushKey(out, VK_CONTROL, kCtrlScan, false, true);
     if (!now.ctrl && want.ctrl) pushKey(out, VK_CONTROL, kCtrlScan, false, false);
-    if (!now.alt && want.alt) pushKey(out, VK_MENU, kAltScan, false, false);
+    if (!now.alt && want.alt) {
+        pushKey(out, VK_MENU, kAltScan, false, false);
+        if (!want.ctrl) mask(out);
+    }
     if (!now.shift && want.shift) pushKey(out, VK_SHIFT, kShiftScan, false, false);
     now = want;
 }
@@ -486,6 +506,21 @@ bool WinKeyLayout::chordKey(char32_t ch, WinStroke& out) const
     return false;
 }
 
+bool WinKeyLayout::letterKey(char32_t ch, WinStroke& out) const
+{
+    const char32_t upper = ch >= U'a' && ch <= U'z' ? ch - (U'a' - U'A') : ch;
+    if (upper < U'A' || upper > U'Z') return false;
+    // A letter's virtual key is the letter itself, on every layout.
+    const UINT mapped = ::MapVirtualKeyExW(static_cast<UINT>(upper), MAPVK_VK_TO_VSC_EX,
+                                           reinterpret_cast<HKL>(m_Hkl));
+    if ((mapped & 0xFF) == 0) return false;
+    out = WinStroke{};
+    out.vk = static_cast<uint8_t>(upper);
+    out.scan = static_cast<uint8_t>(mapped & 0xFF);
+    out.extended = ((mapped >> 8) & 0xFF) == 0xE0;
+    return true;
+}
+
 size_t WinKeyLayout::size(bool capsLock) const
 {
     const Table& t = m_Tables[capsLock ? 1 : 0];
@@ -496,6 +531,9 @@ WinTextCounts planText(const WinKeyLayout& layout, const std::u32string& text, b
                        WinHeldMods held, std::vector<WinKeyEvent>& out)
 {
     WinTextCounts counts;
+    // Text types characters: a Ctrl and an Alt held together under it are
+    // AltGr, as they always were for text, never a two-modifier shortcut.
+    if (held.ctrl && held.alt) held.altLevel = true;
     const Mods rest{held.shift, held.ctrl, held.alt};
     Mods now = rest;
 
@@ -552,15 +590,14 @@ WinTextCounts planText(const WinKeyLayout& layout, const std::u32string& text, b
 
 void planKeyEdge(const WinStroke& key, bool down, WinHeldMods held, std::vector<WinKeyEvent>& out)
 {
-    const Mods rest{held.shift, held.ctrl, held.alt};
-    if (down) {
-        Mods now = rest;
-        transition(now, wantFor(key.mods, held), out);
-        pushKey(out, key.vk, key.scan, key.extended, false);
+    if (!down) {
+        pushKey(out, key.vk, key.scan, key.extended, true);
         return;
     }
-    pushKey(out, key.vk, key.scan, key.extended, true);
-    Mods now = wantFor(key.mods, held);
+    const Mods rest{held.shift, held.ctrl, held.alt};
+    Mods now = rest;
+    transition(now, wantFor(key.mods, held), out);
+    pushKey(out, key.vk, key.scan, key.extended, false);
     transition(now, rest, out);
 }
 

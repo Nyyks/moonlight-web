@@ -1172,6 +1172,7 @@ WinHeldMods Win32Input::heldModsLocked() const
     mods.shift = held(VK_SHIFT, VK_LSHIFT, VK_RSHIFT);
     mods.ctrl = held(VK_CONTROL, VK_LCONTROL, VK_RCONTROL);
     mods.alt = held(VK_MENU, VK_LMENU, VK_RMENU);
+    mods.win = m_HeldKeys.count(VK_LWIN) || m_HeldKeys.count(VK_RWIN);
     return mods;
 }
 
@@ -1211,20 +1212,37 @@ void Win32Input::injectChar(const InputEvent& event, bool down)
         m_CharKeys.erase(it);
         m_HeldKeys.erase(key.vk);
         m_HeldScan.erase(key.vk);
-        WinHeldMods held = heldModsLocked();
-        held.altLevel = event.altGraph;
-        planKeyEdge(key, false, held, plan);
+        // The key alone: its levels went back on the press.
+        planKeyEdge(key, false, WinHeldMods{}, plan);
     } else {
         const bool caps = (::GetKeyState(VK_CAPITAL) & 0x0001) != 0;
         const WinRecipe recipe = layout && !layout->ime() ? layout->recipe(ch, caps) : WinRecipe{};
         std::lock_guard<std::mutex> lock(m_HeldMutex);
         WinHeldMods held = heldModsLocked();
-        // A Mac's Option composed it, as AltGr does: its Alt is a level here.
+        // AltGr, or a Mac's Option, composed it: their Ctrl and Alt are a
+        // level here. Otherwise a Ctrl, an Alt or the Windows key held makes
+        // the key a shortcut.
         held.altLevel = event.altGraph;
-        if (recipe.kind == WinRecipe::Kind::Key) {
-            // Held like the key it is, and repeating like one. Nothing pressed
-            // here is ever recorded as the viewer's own modifier: m_HeldKeys
-            // gets the character's key, never the levels around it.
+        const bool shortcut = (held.ctrl || held.alt || held.win) && !held.altLevel;
+        WinStroke letter;
+        const bool byLetter = shortcut && layout && !layout->ime() && layout->letterKey(ch, letter);
+        if (byLetter) {
+            // A shortcut names a key, and a program reads it by virtual key:
+            // Ctrl+A is the key this layout calls A, under exactly what the
+            // viewer holds, Caps Lock or not, where Ctrl+a typed as a
+            // character would add or lift a Shift, or be Unicode on a layout
+            // with no "a" at all (Russian). The client sends a shortcut's
+            // other keys by their position.
+            m_CharKeys[ch] = letter;
+            m_HeldKeys.insert(letter.vk);
+            m_HeldScan[letter.vk] =
+                static_cast<uint16_t>(letter.scan | (letter.extended ? 0xE000 : 0));
+            planChordEdge(letter, true, plan);
+            if (diagnosing()) reportChord(ch, letter);
+        } else if (recipe.kind == WinRecipe::Kind::Key) {
+            // Held like the key it is. Nothing pressed here is ever recorded
+            // as the viewer's own modifier: m_HeldKeys gets the character's
+            // key, never the levels around it, which go back at once.
             m_CharKeys[ch] = recipe.key;
             m_HeldKeys.insert(recipe.key.vk);
             m_HeldScan[recipe.key.vk] =
@@ -1236,7 +1254,7 @@ void Win32Input::injectChar(const InputEvent& event, bool down)
         } else {
             planUnicode(text, plan);
         }
-        if (diagnosing()) reportCharPlan(ch, recipe, hkl);
+        if (diagnosing() && !byLetter) reportCharPlan(ch, recipe, hkl);
     }
     sendPlan(plan);
 }

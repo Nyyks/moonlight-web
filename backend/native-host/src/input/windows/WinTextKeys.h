@@ -81,6 +81,10 @@ struct WinRecipe
     WinStroke base; ///< DeadKey: the key after it
 };
 
+/// The key a plan taps so that an Alt is never seen going down and up alone:
+/// an unassigned virtual key, sent as itself, with no scancode.
+constexpr uint8_t kWinMaskVk = 0xE8;
+
 /// The modifiers the viewer holds on the host — Win32Input's own record of
 /// what it pressed for them, generic and sided VKs alike.
 struct WinHeldMods
@@ -88,9 +92,12 @@ struct WinHeldMods
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
-    /// The Alt held is a level, not a chord: a Mac's Option composed the
-    /// character, as AltGr does, so it is let go when the layout does not
-    /// need it — "{" is Shift+[ on a US host, not Alt+Shift+[.
+    bool win = false;
+    /// The Ctrl and Alt held are a level, not a shortcut: AltGr, or a Mac's
+    /// Option, chose the character on the client, so they are let go when
+    /// the host's layout does not need them — "@" from a French AltGr is
+    /// Shift+2 on a US host, "{" from a Mac's Option is Shift+[. Without it,
+    /// a Ctrl or an Alt held is a shortcut (Ctrl+A, Ctrl+Alt+T) and stays.
     bool altLevel = false;
 };
 
@@ -167,6 +174,12 @@ public:
     /// key Z, whatever level z sits at. False when the layout has none.
     bool chordKey(char32_t ch, WinStroke& out) const;
 
+    /// The key Windows calls @p ch on this layout, for an ASCII letter in a
+    /// shortcut from a physical keyboard: programs read Ctrl+A by its virtual
+    /// key, which every layout keeps — a Russian one at the US place of A,
+    /// where no key types "a". False for anything but a letter.
+    bool letterKey(char32_t ch, WinStroke& out) const;
+
     /// What @p stroke types: 1 and the character, -1 and the accent for a dead
     /// key, 0 for nothing. The same read the table was built from, through
     /// ToUnicodeEx without touching the dead-key state.
@@ -206,6 +219,8 @@ private:
 /// The layout decides Shift and AltGr: a Shift or an AltGr the viewer holds
 /// and a character does not need is let go for it, and put back at the end.
 /// A Ctrl or an Alt held alone is a chord the viewer asked for, and stays.
+/// An Alt let go or put back alone is masked (kWinMaskVk), so Windows never
+/// takes it for a tap of Alt.
 /// Tab, Enter (any of \n, \r, \r\n) are their keys; other control characters
 /// are dropped, never typed as the Ctrl chords that would make them.
 WinTextCounts planText(const WinKeyLayout& layout, const std::u32string& text, bool capsLock,
@@ -218,10 +233,13 @@ WinTextCounts planUnicode(const std::u32string& text, std::vector<WinKeyEvent>& 
 
 /// One edge of a key held for a character from a physical keyboard (the
 /// layout fidelity path, CharDown/CharUp): the same rule as text for the
-/// levels around it, but the key stays down between the two calls, so it
-/// repeats like a key. The press lets go of the levels the character does not
-/// need and presses the ones it does; the release undoes that against what
-/// the viewer holds THEN, which may have changed meanwhile.
+/// levels around it, but the key stays down between the two calls. The press
+/// sets the levels the character needs, presses the key and puts the levels
+/// back as the viewer holds them, all in one batch; the release lets go of
+/// the key alone. Windows repeats nothing it is sent — the client's repeats
+/// come as presses — so no level has to stay down with the key, and one that
+/// did was under the next key typed while this one was still down: "1a"
+/// rolled on a US keyboard came out "1A" on an AZERTY host.
 void planKeyEdge(const WinStroke& key, bool down, WinHeldMods held, std::vector<WinKeyEvent>& out);
 
 /// One edge of a chord's key (Ctrl+z from the touch keyboard's bar): the key

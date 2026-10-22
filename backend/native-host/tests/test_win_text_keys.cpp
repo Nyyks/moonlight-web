@@ -27,7 +27,8 @@ using namespace mw::native::input;
 // press for it, on the host's own layout: é is the 2 key on a French AZERTY,
 // ê is the dead ^ then e, @ is AltGr+à. The layouts below are the ones the
 // plan names: the French AZERTY (legacy), the French AFNOR, US, German, and US
-// International — each one is either already loaded in this session or loaded
+// International, and Russian for a layout with no Latin letter at all — each
+// one is either already loaded in this session or loaded
 // for the test only, never activated, and unloaded when the test is done. The
 // layout the person at this PC types with is never touched.
 
@@ -286,14 +287,52 @@ void frenchLegacy(const WinKeyLayout& fr)
     CHECK(fr.chordKey(U'1', key) && key.vk == '1' && key.mods == 0);
 
     // A Mac's Option for { on the French host: AltGr+4 there, so the Alt it
-    // holds stays and Ctrl joins it — the case that worked by chance before.
+    // holds stays and Ctrl joins it for the press — the case that worked by
+    // chance before.
     {
         WinHeldMods option;
         option.alt = true;
         option.altLevel = true;
         std::vector<WinKeyEvent> down;
         planKeyEdge(fr.recipe(U'{', false).key, true, option, down);
-        CHECK(down.size() == 2 && down[0].vk == VK_CONTROL && !down[0].up && down[1].vk == '4');
+        CHECK(down.size() == 3 && down[0].vk == VK_CONTROL && !down[0].up && down[1].vk == '4' &&
+              !down[1].up && down[2].vk == VK_CONTROL && down[2].up);
+    }
+
+    // Keys rolled over each other: a US keyboard's "1", then its "a" before
+    // the 1 is let go. The 1 is Shift+& here; the Shift went back up with the
+    // press, so the a is no capital — it was, while the 1's Shift stayed down.
+    {
+        std::vector<WinKeyEvent> plan;
+        planKeyEdge(fr.recipe(U'1', false).key, true, WinHeldMods{}, plan);
+        planKeyEdge(fr.recipe(U'a', false).key, true, WinHeldMods{}, plan);
+        planKeyEdge(fr.recipe(U'1', false).key, false, WinHeldMods{}, plan);
+        planKeyEdge(fr.recipe(U'a', false).key, false, WinHeldMods{}, plan);
+        CHECK(typeOut(fr, plan, false, WinHeldMods{}) == U"1a");
+        CHECK(balanced(plan, WinHeldMods{}));
+        // A release is the key alone.
+        std::vector<WinKeyEvent> up;
+        planKeyEdge(fr.recipe(U'1', false).key, false, WinHeldMods{}, up);
+        CHECK(up.size() == 1 && up[0].vk == '1' && up[0].up);
+    }
+
+    // A left Ctrl+Alt is a shortcut, not AltGr, unless the client says AltGr
+    // chose the character: Ctrl+Alt+T keeps both.
+    {
+        WinHeldMods ctrlAlt;
+        ctrlAlt.ctrl = ctrlAlt.alt = true;
+        std::vector<WinKeyEvent> plan;
+        planKeyEdge(fr.recipe(U't', false).key, true, ctrlAlt, plan);
+        CHECK(plan.size() == 1 && plan[0].vk == 'T' && !plan[0].up);
+    }
+
+    // The key Windows calls A, for a shortcut: where the AZERTY types a.
+    {
+        WinStroke letter;
+        CHECK(fr.letterKey(U'a', letter) && letter.vk == 'A' && letter.scan == 0x10);
+        CHECK(fr.letterKey(U'Z', letter) && letter.vk == 'Z' && letter.scan == 0x11);
+        CHECK(!fr.letterKey(U'1', letter));
+        CHECK(!fr.letterKey(U'\u00E9', letter));
     }
 
     // Plans.
@@ -431,6 +470,8 @@ void unitedStates(const WinKeyLayout& us)
     // A Mac's Option composes { on its AZERTY, as AltGr would: the viewer's
     // Alt is a level, let go for the key — Shift+[ on a US host. Kept as a
     // chord, it was Alt+Shift+[, a shortcut. A plain left Alt stays a chord.
+    // The Alt let go alone, and put back alone, is masked on both sides: an
+    // Alt down then up with nothing between gives the menu bar the keys.
     {
         const WinRecipe brace = us.recipe(U'{', false);
         CHECK(isKey(brace, kVkOem4, 1));
@@ -440,15 +481,64 @@ void unitedStates(const WinKeyLayout& us)
         std::vector<WinKeyEvent> down, up;
         planKeyEdge(brace.key, true, option, down);
         planKeyEdge(brace.key, false, option, up);
-        CHECK(down.size() == 3 && down[0].vk == VK_MENU && down[0].up && down[1].vk == VK_SHIFT &&
-              !down[1].up && down[2].vk == kVkOem4 && !down[2].up);
-        CHECK(up.size() == 3 && up[0].vk == kVkOem4 && up[0].up && up[1].vk == VK_SHIFT &&
-              up[1].up && up[2].vk == VK_MENU && !up[2].up);
+        CHECK(down.size() == 9);
+        if (down.size() == 9) {
+            CHECK(down[0].vk == kWinMaskVk && !down[0].up && down[0].scan == 0);
+            CHECK(down[1].vk == kWinMaskVk && down[1].up);
+            CHECK(down[2].vk == VK_MENU && down[2].up);
+            CHECK(down[3].vk == VK_SHIFT && !down[3].up);
+            CHECK(down[4].vk == kVkOem4 && !down[4].up);
+            CHECK(down[5].vk == VK_SHIFT && down[5].up);
+            CHECK(down[6].vk == VK_MENU && !down[6].up);
+            CHECK(down[7].vk == kWinMaskVk && !down[7].up);
+            CHECK(down[8].vk == kWinMaskVk && down[8].up);
+        }
+        CHECK(up.size() == 1 && up[0].vk == kVkOem4 && up[0].up);
+        std::vector<WinKeyEvent> both = down;
+        both.insert(both.end(), up.begin(), up.end());
+        CHECK(typeOut(us, both, false, option) == U"{");
+        CHECK(balanced(both, option));
+
+        // The chord's Alt stays; the Shift let go under it is masked too, as
+        // Alt+Shift released alone switches the input language.
         WinHeldMods chord;
         chord.alt = true;
         std::vector<WinKeyEvent> kept;
         planKeyEdge(brace.key, true, chord, kept);
-        CHECK(kept.size() == 2 && kept[0].vk == VK_SHIFT && kept[1].vk == kVkOem4);
+        CHECK(kept.size() == 5 && kept[0].vk == VK_SHIFT && kept[1].vk == kVkOem4 &&
+              kept[2].vk == kWinMaskVk && kept[4].vk == VK_SHIFT && kept[4].up);
+    }
+
+    // A French AltGr's "@": the client says AltGr chose it, so its Ctrl and
+    // Alt go for Shift+2 here and come back after. Under Ctrl, Alt is no menu
+    // key: nothing to mask.
+    {
+        WinHeldMods altGr;
+        altGr.ctrl = altGr.alt = altGr.altLevel = true;
+        std::vector<WinKeyEvent> plan;
+        planKeyEdge(us.recipe(U'@', false).key, true, altGr, plan);
+        planKeyEdge(us.recipe(U'@', false).key, false, altGr, plan);
+        CHECK(typeOut(us, plan, false, altGr) == U"@");
+        CHECK(balanced(plan, altGr));
+        bool masked = false;
+        for (const WinKeyEvent& e : plan)
+            masked = masked || e.vk == kWinMaskVk;
+        CHECK(!masked);
+    }
+
+    // An AZERTY keyboard's Shift held for "1", then "A" rolled over it: the
+    // 1 is unshifted here, the Shift comes back for the A.
+    {
+        WinHeldMods shift;
+        shift.shift = true;
+        std::vector<WinKeyEvent> plan;
+        planKeyEdge(us.recipe(U'1', false).key, true, shift, plan);
+        planKeyEdge(us.recipe(U'A', false).key, true, shift, plan);
+        CHECK(typeOut(us, plan, false, shift) == U"1A");
+    }
+    {
+        WinStroke letter;
+        CHECK(us.letterKey(U'a', letter) && letter.vk == 'A' && letter.scan == 0x1E);
     }
     roundTripTable(us, "US");
 }
@@ -487,6 +577,19 @@ void unitedStatesInternational(const WinKeyLayout& usx)
     planText(usx, U"echo \"l'\u00E9t\u00E9\"", false, WinHeldMods{}, plan);
     CHECK(typeOut(usx, plan, false, WinHeldMods{}) == U"echo \"l'\u00E9t\u00E9\"");
     roundTripTable(usx, "US International");
+}
+
+void russian(const WinKeyLayout& ru)
+{
+    // No key types a Latin "a" here, so a shortcut's letter goes by the key
+    // Windows calls A, which this layout keeps where US has it. Typed as a
+    // character, Ctrl+a was Unicode under Ctrl: nothing a program reads as
+    // Ctrl+A.
+    CHECK(ru.recipe(U'a', false).kind == WinRecipe::Kind::Unicode);
+    WinStroke letter;
+    CHECK(ru.letterKey(U'a', letter) && letter.vk == 'A' && letter.scan == 0x1E);
+    CHECK(isKey(ru.recipe(U'\u0444', false), 'A', 0)); // ф, on that key
+    roundTripTable(ru, "Russian");
 }
 
 void withLayout(const wchar_t* klid, const char* name, void (*test)(const WinKeyLayout&))
@@ -533,6 +636,7 @@ void run_win_text_keys_tests()
     withLayout(L"00000409", "US", unitedStates);
     withLayout(L"00000407", "German", german);
     withLayout(L"00020409", "US International", unitedStatesInternational);
+    withLayout(L"00000419", "Russian", russian);
 
     {
         // Unicode only: an input method open, or no layout to read.
