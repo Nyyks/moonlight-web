@@ -339,7 +339,11 @@ def _gate_files(a, tag):
     found = {}
     for name, _ in gate_cases(a):
         p = os.path.join(a.dir, "%s-%s.json" % (tag, name))
-        posted = sorted(glob.glob(os.path.join(a.dir, "phone-%s-%s-*.json" % (tag, name))))
+        # phone-<tag>-x2-text-*.json also matches the -tick case's files: keep
+        # the ones whose suffix is the posting time alone
+        head = "phone-%s-%s-" % (tag, name)
+        posted = sorted(f for f in glob.glob(os.path.join(a.dir, head + "*.json"))
+                        if os.path.basename(f)[len(head):-len(".json")].isdigit())
         if posted:
             p = posted[-1]
         if os.path.exists(p):
