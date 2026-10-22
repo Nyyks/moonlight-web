@@ -31,7 +31,11 @@ import { AudioPipeline } from '../audio/AudioPipeline.js';
 import * as streamVolume from '../audio/streamVolume.js';
 import { JitterController } from '../stream/JitterController.js';
 import { FramePacer } from '../stream/FramePacer.js';
-import { measureRefreshRate, onRefreshRateChange } from '../util/RefreshRate.js';
+import {
+    currentRefreshMilliHz,
+    measureRefreshRate,
+    onRefreshRateChange,
+} from '../util/RefreshRate.js';
 import { devicePixelSize } from '../util/StreamResolution.js';
 import { PeriodicStallDetector } from '../stream/PeriodicStallDetector.js';
 import { GamepadManager } from '../stream/GamepadManager.js';
@@ -5726,8 +5730,11 @@ export class StreamView {
     //
     // /start carried what the monitor had measured by then (possibly nothing,
     // on a page that launched within its first second). From here on the view
-    // measures once more now and listens for a change — the window moving to
-    // another monitor — and tells the host only when the number really moved.
+    // listens for a change — the window moving to another monitor — and tells
+    // the host only when the number really moved. It measures now only when
+    // nothing was measured yet: a stream that is starting is the page at its
+    // busiest, and a phone read its 120 Hz as 112 then (RefreshRate.js, "Under
+    // load").
     // The host re-chooses its cadence between two frames; nothing relaunches.
     // Native host only: no other host can be told how to pace its capture.
     _startRefreshWatch() {
@@ -5745,7 +5752,9 @@ export class StreamView {
             if (this._stepper) this._stepper.linkChanged('the screen changed', performance.now());
         };
         this._offRefreshChange = onRefreshRateChange(tell);
-        measureRefreshRate().then(tell, () => {});
+        const known = currentRefreshMilliHz();
+        if (known) tell(known);
+        else measureRefreshRate().then(tell, () => {});
     }
 
     _stopRefreshWatch() {

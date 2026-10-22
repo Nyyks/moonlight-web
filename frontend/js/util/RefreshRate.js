@@ -50,6 +50,21 @@
  * read 34 Hz and the Freebox Player POP's 50 Hz read 29.4; the host took the
  * 34 for a new screen and ran a stream set to 30 at 34 fps, at the ceiling of
  * that TV's decoder.
+ *
+ * ── Under load ──────────────────────────────────────────────────────────────
+ *
+ * A phone streaming is loaded too, and its readings come out low the same way:
+ * the realme Note 60 (Mali-G57, WebGL2 at 1080p) read 35-39 Hz, the iPhone 13
+ * Pro's 120 Hz read 112-116, and the host, which runs the stream at a divisor
+ * of that number, went to 56-58 fps and lost its cadence's lock (22/10/2026;
+ * on WebGPU, lighter on the main thread, the iPhone read 120). Once more than
+ * half the frames are skipped, the median is the doubled period and the
+ * mean mixes the two; a frame shown between two refreshes' worth lands in the
+ * mean as well. Either way the good deltas are no longer one tight cluster.
+ * So a reading LOWER than the last one is believed only when it is clean —
+ * its deltas within SPREAD_MAX of the period, few of them left out: a window
+ * that really moved to a slower screen reads clean, a page under load does
+ * not. A higher reading is always believed: no load makes a screen faster.
  */
 
 import { IS_LOW_MEMORY, IS_TV } from './BrowserDetect.js';
@@ -65,6 +80,14 @@ let _resizeTimer = null;
 
 /** A change under one percent is jitter, not a new screen. */
 const CHANGE_THRESHOLD = 0.01;
+
+/** A clean reading ("Under load"): the good deltas' standard deviation within
+ *  this share of the period, or SPREAD_FLOOR_MS (a millisecond clock alone
+ *  spreads a 240 Hz panel's 4.17 ms over 4 and 5), and no more than
+ *  LEFT_OUT_MAX of the deltas outside the median's band. */
+const SPREAD_MAX = 0.15;
+const SPREAD_FLOOR_MS = 0.6;
+const LEFT_OUT_MAX = 0.25;
 
 /** How long the precise reading follows rAF, and the least it keeps. */
 const PRECISE_MS = 12000;
@@ -164,15 +187,31 @@ function _settle(stamps) {
     // 10 Hz to 1000 Hz: anything else is not a screen.
     if (!(median >= 1 && median <= 100)) return _milliHz;
     let sum = 0;
+    let sumSq = 0;
     let count = 0;
     for (const d of deltas) {
         // A delta half again the median is a skipped frame, not a refresh.
         if (d > median * 1.5 || d < median * 0.5) continue;
         sum += d;
+        sumSq += d * d;
         count++;
     }
     const period = count > 0 ? sum / count : median;
     let mhz = Math.round(1e6 / period);
+    // Lower than the last reading, and not clean: the page under load, not
+    // a slower screen ("Under load"). The last reading stands.
+    const spread = count > 1 ? Math.sqrt(Math.max(0, sumSq / count - period * period)) : 0;
+    const leftOut = 1 - count / deltas.length;
+    const clean =
+        spread <= Math.max(period * SPREAD_MAX, SPREAD_FLOOR_MS) && leftOut <= LEFT_OUT_MAX;
+    if (!clean && _milliHz > 0 && mhz < _milliHz * (1 - CHANGE_THRESHOLD)) {
+        console.info(
+            `[RefreshRate] ${(mhz / 1000).toFixed(1)} Hz read under load, ` +
+                `${(_milliHz / 1000).toFixed(1)} Hz kept (spread ${spread.toFixed(2)} ms ` +
+                `on ${period.toFixed(2)}, ${Math.round(leftOut * 100)} % left out)`,
+        );
+        return _milliHz;
+    }
     // The same screen as the precise reading (this page's, else this
     // browser's last): that one stands — it is the better number of the two.
     if (!_preciseMilliHz) {
