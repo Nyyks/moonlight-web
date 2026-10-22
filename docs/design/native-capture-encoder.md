@@ -6076,10 +6076,12 @@ chaîne en bras alternés, la duplication des deux côtés : la chaîne D3D11
 (15,3 ± 4,9 contre 22,0 ± 1,8 par passe), mais chaque image part plus tard
 (présent → bitstream p50 7,1 contre 5,5 ms, l'encodage 7,0 contre 4,5) et son
 p99 est un peu plus haut (23,3 contre 21,1). Les blocages changent d'appel sans
-disparaître (oneVPL et ReleaseFrame en D3D11, Signal + Flush en D3D12), et la
-moitié des trous sont des réveils où la duplication ne livre rien. La mesure ne
-change pas ce défaut ; un défaut D3D11 sous charge sur Intel est à la décision
-de Bruno, « D3D11 » dans l'admin restant la voie à la main.
+disparaître (oneVPL et ReleaseFrame en D3D11, Signal + Flush en D3D12) ; l'autre
+moitié des trous vient de la duplication, surtout un AcquireNextFrame bloqué
+alors que le bureau présente, deux fois plus souvent derrière la chaîne D3D12.
+**Décision de Bruno (22/10, ~13:05) : D3D12 reste le défaut sur Intel, y compris
+sous charge ; « D3D11 » reste le choix manuel dans l'administration. Rien ne
+change dans le code.**
 
 **Concrètement, pour l'utilisateur** : sur un PC à carte ou à puce graphique
 Intel, rien à régler. L'image part plus vite de l'hôte (deux fois plus vite

@@ -7699,7 +7699,7 @@ bras : 42,5 ± 1,3 images capturées par seconde en D3D11, 43,0 ± 1,1 en D3D12,
 
 - **L'écart tient, et il est modeste.** Manche par manche (une passe de
   chaque chaîne dans la même fenêtre de charge), la chaîne D3D11 fait moins de
-  trous > 50 ms **six fois sur six** (de 3 à 12 de moins), soit un tiers de
+  trous > 50 ms **six fois sur six** (de 3 à 12 de moins), soit 30 % de
   trous en moins en moyenne. Mais la chaîne D3D12 a le p99 présent →
   bitstream le plus bas cinq fois sur six, et sa médiane est plus basse de
   1,6 ms sur chaque image : l'encodage oneVPL prend 7,0 ms là où le VE en
@@ -7711,34 +7711,42 @@ bras : 42,5 ± 1,3 images capturées par seconde en D3D11, 43,0 ± 1,1 en D3D12,
   D3D12 acquire 9,3, signal (A + Flush) 10,0, tenue 5,0, libération 0,8,
   encodage 6,4 ms (max 7 à 9 ms, jamais plus de 10). Sur les 92 trous de la
   chaîne D3D11, 48 sont un blocage dans la chaîne (l'appel oneVPL 22 fois,
-  ReleaseFrame 20, la tenue 6) et 44 des réveils où la duplication n'a rien
-  livré (timeouts) ; sur les 132 trous de la chaîne D3D12, 64 blocages (le
-  signal 49, la tenue 11, la libération 4) et 68 réveils à vide. La chaîne
-  D3D11 fait moins d'appels au pilote par image (ni fence, ni Flush, ni
-  attente), mais le blocage ne disparaît pas : il se déplace dans l'appel
-  oneVPL, qui soumet et attend lui-même le planificateur, et dans ReleaseFrame.
-  La moitié des trous, dans les deux chaînes, est la duplication qui ne livre
-  rien sous la charge — la chaîne n'y peut rien.
-- **Ce que ça donne pour un défaut sous charge sur Intel** (décision de
-  Bruno) : passer la chaîne Intel en D3D11 quand le GPU est chargé
-  achèterait environ sept à-coups de moins par minute au prix de 1,6 ms sur
-  chaque image, et le stream resterait saccadé. La mesure ne justifie pas de
-  changer le défaut (§32.9 du design, D3D12 sur Intel) ; « D3D11 » dans
-  l'admin, ou `pipeline=d3d11` au banc, reste la voie à la main. Le levier qui
-  reste est en amont des deux chaînes : la file du pilote sous charge, et ce que
-  la duplication ne livre pas.
+  ReleaseFrame 20, la tenue 6) et 44 une image qui arrive en retard de la
+  duplication : 23 fois un seul appel AcquireNextFrame bloqué sur plus de la
+  moitié du trou alors que le bureau présentait (il rend ensuite plusieurs
+  présentations cumulées), 11 fois un vrai délai sans image nouvelle, 10 fois
+  la boucle ailleurs. Sur les 132 trous de la chaîne D3D12 : 64 blocages dans
+  la chaîne (le signal 49, la tenue 11, la libération 4) et 68 du côté de la
+  duplication, dont 48 acquisitions bloquées de la même façon, 9 délais sans
+  image et 11 autres. L'essentiel de l'écart (25 trous sur 40) est là :
+  derrière la chaîne D3D12, l'acquisition de la duplication bloque deux fois
+  plus souvent, sans doute parce que le Signal et le Flush ajoutés sur son
+  device passent par la même file du planificateur. La chaîne D3D11 fait
+  moins d'appels au pilote par image (ni fence, ni Flush, ni attente), mais
+  le blocage ne disparaît pas : il se déplace dans l'appel oneVPL, qui soumet
+  et attend lui-même le planificateur, et dans ReleaseFrame.
+- **Décision de Bruno (22/10, ~13:05) : D3D12 reste le défaut sur Intel, y
+  compris sous charge ; « D3D11 » reste le choix manuel dans
+  l'administration (`pipeline=d3d11` au banc). Rien ne change dans le
+  code.** Passer la chaîne Intel en D3D11 quand le GPU est chargé
+  achèterait près de six à-coups de moins par minute au prix de 1,6 ms sur
+  chaque image, et le stream resterait saccadé. Le levier qui reste est en
+  amont des deux chaînes : la file du pilote sous charge, où attendent aussi
+  bien nos appels que ceux de la duplication.
 
 Dépouillement : `scratchpad\chains_sum.py` (une ligne par passe, moyennes par
-chaîne, manche par manche) et `gaps_where.py` (l'origine de chaque trou > 50 ms :
-blocage dans la chaîne et son étape, ou réveil à vide) ; données
+chaîne, manche par manche), `gaps_where.py` (l'origine de chaque trou > 50 ms :
+blocage dans la chaîne et son étape, ou image en retard de la duplication) et
+`delivery_gaps.py` (ces retards : acquisition bloquée, délai sans image,
+boucle ailleurs) ; données
 `bench\n95-day3\d3d11{1..4}a,{1,2}b` et `d3d12…` (`*.out.txt`, `*.csv`,
 `*.click-trace.csv`). N95 rendu propre à 09:19 (tâches retirées, exe de banc et
 dossiers supprimés, clip et tunnel fermés, DEV `3B763FB6…` intacte).
 
 **Concrètement, pour l'utilisateur** : rien ne change. Sur un mini-PC Intel
 qui lit une vidéo pendant le stream, l'ancienne chaîne (« D3D11 » dans
-l'admin) fait un tiers d'à-coups en moins, mais chaque image part 1,6 ms plus
-tard, et le stream saccade dans les deux cas.
+l'admin) fait près d'un tiers d'à-coups en moins, mais chaque image part
+1,6 ms plus tard, et le stream saccade dans les deux cas.
 
 ## 9. Pour l'A/B
 
