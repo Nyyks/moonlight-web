@@ -816,6 +816,14 @@ bool Win32Input::start(std::string& error)
     // Before m_Started as well: the first relative move may come at once.
     startVirtualMouse();
 
+    // The table of the layout the keys will be typed in, read now rather than
+    // on the first character: 1 to 8 ms once per layout (WinTextKeys), which a
+    // first keystroke should not wait for. Another layout later pays it once.
+    {
+        HWND window = nullptr;
+        WinKeyLayout::of(foregroundLayout(window));
+    }
+
     m_Follow = platform::runningAsSystem();
     if (m_Follow) {
         m_FollowerQuit = false;

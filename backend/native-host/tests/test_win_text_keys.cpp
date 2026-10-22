@@ -10,6 +10,7 @@
 #include <windows.h>
 #endif
 
+#include <chrono>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -495,16 +496,20 @@ void withLayout(const wchar_t* klid, const char* name, void (*test)(const WinKey
         std::fprintf(stderr, "  skipped %s: Windows has no such layout here\n", name);
         return;
     }
+    const auto t0 = std::chrono::steady_clock::now();
     const WinKeyLayout layout(reinterpret_cast<uintptr_t>(loaded.hkl()));
+    const double readMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     WinStroke space;
     if (!layout.chordKey(U' ', space)) {
         std::fprintf(stderr, "  skipped %s: the layout types nothing here (no desktop?)\n", name);
         return;
     }
-    std::fprintf(stderr, "  %s: HKL 0x%08X%s, %zu character(s), compositions %s\n", name,
+    std::fprintf(stderr, "  %s: HKL 0x%08X%s, %zu character(s), compositions %s, read in %.1f ms\n",
+                 name,
                  static_cast<unsigned>(reinterpret_cast<uintptr_t>(loaded.hkl()) & 0xFFFFFFFFu),
                  loaded.loadedHere() ? " (loaded for the test)" : "", layout.size(false),
-                 layout.composes() ? "read" : layout.why().c_str());
+                 layout.composes() ? "read" : layout.why().c_str(), readMs);
     test(layout);
 }
 
