@@ -938,6 +938,12 @@ production) qui :
 La page tourne sur n'importe quel navigateur du parc (Safari, Chrome ARM, iPhone compris) :
 c'est elle qui donne les chiffres mobiles, pas un outil natif.
 
+Le point 4, pour l'œil, est une page à part depuis le 23/10 (journal J30) : `compare.html`, les
+renderers du produit sur une image 1440p (réductions 1440 → 1080 et 720, agrandissements 720 et
+1080 → 1440 depuis sa réduction bicubique), leurs sorties en bandes sous un même zoom, chacune avec son
+SSIM, son PSNR et son temps par image ; `scaler_lab.py --serve` l'imprime (`/compare`) pour un
+téléphone comme pour un PC.
+
 ### 6.2 Les estimateurs hors ligne
 
 - **Mali** : `malioc` (Arm Mobile Studio) sur le GLSL ES du jumeau et sur le SPIR-V émis par Tint

@@ -26,6 +26,11 @@ a run's files and writes <dir>/<TAG>-gate.md with the verdict's figures. With
 --serve, --p4 gives a phone the same links (--gl: the WebGL2 page alone, for
 a device without WebGPU; --screen WxH adds the cases at the device's size).
 
+--serve also links /compare, compare.html: the side-by-side viewer of the
+upscalers for the eye (the product's renderers on C:\\Test\\test.png, else
+00_Background.png, in bands under one zoom, with SSIM, PSNR and the time of
+a frame), on a phone as on a PC.
+
 --conformity (p4_flows.py) holds the product's two renderers to the kernel:
 on the software adapters WebGL2 on ANGLE's SwiftShader switches WebGPU off,
 so it runs once per side (--swiftshader, then --webgl-swiftshader) and
@@ -399,6 +404,13 @@ def main():
             server.short["/%d" % k] = path
             for ip in ips or ["<this machine>"]:
                 print("  %s://%s:%s/%d  ->  %s" % (scheme, ip, port, k, path))
+        # The side-by-side viewer (compare.html): the product's renderers on one
+        # picture, for the eye; its picture is C:\Test\test.png, else the SDR
+        # reference 00_Background.png, both under /test/.
+        server.short["/compare"] = "/scripts/bench/scaler-lab/compare.html"
+        print("the side-by-side viewer of the upscalers (compare.html, picture /test/test.png else /test/00_Background.png):")
+        for ip in ips or ["<this machine>"]:
+            print("  %s://%s:%s/compare" % (scheme, ip, port))
         sys.stdout.flush()
         server.serve_forever()
         return

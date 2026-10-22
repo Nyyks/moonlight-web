@@ -1228,3 +1228,44 @@ règle de sortie du job CI « Upscaler lab ». Codés au go de Bruno, après le 
   seule réduction de la zone plate. À Bruno : la garder comme différence connue, ou juger cette paire
   contre l'écart des deux bilinéaires nus des deux API sur les mêmes pixels (un changement de méthode
   de C11).
+
+## 2026-10-23 — J30, le comparateur côte à côte (`compare.html`), pour l'œil et le téléphone
+
+Demande de Bruno (23/10) : une page qui compare visuellement les algorithmes côte à côte sur son image
+1440p, en réduction (1440 → 1080, 1440 → 720) et en agrandissement (720 → 1440, 1080 → 1440, l'entrée
+étant une réduction bicubique), avec le choix et l'ordre des algorithmes (natif, mw, fsr1, sgsr1, nis),
+des bandes horizontales ou verticales, les réglages derrière un petit bouton, le zoom à deux doigts et
+le déplacement à un doigt, et deux chiffres par algorithme : la qualité contre l'original et la moyenne
+du temps sur 1000 itérations.
+
+- **La page** (`scripts/bench/scaler-lab/compare.html`, `compare.js`, `compare-worker.js`), servie
+  comme le labo depuis la racine du dépôt (`scaler_lab.py --serve` imprime son lien, `/compare`) : les
+  renderers du produit eux-mêmes (`WebGpuRenderer`, `WebGlRenderer`, un par API, la passe changée par
+  `setAlgo` comme l'échelle le fait), chacun sur un `OffscreenCanvas` à la taille de sortie ; « natif »
+  est `drawImage` bilinéaire (qualité `low`), « Smooth2D » la qualité `high`, en option. L'entrée est
+  une `VideoFrame` RGBA de l'image (pas de codec). Les sorties sont capturées (`transferToImageBitmap`,
+  sinon `createImageBitmap` du canvas) et dessinées dans des bandes sous un même zoom et un même
+  déplacement : par défaut la **même zone** dans chaque bande, vue 1:1 (un pixel de sortie par pixel
+  d'écran), centrée ; l'autre mode coupe une image continue. Au-dessus de 1:1 le voisin le plus proche
+  (les pixels se voient) ; en dessous l'afficheur réduit lui-même, et le dit.
+- **Les deux chiffres.** Qualité : SSIM de la luma (fenêtre gaussienne de Wang, σ 1,5, bord coupé : la
+  définition de `metrics.py`) et PSNR RGB, contre l'image à 1440p ; à 1080p et 720p, contre sa réduction
+  bicubique (Catmull-Rom, support élargi, espace gamma : le `BICUBIC` de Pillow), qui est aussi l'entrée
+  des agrandissements, la même référence servant aux deux sens. Temps : la moyenne de `iters` (1000)
+  images après 20 de chauffe, de l'appel du dessin à la fin du GPU, le `done` du labo (WebGPU l'attend
+  dans `draw()`, WebGL2 par une fence scrutée tâche par tâche, Canvas2D par la lecture d'un pixel), en
+  pause pendant les gestes ; le p50 est dans le tableau du panneau. Les réductions et le SSIM (par bandes
+  de 64 lignes) tournent dans un worker.
+- **API « auto »** : la décision de Bruno du 22/10 (plan §9), WebGL2 partout et WebGPU sur iPhone et
+  iPad ; WebGPU ou WebGL2 au choix (WebGL2 quand WebGPU manque ou refuse). Cinq cas, dont 720 → 1080,
+  ajouté (la demande écrivait deux fois 720 → 1440). L'état est dans la requête de la page (et le dernier
+  dans localStorage) : un lien se partage.
+- **Vérifié sur SwiftShader (Chrome 155 headless sous Windows, `00_Background.png`, ×2, 20 itérations)**,
+  par un pilote CDP du scratchpad. Côté WebGL2 (ANGLE sur SwiftShader) : cinq sorties, SSIM natif 0,857,
+  MW 0,871, FSR1 0,881, SGSR1 0,879, NIS 0,875 (PSNR 21,6 à 22,1 dB sur l'image entière : l'ordre des
+  repères du 20/10). Côté WebGPU (adaptateur logiciel, `soft=1`) : les quatre mêmes à 10⁻⁴ près. Molette,
+  glisser, pincement à deux points et double appui conformes ; l'émulation 390×844 à 3× en bandes
+  horizontales lisible, le panneau utilisable au doigt. Non vérifié : la capture d'un canvas WebGPU sous
+  Safari (le repli `createImageBitmap` est là, et un échec se lirait « capture noire » sur la bande).
+- **L'image** : `C:\Test\test.png`, servie sous `/test/`, à défaut l'étalon `00_Background.png` ;
+  `test.png` n'existait sur aucun disque de DualRTX le 23/10. Le panneau accepte aussi un fichier.
