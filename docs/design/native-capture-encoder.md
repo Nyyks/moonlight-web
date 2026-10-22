@@ -8034,14 +8034,24 @@ injecté comme tel** (`KEYEVENTF_UNICODE`), administrateur ou non, alors que les
   qu'aucune fenêtre au premier plan ne dit sa disposition. Dans conhost, ces caractères-là restent
   perdus : limite connue.
 - Tests : `test_win_text_keys.cpp`, sur l'AZERTY classique, l'AFNOR, l'US, l'allemand,
-  l'US-International et la disposition Apple quand elle est là ; une disposition absente est
-  chargée pour le test (`KLF_NOTELLSHELL`, jamais activée) puis déchargée.
+  l'US-International, le russe (aucune lettre latine) et la disposition Apple quand elle est là ;
+  une disposition absente est chargée pour le test (`KLF_NOTELLSHELL`, jamais activée) puis
+  déchargée.
 
 ### 36.2 Le texte (`planText`, `Win32Input::injectText`)
 
 - Chaque caractère devient les touches qui le tapent ; la disposition décide Maj et AltGr. Une Maj
   ou un AltGr que le spectateur tient et que le caractère ne veut pas est relâché le temps de la
   touche, puis remis ; un Ctrl ou un Alt tenu seul est un raccourci voulu, gardé.
+- **AltGr part comme un clavier l'envoie, Ctrl gauche + Alt droit** (scancode étendu). Un Ctrl+Alt
+  gauche tape la même chose dans Notepad, mais Windows Terminal lit Ctrl+Alt+2 à 9 comme « aller à
+  l'onglet » : sur un hôte AZERTY, # { [ ~ \ | n'y arrivaient pas (banc P3). Windows relâche avec
+  l'Alt droit le Ctrl qu'il a mis dessous : le Ctrl voulu après est donc rappuyé, un Ctrl non voulu
+  relâché encore.
+- **Un Alt seul n'est jamais tapé seul** : une touche non attribuée (VK 0xE8, le « menu mask »
+  d'AutoHotkey) le masque avant qu'on relâche quoi que ce soit dessous, et après qu'on le remet
+  seul. Sinon l'Option du Mac, relâchée pour « { » puis remise, faisait deux appuis d'Alt, et un
+  appui d'Alt donne les touches à la barre de menus (Alt+Maj change la langue de saisie).
 - Entrée et Tab sont leurs touches (`\n`, `\r`, `\r\n`), les autres caractères de contrôle sont
   jetés.
 - Un `SendInput` par morceau de 256 caractères : un collage garde son ordre, sans appel géant.
@@ -8069,8 +8079,34 @@ chemin ne dépend pas de `keyboard_layout_fidelity`.
   position (l'hôte compose) et la touche suivante n'attend plus la composition du navigateur.
 - Sunshine pour Windows reçoit au Bureau **toutes** les lettres en VK non normalisé, plus seulement
   celles qu'un clavier US n'aurait pas données (un QWERTY sur un Sunshine AZERTY tapait q pour a).
-- **L'Option du Mac** compose comme AltGr ({ [ | ~ €) : le client le marque (`altGraph`), l'hôte
-  Windows ou Linux relâche l'Alt du spectateur pour la touche quand sa disposition n'en veut pas.
+- **AltGr et l'Option du Mac** choisissent le caractère : le client le marque (`altGraph`) pour
+  AltGr sous Windows (Ctrl+Alt avec AltGraph), sous Linux (AltGraph seul), pour un Ctrl+Alt gauche
+  qui a tapé ce qu'AltGr tape à cet endroit (€ sur le E d'un AZERTY), et pour l'Option du Mac
+  ({ [ | ~ €). L'hôte Windows ou Linux relâche alors le Ctrl et l'Alt du spectateur pour la touche
+  quand sa disposition n'en veut pas. Sans la marque, un Ctrl+Alt est un raccourci, gardé entier
+  (Ctrl+Alt+T).
+- **Un raccourci** (Ctrl, Cmd, ou un Alt qui n'est pas AltGr) ne porte le caractère que d'une
+  lettre : Ctrl+A sur un AZERTY reste le A de l'hôte, et l'hôte Windows appuie la touche que la
+  disposition appelle A, sous les modificateurs tenus, sans Maj ajoutée ni levée (Ctrl+A sur une
+  disposition russe aussi, qui n'a pas de « a »). Le reste part par sa position, comme un clavier
+  branché sur l'hôte : Ctrl+1 sur un AZERTY était Ctrl+Maj+7 sur un hôte US. Décidé à l'appui, que
+  le relâchement et le battement rejouent. **Le pavé numérique** part toujours par sa position
+  (son 1 tapé en caractère devenait le 1 de la rangée du haut : Alt+0233 et les vues de Blender
+  ne le voyaient pas).
+- **Les niveaux reviennent avec l'appui** (hôte Windows) : Maj et AltGr sont posés, la touche
+  appuyée, puis les niveaux remis comme le spectateur les tient, d'un seul lot ; le relâchement
+  ne lâche que la touche. Gardés jusqu'au relâchement, ils étaient sous la touche suivante tapée
+  entre-temps (« 1a » roulé sur un clavier US sortait « 1A » sur un hôte AZERTY), et une session
+  coupée touche enfoncée laissait la Maj ou l'AltGr enfoncé. Windows ne répète rien de ce qu'on
+  lui envoie : les répétitions du client arrivent en appuis. Sous Linux, la répétition est celle
+  du compositeur, qui relit les modificateurs du moment : les niveaux y restent le temps de la
+  touche (limite connue : des touches roulées entre deux dispositions différentes).
+- **Une touche morte laissée de côté** par l'hôte natif est remplacée par un appui de la touche non
+  attribuée (0xE8) : sous l'Option du Mac (Option+n pour « ~ »), l'hôte voyait sinon un Alt
+  descendre et remonter sans rien entre les deux. En Jeu sous `"always"`, la touche morte part par
+  sa position (le client n'y retient pas la touche suivante).
+- **Une répétition rejoue l'appui entier**, mode souris et AltGr compris : une touche tenue en Jeu
+  passait au caractère dès la première répétition, et son relâchement avec elle.
 - La valeur passe au worker dans sa config (`StreamWorkerHost::prepare`), avec `keyboard_debug` :
   un worker SYSTEM lit le settings.json de systemprofile, jamais celui du propriétaire.
 
@@ -8081,3 +8117,24 @@ La règle « policy » (§30) ferme les fenêtres administrateur aux invités. L
 ou souris, bureau sécurisé compris ; le worker de l'invité le dit dans son journal. Le bouton
 « Minimise the host's windows » est offert à l'invité aussi (décision du 22/10) : un jeu lancé en
 administrateur qui remplit l'écran ne lui laisse rien d'autre à cliquer. Wiki : Sécurité §6.4c.
+
+### 36.6 Banc P3 (22/10, DualRTX, hôte FR `040C`)
+
+Le texte du clavier d'un téléphone (Chrome headless sur SwiftShader, écran tactile émulé,
+`Input.insertText`), envoyé par le flux dans de vraies fenêtres, le premier plan vérifié avant
+chaque texte :
+
+| Fenêtre | ASCII | é è à ù ç ê ë… | É (Unicode) | AltGr @ € # { } [ ] ~ \ ^ \| | Émoji |
+|---|---|---|---|---|---|
+| cmd (conhost) | oui | oui | oui | oui | oui |
+| PowerShell 5.1 (conhost, PSReadLine 2.0.0) | oui | oui | **jeté** | oui sauf **~ → « é~ »** | **jeté** |
+| Windows Terminal (cmd) | oui | oui | oui | oui depuis `7be93512` (avant : # { [ ~ \ \| manquaient) | deux carrés |
+| Champ EDIT classique | oui | oui | oui | oui | oui |
+| Raw Input | vraies touches, scancodes de la disposition ; Alt droit marqué E0 | | | | Unicode |
+
+- PSReadLine 2.0.0 jette ce qui arrive en Unicode, et compose mal la touche morte d'AltGr, avec
+  l'Alt droit comme avec le gauche : à comparer avec un vrai clavier.
+- Non mesurés : Notepad (celui de Bruno était ouvert), Edge (sa fenêtre de premier lancement a
+  pris le premier plan), donc les accords de la barre.
+- Le banc ne clique plus dans le flux que si la fenêtre sous le point visé est la cible : un clic
+  au centre de l'écran diffusé est tombé une fois sur une fenêtre de Bruno (rien n'y a été tapé).
