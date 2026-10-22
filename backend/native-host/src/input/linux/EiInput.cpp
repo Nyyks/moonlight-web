@@ -82,6 +82,7 @@ constexpr uint16_t kKeyLeftShift = 42;
 constexpr uint16_t kKeyRightShift = 54;
 constexpr uint16_t kKeyRightAlt = 100;
 constexpr uint16_t kKeyLeftAlt = 56;
+constexpr uint16_t kKeyLeftCtrl = 29;
 
 } // namespace
 
@@ -403,9 +404,12 @@ void EiInput::character(const std::string& utf8, bool down, bool altGraph)
         if (m_HeldKeys.count(kKeyRightShift)) lift.push_back(kKeyRightShift);
     }
     if (!wants(kKeyRightAlt) && m_HeldKeys.count(kKeyRightAlt)) lift.push_back(kKeyRightAlt);
-    // A Mac's Option composed this character, as AltGr does (InputEvent).
+    // AltGr, or a Mac's Option, composed this character (InputEvent): the
+    // viewer's Alt, and the Ctrl of a Windows AltGr, are a level here.
     if (altGraph && !wants(kKeyLeftAlt) && m_HeldKeys.count(kKeyLeftAlt))
         lift.push_back(kKeyLeftAlt);
+    if (altGraph && !wants(kKeyLeftCtrl) && m_HeldKeys.count(kKeyLeftCtrl))
+        lift.push_back(kKeyLeftCtrl);
     std::vector<uint16_t> mine;
     for (uint16_t mod : stroke.mods)
         if (mod != 0 && !m_HeldKeys.count(mod)) mine.push_back(mod);

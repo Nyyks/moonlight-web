@@ -440,17 +440,20 @@ void UinputInput::injectChar(const std::string& utf8, bool down, bool altGraph)
     const auto wants = [&stroke](uint16_t mod) {
         return stroke.mods[0] == mod || stroke.mods[1] == mod;
     };
-    uint16_t lift[4] = {0, 0, 0, 0}; // held by the viewer, unwanted by the stroke
+    uint16_t lift[5] = {0, 0, 0, 0, 0}; // held by the viewer, unwanted by the stroke
     int lifts = 0;
     if (!wants(KEY_LEFTSHIFT)) {
         if (m_HeldKeys.count(KEY_LEFTSHIFT)) lift[lifts++] = KEY_LEFTSHIFT;
         if (m_HeldKeys.count(KEY_RIGHTSHIFT)) lift[lifts++] = KEY_RIGHTSHIFT;
     }
     if (!wants(KEY_RIGHTALT) && m_HeldKeys.count(KEY_RIGHTALT)) lift[lifts++] = KEY_RIGHTALT;
-    // A Mac's Option composed this character, as AltGr does: its Alt is a
-    // level here, not the chord a left Alt otherwise is.
+    // AltGr, or a Mac's Option, composed this character on the client: the
+    // viewer's Alt, and the Ctrl a Windows AltGr comes with, are a level
+    // here, not the chord a left Alt or a Ctrl otherwise is.
     if (altGraph && !wants(KEY_LEFTALT) && m_HeldKeys.count(KEY_LEFTALT))
         lift[lifts++] = KEY_LEFTALT;
+    if (altGraph && !wants(KEY_LEFTCTRL) && m_HeldKeys.count(KEY_LEFTCTRL))
+        lift[lifts++] = KEY_LEFTCTRL;
 
     uint16_t mine[2] = {0, 0}; // wanted by the stroke, not held by the viewer
     int count = 0;

@@ -9882,6 +9882,62 @@ export class StreamView {
         return { char: key, nonUs: key !== us[e.shiftKey ? 1 : 0] };
     }
 
+    /**
+     * Whether the Ctrl and Alt of a keystroke chose its character rather than
+     * made a shortcut: AltGr (Chrome on Windows reports it as Ctrl+Alt with
+     * AltGraph, on Linux as AltGraph alone), a left Ctrl+Alt that typed what
+     * AltGr types there (Windows takes the one for the other: € on AZERTY's E),
+     * or a Mac's Option, which composes characters as AltGr does ({ [ | ~ € on
+     * the Mac's AZERTY). Said so, the host lets them go when its own layout
+     * does not need them: "@" from a French AltGr is Shift+2 on a US host, "{"
+     * from Option is Shift+[. Ctrl+Alt+T, which types its plain t, stays a
+     * shortcut.
+     *
+     * @param {KeyboardEvent} e
+     * @param {boolean} apple the client's keyboard is a Mac's
+     * @param {Map<string, string>|null} map navigator.keyboard's layout map
+     * @returns {boolean}
+     */
+    static altGraphLevel(e, apple, map) {
+        let altGraph = false;
+        try {
+            altGraph = typeof e.getModifierState === 'function' && e.getModifierState('AltGraph');
+        } catch {
+            altGraph = false;
+        }
+        if (altGraph) return true;
+        if (apple) return !!(e.altKey && !e.ctrlKey && !e.metaKey);
+        if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && map) {
+            const plain = map.get(e.code);
+            return typeof plain === 'string' && e.key !== plain && e.key !== plain.toUpperCase();
+        }
+        return false;
+    }
+
+    /**
+     * The character a keystroke carries to the host, or null where its
+     * position is what counts.
+     *
+     * A shortcut names a key, not a character: Ctrl, Cmd (the host's Windows
+     * key) or an Alt that is not AltGr. A letter keeps its character — Ctrl+A
+     * on an AZERTY is the host's A, not the Q of its position — and anything
+     * else goes by its position, as a keyboard plugged into the host would
+     * send it: Ctrl+1 on an AZERTY is Ctrl+1, where its "&" was Ctrl+Shift+7
+     * on a US host. Decided at the press, which its release and the heartbeat
+     * replay.
+     *
+     * @param {KeyboardEvent} e
+     * @param {{char: string, nonUs: boolean}|null} cc clientChar(e)
+     * @param {boolean} altGraph altGraphLevel(e, …)
+     * @returns {{char: string, nonUs: boolean}|null}
+     */
+    static keyChar(e, cc, altGraph) {
+        if (!cc) return null;
+        const shortcut = (e.ctrlKey || e.metaKey || e.altKey) && !altGraph;
+        if (shortcut && !/^[A-Za-z]$/.test(cc.char)) return null;
+        return cc;
+    }
+
     // Cache navigator.keyboard.getLayoutMap() to resolve a physical key code
     // (e.code) to its printed label for the active layout. Used by combo
     // detection so Cmd+Option+Ctrl+{Q,X,Z,M} matches the labelled key on
@@ -10032,18 +10088,14 @@ export class StreamView {
             if (this._selfStream) return;
             const held = this._heldPhysKeys.get(e.code);
             if (!held) return;
+            // The repeat replays the press the host actually received — its
+            // character, its mouse mode and its AltGr included, or the host
+            // would resolve the repeats, then the release, through another
+            // path than the press: a key held in gaming mode turned into a
+            // character after the first repeat.
             this._sendKeyEvent({
+                ...held,
                 type: 'keydown',
-                keyCode: held.keyCode,
-                code: held.code,
-                key: held.key,
-                // The repeat replays the press the host actually received —
-                // character included, or the host would resolve the repeats
-                // through a different path than the original press.
-                char: held.char,
-                nonUs: held.nonUs,
-                dead: held.dead,
-                hold: held.hold,
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
@@ -10240,15 +10292,16 @@ export class StreamView {
         // there — plus whether the US layout disagrees. What each host does with
         // that is InputMsg::resolveKey's business, not ours. A dead key has none
         // yet, whatever e.key reads.
-        const cc = dead ? null : StreamView.clientChar(e);
+        const typed = dead ? null : StreamView.clientChar(e);
+        // AltGr, or a Mac's Option, chose the character: the host lets their
+        // Ctrl and Alt go for the key when its own layout does not need them
+        // (Alt+Shift+[ was a shortcut on a US host, not "{"). With a key that
+        // types nothing (Tab, F4, an arrow) they stay modifiers.
+        const altGraph =
+            !!typed && StreamView.altGraphLevel(e, this._appleKeyboard, this._layoutMap);
+        const cc = StreamView.keyChar(e, typed, altGraph);
         const char = cc ? cc.char : null;
         const nonUs = cc ? cc.nonUs : false;
-        // A Mac's Option composes characters as AltGr does ({ [ | ~ € on its
-        // AZERTY). Said so, the host lets the Alt go for the key when its own
-        // layout does not need it: Alt+Shift+[ was a shortcut on a US host,
-        // not "{". Option with a key that types nothing (Tab, F4, an arrow)
-        // stays Alt.
-        const altGraph = !!(this._appleKeyboard && e.altKey && !e.ctrlKey && !e.metaKey && cc);
 
         // The printable key after a dead key: what it types is the browser's
         // composition, and Chrome on Windows does not put that in this event —
@@ -10285,6 +10338,7 @@ export class StreamView {
                 nonUs,
                 dead,
                 gaming: !!this._gamingMode,
+                altGraph,
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
@@ -10346,7 +10400,7 @@ export class StreamView {
                 dead: false,
                 hold: this._holdsThroughStall(e.code),
                 gaming: !!this._gamingMode,
-                altGraph: !!(this._appleKeyboard && e.altKey && !e.ctrlKey && !e.metaKey),
+                altGraph: StreamView.altGraphLevel(e, this._appleKeyboard, this._layoutMap),
                 ctrlKey: e.ctrlKey,
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
@@ -10625,14 +10679,11 @@ export class StreamView {
         // Snapshot: _sendKeyEvent deletes from the map we are iterating.
         for (const [id, payload] of [...this._heldPhysKeys]) {
             if (typeof id !== 'string' || StreamView.MODIFIER_CODES.has(id)) continue;
+            // The press's own template, mouse mode included: a release
+            // resolved otherwise lets go of another key.
             this._sendKeyEvent({
+                ...payload,
                 type: 'keyup',
-                keyCode: payload.keyCode,
-                code: payload.code,
-                key: payload.key,
-                char: payload.char ?? null,
-                nonUs: !!payload.nonUs,
-                dead: !!payload.dead,
                 ctrlKey: false,
                 shiftKey: false,
                 altKey: false,

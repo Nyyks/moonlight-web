@@ -419,6 +419,39 @@ describe('the mouse mode of a key', () => {
         expect(v.sent[0]).toMatchObject({ type: 'keyup', gaming: false, char: 'a' });
     });
 
+    it('repeats a key held in gaming mode as the gaming key it was pressed as', () => {
+        // The repeat used to drop the mode: after the first one the host
+        // resolved the key by its character, and its release lost the key.
+        const v = keySink({ _gamingMode: true });
+        v.handleKeyDown(ev('KeyW', 'z'));
+        v.handleKeyDown(ev('KeyW', 'z', { repeat: true }));
+        v.handleKeyUp(ev('KeyW', 'z'));
+        expect(v.sent.map((m) => [m.type, m.gaming])).toEqual([
+            ['keydown', true],
+            ['keydown', true],
+            ['keyup', true],
+        ]);
+    });
+
+    it('keeps the AltGr of a held key through its repeats', () => {
+        const v = keySink({ _appleKeyboard: true });
+        v.handleKeyDown(ev('Digit5', '{', { altKey: true }));
+        v.handleKeyDown(ev('Digit5', '{', { altKey: true, repeat: true }));
+        expect(v.sent[1]).toMatchObject({ type: 'keydown', char: '{', altGraph: true });
+    });
+
+    it('lets go of keys held under Cmd by the mode they were pressed in', () => {
+        const v = keySink({
+            _appleKeyboard: true,
+            _gamingMode: true,
+            _releaseKeysHeldUnderMeta: StreamView.prototype._releaseKeysHeldUnderMeta,
+        });
+        v.handleKeyDown(ev('KeyW', 'z'));
+        v.sent.length = 0;
+        v._releaseKeysHeldUnderMeta();
+        expect(v.sent[0]).toMatchObject({ type: 'keyup', code: 'KeyW', gaming: true, char: 'z' });
+    });
+
     it("says each held key's mode, and a chord, in the heartbeat", () => {
         const v = keySink({ _gamingMode: true });
         v.handleKeyDown(ev('KeyW', 'z'));
@@ -475,9 +508,107 @@ describe("a Mac's Option key", () => {
         expect(v.sent[0].altGraph).toBe(false);
     });
 
-    it('never marks a Windows client, whose AltGr says so itself', () => {
+    it('leaves Option with Cmd or Ctrl a shortcut', () => {
+        const v = keySink({ _appleKeyboard: true });
+        v.handleKeyDown(ev('KeyQ', 'a', { altKey: true, metaKey: true }));
+        expect(v.sent[0]).toMatchObject({ char: 'a', altGraph: false });
+    });
+});
+
+describe('AltGr chose the character', () => {
+    // Its Ctrl and Alt are a level, which the host lets go when its own layout
+    // does not need them: "@" from a French AltGr is Shift+2 on a US host. A
+    // Ctrl+Alt that is no AltGr is a shortcut, kept whole: Ctrl+Alt+T.
+    const azerty = new Map([
+        ['KeyE', 'e'],
+        ['KeyT', 't'],
+        ['Digit0', 'à'],
+    ]);
+
+    it('marks a Windows AltGr, reported as Ctrl+Alt with AltGraph', () => {
+        const v = keySink();
+        v.handleKeyDown(
+            ev('Digit0', '@', {
+                ctrlKey: true,
+                altKey: true,
+                getModifierState: (n) => n === 'AltGraph',
+            }),
+        );
+        expect(v.sent[0]).toMatchObject({ char: '@', altGraph: true });
+    });
+
+    it("marks Linux's AltGr, reported as AltGraph alone", () => {
+        const v = keySink();
+        v.handleKeyDown(ev('Digit0', '@', { getModifierState: (n) => n === 'AltGraph' }));
+        expect(v.sent[0]).toMatchObject({ char: '@', altGraph: true });
+    });
+
+    it('marks a left Ctrl+Alt that typed what AltGr types there', () => {
+        // Windows takes Ctrl+Alt for AltGr: € on the E of an AZERTY.
+        const v = keySink({ _layoutMap: azerty });
+        v.handleKeyDown(ev('KeyE', '€', { ctrlKey: true, altKey: true }));
+        expect(v.sent[0]).toMatchObject({ char: '€', altGraph: true });
+    });
+
+    it('keeps Ctrl+Alt+T a shortcut, its letter included', () => {
+        const v = keySink({ _layoutMap: azerty });
+        v.handleKeyDown(ev('KeyT', 't', { ctrlKey: true, altKey: true }));
+        expect(v.sent[0]).toMatchObject({ char: 't', altGraph: false });
+    });
+
+    it('takes a left Ctrl+Alt for a shortcut without a layout map to tell', () => {
         const v = keySink();
         v.handleKeyDown(ev('KeyE', '€', { ctrlKey: true, altKey: true }));
-        expect(v.sent[0].altGraph).toBe(false);
+        expect(v.sent[0]).toMatchObject({ code: 'KeyE', char: null, altGraph: false });
+    });
+});
+
+describe('a shortcut', () => {
+    // Ctrl, Cmd or an Alt that is no AltGr: the keystroke names a key. A
+    // letter keeps its character, so the host presses its own A for Ctrl+A on
+    // an AZERTY; everything else goes by position, as a keyboard plugged into
+    // the host sends it: Ctrl+1 on an AZERTY was Ctrl+Shift+7 on a US host.
+    it("sends a letter's character", () => {
+        const v = keySink();
+        v.handleKeyDown(ev('KeyQ', 'a', { ctrlKey: true }));
+        expect(v.sent[0]).toMatchObject({ keyCode: VK_Q, char: 'a', nonUs: true });
+        v.handleKeyDown(ev('KeyQ', 'A', { ctrlKey: true, shiftKey: true, repeat: false }));
+        expect(v.sent[1]).toMatchObject({ char: 'A' });
+    });
+
+    it('sends a digit of the AZERTY row by its position', () => {
+        const v = keySink();
+        v.handleKeyDown(ev('Digit1', '&', { ctrlKey: true }));
+        expect(v.sent[0]).toMatchObject({ keyCode: VK_1, char: null, nonUs: false });
+    });
+
+    it('sends what follows an Alt by position, and a Cmd tap too', () => {
+        const alt = keySink();
+        alt.handleKeyDown(ev('Digit1', '&', { altKey: true }));
+        expect(alt.sent[0]).toMatchObject({ keyCode: VK_1, char: null });
+
+        const mac = keySink({ _appleKeyboard: true });
+        mac.handleKeyDown(ev('Digit1', '&', { metaKey: true }));
+        expect(mac.sent.map((m) => [m.type, m.char])).toEqual([
+            ['keydown', null],
+            ['keyup', null],
+        ]);
+    });
+
+    it('releases by the position it was pressed by, Ctrl let go first', () => {
+        const v = keySink();
+        v.handleKeyDown(ev('Digit1', '&', { ctrlKey: true }));
+        v.handleKeyUp(ev('Digit1', '&'));
+        expect(v.sent[1]).toMatchObject({ type: 'keyup', keyCode: VK_1, char: null });
+        v.handleKeyDown(ev('Digit1', '&', { ctrlKey: true }));
+        v.sent.length = 0;
+        v._sendInputState();
+        expect(v.sent[0].keys).toEqual([expect.objectContaining({ keyCode: VK_1, char: null })]);
+    });
+
+    it('leaves Shift alone a level: its digit is a character', () => {
+        const v = keySink();
+        v.handleKeyDown(ev('Digit1', '1', { shiftKey: true }));
+        expect(v.sent[0]).toMatchObject({ char: '1' });
     });
 });

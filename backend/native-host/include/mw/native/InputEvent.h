@@ -91,10 +91,11 @@ struct InputEvent
     /// a shortcut is a key, not a character. keyCode is then the character's
     /// US position, for a layout with no key for it (a Cyrillic one).
     bool chord = false;
-    /// CharDown / CharUp: the character came from a Mac's Option key, which
-    /// composes characters as AltGr does ({ [ | ~ on the Mac's AZERTY): the
-    /// Alt the viewer holds is a level here, let go for the key when the
-    /// host's layout does not need it, never kept as an Alt+ chord.
+    /// CharDown / CharUp: the character came from AltGr, or from a Mac's
+    /// Option key, which composes characters as AltGr does ({ [ | ~ on the
+    /// Mac's AZERTY): the Alt the viewer holds, and the Ctrl a Windows AltGr
+    /// comes with, are a level here, let go for the key when the host's
+    /// layout does not need them, never kept as a Ctrl+ or Alt+ shortcut.
     bool altGraph = false;
 
     // ── Mouse ────────────────────────────────────────────────────────────────
