@@ -124,6 +124,12 @@ inline LayoutFidelity parseLayoutFidelity(const QString& text)
     return LayoutFidelity::Auto;
 }
 
+/// A virtual key no layout assigns, tapped in place of a key the native host
+/// must not type (a dead key, see sendKey): Windows then sees a key between
+/// an Alt's press and its release, and does not take the Alt for a tap. The
+/// Linux and macOS hosts have no key for it and drop it.
+constexpr short kMaskVk = 0xE8;
+
 /// What to do with one key message: press a key, or type a character.
 struct KeyPlan
 {
@@ -194,6 +200,11 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
     plan.keyCode = static_cast<short>(msg["keyCode"].toInt(0));
     plan.flags = 0;
 
+    // The numeric keypad is the same on every layout, and a key of its own:
+    // its 1 typed as a character came out as the 1 of the main row — Shift+&
+    // on a French host — which Alt+0233 codes and Blender's views never see.
+    if (code.startsWith(QLatin1String("Numpad"))) return plan;
+
     const QString ch = msg["char"].toString();
     if (msg["chord"].toBool(false) && !ch.isEmpty()) {
         switch (mode) {
@@ -229,8 +240,11 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
     // what the host's layout has there without the client's AltGr: "é" on a
     // French host, then "~" with the space, "é~" for one tilde (12/10/2026).
     // A Sunshine host composes nothing from text and keeps the position, and
-    // so does a key sent by position: the host composes it in its layout.
-    if (mode == KeyboardMode::Native && !positional && msg["dead"].toBool(false)) {
+    // so does a key sent by position: the host composes it in its layout. So
+    // does gaming mode under "always": the client does not hold the next key
+    // back there to read what the two compose to, so the host has to.
+    if (mode == KeyboardMode::Native && !positional && msg["dead"].toBool(false) &&
+        !msg["gaming"].toBool(false)) {
         plan.skip = true;
         return plan;
     }
@@ -555,7 +569,17 @@ inline void sendKey(IMediaEngine& engine, const QJsonObject& msg, bool down, boo
     const KeyPlan plan = resolveKey(msg, mode, fidelity);
     logKey(msg, mode, plan, down);
     // A dead key on the native host: its character comes with the next key.
-    if (plan.skip) return;
+    // In its place, a tap of a key that types nothing: under a Mac's Option
+    // (Option+n for "~") the host saw an Alt go down and would see it come
+    // up with nothing between, which Windows takes for a tap of Alt — the
+    // menu bar would get the keys.
+    if (plan.skip) {
+        if (down) {
+            engine.sendKeyEvent(kMaskVk, true, modifierMask(msg), 0);
+            engine.sendKeyEvent(kMaskVk, false, modifierMask(msg), 0);
+        }
+        return;
+    }
     if (plan.isText()) {
         // A character the host must honour instead of its position: a real
         // press and release on the native host, a one-shot text injection on

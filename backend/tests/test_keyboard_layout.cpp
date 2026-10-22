@@ -589,6 +589,12 @@ void run_keyboard_layout_tests()
         CHECK_EQ(deadGame.keyCode, static_cast<short>(kVk1 + 1));
         dead["gaming"] = false;
         CHECK(resolveKey(dead, KeyboardMode::Native, LayoutFidelity::Auto).skip);
+        // Under "always" too: the client does not hold the next key back in
+        // gaming mode, so the host has to compose them, or the accent is lost.
+        dead["gaming"] = true;
+        const KeyPlan deadAlways = resolveKey(dead, KeyboardMode::Native, LayoutFidelity::Always);
+        CHECK(!deadAlways.skip);
+        CHECK_EQ(deadAlways.keyCode, static_cast<short>(kVk1 + 1));
 
         // A chord stays a chord in a game: Ctrl+z still means undo.
         QJsonObject z = key(0x5A, "", "z");
@@ -611,6 +617,40 @@ void run_keyboard_layout_tests()
                   .line.endsWith(QStringLiteral("| mode: gaming")));
         CHECK(describeKey(desk, KeyboardMode::Native, nativeDesk)
                   .line.endsWith(QStringLiteral("| mode: desktop")));
+    }
+    // ── The numeric keypad ───────────────────────────────────────────────────
+    //
+    // The same on every layout, and keys of their own: its 1 typed as a
+    // character came out as the main row's 1 — Shift+& on a French host —
+    // which Alt+0233 codes and Blender's views never see. By position always.
+    {
+        const struct
+        {
+            int vk;
+            const char* code;
+            const char* character;
+        } pad[] = {{0x61, "Numpad1", "1"},
+                   {0x6E, "NumpadDecimal", "."},
+                   {0x6A, "NumpadMultiply", "*"},
+                   {0x6F, "NumpadDivide", "/"}};
+        for (const auto& k : pad) {
+            const QJsonObject msg = key(k.vk, k.code, k.character, false);
+            for (KeyboardMode mode : allModes) {
+                for (LayoutFidelity f : {LayoutFidelity::Auto, LayoutFidelity::Always}) {
+                    const KeyPlan plan = resolveKey(msg, mode, f);
+                    CHECK(!plan.isText() && !plan.skip);
+                    CHECK_EQ(plan.keyCode, static_cast<short>(k.vk));
+                    CHECK_EQ(plan.flags, static_cast<char>(0));
+                }
+            }
+        }
+        // And the watchdog keeps them, like any key pressed by position.
+        QJsonObject beat;
+        beat["keys"] = QJsonArray{key(0x61, "Numpad1", "1", false)};
+        CHECK_EQ(InputMsg::parseHeldKeys(beat, KeyboardMode::Native, LayoutFidelity::Auto).size(),
+                 1);
+        // The key tapped in a dead key's place, which no layout assigns.
+        CHECK_EQ(InputMsg::kMaskVk, static_cast<short>(0xE8));
     }
     {
         // As settings.json spells the choice; anything else is the default.
