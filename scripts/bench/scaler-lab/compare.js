@@ -89,9 +89,18 @@ const RENDERER_URLS = {
 const MWSR_URL = "/frontend/js/stream/renderers/MwsrShader.js";
 // MWSR's per-draw values and their product defaults (read from the module at
 // boot); the panel's two sliders, applied through the renderers' setMwsrTuning.
-const MWSR_DEF = { sharp: 1, tau: 0.05 };
-const SHARP_RANGE = [0.5, 2, 0.05];
+const MWSR_DEF = { sharp: 1, tau: 0.05, flat: 1, fc: 0.5 };
+const SHARP_RANGE = [0.5, 3, 0.05];
 const TAU_RANGE = [0.01, 0.1, 0.005];
+// The flat path's reconstruction (MwsrShader's FLAT_TAPS, FLAT_C overrides):
+// one bilinear sample, or a Catmull-Rom of 5 or 9 bilinear taps with the
+// depth of its negative lobe; a pipeline constant, so the renderer rebuilds.
+const FLAT_CHOICES = [
+  [1, "bilinéaire (1 échantillon)"],
+  [5, "Catmull-Rom, 5 échantillons"],
+  [9, "Catmull-Rom, 9 échantillons"],
+];
+const FC_RANGE = [0.25, 1, 0.05];
 const API_LABEL = { webgpu: "WebGPU", webgl: "WebGL2", canvas2d: "Canvas2D" };
 const DEFAULT_IMAGES = ["/test/test.png", "/test/00_Background.png"];
 const STORE = "mw_compare";
@@ -113,15 +122,25 @@ const state = {
   iters: 300,
   sharp: MWSR_DEF.sharp,
   tau: MWSR_DEF.tau,
+  flat: MWSR_DEF.flat,
+  fc: MWSR_DEF.fc,
   soft: false,
 };
 const shown = () => state.order.filter((a) => state.on.has(a));
 const tuning = () => ({ sharp: state.sharp, tau: state.tau });
+const overrides = () =>
+  state.flat === 1 ? {} : { FLAT_TAPS: state.flat, FLAT_C: state.fc };
 const tuned = () =>
   Math.abs(state.sharp - MWSR_DEF.sharp) > 1e-9 ||
-  Math.abs(state.tau - MWSR_DEF.tau) > 1e-9;
+  Math.abs(state.tau - MWSR_DEF.tau) > 1e-9 ||
+  state.flat !== MWSR_DEF.flat ||
+  (state.flat !== 1 && Math.abs(state.fc - MWSR_DEF.fc) > 1e-9);
 const tuningText = () =>
-  "netteté " + fr(state.sharp, 2) + " · τ " + fr(state.tau, 3);
+  "netteté " +
+  fr(state.sharp, 2) +
+  " · τ " +
+  fr(state.tau, 3) +
+  (state.flat !== 1 ? " · plat CR" + state.flat + " C " + fr(state.fc, 2) : "");
 const currentCase = () => CASE_BY[state.caseId];
 const sizeOf = (level) => [Math.round((level * 16) / 9), level];
 
@@ -168,6 +187,10 @@ function readState() {
   if (sh >= 0.1 && sh <= 4) state.sharp = sh;
   const ta = parseFloat(q.tau);
   if (ta >= 0.001 && ta <= 0.5) state.tau = ta;
+  const fl = parseInt(q.flat, 10);
+  if (FLAT_CHOICES.some(([n]) => n === fl)) state.flat = fl;
+  const fc = parseFloat(q.fc);
+  if (fc >= 0 && fc <= 2) state.fc = fc;
   state.soft = q.soft === "1";
 }
 
@@ -182,6 +205,10 @@ function writeState() {
   p.set("iters", String(state.iters));
   p.set("sharp", String(state.sharp));
   p.set("tau", String(state.tau));
+  if (state.flat !== 1) {
+    p.set("flat", String(state.flat));
+    p.set("fc", String(state.fc));
+  }
   if (state.soft) p.set("soft", "1");
   history.replaceState(null, "", "?" + p.toString());
   try {
@@ -403,11 +430,24 @@ const outKey = (algoId) =>
   apiFor(algoId) +
   "|" +
   algoId +
-  (algoId === "mw" ? "|s" + state.sharp + "|t" + state.tau : "");
+  (algoId === "mw"
+    ? "|s" +
+      state.sharp +
+      "|t" +
+      state.tau +
+      "|f" +
+      state.flat +
+      "|c" +
+      state.fc
+    : "");
 
-/** MWSR's sliders onto the renderer, before one of its draws. */
+/** MWSR's settings onto the renderer, before one of its draws: the two
+ *  per-draw values, and the flat path's constants (a rebuild of its
+ *  pipelines when they change; the renderer skips an unchanged set). */
 function applyTuning(algoId, r) {
-  if (algoId === "mw" && r.setMwsrTuning) r.setMwsrTuning(tuning());
+  if (algoId !== "mw") return;
+  if (r.setMwsrTuning) r.setMwsrTuning(tuning());
+  if (r.setMwsrOverrides) r.setMwsrOverrides(overrides());
 }
 
 function pixelsOf(bmp, w, h) {
@@ -1529,6 +1569,21 @@ function buildPanel() {
   };
   slider("sharp", "netteté", SHARP_RANGE, "sharp", 2);
   slider("tau", "seuil τ", TAU_RANGE, "tau", 3);
+  const flatSel = el("select", {
+    id: "flat",
+    onchange: () => {
+      state.flat = parseInt(flatSel.value, 10);
+      changed("mwsr");
+    },
+  });
+  for (const [n, label] of FLAT_CHOICES)
+    flatSel.append(
+      el("option", { value: n, selected: state.flat === n }, label),
+    );
+  body.append(
+    el("div", { class: "row" }, el("span", null, "chemin plat"), flatSel),
+  );
+  slider("fc", "lobe C", FC_RANGE, "fc", 2);
   body.append(
     el(
       "div",
@@ -1540,6 +1595,8 @@ function buildPanel() {
           onclick: () => {
             state.sharp = MWSR_DEF.sharp;
             state.tau = MWSR_DEF.tau;
+            state.flat = MWSR_DEF.flat;
+            state.fc = MWSR_DEF.fc;
             changed("mwsr");
           },
         },
@@ -1547,6 +1604,8 @@ function buildPanel() {
           fr(MWSR_DEF.sharp, 2) +
           " · " +
           fr(MWSR_DEF.tau, 3) +
+          " · " +
+          (MWSR_DEF.flat === 1 ? "bilinéaire" : "CR" + MWSR_DEF.flat) +
           ")",
       ),
     ),
@@ -1555,7 +1614,7 @@ function buildPanel() {
     el(
       "p",
       { class: "note" },
-      "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. La bande MWSR seule est refaite.",
+      "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. Chemin plat : ce que rend un quad sous le seuil, l'échantillon bilinéaire ou un Catmull-Rom de 5 ou 9 échantillons bilinéaires (lobe C : 0,5 = Catmull-Rom, plus haut = plus net, plus de sonnerie). La bande MWSR seule est refaite.",
     ),
   );
   // the results
@@ -1677,12 +1736,15 @@ function syncPanel() {
   for (const [id, key, dec] of [
     ["sharp", "sharp", 2],
     ["tau", "tau", 3],
+    ["fc", "fc", 2],
   ]) {
     const input = document.getElementById(id);
     const val = document.getElementById(id + "v");
     if (input) input.value = state[key];
     if (val) val.textContent = fr(state[key], dec);
   }
+  const flatSel = document.getElementById("flat");
+  if (flatSel) flatSel.value = String(state.flat);
   const link = document.getElementById("link");
   if (link) link.value = location.href;
   renderTable();
@@ -1821,8 +1883,14 @@ async function boot() {
     // start from them and the "defaults" button means the product's
     const m = await import(MWSR_URL);
     Object.assign(MWSR_DEF, m.MWSR_UNIFORMS);
+    if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.FLAT_TAPS !== undefined) {
+      MWSR_DEF.flat = m.MWSR_OVERRIDES.FLAT_TAPS;
+      MWSR_DEF.fc = m.MWSR_OVERRIDES.FLAT_C;
+    }
     state.sharp = MWSR_DEF.sharp;
     state.tau = MWSR_DEF.tau;
+    state.flat = MWSR_DEF.flat;
+    state.fc = MWSR_DEF.fc;
   } catch (e) {
     console.warn("MwsrShader.js :", e);
   }

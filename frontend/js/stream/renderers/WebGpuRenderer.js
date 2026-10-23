@@ -1428,7 +1428,7 @@ export class WebGpuRenderer extends VideoRenderer {
                 entryPoint: 'fs',
                 constants:
                     reg.mode === 'up'
-                        ? { CHROMA444: this._yuv444 ? 1 : 0 }
+                        ? { CHROMA444: this._yuv444 ? 1 : 0, ...(this._mwsrOverrides || {}) }
                         : { R_DOWN: reg.rDown, LINEAR_LIGHT: reg.linearLight },
                 targets: [{ format: srgb ? this._format + '-srgb' : this._format }],
             },
@@ -2057,6 +2057,20 @@ export class WebGpuRenderer extends VideoRenderer {
     setMwsrTuning(tuning) {
         this._mwsrTuning = tuning || null;
         this._mwsrUniKey = '';
+    }
+
+    /**
+     * The mwsr kernel's pipeline constants of the `up` mode beyond the
+     * product's (MwsrShader's MWSR_OVERRIDE_SPEC: FLAT_TAPS, FLAT_C…), for
+     * the laboratory's side-by-side viewer; the product never sets any. A
+     * changed set drops the kernel's pipelines, rebuilt at the next draw.
+     * @param {Object<string, number>|null} overrides null or {}: the product's
+     */
+    setMwsrOverrides(overrides) {
+        const next = overrides || {};
+        if (JSON.stringify(next) === JSON.stringify(this._mwsrOverrides || {})) return;
+        this._mwsrOverrides = next;
+        if (this._mwsrPipelines) this._mwsrPipelines.clear();
     }
 
     /**

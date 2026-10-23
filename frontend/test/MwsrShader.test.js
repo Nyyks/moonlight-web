@@ -235,4 +235,24 @@ describe('the mwsr shader text', () => {
         expect(d[2]).toBe(0.5);
         expect(d[3]).toBe(0.5);
     });
+
+    it('reconstructs the flat path by a cubic of bilinear taps when FLAT_TAPS asks (J33)', () => {
+        // the product's default: the bilinear sample itself, in both twins
+        expect(MWSR_OVERRIDES.FLAT_TAPS).toBe(1);
+        expect(MWSR_OVERRIDES.FLAT_C).toBe(0.5);
+        for (const text of [tex, glsl]) {
+            expect(text).toContain('if (FLAT_TAPS != 5u && FLAT_TAPS != 9u) {');
+            expect(text).toContain('if (FLAT_TAPS == 9u) {');
+            // the flat quad goes through it, the samples bound it
+            expect(text).toContain('flatPath(uv, C)');
+            expect(text).toContain('return clamp(acc / norm, lo, hi);');
+        }
+        // the middle pair of an axis by one sample at its weighted midpoint
+        expect(tex).toContain('let p12 = (tc + w2 / w12) * u.texel;');
+        expect(glsl).toContain('vec2 p12 = (tc + w2 / w12) * texel;');
+        // the twin bakes a chosen reconstruction into its text
+        const nine = mwsrGlsl({ overrides: { FLAT_TAPS: 9, FLAT_C: 0.75 } });
+        expect(nine).toContain('const uint FLAT_TAPS = 9u;');
+        expect(nine).toContain('const float FLAT_C = 0.75;');
+    });
 });

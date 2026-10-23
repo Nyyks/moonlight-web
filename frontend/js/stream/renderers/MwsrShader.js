@@ -98,6 +98,10 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     DERING: ['u32', 1],
     /** 1: the vote, the coherence and the weights per channel (4:4:4 streams); 0: from the luma, shared by the channels. */
     CHROMA444: ['u32', 0],
+    /** The flat path's reconstruction: 1 the bilinear sample itself; 5 or 9 bilinear taps of a cubic (Mitchell-Netravali, B 0, C FLAT_C) over the 4×4 texels around, the four corners dropped at 5 (J33). */
+    FLAT_TAPS: ['u32', 1],
+    /** The cubic's C, the depth of its negative lobe: 0.5 is Catmull-Rom; higher is steeper, with more ringing (bounded by the taps). */
+    FLAT_C: ['f32', 0.5],
     /** Reduction: the span of the tap grid, as a fraction of the pixel's footprint in the input (mwsrRegime() sets it by the grid). */
     R_DOWN: ['f32', 1.0],
     /** Reduction: 0 average the encoded values; 1 in gamma-2 light (square, square root); 2 in sRGB linear light (≤ 0.35 dB better, 15 pow per pixel). */
@@ -332,6 +336,52 @@ fn coherence(c : hf, t1 : hf, t2 : hf, x1 : hf, x2 : hf) -> hf {
     return max(step, ridge) / variation;
 }
 
+// The flat path's picture: the bilinear sample C, or (FLAT_TAPS 5 or 9) the
+// cubic of Mitchell and Netravali with B 0 and C FLAT_C (0.5: Catmull-Rom)
+// over the 4×4 texels around the position, read as the bilinear samples the
+// GPU weighs for free: on each axis the middle two texels by one sample at
+// their weighted midpoint, the outer two by one sample each — nine samples,
+// or five without the four corners, whose weights are the smallest, the
+// rest renormalised. Bounded by the samples themselves, as the edge path is.
+fn flatPath(uv : vec2f, C : vec3f) -> vec3f {
+    if (FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
+        return C;
+    }
+    let sp = uv / u.texel;
+    let tc = floor(sp - 0.5) + 0.5;
+    let f = sp - tc;
+    let c = FLAT_C;
+    let w0 = -c * f * (1.0 - f) * (1.0 - f);
+    let w1 = (2.0 - c) * f * f * f - (3.0 - c) * f * f + 1.0;
+    let w3 = -c * (1.0 - f) * f * f;
+    let w2 = 1.0 - w0 - w1 - w3;
+    let w12 = w1 + w2;
+    let p0 = (tc - 1.0) * u.texel;
+    let p12 = (tc + w2 / w12) * u.texel;
+    let p3 = (tc + 2.0) * u.texel;
+    let s12 = S(p12);
+    let s02 = S(vec2f(p0.x, p12.y));
+    let s32 = S(vec2f(p3.x, p12.y));
+    let s20 = S(vec2f(p12.x, p0.y));
+    let s23 = S(vec2f(p12.x, p3.y));
+    var acc = s12 * (w12.x * w12.y) + s02 * (w0.x * w12.y) + s32 * (w3.x * w12.y)
+        + s20 * (w12.x * w0.y) + s23 * (w12.x * w3.y);
+    var norm = w12.x * w12.y + w0.x * w12.y + w3.x * w12.y + w12.x * w0.y + w12.x * w3.y;
+    var lo = min(min(s12, s02), min(s32, min(s20, s23)));
+    var hi = max(max(s12, s02), max(s32, max(s20, s23)));
+    if (FLAT_TAPS == 9u) {
+        let s00 = S(p0);
+        let s30 = S(vec2f(p3.x, p0.y));
+        let s03 = S(vec2f(p0.x, p3.y));
+        let s33 = S(p3);
+        acc += s00 * (w0.x * w0.y) + s30 * (w3.x * w0.y) + s03 * (w0.x * w3.y) + s33 * (w3.x * w3.y);
+        norm += w0.x * w0.y + w3.x * w0.y + w0.x * w3.y + w3.x * w3.y;
+        lo = min(lo, min(min(s00, s30), min(s03, s33)));
+        hi = max(hi, max(max(s00, s30), max(s03, s33)));
+    }
+    return clamp(acc / norm, lo, hi);
+}
+
 @fragment
 fn fs(in : VSOut) -> @location(0) vec4f {
     let uv = in.uv;
@@ -354,7 +404,7 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         return vec4f(vec3f(select(1.0, 0.0, flat)), 1.0);
     }
     if (flat) {
-        return vec4f(C, 1.0);
+        return vec4f(flatPath(uv, C), 1.0);
     }
     // Strength: none at 1:1 (the renderer copies the frame there), full from
     // S_FULL on.
@@ -518,6 +568,47 @@ mediump float coherence(mediump float c, mediump float t1, mediump float t2, med
     return max(jump, ridge) / variation;
 }
 
+// The flat path's picture, the WGSL text's flatPath line for line.
+vec3 flatPath(vec2 uv, vec3 C) {
+    if (FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
+        return C;
+    }
+    vec2 texel = uTexelScale.xy;
+    vec2 sp = uv / texel;
+    vec2 tc = floor(sp - 0.5) + 0.5;
+    vec2 f = sp - tc;
+    float c = FLAT_C;
+    vec2 w0 = -c * f * (1.0 - f) * (1.0 - f);
+    vec2 w1 = (2.0 - c) * f * f * f - (3.0 - c) * f * f + 1.0;
+    vec2 w3 = -c * (1.0 - f) * f * f;
+    vec2 w2 = 1.0 - w0 - w1 - w3;
+    vec2 w12 = w1 + w2;
+    vec2 p0 = (tc - 1.0) * texel;
+    vec2 p12 = (tc + w2 / w12) * texel;
+    vec2 p3 = (tc + 2.0) * texel;
+    vec3 s12 = S(p12);
+    vec3 s02 = S(vec2(p0.x, p12.y));
+    vec3 s32 = S(vec2(p3.x, p12.y));
+    vec3 s20 = S(vec2(p12.x, p0.y));
+    vec3 s23 = S(vec2(p12.x, p3.y));
+    vec3 acc = s12 * (w12.x * w12.y) + s02 * (w0.x * w12.y) + s32 * (w3.x * w12.y)
+        + s20 * (w12.x * w0.y) + s23 * (w12.x * w3.y);
+    float norm = w12.x * w12.y + w0.x * w12.y + w3.x * w12.y + w12.x * w0.y + w12.x * w3.y;
+    vec3 lo = min(min(s12, s02), min(s32, min(s20, s23)));
+    vec3 hi = max(max(s12, s02), max(s32, max(s20, s23)));
+    if (FLAT_TAPS == 9u) {
+        vec3 s00 = S(p0);
+        vec3 s30 = S(vec2(p3.x, p0.y));
+        vec3 s03 = S(vec2(p0.x, p3.y));
+        vec3 s33 = S(p3);
+        acc += s00 * (w0.x * w0.y) + s30 * (w3.x * w0.y) + s03 * (w0.x * w3.y) + s33 * (w3.x * w3.y);
+        norm += w0.x * w0.y + w3.x * w0.y + w0.x * w3.y + w3.x * w3.y;
+        lo = min(lo, min(min(s00, s30), min(s03, s33)));
+        hi = max(hi, max(max(s00, s30), max(s03, s33)));
+    }
+    return clamp(acc / norm, lo, hi);
+}
+
 void main() {
     vec2 uv = vUv;
     vec3 C = S(uv);
@@ -539,7 +630,7 @@ void main() {
         return;
     }
     if (isFlat) {
-        oColor = vec4(C, 1.0);
+        oColor = vec4(flatPath(uv, C), 1.0);
         return;
     }
     float smin = min(uTexelScale.z, uTexelScale.w);

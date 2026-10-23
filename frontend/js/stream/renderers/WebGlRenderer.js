@@ -852,6 +852,26 @@ export class WebGlRenderer extends VideoRenderer {
         this._mwsrUniKey = '';
     }
 
+    /**
+     * The gl-mwsr kernel's constants of the `up` mode beyond the product's
+     * (MwsrShader's MWSR_OVERRIDE_SPEC: FLAT_TAPS, FLAT_C…), baked into the
+     * texts, for the laboratory's side-by-side viewer; the product never sets
+     * any. A changed set rebuilds the kernel's programs now, when the pass is
+     * the current one, else at its next build.
+     * @param {Object<string, number>|null} overrides null or {}: the product's
+     */
+    setMwsrOverrides(overrides) {
+        const next = overrides || {};
+        if (JSON.stringify(next) === JSON.stringify(this._mwsrOverrides || {})) return;
+        this._mwsrOverrides = next;
+        if (!this._mwsr) return;
+        const gl = this.gl;
+        if (gl && !this.isContextLost())
+            for (const p of this._mwsr.values()) gl.deleteProgram(p.prog);
+        this._mwsr = null;
+        if (this._algo === 'gl-mwsr' && gl && !this.isContextLost()) this._buildAlgo('gl-mwsr');
+    }
+
     _compile(type, src) {
         const gl = this.gl;
         const sh = gl.createShader(type);
@@ -941,7 +961,7 @@ export class WebGlRenderer extends VideoRenderer {
             for (const reg of mwsrRegimes()) {
                 const overrides =
                     reg.mode === 'up'
-                        ? { CHROMA444: this._yuv444 ? 1 : 0 }
+                        ? { CHROMA444: this._yuv444 ? 1 : 0, ...(this._mwsrOverrides || {}) }
                         : { R_DOWN: reg.rDown, LINEAR_LIGHT: reg.linearLight };
                 programs.set(
                     mwsrRegimeKey(reg),
