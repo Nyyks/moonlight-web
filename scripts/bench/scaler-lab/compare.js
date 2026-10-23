@@ -15,7 +15,7 @@
 //                      continuous picture
 //   api=auto|webgpu|webgl  the shader renderers' API; auto is the product's
 //                      choice (plan §9, 22/10/2026): WebGL2, WebGPU on iOS
-//   iters=1000         draws per algorithm for the time
+//   iters=300          draws per algorithm for the time
 //   soft=1             the WebGPU fallback adapter (SwiftShader), for a test
 //   viewer=2d          the bands drawn by Canvas2D drawImage, not WebGL2 (a test)
 //
@@ -61,10 +61,10 @@ const ALGOS = [
   },
   {
     id: "mw",
-    label: "MW",
+    label: "MWSR",
     gpu: "mwsr",
     gl: "gl-mwsr",
-    note: "mwsr, MoonlightWeb",
+    note: "MoonlightWeb",
   },
   {
     id: "fsr1",
@@ -101,7 +101,7 @@ const state = {
   bands: "v",
   zone: "same",
   api: "auto",
-  iters: 1000,
+  iters: 300,
   soft: false,
 };
 const shown = () => state.order.filter((a) => state.on.has(a));
@@ -395,7 +395,10 @@ function looksBlack(px) {
   return true;
 }
 
-function drawPlain(algoId, frame, outW, outH) {
+/** The browser's own scaling: drawImage of the level's canvas (a GPU-side
+ *  source everywhere, as a decoded frame is; a VideoFrame made from pixels
+ *  went through the CPU on Safari, ten times the cost). */
+function drawPlain(algoId, src, outW, outH) {
   const cv = canvas2d.cv;
   if (cv.width !== outW || cv.height !== outH) {
     cv.width = outW;
@@ -405,8 +408,7 @@ function drawPlain(algoId, frame, outW, outH) {
   const ctx = canvas2d.ctx;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = algoId === "smooth2d" ? "high" : "low";
-  ctx.drawImage(frame, 0, 0, outW, outH);
-  frame.close();
+  ctx.drawImage(src, 0, 0, outW, outH);
 }
 
 /** One frame through an algorithm: its output as a bitmap for the viewer and
@@ -415,15 +417,16 @@ async function renderOnce(algoId, c) {
   const def = ALGO_BY[algoId];
   const api = apiFor(algoId);
   const [outW, outH] = sizeOf(c.outLevel);
-  const frame = await inputFrame(c.inLevel);
   let bmp;
   let path;
   let r = null;
+  let frame = null;
   if (api === "canvas2d") {
-    drawPlain(algoId, frame.clone(), outW, outH);
+    drawPlain(algoId, source.canvases.get(c.inLevel), outW, outH);
     bmp = canvas2d.cv.transferToImageBitmap();
     path = "drawImage " + (algoId === "smooth2d" ? "high" : "low");
   } else {
+    frame = await inputFrame(c.inLevel);
     const eng = await engine(api);
     if (eng.error) throw new Error(API_LABEL[api] + " : " + eng.error);
     r = eng.r;
@@ -492,24 +495,25 @@ async function timeAlgo(algoId, c, iters, onProgress, alive) {
   const def = ALGO_BY[algoId];
   const api = apiFor(algoId);
   const [outW, outH] = sizeOf(c.outLevel);
-  const frame = await inputFrame(c.inLevel);
-  let draw;
+  let draw; // one frame of the algorithm, from the level's input
   let sync = null;
   let r = null;
   if (api === "canvas2d") {
-    draw = (f) => drawPlain(algoId, f, outW, outH);
+    const src = source.canvases.get(c.inLevel);
+    draw = () => drawPlain(algoId, src, outW, outH);
     sync = () => canvas2d.ctx.getImageData(0, 0, 1, 1);
   } else {
+    const frame = await inputFrame(c.inLevel);
     const eng = await engine(api);
     if (eng.error) throw new Error(API_LABEL[api] + " : " + eng.error);
     r = eng.r;
     r.setAlgo(api === "webgpu" ? def.gpu : def.gl);
     r.setOutputSize(outW, outH);
-    draw = (f) => r.draw(f);
+    draw = () => r.draw(frame.clone());
     if (api === "webgl") sync = () => glDone(r.gl);
   }
   for (let i = 0; i < WARM; i++) {
-    await draw(frame.clone());
+    await draw();
     if (sync) await sync();
     await nextTask();
   }
@@ -521,7 +525,7 @@ async function timeAlgo(algoId, c, iters, onProgress, alive) {
     await pauseWhileBusy(alive);
     if (!alive()) return null;
     const t0 = performance.now();
-    await draw(frame.clone());
+    await draw();
     if (sync) await sync();
     const dt = performance.now() - t0;
     times[i] = dt;
