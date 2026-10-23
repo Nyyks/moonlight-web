@@ -116,8 +116,21 @@ public:
     /// The router-side port for a stream slot. Answered without a round trip
     /// when the slot's hole is already held from an earlier session — the
     /// mapping outlives the stream so the next launch on the slot is instant
-    /// and a theft between sessions is still caught at renewal.
+    /// and a theft between sessions is still caught at renewal. The held
+    /// entry is rechecked behind that answer (recheck()).
     void claimMediaPort(int slot, uint16_t internalPort, QObject* context, Callback callback);
+
+    /// Renew every held hole now, as the half-hour timer does: the admin
+    /// page's Force refresh, so a router that dropped its table gets the
+    /// entries back without waiting for the timer.
+    void renewNow();
+
+    /// Renew one held hole now, without holding up whoever is about to use
+    /// it: a stream launched or a browser served on a hole held for hours.
+    /// The write lands in tens of milliseconds, long before their
+    /// connectivity checks give up. A hole found pointing elsewhere is
+    /// dropped and reported through portLost(), as at renewal.
+    void recheck(uint16_t externalPort);
 
     /// Take a stream slot's hole off the router now instead of at exit. For
     /// the invited players' slots, whose holes should not outlive the guest:

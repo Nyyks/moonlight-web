@@ -208,13 +208,15 @@ bool UPNPClient::discover(int timeoutMs)
 }
 
 bool UPNPClient::getExistingPortMapping(uint16_t externalPort, const std::string& protocol,
-                                        std::string& internalClient, std::string& internalPort)
+                                        std::string& internalClient, std::string& internalPort,
+                                        std::string* leaseDuration)
 {
 #ifndef MW_HAVE_MINIUPNPC
     Q_UNUSED(externalPort);
     Q_UNUSED(protocol);
     Q_UNUSED(internalClient);
     Q_UNUSED(internalPort);
+    Q_UNUSED(leaseDuration);
     return false;
 #else
     if (!m_Available || !m_Urls || !m_Data) {
@@ -247,6 +249,7 @@ bool UPNPClient::getExistingPortMapping(uint16_t externalPort, const std::string
 
     internalClient = std::string(intClient);
     internalPort = std::string(intPort);
+    if (leaseDuration) *leaseDuration = std::string(leaseDur);
 
     qInfo() << "[UPNP] Existing port mapping found:" << externalPort << protocol.c_str() << "->"
             << intClient << ":" << intPort << "desc='" << desc << "' enabled='" << enabled

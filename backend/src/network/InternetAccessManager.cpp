@@ -268,6 +268,14 @@ void InternetAccessManager::forceRefresh()
     // the host's own public address back to the LAN.
     updateHairpinStatus();
 
+    // And the router's own table: a router rebooted or reset since may have
+    // lost the holes this host holds, which the half-hour renewal would only
+    // put back later; one that did not answer at start-up is looked for again.
+    if (m_RouterPorts && m_Settings->upnpEnabled()) {
+        m_RouterPorts->discover();
+        m_RouterPorts->renewNow();
+    }
+
     emit statusChanged(statusJson());
 }
 

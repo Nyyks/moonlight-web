@@ -49,14 +49,19 @@ public:
                                         description.toStdString(), protocol.toStdString());
     }
 
-    bool owner(uint16_t externalPort, const QString& protocol, QString& client) override
+    bool owner(uint16_t externalPort, const QString& protocol, QString& client,
+               int& leaseLeft) override
     {
         std::string who;
         std::string internalPort;
+        std::string lease;
         if (!m_Client->getExistingPortMapping(externalPort, protocol.toStdString(), who,
-                                              internalPort))
+                                              internalPort, &lease))
             return false;
         client = QString::fromStdString(who);
+        bool number = false;
+        const int seconds = QString::fromStdString(lease).trimmed().toInt(&number);
+        leaseLeft = number && seconds >= 0 ? seconds : -1;
         return true;
     }
 
@@ -163,6 +168,15 @@ public:
         if (m_Core->renewFailures() == 2 && m_Core->leaseSec() == 0)
             Logger::warning(QStringLiteral("[UPNP] Renewal failed twice — switching to permanent "
                                            "mappings"));
+        if (lost.isEmpty()) return;
+        QMetaObject::invokeMethod(
+            m_Owner, [o = m_Owner, lost]() { o->onRenewed(lost); }, Qt::QueuedConnection);
+    }
+
+    void renew(uint16_t externalPort)
+    {
+        if (!m_Core) return;
+        const QList<RouterPortCore::Lost> lost = m_Core->renew(externalPort);
         if (lost.isEmpty()) return;
         QMetaObject::invokeMethod(
             m_Owner, [o = m_Owner, lost]() { o->onRenewed(lost); }, Qt::QueuedConnection);
@@ -379,9 +393,12 @@ void RouterPortAllocator::claimMediaPort(int slot, uint16_t internalPort, QObjec
         return;
     }
 
-    // Held from an earlier stream on this slot: no round trip, no wait.
+    // Held from an earlier stream on this slot: no round trip, no wait. The
+    // entry is written again behind the answer: the router may have lost it
+    // meanwhile (rebooted, or a lease run out while this machine slept).
     if (const auto held = heldMediaPort(slot)) {
         answerLater(Purpose::Media, slot, context, std::move(callback), *held, {});
+        recheck(held->external);
         return;
     }
 
@@ -403,6 +420,20 @@ void RouterPortAllocator::claimMediaPort(int slot, uint16_t internalPort, QObjec
     request.description = QStringLiteral("MoonlightWeb media slot %1").arg(slot);
 
     submit(std::move(request), context, std::move(callback));
+}
+
+void RouterPortAllocator::renewNow()
+{
+    if (m_State != GatewayState::Ready || !enabled()) return;
+    Logger::info(QStringLiteral("[UPNP] Renewing every held hole now"));
+    QMetaObject::invokeMethod(m_Worker, [w = m_Worker]() { w->renew(); }, Qt::QueuedConnection);
+}
+
+void RouterPortAllocator::recheck(uint16_t externalPort)
+{
+    if (m_State != GatewayState::Ready || !enabled()) return;
+    QMetaObject::invokeMethod(
+        m_Worker, [w = m_Worker, externalPort]() { w->renew(externalPort); }, Qt::QueuedConnection);
 }
 
 void RouterPortAllocator::releaseMediaPort(int slot)

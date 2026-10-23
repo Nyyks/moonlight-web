@@ -27,6 +27,8 @@ struct FakeGateway : IUpnpGateway
     {
         QString client;
         uint16_t internal = 0;
+        /// Seconds left; 0 = permanent.
+        uint32_t lease = 0;
     };
 
     QString lan = QStringLiteral("192.168.1.20");
@@ -39,6 +41,10 @@ struct FakeGateway : IUpnpGateway
     bool mute = false;
     /// An IGD v1 that rejects every non-zero lease.
     bool refuseLease = false;
+    /// MiniUPnPd up to 1.9 (TP-Link Deco X50, issue #37): AddPortMapping
+    /// identical to an entry it holds succeeds and changes nothing, lease
+    /// included.
+    bool ignoresRenewal = false;
     /// Ports the router refuses outright, both leases.
     QSet<uint16_t> refuse;
     int adds = 0;
@@ -47,6 +53,21 @@ struct FakeGateway : IUpnpGateway
     void foreign(uint16_t port, const QString& client)
     {
         table.insert({port, QStringLiteral("UDP")}, {client, port});
+    }
+
+    /// Time passes: leases count down, and an entry whose lease runs out is gone.
+    void elapse(uint32_t seconds)
+    {
+        for (auto it = table.begin(); it != table.end();) {
+            if (it->lease == 0) {
+                ++it;
+            } else if (it->lease <= seconds) {
+                it = table.erase(it);
+            } else {
+                it->lease -= seconds;
+                ++it;
+            }
+        }
     }
 
     QString lanAddress() const override { return lan; }
@@ -59,16 +80,20 @@ struct FakeGateway : IUpnpGateway
         if (refuseLease && leaseSec > 0) return false;
         const auto key = qMakePair(ext, proto);
         if (keepsForeignEntries && table.contains(key) && table[key].client != lan) return true;
-        table[key] = {lan, in};
+        if (ignoresRenewal && table.contains(key) && table[key].client == lan &&
+            table[key].internal == in)
+            return true;
+        table[key] = {lan, in, leaseSec};
         return true;
     }
 
-    bool owner(uint16_t ext, const QString& proto, QString& client) override
+    bool owner(uint16_t ext, const QString& proto, QString& client, int& leaseLeft) override
     {
         if (mute) return false;
         const auto key = qMakePair(ext, proto);
         if (!table.contains(key)) return false;
         client = table[key].client;
+        leaseLeft = static_cast<int>(table[key].lease);
         return true;
     }
 
@@ -196,11 +221,11 @@ void run_router_port_core_tests()
         struct LateLiar : FakeGateway
         {
             int looks = 0;
-            bool owner(uint16_t ext, const QString& proto, QString& client) override
+            bool owner(uint16_t ext, const QString& proto, QString& client, int& leaseLeft) override
             {
                 // First look at 3478 says "nobody"; the read-back tells the truth.
                 if (ext == 3478 && looks++ == 0) return false;
-                return FakeGateway::owner(ext, proto, client);
+                return FakeGateway::owner(ext, proto, client, leaseLeft);
             }
         } liar;
         liar.keepsForeignEntries = true;
@@ -384,6 +409,133 @@ void run_router_port_core_tests()
         // The hole is still held: the latch is a bet on the next lease, not a
         // verdict on this mapping.
         CHECK(core.holds(3478));
+    }
+
+    // ── MiniUPnPd ≤ 1.9 answers a renewal without renewing (#37): the
+    //    entry is removed and added again, so it never runs out ──────────
+    {
+        using mw::routerports::kLeaseSec;
+        const auto udp = qMakePair(uint16_t(48550), QStringLiteral("UDP"));
+        const auto tcp = qMakePair(uint16_t(48550), QStringLiteral("TCP"));
+        FakeGateway gw;
+        gw.ignoresRenewal = true;
+        RouterPortCore core(gw, kAlwaysFree);
+        CHECK(core.claim(mediaRequest(0)).ok);
+        CHECK_EQ(gw.table[udp].lease, kLeaseSec);
+
+        // The timer's first tick lands soon after the claim: the entry still
+        // reads close to a full lease, and nothing tells the two apart yet.
+        gw.elapse(300);
+        gw.removes = 0;
+        CHECK(core.renew().isEmpty());
+        CHECK_EQ(gw.removes, 0);
+        // Half an hour on, the countdown gives it away.
+        gw.elapse(1800);
+        CHECK(core.renew().isEmpty());
+        CHECK_EQ(gw.removes, 2); // UDP and TCP
+        CHECK_EQ(gw.table[udp].lease, kLeaseSec);
+        CHECK_EQ(gw.table[tcp].lease, kLeaseSec);
+        CHECK(core.holds(48550));
+        CHECK_EQ(core.renewFailures(), 0);
+
+        // Six hours of half-hour ticks: the hole is there between every two.
+        bool alwaysThere = true;
+        for (int tick = 0; tick < 12; ++tick) {
+            gw.elapse(1800);
+            alwaysThere = alwaysThere && gw.table.contains(udp) && gw.table.contains(tcp);
+            core.renew();
+        }
+        CHECK(alwaysThere);
+    }
+
+    // ── A router that honours renewals is never made to churn ────────────
+    {
+        FakeGateway gw;
+        RouterPortCore core(gw, kAlwaysFree);
+        CHECK(core.claim(mediaRequest(0)).ok);
+        gw.removes = 0;
+        for (int tick = 0; tick < 4; ++tick) {
+            gw.elapse(1800);
+            CHECK(core.renew().isEmpty());
+        }
+        CHECK_EQ(gw.removes, 0);
+        CHECK_EQ(gw.table[qMakePair(uint16_t(48550), QStringLiteral("UDP"))].lease,
+                 mw::routerports::kLeaseSec);
+    }
+
+    // ── An entry this host left behind (killed, not stopped) is made
+    //    afresh, not kept on its old lease ───────────────────────────────
+    {
+        using mw::routerports::kLeaseSec;
+        const auto udp = qMakePair(uint16_t(3478), QStringLiteral("UDP"));
+        const auto tcp = qMakePair(uint16_t(3478), QStringLiteral("TCP"));
+        FakeGateway gw;
+        gw.ignoresRenewal = true;
+        gw.table.insert(udp, {gw.lan, 3478, 200}); // minutes from running out
+        gw.table.insert(tcp, {gw.lan, 3478, 200});
+        RouterPortCore core(gw, kAlwaysFree);
+
+        const auto r = core.claim(tunnelRequest({3478}));
+        CHECK(r.ok);
+        CHECK_EQ(r.claim.external, uint16_t(3478));
+        CHECK(r.claim.tcp);
+        CHECK_EQ(gw.table[udp].lease, kLeaseSec);
+        CHECK_EQ(gw.table[tcp].lease, kLeaseSec);
+    }
+
+    // ── The switch to permanent mappings takes on such a router too ──────
+    {
+        const auto udp = qMakePair(uint16_t(3478), QStringLiteral("UDP"));
+        const auto tcp = qMakePair(uint16_t(3478), QStringLiteral("TCP"));
+        FakeGateway gw;
+        gw.ignoresRenewal = true;
+        RouterPortCore core(gw, kAlwaysFree);
+        CHECK(core.claim(tunnelRequest()).ok);
+        gw.refuse.insert(3478);
+        core.renew();
+        core.renew();
+        CHECK_EQ(core.leaseSec(), uint32_t(0));
+
+        // The router answers again. A permanent write over the leased entry
+        // is ignored like any other, so the entry is made again.
+        gw.refuse.clear();
+        gw.elapse(600);
+        CHECK(core.renew().isEmpty());
+        CHECK(gw.table.contains(udp));
+        CHECK_EQ(gw.table[udp].lease, uint32_t(0));
+        CHECK_EQ(gw.table[tcp].lease, uint32_t(0));
+    }
+
+    // ── One hole, now: a router that lost its table gets it back at once ──
+    {
+        const auto udp = qMakePair(uint16_t(48550), QStringLiteral("UDP"));
+        const auto tcp = qMakePair(uint16_t(48550), QStringLiteral("TCP"));
+        FakeGateway gw;
+        RouterPortCore core(gw, kAlwaysFree);
+        CHECK(core.claim(mediaRequest(0)).ok);
+        CHECK(core.claim(tunnelRequest()).ok);
+        gw.table.clear(); // rebooted
+        const int adds = gw.adds;
+
+        CHECK(core.renew(48550).isEmpty());
+        CHECK(gw.table.contains(udp));
+        CHECK(gw.table.contains(tcp));
+        CHECK_EQ(gw.adds, adds + 2);
+        // That one only: the tunnel's waits for its own turn.
+        CHECK(!gw.table.contains(qMakePair(uint16_t(3478), QStringLiteral("UDP"))));
+        // A port this host does not hold is not written.
+        CHECK(core.renew(48551).isEmpty());
+        CHECK_EQ(gw.adds, adds + 2);
+
+        // One a neighbour took meanwhile is dropped and reported, as at renewal.
+        gw.keepsForeignEntries = true;
+        gw.table[udp].client = QStringLiteral("192.168.1.34");
+        const auto lost = core.renew(48550);
+        CHECK_EQ(lost.size(), 1);
+        CHECK_EQ(lost.first().owner, QString("192.168.1.34"));
+        CHECK(!core.holds(48550));
+        CHECK(core.holds(3478));
+        CHECK_EQ(core.renewFailures(), 0);
     }
 
     // ── Release removes what was mapped, and only that ────────────────────

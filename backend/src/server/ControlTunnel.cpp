@@ -322,9 +322,11 @@ void ControlTunnel::onSessionOpened(const QString& sessionId)
                                 .arg(TunnelPeerPolicy::kHandshakeDeadlineMs / 1000));
     });
 
-    // A hole is free: build the connection on it now, the common case.
+    // A hole is free: build the connection on it now, the common case. It may
+    // have been held for hours, so the router is asked again behind it.
     p.port = takeTunnelPort();
     if (p.port != 0 || !m_Ports->enabled()) {
+        if (p.port != 0) m_Ports->recheck(p.port);
         createPeerConnection(p);
         return;
     }
