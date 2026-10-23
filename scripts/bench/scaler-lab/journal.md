@@ -1747,3 +1747,18 @@ premier draw : 128 ms (110-132), 0,17 ms sans barrière ; avec une VideoFrame CP
 et le stream dessine dans le canvas visible. Second micro-banc prêt : trois sortes de canvas sur 30 tours,
 requête de temps GPU, FSR1 et SGSR1, empreinte SHA-256 de la sortie sur une entrée déterministe, relevée
 d'abord sur SwiftShader ; sur la RTX au go de Bruno (scripts de séance, hors dépôt).
+
+**Second micro-banc (16:53, RTX 0 épinglée et vérifiée, 35 s, référence SwiftShader relevée avant).** La RTX
+rend juste : PSNR contre SwiftShader sur la même entrée déterministe, gl-mwsr 63,1 dB (écart max 58/255 sur
+0,10 % des pixels), gl-fsr1 61,9, gl-sgsr 62,9, toutes au-dessus du seuil de 45 dB fixé d'avance ; même
+empreinte pour les trois sortes de canvas. Et les 125 ms ne sont pas du GPU : la requête de temps GPU donne
+0,076 ms par dessin gl-mwsr 1440p. Tours (p50) : renderer sur OffscreenCanvas(16,16) 12 tours à 122-163 ms
+puis 18 à 3-15 ; sur OffscreenCanvas(2560,1440) 30 tours sur 30 à 117-142 ; sur un canvas d'élément 3-8 dès
+le troisième ; un renderer neuf sur OffscreenCanvas(16,16) avec begin/endQuery autour du dessin 0,9 ms ;
+gl-fsr1 et gl-sgsr sur OffscreenCanvas 117-143. Lecture : la barrière attend une soumission D3D que le dessin
+et le flush du comparateur ne provoquent pas sur ce pilote NVIDIA ; un canvas d'élément (commit du
+compositeur) ou une requête de temps (endQuery) la forcent. C'est la clé des trois régimes : une soumission
+par image d'écran dans une fenêtre visible, une soumission périodique sinon. Le produit dessine dans le
+canvas visible du stream : non concerné. Troisième micro-banc prêt (barrière seule, finish, readPixels 1×1,
+endQuery, flushs explicites, deux témoins nus sur OffscreenCanvas) : la gagnante deviendra le « done » du
+comparateur sur WebGL2 ; UM790Pro : recette du N95 avec le LUID du 780M lu dans le registre, au go de 59.
