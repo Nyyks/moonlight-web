@@ -309,15 +309,15 @@ describe('the mwsr shader text', () => {
         expect(mwsrGlsl({ overrides: { FLAT_TAPS: 3 } })).toContain('const uint FLAT_TAPS = 3u;');
     });
 
-    it('can bound the edge path by the four texels alone, so a thin line keeps its depth (J35)', () => {
-        // the product's default: the five samples, then the texels
-        expect(MWSR_OVERRIDES.DERING).toBe(1);
+    it('bounds the edge path by the four texels alone, so a thin line keeps its depth (J35; the default since J37)', () => {
+        // the product's default since 23/10/2026 (Bruno): the texels alone
+        expect(MWSR_OVERRIDES.DERING).toBe(2);
         for (const text of [tex, glsl]) {
             // the blend's own bound is lifted at 2 only, the texels' kept at 1 and 2
             expect(text).toContain('if (DERING == 2u) {');
             expect(text).toContain('if (DERING != 0u) {');
             expect(text).toContain('R = clamp(R, min(min(q00, q10), min(q01, q11)), max(max(q00, q10), max(q01, q11)));');
         }
-        expect(mwsrGlsl({ overrides: { DERING: 2 } })).toContain('const uint DERING = 2u;');
+        expect(mwsrGlsl({ overrides: { DERING: 1 } })).toContain('const uint DERING = 1u;');
     });
 });

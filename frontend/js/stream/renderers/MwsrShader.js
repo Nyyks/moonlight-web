@@ -36,9 +36,9 @@
  *   4. a coherence term (a step or a ridge across, against all the variation
  *      around) doses both, so that grain, texture and compression blocks are
  *      left alone; the whole fades to C near 1:1;
- *   5. the result is bounded by the min and max of the five samples, then by
- *      the four input texels around the pixel (DERING 1; 2: the texels alone,
- *      so that a line one texel wide keeps its depth, J35).
+ *   5. the result is bounded by the four input texels around the pixel
+ *      (DERING 2, the default since J37: a line one texel wide keeps its
+ *      depth, J35), or by the five samples first, then the texels (DERING 1).
  *   With CHROMA444 (4:4:4 streams, plan §4.2) the vote, the coherence and the
  *   weights are taken per channel, so that a border between two colours of one
  *   luma is seen and sharpened too.
@@ -95,8 +95,8 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     /** The most negative weight of an across tap: the blend's divisor stays >= 1 + 2 W_MIN
      *  (0.3 × 1.67 at sharpness 1.67; at the default sharpness 1 the cap is never reached). */
     W_MIN: ['f32', -0.5],
-    /** The edge path's bound (the flat path keeps its taps' range): 0 the five samples of the blend; 1 the five samples, then the four input texels around the pixel (four loads); 2 the four texels alone, so that a line's pixel may pass its bilinear mix, as far as the texel (J35). */
-    DERING: ['u32', 1],
+    /** The edge path's bound (the flat path keeps its taps' range): 0 the five samples of the blend; 1 the five samples, then the four input texels around the pixel (four loads); 2 the four texels alone, so that a line's pixel may pass its bilinear mix, as far as the texel (J35; the default since 23/10/2026, J37). */
+    DERING: ['u32', 2],
     /** 1: the vote, the coherence and the weights per channel (4:4:4 streams); 0: from the luma, shared by the channels. */
     CHROMA444: ['u32', 0],
     /** The flat path's reconstruction: 1 the bilinear sample itself; 5 or 9 bilinear taps of a cubic (Mitchell-Netravali, B 0, C FLAT_C) over the 4×4 texels around, the four corners dropped at 5 (J33); 3 the interpolating quadratic of Dodgson over the 3×3 texels around, its corner dropped (J34). */

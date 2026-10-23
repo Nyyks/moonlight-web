@@ -639,7 +639,8 @@ est le pas d'un texel en coordonnées de texture.
    trait (ce que Bruno a vu sur l'iPhone : « une couleur plus pâle sur le noir »). `DERING 2` ne
    garde que la borne 2×2 des texels : sur `text` à ×1,33, +0,37 dB et SSIM 0,950 → 0,958, les
    noirs des traits à la profondeur de la référence, dépassements 0 % ; option de labo (`dr=2` du
-   comparateur), le défaut reste 1 en attendant le choix de Bruno.
+   comparateur) jusqu'au 23/10 à 15:14, où Bruno en fait le défaut du produit (J37) ; `dr=1` du
+   comparateur rend l'ancienne borne.
 10. Netteté fusionnée, adaptative au contraste : `out = R + λ · (R − moyenne(A, B, D, E))`, avec
     `λ = netteté · S(s) · H`, où `S(s)` croît de 0 à l'échelle 1 (contournement de toute façon) à
     1 à l'échelle 2, et `H` est la marge locale (distance de `R` au min et au max du voisinage,

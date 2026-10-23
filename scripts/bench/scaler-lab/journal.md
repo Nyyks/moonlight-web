@@ -1697,3 +1697,53 @@ morte au lieu d'abandonner (délai de socket de 60 s ajouté depuis) ; tuée à 
 59, qui tenait f1 en attente ; un créneau RTX de deux minutes est demandé pour plus tard. Les deux
 premiers essais DualRTX avaient échoué avant toute mesure (`navigator.gpu` absent sur `data:`, `wmic`
 absent de Windows 11 26200) : les LUID n'étaient pas en cause.
+
+## 2026-10-23 — J37, la borne des texels seuls par défaut (`DERING 2`) ; le comparateur sur NVIDIA, trois régimes
+
+**Décision de Bruno (15:14, par 59)** : `DERING 2`, la borne des arêtes par les quatre texels seuls (J35),
+devient le défaut du produit ; CR5, la netteté et la zone du regard restent comme avant (bilinéaire, 2,0,
+zone coupée), en attente de ses décisions. Sa préférence à l'œil à ×1,33 (iPhone, 14:51) : plat Q3,
+netteté 1,85, texels seuls, sans zone, 4,02 ms, SSIM 0,948, PSNR 25,4 dB contre FSR1 0,947 / 25,1 à
+9,23 ms. À ×2 (720p → 1440p), MWSR lui paraît « baveux » à côté de FSR1, sur l'iPhone comme sur le DualRTX
+(0,874 / 21,9 dB contre 0,880 / 22,1) : c'est structurel (J31 : raideur des contours 0,53-0,54 contre 0,55,
+FLIP 0,057 contre 0,045 sur l'étalon ; la netteté sature sur `W_MIN`, le chemin plat n'affûte pas la
+texture, RCAS si). Trois voies lui sont proposées : accepter ; FSR1 au-dessus de ×1,6 par le gouverneur là
+où l'appareil le paie (FSR1 à 1440p : iPhone 8-9 ms, Mac 4,2, 780M 14,9, N95 33) ; un affûtage borné dans
+MWSR au-delà de ×1,6 (étude). Décision attendue.
+
+**Appliqué (16:33-16:45)** : `DERING: 2` dans `MWSR_OVERRIDE_SPEC` (les deux jumeaux lisent la même
+table), le test unitaire (le défaut à 2 ; le GLSL cuit `DERING = 1u` sur demande), le comparateur
+(`MWSR_DEF.dr` suit le produit : « texels seuls » par défaut, `dr=1` rend l'ancienne borne, étiquetée
+« borne cinq puis texels »), le design §3.2 (9). `golden.json` refait sur SwiftShader (`chain-mwsr` =
+`mwsr` au bit près sur les neuf cas) et revérifié par `--golden-check` ; conformité : côté WebGPU
+`chain-mwsr` = `mwsr` exact partout ; côté WebGL (SwiftShader, « renderer on ANGLE (Google, Vulkan 1.3.0
+(SwiftShader Device …)) » dans le journal de la passe) jumeau contre noyau text 0,057 dB, game 0,010,
+code 0,020, FLIP 0,001 / 0,000 / 0,000 : OK ; 1726 tests, `npm run check` vert ; commit du jour sur
+l'index privé. Pilote du parc : `dr=1` épinglé sur q3 / q3f / q5 / q5f, pour garder la borne mesurée en J36.
+
+**Faux pas et fausse alerte.** La passe « côté WebGPU » (`--swiftshader --conformity`) crée un contexte
+WebGL2 sur l'adaptateur par défaut, ici la RTX de l'écran, avant que le garde-fou `soft=1` de la page ne
+le rejette : quelques millisecondes, aucune cellule rendue ; signalé à 59. Puis la table de conformité a
+comparé au noyau d'aujourd'hui des clichés `conf-q-*-chain-gl-mwsr.png` **du 21/10** (noms sans étiquette
+ni date ; leurs FLIP 0,071 / 0,019 / 0,029 sont ceux de J20) et conclu « pas la même qualité » : une heure
+de fausse alerte sur « la RTX rend autre chose ». Une relance avec `--use-angle=swiftshader` côté WebGPU
+coupe WebGPU (`requestAdapter returned null`), comme le commentaire du pilote le dit ; seule la passe
+`--webgl-swiftshader` produit les clichés du jumeau. À faire un autre jour : l'âge de chaque cliché dans
+la table, et « périmé » pour ce qui précède la passe.
+
+**Le comparateur sur NVIDIA, en cours.** Trois régimes vus sur le DualRTX, aucun n'étant le temps GPU :
+(1) le Chrome de Bruno, fenêtre du comparateur recouverte par une autre (14:49) : 110 ms par image pour
+les trois shaders, Natif 0,46 ms, mesuré en premier, fenêtre encore visible ; (2) le même Chrome, fenêtre
+seule au premier plan sur DISPLAY5 à 120 Hz (59, par l'extension, 16:29) : Natif 8,03 ms, MWSR 11,04,
+FSR1 8,47, SGSR1 12,38, la cadence de l'écran : chaque itération attend une image du compositeur ; (3) un
+Chrome sans tête épinglé sur la RTX 0 (bus 01:00 ; épinglage vérifié par la croissance des compteurs WDDM
+du processus GPU pendant un dessin, le cumul comptant l'énumération des adaptateurs au démarrage) :
+« chrono 225/300 » après 45 s, ~180 ms par itération, et au micro-banc (8 tours) : dessin trivial 1440p +
+barrière 1,61 ms, import VideoFrame de canvas / VideoFrame CPU / ImageBitmap / canvas + dessin + barrière
+4,77 / 2,67 / 0,94 / 1,12 ms, mais `WebGlRenderer` gl-mwsr sur `OffscreenCanvas(16,16)` redimensionné au
+premier draw : 128 ms (110-132), 0,17 ms sans barrière ; avec une VideoFrame CPU 4 tours à 125 ms puis
+0,9-3,9 ; avec une ImageBitmap 0,2-4. Le produit n'est pas en cause : la porte P4 (J20) a mesuré gl-mwsr
+à 0,81-0,87 ms sur la RTX avec le labo, qui donne au renderer un OffscreenCanvas à la taille de sortie,
+et le stream dessine dans le canvas visible. Second micro-banc prêt : trois sortes de canvas sur 30 tours,
+requête de temps GPU, FSR1 et SGSR1, empreinte SHA-256 de la sortie sur une entrée déterministe, relevée
+d'abord sur SwiftShader ; sur la RTX au go de Bruno (scripts de séance, hors dépôt).

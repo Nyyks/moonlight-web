@@ -3,19 +3,19 @@
  "cases": {
   "code 1280x720->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.138022,
-    "psnrVsBilinear": 31.564,
-    "sha256": "0662731f73b0e176b94208529ef6716f045401e447126d91db33232b5b2b55d0"
+    "mean": 0.140198,
+    "psnrVsBilinear": 28.877,
+    "sha256": "e7b1b7d00d1fb803ac7e042bbcd6a5e5b02b6889cf3fda80318359858e5516f9"
    },
    "mwsr": {
-    "mean": 0.138022,
-    "psnrVsBilinear": 31.564,
-    "sha256": "0662731f73b0e176b94208529ef6716f045401e447126d91db33232b5b2b55d0"
+    "mean": 0.140198,
+    "psnrVsBilinear": 28.877,
+    "sha256": "e7b1b7d00d1fb803ac7e042bbcd6a5e5b02b6889cf3fda80318359858e5516f9"
    },
    "mwsr_c444_1": {
-    "mean": 0.138035,
-    "psnrVsBilinear": 31.447,
-    "sha256": "ac6dd69c722fdf3ecce24db14217a9f18f60f6739691b44d8fd67b1d895653e9"
+    "mean": 0.140363,
+    "psnrVsBilinear": 28.715,
+    "sha256": "e828bd566135a4ee42813a27fb6bcf07a31477decf52e04483b28a633243d7ff"
    },
    "mwsr_dering_0": {
     "mean": 0.13807,
@@ -29,19 +29,19 @@
   },
   "code 1920x1080->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.136486,
-    "psnrVsBilinear": 34.837,
-    "sha256": "11a231ac95fa1b68c8abf13ae3c5450f2ca1b2723c5308a0ac232d84e5672b15"
+    "mean": 0.138007,
+    "psnrVsBilinear": 32.025,
+    "sha256": "a64aa4080fdfd648d374e129a961e6f6dfcfe84938bb56ef9ab12d4068f81b61"
    },
    "mwsr": {
-    "mean": 0.136486,
-    "psnrVsBilinear": 34.837,
-    "sha256": "11a231ac95fa1b68c8abf13ae3c5450f2ca1b2723c5308a0ac232d84e5672b15"
+    "mean": 0.138007,
+    "psnrVsBilinear": 32.025,
+    "sha256": "a64aa4080fdfd648d374e129a961e6f6dfcfe84938bb56ef9ab12d4068f81b61"
    },
    "mwsr_c444_1": {
-    "mean": 0.136479,
-    "psnrVsBilinear": 34.762,
-    "sha256": "c10ca6f7723051d954abc3eb62c2442f229678e4456232727b444edd00b96e4f"
+    "mean": 0.138082,
+    "psnrVsBilinear": 31.928,
+    "sha256": "06d03ff4687204c95e99179023b5710aa2e4659c3c7fa04de776bea7ab737a9d"
    },
    "mwsr_dering_0": {
     "mean": 0.136526,
@@ -86,19 +86,19 @@
   },
   "game 1280x720->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.375974,
-    "psnrVsBilinear": 38.335,
-    "sha256": "2356a3822fafa12849edce7adcbca53ce7dc62036b2d487fff64995264638781"
+    "mean": 0.375972,
+    "psnrVsBilinear": 38.05,
+    "sha256": "a73320a80302da450789d182db1bdfdd95e384fbf629af2dd5a28ea64bb822d8"
    },
    "mwsr": {
-    "mean": 0.375974,
-    "psnrVsBilinear": 38.335,
-    "sha256": "2356a3822fafa12849edce7adcbca53ce7dc62036b2d487fff64995264638781"
+    "mean": 0.375972,
+    "psnrVsBilinear": 38.05,
+    "sha256": "a73320a80302da450789d182db1bdfdd95e384fbf629af2dd5a28ea64bb822d8"
    },
    "mwsr_c444_1": {
-    "mean": 0.375977,
-    "psnrVsBilinear": 38.302,
-    "sha256": "94ec39e71ba3aafe4180ac8ccdd1cc9335e5a34cd8256007e0c0afa821a0b5f7"
+    "mean": 0.375974,
+    "psnrVsBilinear": 38.001,
+    "sha256": "bdab08cc3473a794e1ce4038e2a7fb1186c8a063cea13f1cff2028ac478e9623"
    },
    "mwsr_dering_0": {
     "mean": 0.37598,
@@ -112,19 +112,19 @@
   },
   "game 1920x1080->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.375927,
-    "psnrVsBilinear": 42.386,
-    "sha256": "4cb7817940025b2ec89bd1bc521c0b95cc911ccba61a7f61b08c549c07cfa91e"
+    "mean": 0.375925,
+    "psnrVsBilinear": 41.937,
+    "sha256": "9da99fe6ca24c3d4e53de1e7a9084d41d7c4d3dbb4f9244a3f0fe87a70ef143c"
    },
    "mwsr": {
-    "mean": 0.375927,
-    "psnrVsBilinear": 42.386,
-    "sha256": "4cb7817940025b2ec89bd1bc521c0b95cc911ccba61a7f61b08c549c07cfa91e"
+    "mean": 0.375925,
+    "psnrVsBilinear": 41.937,
+    "sha256": "9da99fe6ca24c3d4e53de1e7a9084d41d7c4d3dbb4f9244a3f0fe87a70ef143c"
    },
    "mwsr_c444_1": {
-    "mean": 0.375927,
-    "psnrVsBilinear": 42.355,
-    "sha256": "a25fe94a30a4a2c45c9b602147235a27cad56ac549e387a75c540319d4f204c6"
+    "mean": 0.375925,
+    "psnrVsBilinear": 41.899,
+    "sha256": "a85baa5df04d56fb61991c608aa70115500c6b7c6a85c9412aa94931040998ec"
    },
    "mwsr_dering_0": {
     "mean": 0.37593,
@@ -138,19 +138,19 @@
   },
   "text 1280x720->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.895978,
-    "psnrVsBilinear": 22.903,
-    "sha256": "74db75c9089b18426e622392c49018f1422b439f9c1adb9480ae86daad8d3df5"
+    "mean": 0.884968,
+    "psnrVsBilinear": 19.648,
+    "sha256": "d51ff2aa2dec58381aaecf381849a68d96d1dc521debf68513c7140fcda666c2"
    },
    "mwsr": {
-    "mean": 0.895978,
-    "psnrVsBilinear": 22.903,
-    "sha256": "74db75c9089b18426e622392c49018f1422b439f9c1adb9480ae86daad8d3df5"
+    "mean": 0.884968,
+    "psnrVsBilinear": 19.648,
+    "sha256": "d51ff2aa2dec58381aaecf381849a68d96d1dc521debf68513c7140fcda666c2"
    },
    "mwsr_c444_1": {
-    "mean": 0.896113,
-    "psnrVsBilinear": 22.86,
-    "sha256": "f7b601ef0dc946e284f3b01c8262dd5db9d77b22c7b5573117375096a8a42aaf"
+    "mean": 0.88486,
+    "psnrVsBilinear": 19.524,
+    "sha256": "0550d36a794798ccc007ec37073530c247c2a0de0f23a9e72da77f897c4a6759"
    },
    "mwsr_dering_0": {
     "mean": 0.895954,
@@ -164,19 +164,19 @@
   },
   "text 1920x1080->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.913311,
-    "psnrVsBilinear": 26.619,
-    "sha256": "ecb7dbcc4d468c3750ee46a007fdd96b502f357c9d0b53d61d56036e46117674"
+    "mean": 0.904809,
+    "psnrVsBilinear": 23.026,
+    "sha256": "356d0ece01031981a6a439829bdb7292fbe79c16c8d3b107939bd3b583aaad7b"
    },
    "mwsr": {
-    "mean": 0.913311,
-    "psnrVsBilinear": 26.619,
-    "sha256": "ecb7dbcc4d468c3750ee46a007fdd96b502f357c9d0b53d61d56036e46117674"
+    "mean": 0.904809,
+    "psnrVsBilinear": 23.026,
+    "sha256": "356d0ece01031981a6a439829bdb7292fbe79c16c8d3b107939bd3b583aaad7b"
    },
    "mwsr_c444_1": {
-    "mean": 0.913489,
-    "psnrVsBilinear": 26.654,
-    "sha256": "6ea88d5a31ffb7c24dc4da082103821c749a3dd0a435b372fa309302fadd8418"
+    "mean": 0.904542,
+    "psnrVsBilinear": 22.958,
+    "sha256": "393cfe94758e6e44cd4fb2a96f24d994c670c0560f8f9bd674ba4d94e9f928fb"
    },
    "mwsr_dering_0": {
     "mean": 0.913405,

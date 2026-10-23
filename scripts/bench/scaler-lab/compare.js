@@ -104,8 +104,8 @@ const FLAT_CHOICES = [
 ];
 const FC_RANGE = [0.25, 1, 0.05];
 // The edge path's bound (MwsrShader's DERING): the five samples of the blend,
-// then the four texels around the pixel (the product); or the texels alone,
-// which lets a line one texel wide keep its depth past its bilinear mix (J35).
+// then the four texels around the pixel (the product until 23/10); or the texels alone,
+// which lets a line one texel wide keep its depth past its bilinear mix (J35; the product since 23/10).
 const BOUND_CHOICES = [
   [1, "cinq échantillons, puis texels"],
   [2, "texels seuls"],
@@ -202,7 +202,11 @@ const tuningText = () =>
     : state.flat !== 1
       ? " · plat CR" + state.flat + " C " + fr(state.fc, 2)
       : "") +
-  (state.dr === 2 ? " · borne texels" : "") +
+  (state.dr === 2
+    ? " · borne texels"
+    : state.dr === 1
+      ? " · borne cinq puis texels"
+      : "") +
   (state.gaze ? zoneText() : "");
 const currentCase = () => CASE_BY[state.caseId];
 const sizeOf = (level) => [Math.round((level * 16) / 9), level];
