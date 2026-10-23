@@ -8191,7 +8191,8 @@ du Mac avec l'agent utilisateur d'un Mac). Ils sont tapés par le flux dans le c
   - le settings.json des instances dev portait `"always"`, venu d'un ancien `true`. Le banc met
     `"auto"` le temps du passage ;
   - depuis la session du banc, `SetWindowPos(HWND_TOPMOST)` réussit, mais la fenêtre ne devient pas
-    TOPMOST : le centre de l'écran diffusé doit être libre ;
+    TOPMOST : le centre de l'écran diffusé doit être libre, ou la fenêtre de banc se met elle-même
+    TOPMOST à sa création (`WS_EX_TOPMOST`, vu sur le N95, ci-dessous) ;
   - le ^ mort compté faux : le banc demande le caractère attendu à `ToUnicodeEx` après la frappe,
     quand la disposition garde encore le ^ en attente. Il obtient « ^ » au lieu d'une touche morte,
     alors que ce qui sort, « ^) », est juste.
@@ -8217,4 +8218,23 @@ letters as non-normalized VKs | layout fidelity: auto ».
   - son Desktop reste ouvert après un stream : le banc le reprend, et le laisse ouvert ;
   - le temps de la session, Sunshine fait passer la sortie son par défaut sur « Steam Streaming
     Speakers ». Il la rend une vingtaine de secondes après la déconnexion du client.
-- Reste l'hôte US (le N95).
+
+**Hôte US, partiel** (23/10, 15:24-15:25, le N95) : le champ de texte tape en US `00000409`, et
+le serveur de banc est l'exe de la `--dev` de DualRTX, avec le même frontend. Il tourne dans un
+dossier à part, derrière une règle de pare-feu temporaire. Le worker tourne en `"auto"`. Il lit
+d'abord la disposition de l'hôte (`040C040C`), puis à la première touche celle de la fenêtre au
+premier plan : « layout 0x04090409 read — 95 character(s) on keys, 0 through dead keys ».
+
+- AZERTY Windows au Bureau : 15 touches envoyées, dont 14 jugées, toutes justes (a z q s m , & 1 é
+  è ç à ù !). Lettres et ponctuation partent en vraies touches US : & = Maj+7, ! = Maj+1, : = Maj+;.
+- é è ç à ù n'ont pas de touche US. Ils arrivent en texte Unicode, et le journal dit « no key on
+  this layout | Notepad: OK as Unicode text | Game: KO nothing was pressed ».
+- Le banc s'est arrêté là. Sur le N95, on ne tape pas si quelqu'un a pu se servir du PC dans les
+  deux dernières minutes (GetLastInputInfo), et l'agent ne savait pas encore le lire. Il reste la
+  fin de ce passage, le mode Jeu et les deux autres claviers. La résolution sur une disposition US
+  est couverte par les tests unitaires.
+- **Pièges du banc** :
+  - sur un PC où quelqu'un a des fenêtres ouvertes, la fenêtre de banc ne passe au-dessus que si
+    elle se met elle-même TOPMOST, à sa création ;
+  - un exe neuf qui écoute ouvre une alerte du pare-feu. Il faut une règle par programme, profil
+    Privé, posée avant le démarrage et retirée à la fin.
