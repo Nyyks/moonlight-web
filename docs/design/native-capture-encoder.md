@@ -8158,7 +8158,38 @@ chaque texte :
 
 - PSReadLine 2.0.0 jette ce qui arrive en Unicode, et compose mal la touche morte d'AltGr, avec
   l'Alt droit comme avec le gauche : à comparer avec un vrai clavier.
-- Non mesurés : Notepad (celui de Bruno était ouvert), Edge (sa fenêtre de premier lancement a
-  pris le premier plan), donc les accords de la barre.
+- Non mesurés : Notepad (celui de Bruno était ouvert) et Edge (sa fenêtre de premier lancement a
+  pris le premier plan).
+- Accords de la barre, mesurés le 23/10 dans le champ EDIT : Maj puis a tape A ; Ctrl puis a part
+  en VK 0x41, scancode 0x10, soit Ctrl+A sur l'AZERTY et non plus Ctrl+Q. C'est le journal `[KBD]`
+  qui le prouve : le champ EDIT classique ne gère pas Ctrl+A.
 - Le banc ne clique plus dans le flux que si la fenêtre sous le point visé est la cible : un clic
   au centre de l'écran diffusé est tombé une fois sur une fenêtre de Bruno (rien n'y a été tapé).
+
+### 36.7 Banc C4 (23/10, DualRTX, hôte FR `040C`) : le clavier physique
+
+Trois claviers de client imités dans Chrome headless (SwiftShader) par `Input.dispatchKeyEvent`,
+avec le code, le caractère et les modificateurs que le navigateur donne à chaque touche (l'AZERTY
+du Mac avec l'agent utilisateur d'un Mac). Ils sont tapés par le flux dans le champ EDIT, sous
+`"auto"`, et le premier plan est vérifié avant et après chaque touche :
+
+| Client | Bureau : les caractères du client | Jeu : les positions |
+|---|---|---|
+| AZERTY Windows | 19/19 | 19/19 |
+| QWERTY US | 16/16 | 16/16 sur le fond (le banc en compte 14 : le ^ mort, ci-dessous) ; q w a z m ; 1 @ donnent a z q w , m & 2 |
+| AZERTY Mac | 14/14, Option comprise ({ } [ ] \|) | 14/14 : § ! - @ donnent - _ = ² ; Option + touche ne tape rien |
+
+- Au Bureau, tout part en vraies touches de la disposition de l'hôte, accents, AltGr et Option
+  compris.
+- En Jeu, la position [ d'un clavier US est le ^ mort de l'AZERTY : rien ne sort, puis « ^) » avec
+  la touche suivante, comme avec un clavier AZERTY branché sur l'hôte. Le worker écrit le passage
+  d'un mode à l'autre : « keys from the client's gaming mode — by position ».
+- **Pièges du banc** :
+  - un Ctrl, un Alt ou une Maj imités sans leurs drapeaux de modificateurs font lever au client
+    (`_reconcileModifiers`) le Ctrl, puis l'Alt, sur l'hôte. L'hôte voit alors un Alt tapé seul, et
+    la barre de menus prend la touche suivante : la première touche après Ctrl+Alt+Maj+M se perdait ;
+  - le settings.json des instances dev portait `"always"`, venu d'un ancien `true`. Le banc met
+    `"auto"` le temps du passage ;
+  - depuis la session du banc, `SetWindowPos(HWND_TOPMOST)` réussit, mais la fenêtre ne devient pas
+    TOPMOST : le centre de l'écran diffusé doit être libre.
+- Restent l'hôte US (le N95) et Sunshine pour Windows.
