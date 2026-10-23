@@ -11632,6 +11632,10 @@ export class StreamView {
         // with _firstFrameRendered reset, which would otherwise re-pop the
         // slide on every degrade step — app.js sets this flag to suppress it.
         if (!this._shortcutsSlide || this._suppressShortcutsSlide) return;
+        // A guest invited to watch: the gestures move a cursor and open a
+        // keyboard that reach nothing. (A computer's key combos stay: quitting,
+        // fullscreen and stats are this page's own.)
+        if (IS_TOUCH_DEVICE && !this._mouseAllowed && !RemoteNav.isActive()) return;
         this._shortcutsSlide.classList.remove('fading-out');
         this._shortcutsSlide.style.display = '';
 
