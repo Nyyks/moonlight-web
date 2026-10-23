@@ -1639,8 +1639,9 @@ lab avant toute mesure — `navigator.gpu` n'existe pas sur une URL `data:` — 
 (médiane des passes). Sur le realme, `/json/new` répond 500 : les onglets sont faits par le point
 d'entrée navigateur (`Target.createTarget`, `activateTarget`, `closeTarget`), Chrome mis au premier
 plan par `am start -n`. Conditions de 59 : UM790Pro écarté (test de Qwergin), N95 et mw-arm avec une
-tâche planifiée Interactive — que mon classifieur a refusé d'enregistrer à distance : les deux
-attendent la main de Bruno ; Mac libre (dit par Bruno), mot pour Léo affiché puis retiré, Chrome dédié
+tâche planifiée Interactive — que mon classifieur a refusé d'enregistrer à distance : Bruno a lancé
+lui-même les deux scripts par ssh depuis son poste (`ssh mw-arm powershell -NoProfile -Command - <
+start-arm.ps1`, 14:15), un Chrome sans tête collé à sa console mourant avec elle ; Mac libre (dit par Bruno), mot pour Léo affiché puis retiré, Chrome dédié
 `--mute-audio` ; DualRTX annoncé début et fin.
 
 **Mesures (ms par image, moyenne de 300 images ; médiane des passes ; la saveur entre parenthèses) :**
@@ -1650,6 +1651,7 @@ attendent la main de Bruno ; Mac libre (dit par Bruno), mot pour Léo affiché p
 | iPhone 13 Pro, Safari (WebGPU `mwsr`, captures de Bruno 12:13-12:16) | 1 | 4,41 | 4,82 (100 images) | 4,82 | 5,13 | — | — | 7,94-8,26 | 4,39-5,04 |
 | Mac M1 Pro, Chrome 155 (WebGL2 `gl-mwsr`) | 3 | 3,28 | 4,38 | 3,70 | 3,37 | 3,35 | 3,43 | 4,20 | 3,44 |
 | DualRTX 780M, Chrome sans tête (WebGL2) | 1 | 6,13 | 5,86 | 5,85 | 9,46 | 5,32 | 5,67 | 14,93 | 6,60 |
+| N95 (mw-intel), Intel UHD, Chrome 155 sans tête (WebGL2) | 1 | 19,3 | 17,5 | 16,5 | 17,2 | 17,2 | 16,3 | 33,3 | 18,2 |
 | realme Note 60, Mali-G57, Chrome 155 (WebGL2) | 1 | 51,6 | 57,3 | 59,2 | 62,1 | 52,6 | 59,3 | 125 | 73 |
 
 Passe par passe : Mac Q3 3,52 / 3,13 / 3,28, Q3 + zone 3,53 / 4,53 / 4,38, CR5 3,24 / 3,70 / 4,74,
@@ -1668,18 +1670,27 @@ chargée : load 5, les jeux de Léo en fond) ; 780M FSR1 de 11,4 à 17,2 et SGSR
 | FSR1 / SGSR1 | 0,948 / 0,946 | 25,2 / 24,8 |
 
 **Lecture.** (1) Le réglage ne change le temps que sur les téléphones : Q3 contre CR5, +9 % sur l'iPhone
-(4,41 → 4,82) et +15 % sur le realme (51,6 → 59,2) ; sur le Mac et le 780M l'écart est dans le bruit
-des passes. La borne texels ne coûte rien de plus que CR5, comme prévu (780M 5,3, realme 52,6, Mac 3,35).
+(4,41 → 4,82) et +15 % sur le realme (51,6 → 59,2) ; sur le Mac, le 780M et le N95 l'écart est dans le
+bruit des passes (N95 : Q3 19,3 contre CR5 16,5, dans l'autre sens, une passe). La borne texels ne coûte rien de plus que CR5, comme prévu (780M 5,3, realme 52,6, Mac 3,35).
 (2) La zone du regard à poids 1 coûte +0,3-0,4 ms sur l'iPhone (+7-9 %), +3 à +7 ms sur le realme (+5 à
 +11 %), rien de lisible sur le Mac et le 780M ; sur toute l'image elle retire 0,003-0,006 de SSIM et
 0,1-0,2 dB (la netteté 2,5 au centre, J34). (3) Partout, MWSR reste loin sous FSR1 (iPhone 4,4-5,1
-contre 8, Mac 3,4 contre 4,2, 780M 5-6 contre 15, realme 52-62 contre 125) et au niveau ou sous SGSR1
-(4,4-5,0 ; 3,4 ; 6,6 ; 73). (4) À qualité égale ou meilleure que FSR1 (0,951 / 25,5 contre 0,948 / 25,2)
+contre 8, Mac 3,4 contre 4,2, 780M 5-6 contre 15, N95 16-19 contre 29-36, realme 52-62 contre 125) et
+au niveau ou sous SGSR1 (4,4-5,0 ; 3,4 ; 6,6 ; 17-22 ; 73). (4) À qualité égale ou meilleure que FSR1 (0,951 / 25,5 contre 0,948 / 25,2)
 pour le temps de CR5, le candidat de J35 est la configuration à proposer à Bruno ; Q3 reste l'économie
 des téléphones (-9 à -15 %) pour un dixième de SSIM en moins au millième.
 
-**Manques et ratés.** Le mw-arm et le N95 attendent la main de Bruno (voir plus haut) ; l'UM790Pro
-attend la fin du test de Qwergin et son accord explicite. La passe RTX (13:12) est **invalide** : MWSR
+**Manques et ratés.** Le N95 est fait (14:20-14:23, quatre connexions ssh, tâche retirée et vérifiée).
+**Le mw-arm est invalide** : avec le même pilote, les trois algorithmes sortent à 310-350 ms par image
+en médiane (MWSR 312, FSR1 350, SGSR1 340 ; moyennes 372, 359 et 1 574), dix fois un tracé 1440p sur
+son Adreno 618 — un micro-banc dans le même Chrome donne 30 ms par tracé plein écran trivial, la fence
+du comparateur correcte (300 sondages de 0,1 ms), `gl.finish()` 0,2 ms (un flush), et un tracé sur
+huit figé 18 s. Un surcoût commun aux trois, donc hors shader : le portable à 3,6 Go qui pagine (893 Mo
+libres, fichier d'échange en service, Discord et Parsec dans la session de Martin), ou l'import d'une
+VideoFrame par tracé sur le pilote Qualcomm ; à reprendre avec le lab (recette du 22/10, lire les p50),
+pas avec le comparateur. Le pilote a reçu `--ws-timeout` (une réponse DevTools peut prendre des minutes
+sur une machine qui pagine) et la colonne p50. L'UM790Pro attend la fin du test de Qwergin et l'accord
+explicite de Bruno. La passe RTX (13:12) est **invalide** : MWSR
 mesuré à 125 ms par image, FSR1 jamais fini, le processus GPU de ce Chrome avec un compteur de
 plantage récent (`--gpu-recent-crash-count`), et le pilote resté pendu 18 min sur sa socket DevTools
 morte au lieu d'abandonner (délai de socket de 60 s ajouté depuis) ; tuée à 13:30:50 à la demande de
