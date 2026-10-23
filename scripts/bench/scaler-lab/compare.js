@@ -638,7 +638,11 @@ function nextTask() {
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
 // The GPU's completion of what WebGL2 was given: a fence polled task by task
-// (Chrome's gl.finish() is a flush), as the lab does.
+// (Chrome's gl.finish() is a flush), as the lab does. On NVIDIA's D3D11
+// driver the fence alone waits some 120 ms for a submission that neither the
+// draw nor the flush provokes (nor finish, readPixels or more flushes: J37);
+// a time query closed after the draw forces it, so timeAlgo wraps the draw in
+// one where the extension exists (4.7 ms there, nothing changes elsewhere).
 async function glDone(gl) {
   const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
   if (!sync) return;
@@ -681,7 +685,24 @@ async function timeAlgo(algoId, c, iters, onProgress, alive) {
     r.setOutputSize(outW, outH);
     applyTuning(algoId, r);
     draw = () => r.draw(frame.clone());
-    if (api === "webgl") sync = () => glDone(r.gl);
+    if (api === "webgl") {
+      const gl = r.gl;
+      const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+      if (timer) {
+        const bare = draw;
+        draw = async () => {
+          const q = gl.createQuery();
+          gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
+          try {
+            await bare();
+          } finally {
+            gl.endQuery(timer.TIME_ELAPSED_EXT);
+            gl.deleteQuery(q);
+          }
+        };
+      }
+      sync = () => glDone(gl);
+    }
   }
   for (let i = 0; i < WARM; i++) {
     await draw();

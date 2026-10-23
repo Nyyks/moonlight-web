@@ -1781,3 +1781,28 @@ question de Bruno (« Je dois lancer quoi comme commande ? ») : un script lu su
 erreur ; la première version du script avait une boucle multi-lignes et se serait arrêtée avant la tâche. Réécrit
 en une instruction par ligne et répété à blanc en local avant la ligne (les scripts N95 et mw-arm n'avaient pas
 de bloc). Restent le troisième micro-banc RTX et la correction du « done » du comparateur, au go de 59.
+
+**Troisième micro-banc (19:14, RTX 0 épinglée et vérifiée, 29 s ; go de Bruno par 59).** Dix façons de finir un
+dessin gl-mwsr 1080→1440 du `WebGlRenderer` sur OffscreenCanvas, dix tours chacune après deux de chauffe (p50) :
+barrière seule 122 ms ; `gl.finish()` puis barrière 125 ; `readPixels` 1×1 puis barrière 122 ; requête de temps
+(`beginQuery`/`endQuery` TIME_ELAPSED) autour du dessin puis barrière **4,7 ms** (temps GPU 1,7-2,7 ms, horloges au
+repos) ; canvas d'élément, barrière seule 8,0 ms sur cinq tours puis 0,8-1,3 ; offscreen de nouveau 129 ;
+flush-barrière-flush 114 ; flush, tâche, flush, barrière 130 (pics 300-870) ; contexte nu sur
+OffscreenCanvas(2560×1440), attributs du renderer, dessin trivial + barrière 0,90 ms ; attributs par défaut 0,84.
+Lecture : ni `finish`, ni `readPixels`, ni les flushs ne font soumettre sur ce pilote ; seule la requête de temps le
+fait (et le commit du compositeur sur un élément, quantifié à la période d'écran) ; et un contexte nu n'a pas le
+problème : c'est un pas du chemin du renderer avec une VideoFrame (banc 1 : contexte nu + même VideoFrame 2,7 ms ;
+renderer + ImageBitmap 0,2-4 ms ; renderer + VideoFrame CPU lent quatre tours puis rapide) qui laisse le travail
+non soumis ; candidat à vérifier un autre jour, la barrière que le renderer pose lui-même à chaque dessin
+(`_setFence`, lue au dessin suivant). Produit non concerné (canvas visible, porte P4 0,8 ms).
+
+**Correction du comparateur (19:20, commit local du soir).** `compare.js` : sur WebGL2, quand
+`EXT_disjoint_timer_query_webgl2` existe, `timeAlgo` enveloppe chaque dessin (chauffe comprise) dans une requête
+TIME_ELAPSED créée, ouverte, fermée après le dessin et supprimée, puis la barrière comme avant ; sans l'extension
+(Safari, Firefox) rien ne change, et là la soumission est immédiate (Mac, Intel, Mali, 780M mesurés sains). Aucun
+changement d'UI, `frontend/` intact (gel de 59 jusqu'à 02:30). Test sur SwiftShader (Chrome sans tête, aucun moteur
+3D n'a bougé, `softcompare.py` de séance) : q5 MWSR 44,4 ms, FSR1 90,4, SGSR1 69,8 ; d2 39,9 / 107,2 / 48,8 ;
+qualité 0,941 / 24,6 et 0,951 / 25,5, chemin `gl-mwsr:frame` : les chiffres d'avant la correction (référence du
+banc 2 : 40 / 89 / 48). Restent, au go : la RTX à remesurer au comparateur (sa ligne du parc) et mw-arm à refaire ;
+la boucle de mesure du labo (`scaler_lab`) n'a pas ce « done » et ses chiffres RTX de P4 étaient sains (0,8 ms) ;
+à faire un autre jour : la colonne du temps GPU par la même requête.
