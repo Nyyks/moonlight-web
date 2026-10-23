@@ -75,6 +75,12 @@ void StreamWorkerHost::prepare(const QJsonObject& config, QStringList& args,
         const AppSettings settings;
         withSettings[QStringLiteral("keyboardLayoutFidelity")] = settings.keyboardLayoutFidelity();
         if (settings.keyboardDebug()) withSettings[QStringLiteral("keyboardDebug")] = true;
+        // The admin's « Network priority » box, by the same trap: SYSTEM's
+        // settings.json, which nobody writes, says marked. And the bench's
+        // MW_DSCP, which a worker the service starts does not inherit.
+        withSettings[QStringLiteral("packetMarking")] = settings.packetMarking();
+        const QString dscp = qEnvironmentVariable("MW_DSCP");
+        if (!dscp.isEmpty()) withSettings[QStringLiteral("dscp")] = dscp;
     }
     configLine = QJsonDocument(withSettings).toJson(QJsonDocument::Compact) + "\n";
 }

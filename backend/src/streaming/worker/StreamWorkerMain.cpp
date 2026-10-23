@@ -35,6 +35,7 @@
 #include "../IMediaEngine.h"
 #include "../ConsoleSession.h"
 #include "../HidParkingTransfer.h"
+#include "../PacketMarking.h"
 #include "../WorkerService.h"
 #include "../../backend/NvComputer.h"
 #include "../../backend/NvHTTP.h"
@@ -516,6 +517,18 @@ int runStreamWorker(QCoreApplication& app)
         InputMsg::setQuietProbe(&mw::native::NativeHost::secureDesktopHasInput);
         mw::native::NativeHost::setKeyboardDiagnostics(true);
         qInfo() << "[KBD] keyboard diagnostics on in the worker (never on the secure desktop)";
+    }
+
+    // The packets' DSCP, from the server's config for the same reason, before
+    // the first peer connection reads it. Absent (an older parent) → this
+    // process reads its own file and environment, as before.
+    {
+        PacketMarking::Handover marking;
+        if (cfg.contains(QStringLiteral("packetMarking")))
+            marking.marking = cfg[QStringLiteral("packetMarking")].toBool(true);
+        if (cfg.contains(QStringLiteral("dscp")))
+            marking.dscp = cfg[QStringLiteral("dscp")].toString().toStdString();
+        PacketMarking::setHandover(std::move(marking));
     }
 
     // The guests' shared feed: an engine and a pipe, nothing a browser meets.

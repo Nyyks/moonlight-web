@@ -18,7 +18,10 @@
 
 #include <array>
 #include <cstdlib>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <utility>
 
 // The DSCP our WebRTC packets leave with (plan « le son et la priorité des
 // paquets », D5).
@@ -39,7 +42,8 @@
 // out of force after a reboot on a PC outside a domain.
 //
 // `packet_marking: false` in settings.json marks nothing. The bench's
-// MW_DSCP="<audio>,<video>,<data>" (each 0-63) overrides both.
+// MW_DSCP="<audio>,<video>,<data>" (each 0-63) overrides both. The stream
+// worker gets both from the server (Handover below).
 namespace PacketMarking {
 
 /// AF41: Assured Forwarding class 4, low drop probability.
@@ -72,6 +76,51 @@ inline std::array<unsigned int, 3> resolve(bool marking, const std::string& over
     if (i == 3) return out;
     const unsigned int v = marking ? kAf41 : 0;
     return {v, v, v};
+}
+
+/// What the server read, for a stream worker that cannot read it itself: a
+/// worker the Windows service starts runs as SYSTEM, whose settings.json is
+/// not the owner's and whose environment is not the server's. Each value left
+/// unset (an older parent, a stream in the server's own process) is read by
+/// this process, as before.
+struct Handover
+{
+    std::optional<bool> marking;     // packet_marking
+    std::optional<std::string> dscp; // MW_DSCP
+};
+
+namespace detail {
+inline std::mutex& handoverMutex()
+{
+    static std::mutex m;
+    return m;
+}
+inline Handover& handoverSlot()
+{
+    static Handover h;
+    return h;
+}
+} // namespace detail
+
+/// Set once by the worker from its config, before its first peer connection.
+inline void setHandover(Handover h)
+{
+    std::lock_guard<std::mutex> lock(detail::handoverMutex());
+    detail::handoverSlot() = std::move(h);
+}
+
+inline Handover handover()
+{
+    std::lock_guard<std::mutex> lock(detail::handoverMutex());
+    return detail::handoverSlot();
+}
+
+/// resolve() with the server's values where it handed them over, and this
+/// process's own otherwise, read only then.
+template <class ReadMarking, class ReadDscp>
+std::array<unsigned int, 3> resolve(const Handover& h, ReadMarking ownMarking, ReadDscp ownDscp)
+{
+    return resolve(h.marking ? *h.marking : ownMarking(), h.dscp ? *h.dscp : ownDscp());
 }
 
 /// The bench's silent carrier (MW_DSCP_CARRIER=1, off by default): the stream's

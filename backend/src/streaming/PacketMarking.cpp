@@ -29,8 +29,9 @@ namespace PacketMarking {
 
 void apply()
 {
-    const auto values =
-        resolve(AppSettings().packetMarking(), qEnvironmentVariable("MW_DSCP").toStdString());
+    const auto values = resolve(
+        handover(), [] { return AppSettings().packetMarking(); },
+        [] { return qEnvironmentVariable("MW_DSCP").toStdString(); });
     rtc::DscpSettings s;
     s.audio = values[0];
     s.video = values[1];

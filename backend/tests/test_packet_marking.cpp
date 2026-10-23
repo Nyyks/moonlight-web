@@ -35,4 +35,55 @@ void run_packet_marking_tests()
                                 "-1,34,34", "46,34,34,", " 46,34,34", "100,34,34"})
             CHECK(resolve(true, bad) == V({34, 34, 34}));
     }
+
+    SECTION("PacketMarking — the server's handover wins, and spares reading the worker's own");
+    {
+        int reads = 0;
+        const auto ownOn = [&reads] {
+            ++reads;
+            return true;
+        };
+        const auto ownDscp = [&reads] {
+            ++reads;
+            return std::string("46,46,46");
+        };
+        PacketMarking::Handover off;
+        off.marking = false;
+        off.dscp = std::string();
+        CHECK(resolve(off, ownOn, ownDscp) == V({0, 0, 0})); // the owner unticked the box
+        CHECK_EQ(reads, 0);
+
+        PacketMarking::Handover bench;
+        bench.marking = false;
+        bench.dscp = std::string("46,34,34");
+        CHECK(resolve(bench, ownOn, ownDscp) == V({46, 34, 34}));
+        CHECK_EQ(reads, 0);
+
+        // An older parent hands nothing over: the worker reads its own, as before.
+        CHECK(resolve(PacketMarking::Handover{}, ownOn, ownDscp) == V({46, 46, 46}));
+        CHECK_EQ(reads, 2);
+        reads = 0;
+        PacketMarking::Handover markingOnly;
+        markingOnly.marking = false;
+        CHECK(resolve(markingOnly, ownOn, [] { return std::string(); }) == V({0, 0, 0}));
+        CHECK_EQ(reads, 0);
+    }
+
+    SECTION("PacketMarking — the handover is kept process-wide until replaced");
+    {
+        const PacketMarking::Handover before = PacketMarking::handover();
+        CHECK(!before.marking.has_value());
+        CHECK(!before.dscp.has_value());
+
+        PacketMarking::Handover h;
+        h.marking = false;
+        h.dscp = std::string("0,34,34");
+        PacketMarking::setHandover(h);
+        CHECK(PacketMarking::handover().marking == std::optional<bool>(false));
+        CHECK(PacketMarking::handover().dscp == std::optional<std::string>("0,34,34"));
+
+        PacketMarking::setHandover({}); // leave the runner as it found it
+        CHECK(!PacketMarking::handover().marking.has_value());
+        CHECK(!PacketMarking::handover().dscp.has_value());
+    }
 }
