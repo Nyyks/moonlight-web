@@ -98,7 +98,7 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     DERING: ['u32', 1],
     /** 1: the vote, the coherence and the weights per channel (4:4:4 streams); 0: from the luma, shared by the channels. */
     CHROMA444: ['u32', 0],
-    /** The flat path's reconstruction: 1 the bilinear sample itself; 5 or 9 bilinear taps of a cubic (Mitchell-Netravali, B 0, C FLAT_C) over the 4×4 texels around, the four corners dropped at 5 (J33). */
+    /** The flat path's reconstruction: 1 the bilinear sample itself; 5 or 9 bilinear taps of a cubic (Mitchell-Netravali, B 0, C FLAT_C) over the 4×4 texels around, the four corners dropped at 5 (J33); 3 the interpolating quadratic of Dodgson over the 3×3 texels around, its corner dropped (J34). */
     FLAT_TAPS: ['u32', 1],
     /** The cubic's C, the depth of its negative lobe: 0.5 is Catmull-Rom; higher is steeper, with more ringing (bounded by the taps). */
     FLAT_C: ['f32', 0.5],
@@ -342,12 +342,35 @@ fn coherence(c : hf, t1 : hf, t2 : hf, x1 : hf, x2 : hf) -> hf {
 // GPU weighs for free: on each axis the middle two texels by one sample at
 // their weighted midpoint, the outer two by one sample each — nine samples,
 // or five without the four corners, whose weights are the smallest, the
-// rest renormalised. Bounded by the samples themselves, as the edge path is.
+// rest renormalised. Or (FLAT_TAPS 3) the interpolating quadratic of Dodgson
+// (1997) over the 3×3 texels around: on each axis the nearest texel and its
+// neighbour on the sample's side by one sample at their weighted midpoint,
+// the far one, of negative weight, by one sample — three samples without
+// the corner (J34). Bounded by the samples themselves, as the edge path is.
 fn flatPath(uv : vec2f, C : vec3f) -> vec3f {
-    if (FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
+    if (FLAT_TAPS != 3u && FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
         return C;
     }
     let sp = uv / u.texel;
+    if (FLAT_TAPS == 3u) {
+        let tn = floor(sp) + 0.5;
+        let h = sp - tn;
+        let s = select(vec2f(-1.0), vec2f(1.0), h >= vec2f(0.0));
+        let ah = abs(h);
+        let wf = ah * ah - 0.5 * ah;
+        let wm = 1.0 - wf;
+        let wn = ah * ah + 0.5 * ah;
+        let pm = (tn + s * wn / wm) * u.texel;
+        let pf = (tn - s) * u.texel;
+        let sm = S(pm);
+        let sfx = S(vec2f(pf.x, pm.y));
+        let sfy = S(vec2f(pm.x, pf.y));
+        let acc3 = sm * (wm.x * wm.y) + sfx * (wf.x * wm.y) + sfy * (wm.x * wf.y);
+        let norm3 = wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;
+        let lo3 = min(sm, min(sfx, sfy));
+        let hi3 = max(sm, max(sfx, sfy));
+        return clamp(acc3 / norm3, lo3, hi3);
+    }
     let tc = floor(sp - 0.5) + 0.5;
     let f = sp - tc;
     let c = FLAT_C;
@@ -570,11 +593,30 @@ mediump float coherence(mediump float c, mediump float t1, mediump float t2, med
 
 // The flat path's picture, the WGSL text's flatPath line for line.
 vec3 flatPath(vec2 uv, vec3 C) {
-    if (FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
+    if (FLAT_TAPS != 3u && FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
         return C;
     }
     vec2 texel = uTexelScale.xy;
     vec2 sp = uv / texel;
+    if (FLAT_TAPS == 3u) {
+        vec2 tn = floor(sp) + 0.5;
+        vec2 h = sp - tn;
+        vec2 s = mix(vec2(-1.0), vec2(1.0), greaterThanEqual(h, vec2(0.0)));
+        vec2 ah = abs(h);
+        vec2 wf = ah * ah - 0.5 * ah;
+        vec2 wm = 1.0 - wf;
+        vec2 wn = ah * ah + 0.5 * ah;
+        vec2 pm = (tn + s * wn / wm) * texel;
+        vec2 pf = (tn - s) * texel;
+        vec3 sm = S(pm);
+        vec3 sfx = S(vec2(pf.x, pm.y));
+        vec3 sfy = S(vec2(pm.x, pf.y));
+        vec3 acc3 = sm * (wm.x * wm.y) + sfx * (wf.x * wm.y) + sfy * (wm.x * wf.y);
+        float norm3 = wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;
+        vec3 lo3 = min(sm, min(sfx, sfy));
+        vec3 hi3 = max(sm, max(sfx, sfy));
+        return clamp(acc3 / norm3, lo3, hi3);
+    }
     vec2 tc = floor(sp - 0.5) + 0.5;
     vec2 f = sp - tc;
     float c = FLAT_C;

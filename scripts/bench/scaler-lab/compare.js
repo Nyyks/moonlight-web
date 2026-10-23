@@ -93,10 +93,12 @@ const MWSR_DEF = { sharp: 1, tau: 0.05, flat: 1, fc: 0.5 };
 const SHARP_RANGE = [0.5, 3, 0.05];
 const TAU_RANGE = [0.01, 0.1, 0.005];
 // The flat path's reconstruction (MwsrShader's FLAT_TAPS, FLAT_C overrides):
-// one bilinear sample, or a Catmull-Rom of 5 or 9 bilinear taps with the
-// depth of its negative lobe; a pipeline constant, so the renderer rebuilds.
+// one bilinear sample, a quadratic of 3 bilinear taps (Dodgson), or a
+// Catmull-Rom of 5 or 9 with the depth of its negative lobe; a pipeline
+// constant, so the renderer rebuilds.
 const FLAT_CHOICES = [
   [1, "bilinéaire (1 échantillon)"],
+  [3, "quadratique, 3 échantillons"],
   [5, "Catmull-Rom, 5 échantillons"],
   [9, "Catmull-Rom, 9 échantillons"],
 ];
@@ -140,7 +142,11 @@ const tuningText = () =>
   fr(state.sharp, 2) +
   " · τ " +
   fr(state.tau, 3) +
-  (state.flat !== 1 ? " · plat CR" + state.flat + " C " + fr(state.fc, 2) : "");
+  (state.flat === 3
+    ? " · plat Q3"
+    : state.flat !== 1
+      ? " · plat CR" + state.flat + " C " + fr(state.fc, 2)
+      : "");
 const currentCase = () => CASE_BY[state.caseId];
 const sizeOf = (level) => [Math.round((level * 16) / 9), level];
 
@@ -1614,7 +1620,7 @@ function buildPanel() {
     el(
       "p",
       { class: "note" },
-      "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. Chemin plat : ce que rend un quad sous le seuil, l'échantillon bilinéaire ou un Catmull-Rom de 5 ou 9 échantillons bilinéaires (lobe C : 0,5 = Catmull-Rom, plus haut = plus net, plus de sonnerie). La bande MWSR seule est refaite.",
+      "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. Chemin plat : ce que rend un quad sous le seuil, l'échantillon bilinéaire, un quadratique de 3 échantillons bilinéaires (Dodgson : bilinéaire à mi-chemin entre deux texels, le lobe C ne s'applique pas) ou un Catmull-Rom de 5 ou 9 (lobe C : 0,5 = Catmull-Rom, plus haut = plus net, plus de sonnerie). La bande MWSR seule est refaite.",
     ),
   );
   // the results

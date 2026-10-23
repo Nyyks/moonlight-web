@@ -241,8 +241,14 @@ describe('the mwsr shader text', () => {
         expect(MWSR_OVERRIDES.FLAT_TAPS).toBe(1);
         expect(MWSR_OVERRIDES.FLAT_C).toBe(0.5);
         for (const text of [tex, glsl]) {
-            expect(text).toContain('if (FLAT_TAPS != 5u && FLAT_TAPS != 9u) {');
+            expect(text).toContain('if (FLAT_TAPS != 3u && FLAT_TAPS != 5u && FLAT_TAPS != 9u) {');
             expect(text).toContain('if (FLAT_TAPS == 9u) {');
+            // the quadratic of three samples (J34): the far texel's weight ≤ 0,
+            // the near pair's midpoint, the corner dropped and renormalised
+            expect(text).toContain('if (FLAT_TAPS == 3u) {');
+            expect(text).toContain('ah * ah - 0.5 * ah;');
+            expect(text).toContain('(tn + s * wn / wm)');
+            expect(text).toContain('wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;');
             // the flat quad goes through it, the samples bound it
             expect(text).toContain('flatPath(uv, C)');
             expect(text).toContain('return clamp(acc / norm, lo, hi);');
@@ -254,5 +260,6 @@ describe('the mwsr shader text', () => {
         const nine = mwsrGlsl({ overrides: { FLAT_TAPS: 9, FLAT_C: 0.75 } });
         expect(nine).toContain('const uint FLAT_TAPS = 9u;');
         expect(nine).toContain('const float FLAT_C = 0.75;');
+        expect(mwsrGlsl({ overrides: { FLAT_TAPS: 3 } })).toContain('const uint FLAT_TAPS = 3u;');
     });
 });
