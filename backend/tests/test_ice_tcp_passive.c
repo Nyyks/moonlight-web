@@ -194,6 +194,7 @@ static void test_connect_over_tcp_only(void) {
 	if (juice_get_selected_candidates(a.agent, local, sizeof(local), remote, sizeof(remote)) == 0) {
 		printf("  host selected: %s -> %s\n", local, remote);
 		CHECK(strstr(remote, "TCP") != NULL);
+		CHECK(strstr(local, "tcptype passive") != NULL); // what the pair runs on, not the 1st one
 	} else {
 		CHECK(!"selected candidates");
 	}

@@ -15,7 +15,7 @@ index e43db6c..ee5cf45 100644
  
  typedef struct juice_config {
 diff --git a/src/agent.c b/src/agent.c
-index 2378346..ff0d71e 100644
+index 2378346..1490ca1 100644
 --- a/src/agent.c
 +++ b/src/agent.c
 @@ -271,7 +271,7 @@ int agent_gather_candidates(juice_agent_t *agent) {
@@ -52,7 +52,34 @@ index 2378346..ff0d71e 100644
  		} else {
  			JLOG_WARN("No local host candidates gathered, unable to add TCP candidates");
  		}
-@@ -787,6 +805,28 @@ int agent_conn_recv(juice_agent_t *agent, char *buf, size_t len, const addr_reco
+@@ -769,8 +787,25 @@ int agent_get_selected_candidate_pair(juice_agent_t *agent, ice_candidate_t *loc
+ 		return -1;
+ 	}
+ 
+-	if (local)
++	if (local) {
+ 		*local = pair->local ? *pair->local : agent->local.candidates[0];
++		// MoonlightWeb patch: a pair without its own local candidate reported the first one in
++		// the list, and one matched by its mapped address can be the UDP candidate on the port
++		// the listener shares: a UDP one, for a pair over TCP. The local candidate of the same
++		// transport and family says what the pair runs on: the passive one for a peer that dialled.
++		bool tcp = pair->remote->transport != ICE_CANDIDATE_TRANSPORT_UDP;
++		if (!pair->local || (pair->local->transport != ICE_CANDIDATE_TRANSPORT_UDP) != tcp) {
++			for (int i = 0; i < agent->local.candidates_count; ++i) {
++				const ice_candidate_t *c = agent->local.candidates + i;
++				if ((c->transport != ICE_CANDIDATE_TRANSPORT_UDP) == tcp &&
++				    (!tcp || c->transport != pair->remote->transport) &&
++				    c->resolved.addr.ss_family == pair->remote->resolved.addr.ss_family) {
++					*local = *c;
++					break;
++				}
++			}
++		}
++	}
+ 	if (remote)
+ 		*remote = *pair->remote;
+ 
+@@ -787,6 +822,28 @@ int agent_conn_recv(juice_agent_t *agent, char *buf, size_t len, const addr_reco
  	return 0; // ignore errors
  }
  
@@ -81,7 +108,7 @@ index 2378346..ff0d71e 100644
  int agent_conn_fail(juice_agent_t *agent) {
  	agent_change_state(agent, JUICE_STATE_FAILED);
  	atomic_store(&agent->selected_entry, NULL); // disallow sending
-@@ -923,7 +963,10 @@ int agent_bookkeeping(juice_agent_t *agent, timestamp_t *next_timestamp) {
+@@ -923,7 +980,10 @@ int agent_bookkeeping(juice_agent_t *agent, timestamp_t *next_timestamp) {
  				continue;
  
  			if (entry_is_tcp(entry)) {
@@ -93,7 +120,7 @@ index 2378346..ff0d71e 100644
  					conn_tcp_connect(agent, &entry->record); // First attempt a TCP connection
  
  				if(entry->tcp_state != TCP_STATE_CONNECTED)
-@@ -2352,13 +2395,22 @@ int agent_add_remote_reflexive_candidate(juice_agent_t *agent, ice_candidate_typ
+@@ -2352,13 +2412,22 @@ int agent_add_remote_reflexive_candidate(juice_agent_t *agent, ice_candidate_typ
  		JLOG_ERROR("Invalid type for remote reflexive candidate");
  		return -1;
  	}
@@ -120,7 +147,7 @@ index 2378346..ff0d71e 100644
  		JLOG_ERROR("Failed to create reflexive candidate");
  		return -1;
  	}
-@@ -2396,6 +2448,21 @@ int agent_add_local_tcp_active_candidate(juice_agent_t *agent, addr_record_t *re
+@@ -2396,6 +2465,21 @@ int agent_add_local_tcp_active_candidate(juice_agent_t *agent, addr_record_t *re
  	return 0;
  }
  
@@ -142,7 +169,7 @@ index 2378346..ff0d71e 100644
  int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // local may be NULL
                               ice_candidate_t *remote) {
  	ice_candidate_pair_t pair;
-@@ -2411,12 +2478,15 @@ int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // lo
+@@ -2411,12 +2495,15 @@ int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // lo
  	}
  
  	if (remote->transport != ICE_CANDIDATE_TRANSPORT_UDP) {
