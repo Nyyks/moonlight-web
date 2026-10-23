@@ -1651,6 +1651,7 @@ start-arm.ps1`, 14:15), un Chrome sans tête collé à sa console mourant avec e
 | iPhone 13 Pro, Safari (WebGPU `mwsr`, captures de Bruno 12:13-12:16) | 1 | 4,41 | 4,82 (100 images) | 4,82 | 5,13 | — | — | 7,94-8,26 | 4,39-5,04 |
 | Mac M1 Pro, Chrome 155 (WebGL2 `gl-mwsr`) | 3 | 3,28 | 4,38 | 3,70 | 3,37 | 3,35 | 3,43 | 4,20 | 3,44 |
 | DualRTX 780M, Chrome sans tête (WebGL2) | 1 | 6,13 | 5,86 | 5,85 | 9,46 | 5,32 | 5,67 | 14,93 | 6,60 |
+| UM790Pro, Radeon 780M, Chrome 155 sans tête (WebGL2 `gl-mwsr`, 18:09, J37) | 1 | 5,06 | 4,27 | 4,15 | 4,12 | 4,09 | 4,07 | 5,73-7,15 | 4,07-7,28 |
 | N95 (mw-intel), Intel UHD, Chrome 155 sans tête (WebGL2) | 1 | 19,3 | 17,5 | 16,5 | 17,2 | 17,2 | 16,3 | 33,3 | 18,2 |
 | realme Note 60, Mali-G57, Chrome 155 (WebGL2) | 1 | 51,6 | 57,3 | 59,2 | 62,1 | 52,6 | 59,3 | 125 | 73 |
 
@@ -1762,3 +1763,21 @@ par image d'écran dans une fenêtre visible, une soumission périodique sinon. 
 canvas visible du stream : non concerné. Troisième micro-banc prêt (barrière seule, finish, readPixels 1×1,
 endQuery, flushs explicites, deux témoins nus sur OffscreenCanvas) : la gagnante deviendra le « done » du
 comparateur sur WebGL2 ; UM790Pro : recette du N95 avec le LUID du 780M lu dans le registre, au go de 59.
+
+**UM790Pro (18:09, au go de 59 après le « fait » de Bruno ; 50 s pour les six pages, 3 connexions ssh).** Chrome 155
+sans tête dans la session Minis par une tâche planifiée Interactive lancée par Bruno lui-même (`ssh mw-um790win
+powershell -NoProfile -Command - < start-um790.ps1`), épinglé sur le Radeon 780M par son LUID lu dans
+`HKLM\SOFTWARE\Microsoft\DirectX` (l'entrée Radeon vue en dernier : la clé garde les vieux adaptateurs), vérifié
+avant toute mesure (renderer WebGL2 `ANGLE (AMD, AMD Radeon 780M Graphics, D3D11)`, le pilote s'arrête sinon) ;
+Chrome arrêté et tâche retirée à la fin (« chrome left: 0 », « task left: 0 »), prod, DEV, Sunshine, Parsec et les
+deux mstsc intacts, aucun écran touché. Ligne ajoutée au tableau de J36 : Q3 5,06 ms, Q3 + zone 4,27, CR5 4,15,
+CR5 + zone 4,12, borne texels 1,5 CR5 4,09, avec zone 4,07 ; FSR1 5,73-7,15, SGSR1 4,07-7,28 selon la page (la
+première mesure d'une page neuve, pas le GPU : même écart que sur le 780M du DualRTX). Qualité au millième près
+celle du tableau (0,951 / 25,5 dB pour la borne texels, 0,940 / 24,5 pour Q3) : les shaders sont déterministes.
+Lecture : sur ce 780M sous Windows, MWSR coûte 4,1 ms quel que soit le réglage, FSR1 6 et SGSR1 4 à 7 ; la borne
+texels, défaut depuis 15:14, est la meilleure des six en qualité au même temps. Piège levé au passage, après la
+question de Bruno (« Je dois lancer quoi comme commande ? ») : un script lu sur l'entrée standard par
+`powershell -Command -` n'exécute un bloc multi-lignes qu'après une ligne vide et le jette en fin de fichier sans
+erreur ; la première version du script avait une boucle multi-lignes et se serait arrêtée avant la tâche. Réécrit
+en une instruction par ligne et répété à blanc en local avant la ligne (les scripts N95 et mw-arm n'avaient pas
+de bloc). Restent le troisième micro-banc RTX et la correction du « done » du comparateur, au go de 59.
