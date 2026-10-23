@@ -71,6 +71,9 @@ struct BenchSpec
     /// The target alternates between bitrateKbps and this, every rampSeconds.
     int rampKbps = 0;
     double rampSeconds = 2.0;
+    /// The pointer changes hands every this many seconds (0 = never): the
+    /// client's to draw, then drawn into the picture again.
+    double cursorSwapSeconds = 0;
 };
 
 /// What one frame cost, copied out of the callback. The bytes themselves are
@@ -314,7 +317,10 @@ const char* const kUsage =
     "                   reported as it comes out, as a stalled link's drops are; with k,\n"
     "                   each burst closed by a keyframe request, as when the link drains\n"
     "  ramp=<kbps>[@<s>]  the target alternates between bitrate= and <kbps> every <s> s\n"
-    "                   (default 2), as the rate governor would move it\n";
+    "                   (default 2), as the rate governor would move it\n"
+    "  cursorswap=<s>   the pointer changes hands every <s> s, 0.5-600: the client's to\n"
+    "                   draw, then drawn into the picture again, as a viewer going between\n"
+    "                   desktop and gaming modes (the bench draws it from the start)\n";
 
 bool parseChoice(const QString& value, mw::native::EncoderTuning::Choice& out)
 {
@@ -818,6 +824,9 @@ bool parseSpec(const QString& text, BenchSpec& spec, QString& error)
                 spec.rampSeconds = parts[1].toDouble(&ok);
                 ok = ok && spec.rampSeconds >= 0.1 && spec.rampSeconds <= 600;
             }
+        } else if (key == "cursorswap") {
+            spec.cursorSwapSeconds = value.toDouble(&ok);
+            ok = ok && spec.cursorSwapSeconds >= 0.5 && spec.cursorSwapSeconds <= 600;
         } else if (key == "codec") {
             const QString c = value.toLower();
             if (c == "hevc" || c == "h265")
@@ -1099,18 +1108,23 @@ int runNativeBenchCommand(const QString& specText)
         return 1;
     }
 
-    // lose= and ramp= act between frames, so the loop wakes often for them.
+    // lose=, ramp= and cursorswap= act between frames, so the loop wakes often
+    // for them.
     const auto started = std::chrono::steady_clock::now();
     const auto deadline = started + std::chrono::seconds(spec.seconds);
     const auto rampStep = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(spec.rampSeconds));
     auto nextStep = started + rampStep;
+    const auto swapStep = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(spec.cursorSwapSeconds));
+    auto nextSwap = started + swapStep;
     uint32_t nextLoss = static_cast<uint32_t>(spec.loseEvery);
     uint32_t lastLost = 0;
     int burstLeft = 0;
-    int losses = 0, steps = 0;
+    int losses = 0, steps = 0, swaps = 0;
     bool low = false;
-    const bool driving = spec.loseEvery > 0 || spec.rampKbps > 0;
+    bool composite = true;
+    const bool driving = spec.loseEvery > 0 || spec.rampKbps > 0 || spec.cursorSwapSeconds > 0;
     while (std::chrono::steady_clock::now() < deadline && !ended.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(driving ? 2 : 50));
         if (spec.loseEvery > 0 && anyFrame.load()) {
@@ -1137,6 +1151,12 @@ int runNativeBenchCommand(const QString& specText)
             targetKbps.store(kbps);
             ++steps;
             nextStep += rampStep;
+        }
+        if (spec.cursorSwapSeconds > 0 && std::chrono::steady_clock::now() >= nextSwap) {
+            composite = !composite;
+            session->setCompositeCursor(composite, 0);
+            ++swaps;
+            nextSwap += swapStep;
         }
     }
     session->stop();
@@ -1266,6 +1286,8 @@ int runNativeBenchCommand(const QString& specText)
     if (steps > 0)
         out << "ramp            " << steps << " steps between " << spec.bitrateKbps << " and "
             << spec.rampKbps << " kbps, every " << spec.rampSeconds << " s\n";
+    if (swaps > 0)
+        out << "cursor swaps    " << swaps << ", every " << spec.cursorSwapSeconds << " s\n";
     out << "bytes/frame KB  " << tail(bytesAll, 1024.0, 1) << "  (deltas "
         << tail(bytesDelta, 1024.0, 1) << ")\n";
     out << "avg QP          " << tail(qp, 1.0, 1) << (qp.count() == 0 ? "  (not reported)" : "")
