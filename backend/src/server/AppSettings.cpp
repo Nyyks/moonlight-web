@@ -411,6 +411,11 @@ void AppSettings::seedDocumentedDefaults()
         obj["session_location_enabled"] = false;
         changed = true;
     }
+    // Written out so that the switch can be found in the file; nothing sets it.
+    if (!obj.contains("ice_tcp_passive")) {
+        obj["ice_tcp_passive"] = false;
+        changed = true;
+    }
     // The admin's codec of a native session (8f8d9307, never released): PyroWave
     // moved to each browser's Settings → Video codec, where it is chosen per
     // device — the one on Ethernet — rather than for every browser at once.
@@ -666,6 +671,12 @@ void AppSettings::setPacketMarking(bool enabled)
     QJsonObject obj = readAll();
     obj["packet_marking"] = enabled;
     writeAll(obj);
+}
+
+bool AppSettings::iceTcpPassive() const
+{
+    QJsonObject obj = readAll();
+    return obj.value("ice_tcp_passive").toBool(false);
 }
 
 bool AppSettings::sharedFeedEnabled() const

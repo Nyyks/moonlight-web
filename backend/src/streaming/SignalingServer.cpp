@@ -389,7 +389,8 @@ void SignalingServer::onNewWsConnection()
     // (true = UDP + TCP, false = UDP only).
     const bool mapped = !m_UpnpPublicIP.isEmpty() && m_UpnpExternalPort > 0;
     rtc::Configuration config = buildIceConfig(
-        isInternet, mapped, m_MediaPort, lanOnly ? QString() : m_StunServerUrl, m_ForceIceTcp);
+        isInternet, mapped, m_MediaPort, lanOnly ? QString() : m_StunServerUrl, m_ForceIceTcp,
+        m_IceTcpPassive);
 
     // With a router hole, tell the relay to rewrite host candidates with the
     // public IP and EXTERNAL port so the browser sees a "host" candidate at
@@ -1114,7 +1115,8 @@ void SignalingServer::onDataChannelsOpen()
 // ── UPnP NAT traversal ─────────────────────────────────────────────────────────
 
 rtc::Configuration SignalingServer::buildIceConfig(bool isInternet, bool mapped, uint16_t mediaPort,
-                                                   const QString& stunServerUrl, bool forceIceTcp)
+                                                   const QString& stunServerUrl, bool forceIceTcp,
+                                                   bool iceTcpPassive)
 {
     // What the log lines below name: the port the socket binds, which is the
     // one the router forwards to when there is a mapping.
@@ -1169,9 +1171,15 @@ rtc::Configuration SignalingServer::buildIceConfig(bool isInternet, bool mapped,
         // fallback path if UDP is blocked by a restrictive firewall.
         // STUN is included to discover srflx addresses as well.
         config.enableIceTcp = true;
+        // Our ICE-TCP only dials, and a browser only dials too: without a
+        // listener the two never pair, and UDP-blocked means no path at all.
+        // The listener shares the media port, whose TCP side the router hole
+        // already forwards; the relay rewrites its candidate like the UDP one.
+        config.enableIceTcpPassive = iceTcpPassive;
         if (!stunServerUrl.isEmpty()) config.iceServers.emplace_back(stunServerUrl.toStdString());
 
         qInfo() << "[SignalingServer] ICE config: TCP mode"
+                << (iceTcpPassive ? "(listening)" : "(dialling only)")
                 << (upnpMappedPort > 0 ? "+ UPnP port=" + QString::number(upnpMappedPort) : "")
                 << stunServerUrl;
     } else if (isInternet) {

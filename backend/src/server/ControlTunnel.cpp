@@ -419,6 +419,11 @@ void ControlTunnel::buildPeerConnection(Peer& p)
     rtc::Configuration config;
     config.iceTransportPolicy = rtc::TransportPolicy::All;
     config.enableIceTcp = true;
+    // Our ICE-TCP only dials, and so does a browser: where the network lets no
+    // UDP out, this line is the first thing that fails. With the owner's
+    // switch, it also listens on its port's TCP side while the checks run
+    // (docs/design/ice-tcp-passive.md).
+    config.enableIceTcpPassive = m_Settings->iceTcpPassive();
 
     // Bind to a port the router forwards, when there is one.
     //
@@ -490,14 +495,17 @@ void ControlTunnel::buildPeerConnection(Peer& p)
         // connects in practice: measured on the stream side as ICE going from
         // checking to connected in a single step.
         //
-        // Only IPv4 host candidates over UDP: IPv6 traverses no NAT and needs
-        // no rewrite, TCP has its own port, and an unresolved mDNS candidate
-        // has no address to compare. Nothing new is disclosed either — the
-        // reflexive candidate already carries this exact address.
+        // Only IPv4 host candidates over UDP, or over TCP for the passive one,
+        // whose listener shares the UDP socket's port (the router maps that
+        // port's TCP side too): IPv6 traverses no NAT and needs no rewrite, an
+        // active TCP candidate is never dialled, and an unresolved mDNS
+        // candidate has no address to compare. Nothing new is disclosed either
+        // — the reflexive candidate already carries this exact address.
+        const bool tcp = candidate.transportType() == rtc::Candidate::TransportType::TcpPassive;
         std::string publicCand;
         if (!publicIP.empty() && mappedPort != 0 &&
             candidate.type() == rtc::Candidate::Type::Host &&
-            candidate.transportType() == rtc::Candidate::TransportType::Udp) {
+            (candidate.transportType() == rtc::Candidate::TransportType::Udp || tcp)) {
             const auto addr = candidate.address();
             const bool isIpv4 =
                 addr.has_value() && QHostAddress(QString::fromStdString(*addr)).protocol() ==
@@ -517,7 +525,7 @@ void ControlTunnel::buildPeerConnection(Peer& p)
 
         QMetaObject::invokeMethod(
             this,
-            [this, id, attempt, cand, mid, publicCand]() {
+            [this, id, attempt, cand, mid, publicCand, tcp]() {
                 Peer* pp = peer(id);
                 if (!pp || pp->attempt != attempt) return;
                 const auto send = [this, &id, &mid](const std::string& line) {
@@ -530,17 +538,19 @@ void ControlTunnel::buildPeerConnection(Peer& p)
                 // One public candidate, however many adapters this machine has:
                 // they would all rewrite to the same address and port, and the
                 // browser would check the same path several times over.
-                if (!publicCand.empty() && !pp->publicCandidateSent) {
-                    pp->publicCandidateSent = true;
+                bool& sent = tcp ? pp->publicTcpCandidateSent : pp->publicCandidateSent;
+                if (!publicCand.empty() && !sent) {
+                    sent = true;
                     send(publicCand);
                     // Logged because this one line is the difference between a
                     // browser out on the internet having a reachable address to
                     // aim at and having none, and because the failure it fixes
                     // is silent at both ends.
                     Logger::info(QStringLiteral("[Tunnel] Session %1 offered %2:%3 as its public "
-                                                "address")
+                                                "address%4")
                                      .arg(id.left(8), QString::fromStdString(m_PublicIP))
-                                     .arg(pp->port));
+                                     .arg(pp->port)
+                                     .arg(tcp ? QStringLiteral(" (TCP, listening)") : QString()));
                 }
             },
             Qt::QueuedConnection);

@@ -628,6 +628,7 @@ int runStreamWorker(QCoreApplication& app)
                             static_cast<quint16>(cfg["upnpExternalPort"].toInt(0)));
     session->setTransportMode(cfg["transportMode"].toString());
     session->setEnableIceTcp(cfg["iceTcp"].toBool());
+    session->setIceTcpPassive(cfg["iceTcpPassive"].toBool(false));
     session->setLowAudio(cfg["lowAudio"].toBool());
     session->setMuteHostAudio(cfg["muteHostAudio"].toBool(true));
     // Absent (an older parent) → off, which is exactly today's behaviour.

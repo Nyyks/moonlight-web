@@ -863,6 +863,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         signaling->setWsPath(m_WsPath);
         signaling->setStunServer(m_StunServer);
         signaling->setEnableIceTcp(m_EnableIceTcp);
+        signaling->setIceTcpPassive(m_IceTcpPassive);
         signaling->setAllowWsFallback(!m_AutoMode);
         signaling->setClientKind(m_ClientKind);
         signaling->setPairingIdentity(m_MwBindHostId, m_MwBindHostKey, m_MwBindBrowserKey);
@@ -969,6 +970,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         signaling->setWsPath(m_WsPath);
         signaling->setStunServer(m_StunServer);
         signaling->setEnableIceTcp(m_EnableIceTcp);
+        signaling->setIceTcpPassive(m_IceTcpPassive);
         signaling->setAllowWsFallback(!m_AutoMode);
         signaling->setClientKind(m_ClientKind);
         signaling->setPairingIdentity(m_MwBindHostId, m_MwBindHostKey, m_MwBindBrowserKey);

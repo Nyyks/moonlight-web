@@ -162,6 +162,7 @@ private:
         /// easily reaches eight. Rewriting each of them would send the browser
         /// eight identical candidates to check in turn.
         bool publicCandidateSent = false;
+        bool publicTcpCandidateSent = false; // the passive listener's, ice_tcp_passive
 
         // ── MW-BIND-v1, per connection ──────────────────────────────────────
         bool helloSeen = false;

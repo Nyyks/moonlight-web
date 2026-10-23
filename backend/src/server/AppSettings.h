@@ -107,6 +107,16 @@ public:
     bool packetMarking() const;
     void setPacketMarking(bool enabled);
 
+    // ── Passive ICE-TCP ───────────────────────────────────────────────────────
+    // Stored as JSON bool "ice_tcp_passive", DEFAULT false, file-only. With it,
+    // the TCP rungs of a stream and the entry link's tunnel also listen on their
+    // TCP port while their ICE checks run, so that a browser on a network that
+    // lets no UDP out has a pair to form: a browser only ever dials
+    // (docs/design/ice-tcp-passive.md). Off by default because it is a port that
+    // listens to the internet, however briefly and behind whatever gate. Read
+    // when each connection is built.
+    bool iceTcpPassive() const;
+
     // ── The guests' shared feed ───────────────────────────────────────────────
     //
     // Whether the guests of this machine's native host watch ONE stream encoded

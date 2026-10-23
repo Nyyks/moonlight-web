@@ -94,6 +94,9 @@ public:
     /// When true, ICE-TCP is enabled (UDP + TCP candidates).
     /// When false (default), only UDP candidates are used.
     void setEnableIceTcp(bool enable) { m_ForceIceTcp = enable; }
+    /// With ICE-TCP, also listen on the media port's TCP side while the checks
+    /// run: a browser never offers a TCP candidate to dial, it only dials one.
+    void setIceTcpPassive(bool enable) { m_IceTcpPassive = enable; }
 
     /// Control whether WS fallback is allowed on ICE timeout.
     /// In auto mode (allow=false): iceTimedOut → sessionEnded() so the
@@ -194,6 +197,8 @@ private:
 
     /// Force ICE-TCP candidates (true = UDP + TCP, false = UDP only).
     bool m_ForceIceTcp = false;
+    /// Listen for a browser's TCP connection too (docs/design/ice-tcp-passive.md).
+    bool m_IceTcpPassive = false;
 
     // ── The router hole this stream is reached through ──────────────────────
     //
@@ -261,7 +266,7 @@ private:
     /// public address.
     static rtc::Configuration buildIceConfig(bool isInternet, bool mapped, uint16_t mediaPort,
                                              const QString& stunServerUrl,
-                                             bool forceIceTcp = false);
+                                             bool forceIceTcp = false, bool iceTcpPassive = false);
 
     // ── MW-BIND-v1 state ───────────────────────────────────────────────────
     /// Sign the pending SDP offer and hand it to the browser. Called once the

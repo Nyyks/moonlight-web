@@ -128,6 +128,27 @@ La règle de Bruno s'applique donc : **`ice_tcp_passive`** dans `settings.json`,
 défaut**, sans interface (son accord avant toute UI). Le passer à vrai par défaut se décidera après
 la mesure de l'étape 2 (§5).
 
+### 3.7 Défauts du chemin TCP de libjuice, corrigés dans le même patch
+
+Notre ICE-TCP ne se connectait jamais à un navigateur, donc le chemin TCP de libjuice n'avait
+jamais servi chez nous. Une fois rendu vivant, ASan et UBSan l'ont pris en défaut sous Linux (WSL,
+23/10). Ces défauts sont corrigés dans le même patch :
+- **Le fil de poll vidait une trame en attente sans le verrou d'envoi**, pendant qu'un fil
+  applicatif (`juice_send`) écrivait le même contexte. Les octets s'entrelaçaient sur le fil, ce
+  qui casse définitivement le cadrage RFC 4571 : une lecture hors limites sous ASan, et une
+  donnée perdue une fois sur trente.
+- La fermeture de la connexion se faisait aussi sans ce verrou.
+- **Une trame à moitié écrite (tampon du noyau plein)** était signalée comme une erreur, avec
+  l'errno de `send()` (-1) pris pour un code. Le poll n'était pas réveillé pour attendre POLLOUT :
+  la fin de la trame attendait le prochain réveil.
+- **Une connexion ouverte pendant le tour de poll** (TCP actif) faisait lire une case au-delà du
+  tableau de `poll()`. Le traitement suit maintenant ce que la préparation a mis dans le tableau.
+
+Reste, en amont et hors du patch :
+- le parseur STUN lit des `uint32_t` non alignés (UBSan), sans effet sur x86-64 et ARM64 ;
+- un échec d'intégrité STUN logue le mot de passe ICE local en WARN. Chez nous, ces lignes ne
+  sortent qu'en mode verbeux (`RunFlags::applyVerboseLogging`).
+
 ## 4. Ports et pare-feu
 
 - **Windows** : la règle de l'installeur porte sur le programme, tous protocoles : le TCP entrant
@@ -145,14 +166,17 @@ la mesure de l'étape 2 (§5).
 ## 5. Tests et étapes
 
 1. ✅ **Test 1** (23/10, 09:26) : Chrome appelle un candidat passif (§1).
-2. **Patch et tests unitaires** : deux agents libjuice dans le même processus, sur 127.0.0.1
-   seulement (aucune alerte du pare-feu).
+2. ✅ **Patch et tests unitaires** (23/10) : `backend/tests/test_ice_tcp_passive.c`, cible
+   `run_juice_tests`, lancée par `run_coverage.bat` après `run_tests`. Deux agents libjuice dans
+   le même processus, sur 127.0.0.1 seulement (aucune alerte du pare-feu).
    - Le premier écoute (`ACTIVE_PASSIVE`). Le second ne reçoit que ses candidats TCP passifs, et
      appelle en TCP actif.
    - On attend qu'ils se connectent et échangent des données sans aucun UDP.
    - Tests de la porte : sans trame, la connexion est fermée en 2 s ; une longueur hors bornes, un
      message qui n'est pas du STUN, un mauvais ufrag ou un mauvais HMAC la ferment ; la 5ᵉ
      connexion en attente aussi ; après `COMPLETED`, l'écoute refuse.
+   - Passés sous Windows (MSVC, 10 sur 10) et sous Linux (gcc `-Wall -Wextra`, ASan, UBSan,
+     ThreadSanitizer, en série).
 3. **Banc** : une `--dev`, sur un créneau de 59, un Chrome dont l'UDP sortant est bloqué par le
    pare-feu de sa machine (et non par une stratégie Chrome, qui retire tous les candidats). On
    attend le tunnel puis le flux en TCP passif, à la place de `noRouteError`.

@@ -79,6 +79,7 @@ void StreamWorkerHost::prepare(const QJsonObject& config, QStringList& args,
         // settings.json, which nobody writes, says marked. And the bench's
         // MW_DSCP, which a worker the service starts does not inherit.
         withSettings[QStringLiteral("packetMarking")] = settings.packetMarking();
+        withSettings[QStringLiteral("iceTcpPassive")] = settings.iceTcpPassive();
         const QString dscp = qEnvironmentVariable("MW_DSCP");
         if (!dscp.isEmpty()) withSettings[QStringLiteral("dscp")] = dscp;
     }

@@ -3724,6 +3724,7 @@ int main(int argc, char* argv[])
             s->setStreamRelayPort(signalingPort + 1);
             s->setTransportMode(transportMode); // Full mode for response
             s->setEnableIceTcp(iceTcp);
+            s->setIceTcpPassive(AppSettings().iceTcpPassive());
             s->setLowAudio(reqLowAudio);
             s->setMuteHostAudio(reqMuteHost);
             s->setClientUniqueId(reqClientUniqueId);
