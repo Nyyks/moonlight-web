@@ -37,7 +37,8 @@
  *      around) doses both, so that grain, texture and compression blocks are
  *      left alone; the whole fades to C near 1:1;
  *   5. the result is bounded by the min and max of the five samples, then by
- *      the four input texels around the pixel.
+ *      the four input texels around the pixel (DERING 1; 2: the texels alone,
+ *      so that a line one texel wide keeps its depth, J35).
  *   With CHROMA444 (4:4:4 streams, plan §4.2) the vote, the coherence and the
  *   weights are taken per channel, so that a border between two colours of one
  *   luma is seen and sharpened too.
@@ -94,7 +95,7 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     /** The most negative weight of an across tap: the blend's divisor stays >= 1 + 2 W_MIN
      *  (0.3 × 1.67 at sharpness 1.67; at the default sharpness 1 the cap is never reached). */
     W_MIN: ['f32', -0.5],
-    /** 1: bound the result by the four input texels around the pixel (four loads, edge path only). */
+    /** The edge path's bound (the flat path keeps its taps' range): 0 the five samples of the blend; 1 the five samples, then the four input texels around the pixel (four loads); 2 the four texels alone, so that a line's pixel may pass its bilinear mix, as far as the texel (J35). */
     DERING: ['u32', 1],
     /** 1: the vote, the coherence and the weights per channel (4:4:4 streams); 0: from the luma, shared by the channels. */
     CHROMA444: ['u32', 0],
@@ -376,9 +377,15 @@ fn lumah(c : h3) -> hf {
 const UP_FS = `
 // Five samples blended in the frame of an edge: the centre, a pair along it
 // (weight wT each, smoothing) and a pair across it (weight wX each, negative:
-// sharpening), per channel, the result bounded by the five.
+// sharpening), per channel, the result bounded by the five (DERING 0, 1).
 fn blend(C : h3, T1 : h3, T2 : h3, X1 : h3, X2 : h3, wT : h3, wX : h3) -> h3 {
     let R = (C + wT * (T1 + T2) + wX * (X1 + X2)) / (1.0 + 2.0 * (wT + wX));
+    if (DERING == 2u) {
+        // The texels alone bound it (below): on a line one texel wide, the
+        // centre sample is the extremum of the five, and this bound would pin
+        // the pixel at its bilinear mix, paler than the line.
+        return R;
+    }
     let lo = min(min(C, T1), min(T2, min(X1, X2)));
     let hi = max(max(C, T1), max(T2, max(X1, X2)));
     return clamp(R, lo, hi);
@@ -547,7 +554,7 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let sharp = mix(u.sharp, u.zsharp, zg);
     let wX = max(-hf(W_ACROSS) * hf(sharp) * a, h3(hf(W_MIN)));
     var R = vec3f(blend(Ch, T1, T2, X1, X2, wT, wX));
-    if (DERING == 1u) {
+    if (DERING != 0u) {
         // The exact bound: the four input texels around the pixel, the
         // footprint of its bilinear sample.
         let dims = vec2i(textureDimensions(tex));
@@ -666,6 +673,9 @@ const UP_GLSL = `
 mediump vec3 blend(mediump vec3 C, mediump vec3 T1, mediump vec3 T2, mediump vec3 X1, mediump vec3 X2,
                    mediump vec3 wT, mediump vec3 wX) {
     mediump vec3 R = (C + wT * (T1 + T2) + wX * (X1 + X2)) / (1.0 + 2.0 * (wT + wX));
+    if (DERING == 2u) {
+        return R;
+    }
     mediump vec3 lo = min(min(C, T1), min(T2, min(X1, X2)));
     mediump vec3 hi = max(max(C, T1), max(T2, max(X1, X2)));
     return clamp(R, lo, hi);
@@ -814,7 +824,7 @@ void main() {
     float sharp = mix(uTauSharp.y, uZoneBonus.z, zg);
     mediump vec3 wX = max(-W_ACROSS * sharp * a, vec3(W_MIN));
     vec3 R = blend(Ch, T1, T2, X1, X2, wT, wX);
-    if (DERING == 1u) {
+    if (DERING != 0u) {
         ivec2 dims = textureSize(uTex, 0);
         vec2 pt = uv * vec2(dims) - 0.5;
         ivec2 i0 = clamp(ivec2(floor(pt)), ivec2(0), dims - 1);
