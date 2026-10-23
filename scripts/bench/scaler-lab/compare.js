@@ -880,6 +880,15 @@ function applyCenter(f) {
   const [ow, oh] = outSize();
   t.x = r.w / 2 - f.cx * ow * t.zoom;
   t.y = r.h / 2 - f.cy * oh * t.zoom;
+  constrain();
+}
+/** The picture's edges never pass the frame's centre: at most half a band of
+ *  black on either axis (Bruno, 23/10), whatever the zoom. */
+function constrain() {
+  const r = frameRect();
+  const [ow, oh] = outSize();
+  t.x = Math.min(r.w / 2, Math.max(r.w / 2 - ow * t.zoom, t.x));
+  t.y = Math.min(r.h / 2, Math.max(r.h / 2 - oh * t.zoom, t.y));
 }
 /** A change of layout or case with the same picture point kept at the centre. */
 function keepCenter(fn) {
@@ -923,12 +932,14 @@ function zoomAt(p, z) {
   t.zoom = z;
   t.x = p.x - o.x - px * z;
   t.y = p.y - o.y - py * z;
+  constrain();
   requestDraw();
   updateZoomChip();
 }
 
 let drawQueued = false;
 function requestDraw() {
+  constrain();
   if (drawQueued) return;
   drawQueued = true;
   requestAnimationFrame(() => {
@@ -1127,9 +1138,6 @@ function startGesture() {
       kind: "pinch",
       dist: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
       mid,
-      zoom: t.zoom,
-      tx: t.x,
-      ty: t.y,
       origin: originAt(mid),
     };
   } else gesture = null;
@@ -1150,24 +1158,33 @@ view.addEventListener("pointermove", (e) => {
   ptrs.set(e.pointerId, p);
   if (!gesture) return;
   if (gesture.kind === "pan" && ptrs.size === 1) {
-    t.x = gesture.tx + (p.x - gesture.x);
-    t.y = gesture.ty + (p.y - gesture.y);
-    gesture.moved = Math.max(
-      gesture.moved,
-      Math.hypot(p.x - gesture.x, p.y - gesture.y),
-    );
+    const dx = p.x - gesture.x;
+    const dy = p.y - gesture.y;
+    gesture.moved = Math.max(gesture.moved, Math.hypot(dx, dy));
+    t.x = gesture.tx + dx;
+    t.y = gesture.ty + dy;
+    constrain();
+    // against a limit the gesture follows the picture: a finger coming back
+    // moves it at once, not after the way it went past
+    gesture.tx = t.x - dx;
+    gesture.ty = t.y - dy;
     requestDraw();
   } else if (gesture.kind === "pinch" && ptrs.size >= 2) {
+    // step by step from the last event: the picture point under the fingers'
+    // previous middle goes under their middle now, at the new zoom
     const [a, b] = [...ptrs.values()];
     const dist = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
     const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const z = clampZoom((gesture.zoom * dist) / gesture.dist);
+    const z = clampZoom((t.zoom * dist) / gesture.dist);
     const o = gesture.origin;
-    const px = (gesture.mid.x - o.x - gesture.tx) / gesture.zoom;
-    const py = (gesture.mid.y - o.y - gesture.ty) / gesture.zoom;
+    const px = (gesture.mid.x - o.x - t.x) / t.zoom;
+    const py = (gesture.mid.y - o.y - t.y) / t.zoom;
     t.zoom = z;
     t.x = mid.x - o.x - px * z;
     t.y = mid.y - o.y - py * z;
+    constrain();
+    gesture.dist = dist;
+    gesture.mid = mid;
     requestDraw();
     updateZoomChip();
   }

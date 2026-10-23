@@ -1280,4 +1280,11 @@ du temps sur 1000 itérations.
   échantillon sur une arête de texel) ; le tracé Canvas2D reste le repli sans WebGL2, et sur
   `?viewer=2d`. Vérifié sur SwiftShader par le pilote : même tableau, gestes conformes, émulation
   390×844 identique à 99,8 % au tracé Canvas2D (le reste : les chiffres des pastilles). Au doigt sur
-  l'iPhone : à l'essai de Bruno.
+  l'iPhone, 08:04 : « fluidité du zoom : ok ».
+- **La butée (Bruno, 08:04)** : on pouvait sortir l'image entière de la bande. Les bords de l'image ne
+  passent plus le centre du cadre (la bande en « même zone », la page en « image continue »), à tout
+  zoom : au plus une moitié de noir par axe. En butée le glisser suit l'image (l'ancre du geste est
+  resuivie : le doigt qui revient la déplace aussitôt) et le pincement va pas à pas depuis le dernier
+  événement, pour la même raison. Vérifié par le pilote sur SwiftShader : bureau, ajustement puis un
+  glisser trop loin de chaque côté, l'arrêt aux valeurs attendues ; émulation 390×844 en bandes
+  horizontales, deux glissers vers le bas et la droite, idem.
