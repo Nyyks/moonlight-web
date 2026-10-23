@@ -8,6 +8,10 @@
 >
 > **Statut au 09/10/2026** : étude seule. Aucun code, aucun composant, aucun
 > installateur. Chaque phase du §10 attend le « go » de Bruno.
+> **21/10/2026** : Bruno place B0 après la v0.4.1.
+> **23/10/2026** : « go » de B0 (Bruno), en attendant que l'UM790Pro sous
+> Windows soit libre (invitations spectateur jusqu'au 24/10 au soir, puis le
+> banc N95). Protocole au §10.3 ; rien n'est lancé.
 >
 > Légende : **[D]** fait documenté (source officielle, §14) ; **[C]** constat du
 > code ou des bancs de ce dépôt (chemin ou section cités) ; **[H]** hypothèse à
@@ -353,7 +357,11 @@ jeu, à surveiller en vidéo.
 
 - **PyroWave natif** : décodeur Vulkan de référence, ou portage D3D12 du HLSL
   de l'hôte [C, `ultra-lan-poc.md` §6.14]. La file WebGPU disparaît, et la
-  limite des 4:4:4/HDR du navigateur aussi.
+  limite des 4:4:4/HDR du navigateur aussi. *Relu le 23/10* : le POC Ultra est
+  clos depuis le 10/10 (§6.43) ; sur un PC NVIDIA en Ethernet, PyroWave arrive
+  ~1 ms après le HEVC. Depuis la v0.4.0 il est un codec à choisir soi-même,
+  « PyroWave (LAN filaire uniquement) », jamais pris seul (`bc9f64f2`). Un
+  décodeur natif ne profiterait donc qu'à ce choix : option, pas objectif.
 - **HDR** : swapchain HDR10/scRGB, `CAMetalLayer` EDR, sans le tone mapping
   par WebGPU [C, `_hdrMode`].
 - **Upscalers** (FSR1, NIS) en natif, sans le coût WebGPU [C, wiki §15.2].
@@ -517,6 +525,9 @@ une même configuration peut changer de marche d'une passe à l'autre [C,
 - Décodage : de 6,1-6,4 ms (page, 780M, 1440p) vers ~3,2 ms (le temps GPU) ;
   sur une carte dédiée, sous la milliseconde [C → H].
 - Plus le gain de présentation du §9.1.
+- *Relu le 23/10* : ne compte que pour qui choisit ce codec (§6.3) ; le POC a
+  fini ses propres gains de page (relance, tranches, iDWT) le 10/10, et les
+  6,1-6,4 ms ci-dessus datent d'avant.
 
 ### 9.3 Hors latence
 
@@ -544,7 +555,8 @@ une même configuration peut changer de marche d'une passe à l'autre [C,
 ## 10. Le parcours, du premier banc à la distribution
 
 Chaque phase s'ouvre sur le « go » de Bruno, avec l'effort conseillé (Opus 5.5).
-Rien ne se fait avant la sortie de la v0.4.0.
+Rien ne se fait avant la sortie de la v0.4.0 ; le 21/10, Bruno a placé B0
+après la v0.4.1, et l'a ouverte le 23/10 (§10.3).
 
 | Phase | Ce qu'elle fait | Code produit ? | Porte | Effort |
 |---|---|---|---|---|
@@ -552,7 +564,7 @@ Rien ne se fait avant la sortie de la v0.4.0.
 | **B1** | Labo de présentation superposée, outil hors produit (`tools/booster-lab`, comme `mw-click-target`) : il décode un flux enregistré ou relayé, et s'affiche au-dessus d'un Chrome en plein écran. PresentMon (mode de présentation), occlusion de Chrome (rAF, minuteries de la page), clic au photon. Windows seul. | **non** (outil) | **B1** | `xhigh` |
 | **B2** | Canal et lancement : schéma d'URL, WebSocket loopback, demande « réseau local » dans Chrome, Edge, Firefox ; coût par image ; option extension. Labo seulement. | **non** (labo) | **B2** | `high` |
 | **B3** | Intégration Windows derrière `mw_booster=1` : relais des images, retours vers l'hôte, repli, sondes natives ; H.264, HEVC, AV1. Plein écran seulement. | oui, caché | **B3** | `xhigh` |
-| **B4** | PyroWave natif dans le Booster (si Ultra est adopté) ; HDR natif. | oui, caché | — | `high` |
+| **B4** | PyroWave natif dans le Booster (codec à choisir soi-même depuis la v0.4.0, §6.3) ; HDR natif. | oui, caché | — | `high` |
 | **B5** | macOS (VideoToolbox, Metal, Spaces). | oui, caché | **B5** | `xhigh` |
 | **B6** | Linux X11 et KDE Wayland ; GNOME Wayland déclaré non pris en charge. | oui, caché | — | `high` |
 | **B7** | Distribution : installateurs par utilisateur, signature (Authenticode, notarisation si décidée), mise à jour, page « Installer le Booster », textes i18n. | oui | **B7** | `high` |
@@ -593,6 +605,97 @@ Rien ne se fait avant la sortie de la v0.4.0.
   plein écran sur deux versions de macOS.
 - **B7 — pas de distribution** sans signature reconnue par l'OS (sinon,
   l'installation demande de contourner un avertissement de sécurité).
+
+### 10.3 Protocole de B0 (écrit le 23/10/2026, avant le banc)
+
+**La question.** Un client natif sobre affiche-t-il le clic plus tôt que la
+page, sur la même machine cliente, avec le même hôte ? B0 ne construit rien :
+elle mesure moonlight-qt, le client natif de référence, contre MoonlightWeb.
+
+**Le banc.**
+- Hôte : DualRTX, encodage sur la RTX (NVENC), écran streamé = celui de la RTX
+  (`\\.\DISPLAY5`, primaire). Le drapeau `scripts/bench/photon/flag-window.ps1`
+  sur cet écran (`-Screen` par défaut = le primaire ; `-Log` pour dater chaque
+  bascule). Luminosité de l'écran sans effet sur la mesure (DDA lit la mémoire
+  d'image) ; les règles de nuit de DISPLAY5 restent telles quelles.
+- Client : UM790Pro sous Windows (780M, décodage matériel), en Ethernet,
+  session console de `minis`. Rien ne change aux écrans ni à leur mode ; la
+  fréquence de l'écran du client est relevée au début (`monitors.ps1`, et
+  `Get-CimInstance WmiMonitorListedSupportedSourceModes` ou le panneau
+  d'affichage) et écrite dans le relevé : la marche d'une image en dépend.
+- Mesure : `click-photon.ps1` par `run-in-console.ps1` (tâche interactive,
+  session console), 60 clics par passe, 700 ms d'intervalle, lecture au point
+  du clic (`-ReadDx 0 -ReadDy 0`, le drapeau de latence de la page éteint,
+  comme au produit). Souris intouchée, fenêtre jamais couverte, **clients en
+  fenêtre** (la lecture GDI du bureau composé n'est pas prouvée en plein écran
+  exclusif ; même règle qu'au banc Steam du 04/10).
+- Son : rien d'audible. Chrome en `--mute-audio` ; moonlight-qt n'a pas de
+  réglage de sourdine, donc la sortie du client est coupée avant
+  (`C:\Users\minis\mw-photon\audio-mute.ps1 -Action Mute`, `-Action Restore`
+  à la fin).
+- Préalables tenus par la session d'orchestration : la vidéo en kiosque
+  arrêtée (`start-cod.ps1 -Stop`), les invitations spectateur finies, aucune
+  `--dev` sur UDP 3478-3481, Chrome de banc avec son propre `--user-data-dir`.
+
+**Les cases.** Trois clients pour le même hôte physique :
+
+| Case | Client | Hôte | Ce qu'elle isole |
+|---|---|---|---|
+| **A** | moonlight-qt 6.2.0, décodage D3D11VA, swapchain flip + tearing (`d3d11va.cpp`), V-Sync coupé, cadencement coupé, fenêtre | **Sunshine** de DualRTX (installé, pairing web `admin`), app « Desktop » | le client natif |
+| **B** | MoonlightWeb dans Chrome : Canvas2D, tearing, « Auto » (défauts du produit) | **hôte natif** MoonlightWeb de DualRTX (DDA + NVENC), `--dev` de `build\` prêtée par 59 ou démarrée pour le banc, « Display 1 » = DISPLAY5 | le produit tel quel |
+| **C** | la même page, mêmes défauts | le **même Sunshine** que A, enregistré comme hôte dans MoonlightWeb (le backend relaie) | l'hôte : si C ≈ A, l'écart A/B vient de l'hôte, pas de la page |
+
+Deux cadences, l'écran du client inchangé : **120 i/s** (moonlight-qt
+`--fps 120` ; la page en « Auto », puis une passe à 120 fixes si l'« Auto »
+s'est posé ailleurs) et **60 i/s**. HEVC partout, 1920×1080, même débit (celui
+que la page règle pour 1080p ; moonlight-qt `--bitrate` sur la même valeur).
+
+moonlight-qt, sans rien installer : `MoonlightPortable-x64-6.2.0.zip` de la
+release du 04/10/2026 (ou `winget install MoonlightGameStreamingProject.Moonlight`
+si Bruno préfère l'installer), décompressée dans le profil de `minis`, effacée
+à la fin. Appairage : `Moonlight.exe pair <IP de DualRTX> --pin 1234`, PIN
+confirmé à Sunshine (`https://<DualRTX>:47990`, `/api/pin` avec son
+`pairing_id`, voir la note de parc). Passe :
+
+```
+Moonlight.exe stream <IP de DualRTX> Desktop --1080 --fps 120 --bitrate <kbps>
+  --video-codec HEVC --video-decoder hardware --display-mode windowed
+  --no-vsync --no-frame-pacing --no-audio-on-host --no-performance-overlay
+```
+
+puis, sur le client, `run-in-console.ps1 -Tag a-120-1 -Process Moonlight`.
+Pour la page : `run-in-console.ps1 -Tag b-120-1 -Process chrome -Title MoonlightWeb`.
+Les JSON vont dans `bench-out/photon/b0-*.json`, à côté de ceux du 04/10.
+
+**L'ordre.** À 120 i/s : A1 B1 A2 B2, puis C1 C2 ; à 60 i/s : la même suite.
+Douze passes, ~1 h 30 avec les bascules. Chaque passe note : codec, cadence
+réglée, cadence vue (page : `Images dessinées par seconde` de l'overlay lu
+après coup, pas pendant ; moonlight-qt : rien, overlay coupé), fréquence de
+l'écran du client, hôte, heure.
+
+**La lecture.** Médiane et p90 par case, et l'écart A − B en **images
+d'affichage du client** (période = 1000 / fréquence de l'écran du client).
+- A plus tôt que B d'au moins une image, et C ≈ B : **la page coûte au moins
+  une image** ; la porte B0 est franchie, B1 peut s'ouvrir.
+- A plus tôt que B, mais C ≈ A : l'écart vient de l'hôte (Sunshine contre hôte
+  natif), pas du client ; **B0 n'est pas franchie** pour le Booster, et le
+  constat part dans les plans de l'hôte.
+- A ≈ B (moins d'une image) : **abandon**, comme au §10.2 ; reste l'intérêt
+  « codecs » du §9.3, à rejuger à part.
+- Les médianes tombent sur des marches (une image d'écran, §6.5 du POC) : un
+  écart qui change de signe entre les deux manches n'en est pas un.
+
+**Les pièges déjà connus.** Le pairage périmé de l'origine de banc
+(`identity_refused` : effacer l'origine par CDP) ; un PIN de banc à la fois,
+révoqué à la fin ; l'heure de l'UM790Pro souvent en retard de 2 h au retour
+d'Ubuntu (sans effet sur `click-photon`, qui n'use que de l'horloge
+monotone) ; `query user` qui sort en code 1 ; une fenêtre Chrome de Bruno
+par-dessus l'écran streamé de l'hôte.
+
+**Ce qui reste à Bruno avant le banc** (demandé par la session
+d'orchestration) : accord pour moonlight-qt portable sur l'UM790Pro, et
+l'heure du créneau après le banc N95, avant le retour de la machine sous
+Ubuntu.
 
 ## 11. Coûts de développement et de maintenance
 
