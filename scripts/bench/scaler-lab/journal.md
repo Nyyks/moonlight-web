@@ -1468,3 +1468,85 @@ chose : CR9 0,9415 / 24,57 contre 0,9386 / 24,52 (FSR1 0,948 / 25,17) ; coût CP
 qui ne dit rien d'un GPU. **À Bruno** : le temps et l'œil sur l'iPhone (⚙ → chemin plat CR9, C 0,5 ;
 la texture externe y paie deux fetches par échantillon, donc neuf au lieu d'un sur 72 à 98 % des
 pixels) ; si le temps passe, CR9 à C 0,5 est la valeur à retenir, en palier qualité ou par défaut.
+
+## 2026-10-23 — J34, un chemin plat quadratique à trois échantillons (`FLAT_TAPS 3`), et la zone du regard en paramètres
+
+**La question de Bruno (10:50, après l'iPhone).** CR5 à netteté 1,85 lui plaît, mais sa capture de
+11:02 (1080p → 1440p, WebGPU, 100 images) dit le prix : MWSR **5,66 ms** avec CR5 contre 3,9 ms
+nu, SGSR1 5,70, FSR1 8,96 — le chemin plat à cinq échantillons sur 72 à 98 % des pixels mange
+l'avance. « Un Catmull-Rom 3, si ça existe ? » Il n'existe pas : le cubique lit quatre texels par
+axe, trois échantillons bilinéaires par axe (la paire du milieu fusionnée, les deux extérieurs
+seuls), neuf en deux dimensions, cinq sans les coins — le plancher de Jimenez ; en dessous il
+faudrait lâcher un axe. Ce qui existe en trois, c'est le **quadratique interpolant de Dodgson
+(1997)** : trois texels par axe, le plus proche et son voisin du côté de l'échantillon fusionnés en
+un échantillon bilinéaire à leur barycentre, le lointain, de poids négatif (jusqu'à −1/16), en un
+échantillon ponctuel ; le coin lâché et le reste renormalisé : trois échantillons. Sa faiblesse,
+connue d'avance : à mi-chemin entre deux texels (`h = ±0,5`) le poids lointain s'annule et il
+redevient bilinéaire, précisément où le cubique apporte le plus. Go de Bruno (11:0x, par 59) :
+en option de labo, le défaut du produit inchangé. Fait (6fbc3627) : `FLAT_TAPS 3` dans les deux
+jumeaux, borné par ses échantillons ; « quadratique, 3 échantillons » dans le comparateur
+(`flat=3`) ; vérifié par les deux Chromes de SwiftShader : mêmes chiffres des deux côtés (SSIM
+0,9403, PSNR 24,56 sur l'étalon à ×1,33), golden intact (le défaut ne change pas un pixel).
+
+**Balayage (SwiftShader, `--quality`, netteté 1,85, PSNR entier / plat / contours par le masque
+`show=1` ; FSR1 en repère) :**
+
+| ×1,33 (1080p → 1440p) | nu (bilinéaire) | Q3 | CR5 | FSR1 |
+|---|---|---|---|---|
+| étalon (28 % de contours) | 23,78 / 31,10 / 18,84 | 23,80 / 31,20 / 18,84 | 23,82 / 31,35 / 18,84 | 24,15 / 31,45 / 19,20 |
+| `game` (1,6 %) | 38,07 / 39,44 / 25,70 | 38,18 / 39,60 / 25,70 | 38,24 / 39,67 / 25,70 | 37,92 / 39,80 / 24,47 |
+| `text` (26 %) | 21,82 / 40,11 / 16,07 | 21,82 / 40,32 / 16,07 | 21,83 / 41,51 / 16,07 | 21,45 / 42,37 / 15,69 |
+| SSIM étalon / game / text | 0,937 / 0,920 / 0,950 | 0,938 / 0,924 / 0,950 | 0,939 / 0,925 / 0,950 | 0,941 / 0,933 / 0,942 |
+
+| ×2 (720p → 1440p) | nu | Q3 | CR5 | FSR1 |
+|---|---|---|---|---|
+| étalon (29 %) | 20,53 / 22,80 / 17,58 | 20,55 / 22,84 / 17,58 | 20,55 / 22,83 / 17,58 | 20,79 / 22,84 / 17,99 |
+| `game` (2,0 %) | 35,34 / 37,96 / 21,65 | 35,39 / 38,04 / 21,65 | 35,39 / 38,04 / 21,65 | 35,55 / 38,03 / 22,02 |
+| `text` (35 %) | 17,37 / 33,56 / 12,86 | 17,38 / 34,50 / 12,86 | 17,38 / 34,57 / 12,86 | 17,57 / 35,13 / 13,04 |
+| SSIM étalon / game / text | 0,863 / 0,881 / 0,843 | 0,866 / 0,884 / 0,843 | 0,867 / 0,884 / 0,844 | 0,874 / 0,887 / 0,845 |
+
+**Lecture.** À ×2, Q3 **vaut CR5** sur les pixels plats (et FSR1 : étalon 22,84 = 22,84, `game`
+38,04 contre 38,03) : les centres des pixels de sortie tombent à un quart de texel (`h = ±0,25`),
+là où le quadratique est au mieux, à un cheveu du cubique. À ×1,33, un pixel sur quatre par axe
+tombe à mi-chemin et Q3 prend la **moitié** du gain de CR5 sur l'étalon et `game` (31,20 entre
+31,10 et 31,35 ; 39,60 entre 39,44 et 39,67), un cinquième sur `text` (40,32 : les plats du texte
+sont les bords des lettres, à toutes les phases). Dépassements 0 % partout. Pour trois
+échantillons au lieu de cinq : à mesurer sur l'iPhone (lien `flat=3` à netteté 1,85, le même
+réglage que son CR5 : chemin plat et netteté sont indépendants, les contours ne bougent pas d'un
+centième de dB entre nu, Q3 et CR5).
+
+**La zone du regard (go de Bruno, §15.2 du plan), en paramètres.** Faite le même jour dans les deux
+jumeaux : la constante `GAZE` (0 par défaut, le texte d'avant au pixel près) et la table
+`MWSR_ZONE` (centre 0,5 / 0,5, demi-axes 0,2 / 0,45, anneau 0,75, τ 0,02 et netteté 2,5 au
+centre) ; `z = (1 − smoothstep(1, 1 + anneau, d)) · gaze`, `τ' = mix(τ, τc, z)`, `netteté' =
+mix(n, nc, z)` ; `FLAT_ZONE` : le chemin plat CR ou Q3 dans la zone seule ; `SHOW 2` peint z. Le
+poids `gaze` suit le mouvement de l'image dans le produit (`GazeZone.js` : bits par pixel et par
+seconde des images delta, 0,25 → 0 et 1,0 → 1, montée 1 s, descente 3 s, par pas de 1/64 ; test
+unitaire : un bureau immobile reste à 0, un flux 1080p à 19 Mbit/s passe 0,9 en 2,5 s, retombe
+sous 0,1 en 9 s), ou est tenu à 1 par le comparateur. Produit : rien d'allumé, clé de labo
+`mw_mwsr_gaze` (téléphones et tablettes, jamais un client de bureau), coupée par défaut. Jumeaux :
+d'accord sur le comparateur avec la zone et `FLAT_ZONE` (SSIM 0,93671 / 0,93670, PSNR 24,458 des
+deux côtés, SwiftShader).
+
+**Mesure (SwiftShader, `--quality` à ×1,33, netteté 1,85 à la table, poids tenu à 1 ; PSNR dedans
+l'ellipse verte / sur l'anneau / dehors, 28,3 % / 36,7 % / 35,0 % des pixels, poids moyen 47,9 %) :**
+
+| ×1,33 | table | zone (τc 0,02, nc 2,5) | table + CR5 | zone + CR5 | zone + CR5 dans la zone seule | FSR1 |
+|---|---|---|---|---|---|---|
+| étalon | 35,22 / 25,46 / 20,59 | 32,82 / 25,31 / 20,59 | 35,32 / 25,48 / 20,63 | 32,84 / 25,33 / 20,63 | 32,84 / 25,31 / 20,59 | 36,35 / 25,81 / 20,94 |
+| `game` | 37,83 / 38,80 / 37,59 | 37,34 / 38,72 / 37,59 | 37,96 / 39,01 / 37,75 | 37,40 / 38,88 / 37,75 | 37,40 / 38,80 / 37,59 | 37,44 / 39,06 / 37,33 |
+| `text` | 21,82 / 21,64 / 22,02 | 21,65 / 21,60 / 22,02 | 21,83 / 21,65 / 22,03 | 21,66 / 21,61 / 22,03 | 21,66 / 21,60 / 22,02 | 21,44 / 21,28 / 21,66 |
+| SSIM entier | 0,950 / 0,920 / 0,937 | 0,950 / 0,921 / 0,932 | 0,950 / 0,925 / 0,939 | 0,951 / 0,925 / 0,933 | 0,951 / 0,923 / 0,932 | 0,942 / 0,933 / 0,941 |
+| part de pixels au noyau | 26,3 / 1,6 / 27,7 % | 27,1 / 9,5 / 37,3 % | | | | |
+
+(SSIM et parts dans l'ordre `text` / `game` / étalon.)
+
+**Lecture.** Dehors, rien ne bouge au centième : la périphérie est la table, comme voulu, et
+`FLAT_ZONE` la rend au bilinéaire (20,59 contre 20,63 avec CR5 partout). Dedans, le PSNR baisse —
+comme toute netteté ici (J31) : à 2,5 les contours du noyau s'écartent de la vérité terrain, et
+τ 0,02 fait passer six fois plus de pixels de `game` par le noyau (1,6 → 9,5 %) ; le SSIM monte
+un peu sur `text` et `game`, baisse sur l'étalon, dont le centre est un dégradé doux que τ 0,02
+commence à « accentuer ». Les chiffres ne tranchent pas une préférence de netteté : c'est l'œil de
+Bruno sur l'iPhone, avec les anneaux et les six curseurs (`gaze=1` dans le lien) ; les premières
+valeurs sont celles du labo. Le temps sur un vrai GPU est à lire dans le coin de la bande (un
+`length`, un `smoothstep`, deux `mix` de plus par pixel, et les pixels de plus au noyau au centre).

@@ -1647,3 +1647,24 @@ produit scalaire et un `smoothstep`, à mesurer (le plancher est sensible à tou
 les curseurs dans le comparateur (une superposition des anneaux, le tiers central déjà mesuré à part par
 `metrics.py`), SwiftShader puis le RTX, l'œil de Bruno sur l'iPhone ; une session, effort `medium`,
 après son verdict sur la netteté 1,5 (J31). Rien dans le produit avant.
+
+**Fait le 23/10/2026 (journal J34), sur le go de Bruno.** Les paramètres, dans les deux jumeaux :
+la constante de pipeline `GAZE` (0 par défaut : le texte d'avant, au pixel près, les empreintes
+dorées tiennent) et la table `MWSR_ZONE` (centre 0,5 / 0,5, demi-axes 0,2 / 0,45 de l'image,
+anneau 0,75 des demi-axes, τ 0,02 et netteté 2,5 au centre), portée par le bloc d'uniformes (8 →
+16 flottants) avec le poids `gaze` ; `z(x, y) = (1 − smoothstep(1, 1 + anneau, d)) · gaze`, d la
+distance elliptique normalisée ; `τ' = mix(τ, τ_centre, z)` et `netteté' = mix(n, n_centre, z)`,
+continues ; `FLAT_ZONE` met le chemin plat cubique ou quadratique (§3.2, variante) dans la zone
+seule, fondu par z ; `SHOW 2` peint z. Coût quand `GAZE` vaut 1 : un `length`, un `smoothstep`,
+deux `mix` par pixel ; rien sinon. **Le poids suit le mouvement de l'image**, règle de Bruno du
+même jour (« l'appliquer aux images qui bougent, probablement un jeu ; désactiver en bureau pour
+être homogène partout ») : `stream/GazeZone.js` lit la taille des images delta que l'hôte encode,
+en bits par pixel et par seconde (0,25 → 0, 1,0 → 1 ; un jeu 1080p à 5 Mbit/s fait 2,4, un bureau
+immobile 0,05, un curseur qui bouge 0,7), images clés exclues, montée en 1 s et descente en 3 s,
+par pas de 1/64 ; les renderers le reçoivent par `noteEncodedFrame()` aux deux chemins de décodage
+(worker et fil principal) et le lisent à chaque dessin ; `setMwsrZone()` et `setMwsrGaze()` servent
+le laboratoire, qui tient le poids à 1. **Dans le produit, rien d'allumé** : la clé de labo
+`mw_mwsr_gaze` (`BrowserDetect.mwsrGazeWanted` : téléphones et tablettes, jamais un client de
+bureau — lecture de la consigne « en desktop », à confirmer par Bruno), coupée par défaut jusqu'à
+son verdict sur l'iPhone (comparateur : section « Zone du regard », les deux anneaux dessinés sur
+les bandes, `gaze=1` dans le lien). Les mesures sont au journal J34.
