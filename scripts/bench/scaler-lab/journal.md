@@ -1269,3 +1269,15 @@ du temps sur 1000 itérations.
   Safari (le repli `createImageBitmap` est là, et un échec se lirait « capture noire » sur la bande).
 - **L'image** : `C:\Test\test.png`, servie sous `/test/`, à défaut l'étalon `00_Background.png` ;
   `test.png` n'existait sur aucun disque de DualRTX le 23/10. Le panneau accepte aussi un fichier.
+- **Le même matin, sur l'iPhone de Bruno (Safari 26.5, WebGPU)** : la page marche, SSIM à 0,001 près
+  celles de SwiftShader (Natif 0,856, MW 0,870, FSR1 0,880, SGSR1 0,879, NIS 0,874), mais zoom et
+  déplacement mettaient plusieurs secondes à suivre le doigt. Deux causes, corrigées. Le chrono Canvas2D
+  ne rendait la main qu'une image sur dix (un `drawImage` de `VideoFrame` 1440p plus la lecture d'un
+  pixel, dix fois de suite : une seconde d'écran figé sur un téléphone) : une tâche entre chaque image,
+  hors mesure, pour les trois API. Et l'afficheur, un `drawImage` de bitmap 1440p par bande et par image,
+  dessine en WebGL2 : chaque sortie est une texture (mipmappée) envoyée une fois, une image est un clear
+  et un quad par bande, `texelFetch` à partir de 1:1 (les pixels tels quels, sans le doute d'un
+  échantillon sur une arête de texel) ; le tracé Canvas2D reste le repli sans WebGL2, et sur
+  `?viewer=2d`. Vérifié sur SwiftShader par le pilote : même tableau, gestes conformes, émulation
+  390×844 identique à 99,8 % au tracé Canvas2D (le reste : les chiffres des pastilles). Au doigt sur
+  l'iPhone : à l'essai de Bruno.

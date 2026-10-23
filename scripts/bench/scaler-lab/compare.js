@@ -17,6 +17,7 @@
 //                      choice (plan §9, 22/10/2026): WebGL2, WebGPU on iOS
 //   iters=1000         draws per algorithm for the time
 //   soft=1             the WebGPU fallback adapter (SwiftShader), for a test
+//   viewer=2d          the bands drawn by Canvas2D drawImage, not WebGL2 (a test)
 //
 // The reference of an output at 1440p is the picture; at 1080p and 720p, its
 // bicubic reduction (compare-worker.js), which is also the input of the
@@ -510,6 +511,7 @@ async function timeAlgo(algoId, c, iters, onProgress, alive) {
   for (let i = 0; i < WARM; i++) {
     await draw(frame.clone());
     if (sync) await sync();
+    await nextTask();
   }
   if (r && (r.failed || /failed|\+lost$/.test(r.lastDraw.path)))
     throw new Error("aucune image dessinée (" + r.lastDraw.path + ")");
@@ -525,8 +527,10 @@ async function timeAlgo(algoId, c, iters, onProgress, alive) {
     times[i] = dt;
     total += dt;
     if (i % 25 === 24) onProgress(i + 1);
-    // the page breathes: the other two yield a task by themselves
-    if (api === "canvas2d" && i % 10 === 9) await nextTask();
+    // a task between two draws, outside the measure: the page's gestures and
+    // frames get the thread (a Canvas2D draw yields nothing by itself, and
+    // ten of them between two tasks froze an iPhone's screen for a second)
+    await nextTask();
   }
   const sorted = times.slice().sort();
   return {
@@ -553,6 +557,9 @@ let idleResolvers = [];
 function dropOutputs() {
   for (const o of outputs.values()) if (o.bmp) o.bmp.close();
   outputs.clear();
+  if (gl && !gl.isContextLost())
+    for (const tx of textures.values()) gl.deleteTexture(tx.tex);
+  textures.clear();
 }
 
 function clearAll() {
@@ -608,6 +615,7 @@ async function run(g) {
       return;
     }
     outputs.set(key, out);
+    viewerTake(key, out);
     res(key).path = out.path;
     requestDraw();
     updateChips();
@@ -670,9 +678,13 @@ async function run(g) {
 }
 
 // ── the viewer ─────────────────────────────────────────────────────────────
+// WebGL2 draws the bands: each output is a texture uploaded once (the same
+// bytes the distance reads), a frame is one clear and one quad per band, the
+// same cost on every device. Safari on an iPhone spent seconds on the 2D
+// drawImage of 1440p bitmaps that did it before; that path stays as the
+// fallback without WebGL2, and on ?viewer=2d.
 
-const view = document.getElementById("view");
-const vctx = view.getContext("2d", { alpha: false });
+let view = document.getElementById("view");
 const bandsEl = document.getElementById("bands");
 const zoomEl = document.getElementById("zoom");
 const statusEl = document.getElementById("status");
@@ -683,6 +695,141 @@ let H = 0;
 let rects = [];
 const ZOOM_MIN = 0.05;
 const ZOOM_MAX = 64;
+const BG = [16 / 255, 16 / 255, 20 / 255]; // #101014
+
+let gl = null;
+let vctx = null;
+let glProg = null;
+let glU = null;
+const textures = new Map(); // output key → {tex, w, h}
+
+const VIEW_VS = `#version 300 es
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+const VIEW_FS = `#version 300 es
+precision highp float;
+uniform sampler2D u_tex;
+uniform vec2 u_origin; // the picture's origin on the page, device px, y down
+uniform float u_zoom;
+uniform vec2 u_size; // the picture, px
+uniform float u_height; // the canvas, px
+uniform vec3 u_bg;
+uniform int u_nearest; // 1 from 1:1 up: the texel under the pixel's centre
+out vec4 o;
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, u_height - gl_FragCoord.y);
+  vec2 q = (p - u_origin) / u_zoom;
+  if (any(lessThan(q, vec2(0.0))) || any(greaterThanEqual(q, u_size))) {
+    o = vec4(u_bg, 1.0);
+    return;
+  }
+  // texelFetch, not a normalised coordinate: at 1:1 a sample on a texel's
+  // edge would fall on either side from one column to the next
+  if (u_nearest == 1) o = vec4(texelFetch(u_tex, ivec2(q), 0).rgb, 1.0);
+  else o = vec4(texture(u_tex, q / u_size).rgb, 1.0);
+}`;
+
+function compileGl(g) {
+  const sh = (type, src) => {
+    const s = g.createShader(type);
+    g.shaderSource(s, src);
+    g.compileShader(s);
+    if (!g.getShaderParameter(s, g.COMPILE_STATUS))
+      throw new Error(g.getShaderInfoLog(s) || "shader");
+    return s;
+  };
+  const prog = g.createProgram();
+  g.attachShader(prog, sh(g.VERTEX_SHADER, VIEW_VS));
+  g.attachShader(prog, sh(g.FRAGMENT_SHADER, VIEW_FS));
+  g.linkProgram(prog);
+  if (!g.getProgramParameter(prog, g.LINK_STATUS))
+    throw new Error(g.getProgramInfoLog(prog) || "program");
+  glProg = prog;
+  glU = {};
+  for (const n of [
+    "u_tex",
+    "u_origin",
+    "u_zoom",
+    "u_size",
+    "u_height",
+    "u_bg",
+    "u_nearest",
+  ])
+    glU[n] = g.getUniformLocation(prog, n);
+  g.useProgram(prog);
+  g.uniform1i(glU.u_tex, 0);
+  g.uniform3f(glU.u_bg, BG[0], BG[1], BG[2]);
+  g.pixelStorei(g.UNPACK_FLIP_Y_WEBGL, false);
+  g.pixelStorei(g.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  g.pixelStorei(g.UNPACK_COLORSPACE_CONVERSION_WEBGL, g.NONE);
+}
+
+function initViewer() {
+  const want2d = new URLSearchParams(location.search).get("viewer") === "2d";
+  if (!want2d) {
+    try {
+      gl = view.getContext("webgl2", {
+        alpha: false,
+        antialias: false,
+        depth: false,
+        stencil: false,
+        preserveDrawingBuffer: false,
+      });
+      if (gl) compileGl(gl);
+    } catch (e) {
+      console.warn("afficheur WebGL2 refusé, Canvas2D :", e);
+      // the canvas is taken by its WebGL2 context: a fresh one for 2D
+      const fresh = view.cloneNode(false);
+      view.replaceWith(fresh);
+      view = fresh;
+      gl = null;
+    }
+  }
+  if (gl) {
+    view.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      textures.clear();
+    });
+    view.addEventListener("webglcontextrestored", () => {
+      compileGl(gl);
+      dropOutputs();
+      refresh();
+    });
+  } else vctx = view.getContext("2d", { alpha: false });
+}
+initViewer();
+
+/** An output into the viewer: its pixels as a mipmapped texture (the bitmap
+ *  is then let go), or the bitmap kept for the 2D path. */
+function viewerTake(key, out) {
+  if (!gl || !out.px || gl.isContextLost()) return;
+  const old = textures.get(key);
+  if (old) gl.deleteTexture(old.tex);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  const d = out.px.data;
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA8,
+    out.w,
+    out.h,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array(d.buffer, d.byteOffset, d.byteLength),
+  );
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  textures.set(key, { tex, w: out.w, h: out.h });
+  if (out.bmp) {
+    out.bmp.close();
+    out.bmp = null;
+  }
+}
 
 function status(s) {
   statusEl.textContent = s;
@@ -790,6 +937,42 @@ function requestDraw() {
   });
 }
 function draw() {
+  if (gl) drawGl();
+  else draw2d();
+}
+function drawGl() {
+  if (gl.isContextLost()) return;
+  const z = t.zoom;
+  gl.viewport(0, 0, W, H);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.clearColor(BG[0], BG[1], BG[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(glProg);
+  gl.uniform1f(glU.u_height, H);
+  gl.uniform1f(glU.u_zoom, z);
+  gl.uniform1i(glU.u_nearest, z < 1 ? 0 : 1);
+  gl.enable(gl.SCISSOR_TEST);
+  // the pixels themselves from 1:1 up; below, a mipmapped reduction
+  const minF = z < 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST;
+  const magF = z < 1 ? gl.LINEAR : gl.NEAREST;
+  shown().forEach((a, i) => {
+    const rc = rects[i];
+    const tx = textures.get(outKey(a));
+    if (!rc || !tx) return;
+    gl.scissor(rc.x, H - rc.y - rc.h, rc.w, rc.h);
+    gl.bindTexture(gl.TEXTURE_2D, tx.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minF);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magF);
+    gl.uniform2f(
+      glU.u_origin,
+      (state.zone === "same" ? rc.x : 0) + t.x,
+      (state.zone === "same" ? rc.y : 0) + t.y,
+    );
+    gl.uniform2f(glU.u_size, tx.w, tx.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  });
+}
+function draw2d() {
   vctx.setTransform(1, 0, 0, 1, 0, 0);
   vctx.fillStyle = "#101014";
   vctx.fillRect(0, 0, W, H);
@@ -1456,6 +1639,7 @@ function renderInfo() {
         : "absent"),
     "WebGL2 : " +
       (engines.webgl ? engines.webgl.error || engines.webgl.gpu : "—"),
+    "afficheur : " + (gl ? "WebGL2" : "Canvas2D"),
   ];
   const paths = shown()
     .map((a) => {
@@ -1531,6 +1715,9 @@ window.mwCompare = {
   refresh,
   get idle() {
     return !running;
+  },
+  get viewer() {
+    return gl ? "webgl2" : "canvas2d";
   },
   whenIdle: () =>
     running ? new Promise((r) => idleResolvers.push(r)) : Promise.resolve(),
