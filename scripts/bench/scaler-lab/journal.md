@@ -1360,6 +1360,14 @@ blocs ; la cohérence `a` prend ces franges pour de la texture et retient le noy
 lui, ne bougera qu'avec un chemin plat mieux reconstruit** (un Catmull-Rom à quatre échantillons
 bilinéaires en palier qualité, +3 échantillons partout : à chiffrer, au go de Bruno).
 
+**Décision de Bruno (09:55), devant les planches : netteté 2,0 par défaut**, et un chemin plat mieux
+reconstruit « en paramètres » (J33). Appliqué à 10:05 : `MWSR_UNIFORMS.sharp` 2,0, le test unitaire,
+`golden.json` refait (chaîne = noyau sur les neuf cas), conformité OK des deux côtés (jumeau WebGL2 :
+FLIP 0,000, PSNR ≤ 0,038 dB, 0 % de dépassement ; réductions au mètre des bilinéaires), `npm run check`
+vert, 1717 tests verts. Le curseur du comparateur monte à 3. Chiffres de 2,0 (J31) : texte ×1,33 21,81 /
+0,950 / FLIP 0,052 (FSR1 21,45 / 0,942 / 0,042), acuité 0,79 (FSR1 0,77) ; étalon ×1,33 au centre 34,29
+(table 36,76, FSR1 35,94), FLIP 0,043 (0,035) ; `game` 38,00 (FSR1 37,92).
+
 **Appliqué (09:10, signal de 59 à 08:55)** : `MWSR_UNIFORMS.sharp` 1,5 dans `MwsrShader.js`, le test
 unitaire qui épinglait 1 mis à jour, `golden.json` refait sur SwiftShader (la chaîne du produit égale
 au noyau sur les neuf cas, `chain-mwsr` = `mwsr`), conformité C11 OK des deux côtés (WebGPU 0/255
