@@ -693,9 +693,12 @@ monotone) ; `query user` qui sort en code 1 ; une fenêtre Chrome de Bruno
 par-dessus l'écran streamé de l'hôte.
 
 **Ce qui reste à Bruno avant le banc** (demandé par la session
-d'orchestration) : accord pour moonlight-qt portable sur l'UM790Pro, et
-l'heure du créneau après le banc N95, avant le retour de la machine sous
-Ubuntu.
+d'orchestration) : accord pour moonlight-qt portable sur l'UM790Pro ; le
+créneau lui-même, après le retour de Qwergin sur son test, la libération de
+l'UM790Pro et le banc N95 (~5 min), avant le retour de la machine sous
+Ubuntu ; et un moment où il n'est pas devant DualRTX, puisque le drapeau
+couvre DISPLAY5, son écran principal, pendant chaque passe. Le PIN de la
+`--dev` prêtée reste le sien : aucun PIN généré ni effacé sans le dire.
 
 ## 11. Coûts de développement et de maintenance
 
