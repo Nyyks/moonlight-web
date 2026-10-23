@@ -1550,3 +1550,72 @@ commence à « accentuer ». Les chiffres ne tranchent pas une préférence de n
 Bruno sur l'iPhone, avec les anneaux et les six curseurs (`gaze=1` dans le lien) ; les premières
 valeurs sont celles du labo. Le temps sur un vrai GPU est à lire dans le coin de la bande (un
 `length`, un `smoothstep`, deux `mix` de plus par pixel, et les pixels de plus au noyau au centre).
+
+## 2026-10-23 — J35, le noir plus pâle des traits fins : la borne des cinq échantillons du chemin contour
+
+**Constat de Bruno (iPhone, 12:13-12:16, 1080p → 1440p, ×16 sur l'emblème sombre de l'étalon) :**
+« J'ai essayé différentes approches, toutes ont une couleur plus pâle sur le noir. » MWSR à
+netteté 2,00, nu, CR5, Q3, avec ou sans zone : les traits sombres de l'emblème sortent gris-brun là
+où FSR1 et SGSR1 les gardent noirs (ses captures : MWSR SSIM 0,936-0,940 · PSNR 24,4-24,5 ·
+4,4-5,1 ms ; FSR1 0,948 · 25,2 · 7,9-8,3 ms ; SGSR1 0,946 · 24,8 · 4,4-5,0 ms).
+
+**Pistes.** L'espace de couleur, non : le mode `up` lit et écrit les valeurs encodées (les vues sRGB
+ne servent qu'à la réduction, J15), comme FSR1 et SGSR1. La cause est la borne du chemin contour
+(plan §3.2, point 9) : `blend()` borne son résultat entre le minimum et le maximum de ses **cinq
+échantillons bilinéaires**, puis `DERING 1` par les quatre texels. Sur une marche, les deux bornes se
+valent (les échantillons en travers, à ±1 texel, atteignent les plateaux). Sur un **trait d'un
+texel** — une crête — l'échantillon central est l'extrême des cinq, et la première borne épingle le
+pixel à son mélange bilinéaire : à ×1,33 les colonnes de sortie tombent à 0, 0,75, 1,5 et 2,25
+texel, et un trait noir D sur un fond O ne sort jamais plus sombre que 0,5·D + 0,5·O et
+0,75·D + 0,25·O, quelle que soit la netteté (à netteté 2, le mélange voudrait 1,33·D − 0,33·O au
+point milieu ; la borne le lui interdit). EASU et SGSR1 ne bornent que par les quatre texels voisins
+(`min4`/`max4`), et leurs lobes négatifs, puis RCAS, font descendre le trait vers D : le noir « plus
+profond » de leurs bandes. Le chemin plat n'est pas en cause : un trait noir sur orange passe par le
+vote, CR5 et Q3 n'y sont jamais appelés (leurs bornes épingleraient de même, au demeurant).
+
+**Mesure (SwiftShader, `--quality` à ×1,33 ; « traits fins » = pixels sombres de la référence,
+Y < 0,25, avec un pixel clair, Y > 0,4, à deux pixels de part et d'autre : 5,55 % des pixels de
+`text`, 0,32 % de l'étalon ; biais = luma de sortie − référence, + = plus pâle ; p1 = premier centile
+de luma sur les pixels du chemin contour) :**
+
+| ×1,33 | biais traits étalon / `text` | p1 contour étalon / `text` | PSNR étalon / `text` / `game` | SSIM étalon / `text` / `game` | FLIP étalon |
+|---|---|---|---|---|---|
+| MWSR table (2,0 ; cinq échantillons, puis texels) | +0,139 / +0,197 | 0,002 / 0,059 | 23,74 / 21,81 / 38,00 | 0,936 / 0,950 / 0,920 | 0,043 |
+| `dering=2` à 2,0 (texels seuls) | +0,091 / +0,090 | 0,000 / 0,000 | 24,08 / 22,18 / 37,56 | 0,938 / 0,958 / 0,920 | 0,044 |
+| `dering=2` à 1,5 | +0,102 / +0,121 | 0,000 / 0,000 | 24,30 / 22,20 / 37,83 | 0,942 / 0,954 / 0,920 | 0,038 |
+| `dering=2` à 1,5 + CR5 | +0,102 / +0,121 | 0,000 / 0,000 | 24,33 / 22,22 / 37,98 | 0,944 / 0,955 / 0,925 | 0,037 |
+| `dering=2` à 1,0 | +0,118 / +0,161 | 0,000 / 0,000 | 24,29 / 21,86 / 37,81 | 0,942 / 0,947 / 0,920 | 0,033 |
+| FSR1 | +0,124 / +0,189 | 0,000 / 0,014 | 24,15 / 21,45 / 37,92 | 0,941 / 0,942 / 0,933 | 0,035 |
+| SGSR1 (source) | +0,114 / +0,178 | 0,000 / 0,016 | 23,75 / 21,73 / 37,65 | 0,921 / 0,947 / 0,925 | 0,042 |
+
+Dépassements : 0 % pour tous les MWSR (la borne 2×2 tient la sonnerie), FSR1 5,0 % sur l'étalon.
+En moyenne sur tous les pixels sombres (Y < 0,25), MWSR n'était pas plus pâle que FSR1 (biais
++0,0148 contre +0,0144 sur l'étalon) : l'écart est tout entier dans les traits et les extrêmes,
+que le zoom ×16 de Bruno regarde.
+
+**Lecture.** La borne des cinq échantillons, « faible et gratuite » (§3.2), est surtout fausse sur
+les crêtes. Levée (`DERING 2`, aucune instruction de plus : les quatre texels sont déjà chargés), les
+traits reviennent à la profondeur de la référence (p1 0,059 → 0,000 sur `text`, biais des traits
+divisé par deux) et tout monte sur `text` (+0,37 dB, SSIM 0,950 → 0,958) et sur l'étalon (+0,34 dB à
+2,0, +0,56 à 1,5) ; `game` perd 0,44 dB à netteté 2,0 (ses rares pixels sombres au noyau sont
+maintenant poussés sous la référence : biais −0,043 sur la bande 0-0,1), 0,17 dB à 1,5, et rien en
+SSIM. La netteté se redose : à 1,5 avec CR5, MWSR passe FSR1 sur les trois mesures de l'étalon
+(24,33 / 0,944 / 0,037 contre 24,15 / 0,941 / 0,035) et de `text`, à égalité de PSNR sur `game`
+(37,98 / 37,92 ; le SSIM 0,925 / 0,933 reste à FSR1). Sur le comparateur même (SwiftShader, image
+par défaut, 1080p → 1440p, `dr=2&sharp=1.5&flat=5&fc=0.5`) : MWSR SSIM 0,951 · PSNR 25,52 contre
+FSR1 0,948 · 25,17 et SGSR1 0,946 · 24,83 — là où les captures de Bruno donnaient 0,937-0,940 ·
+24,4-24,5 à MWSR.
+
+**Jumeaux** : d'accord sur le comparateur (WebGPU, adaptateur logiciel : 0,95124 · 25,518 ; WebGL2
+SwiftShader : 0,95130 · 25,524). Test unitaire J35 (les deux textes, la constante cuite dans le
+GLSL) ; golden de la table inchangé, conformité C11 refaite des deux côtés : OK (jumeau WebGL2 contre
+noyau : FLIP 0,000, 0,007 dB) ; 1726 tests, `npm run check`. Les cellules `chain-*` du labo n'acceptent pas d'options — elles les ignorent en silence et
+rendent la cellule nue : à savoir avant de s'y fier. **Produit** : `DERING` reste 1 ; dans le
+comparateur, `dr=2` et ⚙ → « borne (arêtes) » ; à l'œil de Bruno, avec la netteté (1,5 ?) et CR5.
+S'il valide, le défaut du produit change, et la netteté avec, sur son oui explicite.
+
+**Faux pas de banc.** La première passe « WebGPU » du comparateur a été lancée sans `api=webgpu` ni
+`soft=1` dans le lien ; le Chrome du pilote, qui n'épingle WebGL que par la page, a pris la
+RTX 5060 Ti en WebGL2 pendant quelques secondes (figures 0,95131 · 25,525, cohérentes avec
+SwiftShader ; aucun mode d'écran touché ; C4 de f1 était fini). Le pilote force désormais ces deux
+paramètres en mode `gpu`.

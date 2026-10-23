@@ -633,7 +633,13 @@ est le pas d'un texel en coordonnées de texture.
    faible, gratuite). Variante `DERING_EXACT` : sur le chemin contour seulement, quatre
    `textureLoad` des quatre texels entourant `p` donnent la borne exacte 2×2 d'EASU (quatre
    instructions de plus, sur les contours seulement ; WebGPU, et WebGL2 par `texelFetch`). Le labo
-   dira si la borne faible suffit sur du texte.
+   dira si la borne faible suffit sur du texte. **Verdict du 23/10/2026 (journal J35)** : la borne
+   faible n'est pas seulement faible, elle nuit sur un trait d'un texel : l'échantillon central y
+   est l'extrême des cinq, et la borne épingle le pixel à son mélange bilinéaire, plus pâle que le
+   trait (ce que Bruno a vu sur l'iPhone : « une couleur plus pâle sur le noir »). `DERING 2` ne
+   garde que la borne 2×2 des texels : sur `text` à ×1,33, +0,37 dB et SSIM 0,950 → 0,958, les
+   noirs des traits à la profondeur de la référence, dépassements 0 % ; option de labo (`dr=2` du
+   comparateur), le défaut reste 1 en attendant le choix de Bruno.
 10. Netteté fusionnée, adaptative au contraste : `out = R + λ · (R − moyenne(A, B, D, E))`, avec
     `λ = netteté · S(s) · H`, où `S(s)` croît de 0 à l'échelle 1 (contournement de toute façon) à
     1 à l'échelle 2, et `H` est la marge locale (distance de `R` au min et au max du voisinage,
