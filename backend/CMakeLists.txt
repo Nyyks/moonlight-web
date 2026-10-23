@@ -220,6 +220,16 @@ endif()
 if(APPLE)
     mw_apply_patch("${MW_LIBJUICE_DIR}" libjuice-macos-diffserv.patch)
 endif()
+# libjuice's ICE-TCP only dials, and a browser only dials too (it never even
+# signals its TCP candidates): where UDP is blocked, no pair could form (bench of
+# 23/10). This one listens as well, on the TCP side of the agent's UDP port and
+# only while the checks run, behind a gate that reads nothing past an
+# authenticated Binding request. A connection asks for it through
+# rtc::Configuration::enableIceTcpPassive, the second patch; the server does
+# when the owner sets ice_tcp_passive. docs/design/ice-tcp-passive.md
+mw_apply_patch("${MW_LIBJUICE_DIR}" libjuice-ice-tcp-passive.patch)
+mw_apply_patch("${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel"
+               libdatachannel-ice-tcp-passive.patch)
 
 # libdatachannel (WebRTC DataChannel + media). Match the previous .bat flags.
 set(NO_WEBSOCKET ON  CACHE BOOL "" FORCE)

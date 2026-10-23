@@ -230,5 +230,32 @@ elseif(UNIX AND NOT APPLE)
     target_link_libraries(run_tests PRIVATE pthread dl)
 endif()
 
+# ── Passive ICE-TCP: our patch on libjuice ─────────────────────────────────
+# A runner of its own, in C against libjuice itself: the patch lives in the
+# library, below anything run_tests links. The backend's configure applies the
+# patch to the submodule; a test tree configured alone applies it the same way
+# (once, left alone when it already is). docs/design/ice-tcp-passive.md
+find_package(Git REQUIRED)
+set(_juice ${_src}/third_party/libdatachannel/deps/libjuice)
+set(_juice_patch ${_src}/third_party/patches/libjuice-ice-tcp-passive.patch)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${_juice}" apply --reverse --check "${_juice_patch}"
+                RESULT_VARIABLE _juice_patched OUTPUT_QUIET ERROR_QUIET)
+if(NOT _juice_patched EQUAL 0)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${_juice}" apply "${_juice_patch}"
+                    RESULT_VARIABLE _juice_failed ERROR_VARIABLE _juice_why)
+    if(NOT _juice_failed EQUAL 0)
+        message(FATAL_ERROR "libjuice-ice-tcp-passive.patch does not apply: ${_juice_why}")
+    endif()
+endif()
+set(NO_SERVER ON CACHE BOOL "" FORCE)
+set(NO_TESTS ON CACHE BOOL "" FORCE)
+add_subdirectory(${_juice} ${CMAKE_BINARY_DIR}/libjuice EXCLUDE_FROM_ALL)
+
+add_executable(run_juice_tests test_ice_tcp_passive.c)
+# Its private headers: the test writes STUN messages with the library's own code.
+target_include_directories(run_juice_tests PRIVATE ${_juice}/src ${_juice}/include/juice)
+target_link_libraries(run_juice_tests PRIVATE juice-static)
+
 enable_testing()
 add_test(NAME backend-tnr COMMAND run_tests)
+add_test(NAME ice-tcp-passive COMMAND run_juice_tests)
