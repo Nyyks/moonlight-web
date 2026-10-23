@@ -27,7 +27,7 @@ The two WebRTC families differ only in the **video** path: `-dc` fragments acces
 - **Video Enhancement OFF**: `webrtc-dc-udp` → `webrtc-dc-tcp` → `webrtc-media-udp` → `webrtc-media-tcp` → `wss`
 - **Video Enhancement ON** (canvas required for WebGPU): `webrtc-dc-udp` → `webrtc-dc-tcp` → `wss` → `webrtc-media-udp` → `webrtc-media-tcp` (media kept only as a last resort, streaming *without* enhancement)
 
-`wss` is dropped from the chain for any browser that arrived through the rendezvous (`req.viaTunnel`) — there is no page-serving TLS connection to carry it. Since that is how every user reaches the app, the rung is effectively LAN-IP-only, and the admin selector omits it outside debug builds (`available_transports`). Selecting it by name is still honoured, and still reported: the `/start` response carries `transport_dropped` and the browser shows which transport actually runs. ICE-TCP covers the same UDP-blocked case that `wss` used to.
+`wss` is dropped from the chain for any browser that arrived through the rendezvous (`req.viaTunnel`) — there is no page-serving TLS connection to carry it. Since that is how every user reaches the app, the rung is effectively LAN-IP-only, and the admin selector omits it outside debug builds (`available_transports`). Selecting it by name is still honoured, and still reported: the `/start` response carries `transport_dropped` and the browser shows which transport actually runs. The `-tcp` rungs do **not** cover the UDP-blocked case that `wss` used to: see [Networks that let no UDP out](#networks-that-let-no-udp-out).
 
 Rules applied when building the chain (`main.cpp`):
 
@@ -38,6 +38,19 @@ Rules applied when building the chain (`main.cpp`):
 **The browser owns the loop**: the `/start` response is sent *before* ICE connects, so only the client can observe a connection failure. The full `transport_chain` and current `transport_index` are echoed in the response; on failure the frontend relaunches with `transport_index + 1`. Manual transport selection precedes automatic fallback.
 
 **Only a transport failure costs a rung.** A `/start` that never yields a session — timeout, 502, Sunshine refusal — is a verdict on the host, not on the transport: nothing was offered, no ICE was gathered. It is retried once on the *same* index and then reported as such (`transport.launchFailed`). Charging it to the chain empties the ladder against an unresponsive host and ends on a "no transport works" that is simply false — the 2026-08-07 incident, where a wedged Sunshine consumed all three rungs in 60 s without a single ICE attempt. The worker's own launch deadline (`NvHTTP::LAUNCH_TIMEOUT_MS`, 20 s) is deliberately shorter than the browser's `/start` timeout (25 s) so the failure is *reported* rather than the worker being killed mid-request by the relaunch that takes its slot.
+
+### Networks that let no UDP out
+
+A school, an office or a guest Wi-Fi that blocks outgoing UDP leaves **no path through the entry link**. The tunnel and every WebRTC rung need ICE, and ICE-TCP cannot form a pair with Chrome: libjuice (1.7.1) only does *active* TCP — it dials, it never listens — and Chrome offers no TCP candidate at all (checked on 22/10/2026, with and without STUN). Active against nothing pairs nothing, so the `-tcp` rungs and the TCP hole `RouterPortCore` maps both wait for a peer that never comes. The browser ends on *"Your machine answered, but no direct connection could be opened"* (`noRouteError` in `bootstrap/v1/tunnel.js`). The project runs no relay (no TURN), so that is the expected outcome, not a fault.
+
+**The way around it is the host's direct address, `https://<public IP>`**, the one place `wss` still runs: the page and the stream then share a single TLS connection to the host on TCP, which such networks usually let through on 443. Verified on 22/10/2026 from an iPhone on 5G, owner and invited player, with `wss` forced too. What it takes:
+
+1. **Forward a TCP port by hand on the router**, external 443 → the host's `https_port` (443, or the port it fell back to). UPnP maps media and tunnel ports, never a web port. The public IP is shown under Admin › Internet, on the host machine itself only: it is redacted for any request that is not local, the tunnel's included.
+2. **Accept the certificate warning.** The host serves its self-signed certificate under an address it has no name for. Accepting it trusts whatever answers on that address; the PIN, not the certificate, is what admits.
+3. **Pair again.** The direct address is another origin from the entry link: no session, no pairing key carried over. The owner enters a PIN from the admin page. An invited player opens `https://<public IP>/p/<token>` — the token is what follows `#t=` in the shared link, which the interface does not print in this form — and enters the invitation's PIN.
+4. **Wait for the chain.** The browser's STUN probe (`api/UdpProbe.js`) finds no UDP and the start request says `udp_blocked`. For a browser planned for the internet, `dropUdpRungsWhenBlocked` (`main.cpp`) then removes the `-udp` rungs, and only those: the one or two `-tcp` rungs still run to their ICE deadline (8 s each in the 22/10 bench) before `wss` takes over. The first frame can take about twenty seconds. A player's chain ignores the owner's forced transport.
+
+What it costs: the link carries the home's public address in clear, and a dynamic IP breaks it at the next change. `wss` is also the worst latency profile of the five, with TCP head-of-line blocking under loss. Putting `wss` back under the entry link would need a valid certificate for that address, so a name per user, which the project does not issue ([Security §6.5](06-Security.md#65-tls)).
 
 ## 5.2 Video path
 
