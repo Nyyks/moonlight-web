@@ -5416,6 +5416,30 @@ plus deux souris : pendant le glissement c'est celle de l'hôte qui commande, la
 sienne s'efface, et elle revient dès qu'on relâche ; et la forme du curseur ne
 change plus toute seule quand quelqu'un touche la souris de la machine.
 
+### 29.8 La bascule de mode sur un bureau immobile : la capture rouverte (23/10/2026)
+
+En mode jeu, l'hôte Windows redessine le pointeur, sur un mouvement seul, à
+partir d'une copie du bureau. Cette copie n'est faite que si le pointeur est
+dessiné et sur cet écran : le mode bureau n'en paie pas le prix, 0,9 ms par
+image sur le N95 (banc §8y.5). Juste après une bascule vers le mode jeu, ou au
+retour du pointeur depuis un autre écran, il n'y avait donc pas de copie. Sur un
+bureau immobile, le pointeur restait absent de l'image jusqu'à ce que l'écran
+change, et une copie d'avant pouvait ramener un écran périmé.
+
+Choix de Bruno du 23/10 : rien en régime établi. La copie est lâchée par la
+première image convertie sans elle. Quand le pointeur doit être dessiné sans
+copie disponible (`desktopWanted()`), la capture rend le bureau à nouveau
+(`IWindowsCapture::retake`), sur le même périphérique : le convertisseur,
+l'encodeur et l'interop D3D12 restent en place. Une nouvelle duplication DXGI
+livre d'abord le bureau entier. On lâche l'ancienne avant (une seule par sortie
+et par processus) ; la chaîne a lâché avant elle ses vues et ses surfaces
+ouvertes (`forgetCaptured`). Côté WGC, la reprise est un `start()` sur le même
+périphérique. Coût mesuré : 13 à 16 ms par bascule en DXGI, ~180 ms en WGC (banc
+§8y.6). Au retour en mode bureau, le même chemin redessine la copie sans le
+pointeur : celui du mode jeu ne reste plus figé dans l'image, à côté de celui
+du client. Linux et macOS gardent leur dernière image dans les deux modes et
+n'avaient pas le défaut.
+
 ## 30. Le worker natif élevé : les fenêtres administrateur répondent (22/09/2026)
 
 Le serveur démarre par la tâche de logon `\MoonlightWeb`, au niveau **non élevé**,

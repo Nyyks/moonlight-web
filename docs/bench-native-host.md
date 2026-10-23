@@ -7812,6 +7812,83 @@ de Bruno `bench\bruno\`. N95 rendu propre à 16:37, pointeur remis où il était
 bureau immobile peut laisser le pointeur invisible et figé jusqu'à ce que
 l'écran change. Le correctif est à choisir.
 
+### 8y.6 Le correctif B : la capture rouverte quand le pointeur n'a pas de bureau (23/10/2026, 09:30-09:48)
+
+**Décision de Bruno (23/10, ~09:00) : B.** Ce que fait le code :
+
+- La copie du bureau n'est gardée que si le pointeur est dessiné dans l'image
+  et se trouve sur cet écran, comme avant. Elle est maintenant **lâchée par la
+  première image convertie sans elle**. Elle ne peut donc plus être plus vieille
+  que l'image du client : c'est la fin de la copie périmée.
+- Quand le pointeur doit être dessiné, qu'il est sur cet écran et qu'aucune copie
+  n'existe, la capture rend le bureau à nouveau (`IWindowsCapture::retake`). C'est
+  le cas juste après la bascule du mode bureau, ou au retour du pointeur depuis un
+  autre écran. La duplication DXGI lâche sa duplication et en redemande une sur
+  la même sortie et le même périphérique (une seule par sortie et par processus) ;
+  sa première image est le bureau entier. WGC refait son `start()` sur le même
+  périphérique. L'image est convertie avec le pointeur, et sa copie est gardée.
+- Cette image est marquée « reprise » : ce n'est pas une présentation. Elle ne
+  nourrit pas le réseau de présentations, ne passe pas par le `pregate`, et son
+  t₀ est l'instant où elle a été prise. Le click trace la note `retaken`.
+- Garde-fous : une reprise par seconde au plus. La session y renonce, en le
+  disant une fois dans le journal, si la reprise échoue, ne livre rien en
+  500 ms, ou si la copie n'est pas gardée. Une reprise refusée passe par le
+  redémarrage ordinaire de la capture.
+- **Défaut miroir, trouvé en écrivant B** : au retour en mode bureau sur un
+  écran immobile, le pointeur dessiné en mode jeu restait figé dans l'image, à
+  côté de celui du client. À chaque changement de main, la copie gardée est
+  maintenant redessinée tout de suite, avec ou sans le pointeur.
+- Clé de banc `cursorswap=<s>` : le pointeur change de main toutes les s secondes.
+
+**La reprise seule** (`mw-native-tests capture`, la duplication rouverte puis
+la première acquisition) :
+
+| GPU | DDA : réouverture | DDA : image | WGC : réouverture | WGC : image |
+|---|---|---|---|---|
+| RTX 5060 Ti (DualRTX, 1440p) | 1,1 ms | +7,3 ms (2 acquisitions) | 58 ms | +9 ms |
+| Intel UHD (N95, 1080p) | 0,8 ms | +8,9 ms (1 acquisition) | 156 ms | +18,5 ms |
+
+AMD n'a pas pu être testé : au 23/10, les deux M27Q de DualRTX sont sur la RTX, et
+l'iGPU AMD n'a plus d'écran.
+
+**De bout en bout sur le N95** (`--native-bench` 1080p HEVC 60 i/s, `cursorswap=3`,
+30 s, exe de `build-gels`). Le pointeur bouge par petits pas sur le fond d'écran
+de Display 1 (`park.ps1 wiggle`, ~6 réveils « pointeur seul » par seconde). On
+vérifie au pixel, sur le flux enregistré (`dump=`) puis décodé : présence du
+pointeur dans un carré de 120 px, image par image. « Fenêtre » désigne une petite
+fenêtre dont le texte change toutes les 1,5 s ; le bureau perd donc sa copie
+pendant les phases en mode bureau.
+
+| passe | chaîne | écran | reprises | coût moyen / max (ms) | phases jeu avec pointeur | phases bureau sans pointeur |
+|---|---|---|---|---|---|---|
+| swapS12 | D3D12 | immobile (2 présentations/s : la vignette de la page Steam ouverte) | 5 | 12,9 / 14,8 | 5/5 | 5/5 |
+| swapT12 | D3D12 | fenêtre | 5 | 15,0 / 17,0 | 5/5 | 5/5 |
+| swapT11 | D3D11 | fenêtre | 5 | 15,7 / 16,9 | 5/5 | 5/5 |
+| pipeT12 | D3D12 pipelinée | fenêtre | 4 | 18,7 / 32,4 | 5/5 | 5/5 |
+| wgcT12 | WGC + D3D12 | fenêtre | 4 | 180,9 / 183,1 | 5/5 | 5/5 |
+| hopT12 | D3D12, mode jeu continu, pointeur parti puis revenu toutes les 3 s | fenêtre | 5 | 12,8 / 16,5 | à chacun des 5 retours, ramené par l'image reprise 10 à 20 ms après la reprise | parti à chaque départ |
+
+- Le coût va de la décision à l'image en main. Une reprise a lieu au démarrage,
+  puis à chaque retour au mode jeu sans copie, sauf si une présentation arrive
+  avant. La bascule elle-même n'agit qu'au réveil suivant de la boucle : au plus
+  100 ms sur un bureau calme, ou au prochain mouvement.
+- La première passe (swapA12) faisait bouger le pointeur au-dessus de la fenêtre
+  Steam ouverte sur Display 1. Ses effets de survol présentaient à 60 i/s. Elle
+  donne 4 reprises de 13,2 ms, mais ne compte pas pour le bureau immobile.
+- La reprise WGC coûte ~180 ms : une saccade unique à la bascule, sur le secours
+  WGC. On pourrait la réduire en ne refaisant que le pool et la session.
+- Tests natifs : 189 sur 189 sur DualRTX, 222 sur 222 sur le N95.
+
+Reste à faire : AMD, et une passe sur l'écran de la RTX avec le pointeur de
+Bruno (demandée par 59). Dépouillement : `scratchpad\swap_check.py` ; script
+`n95-day4.sh` ; données `bench\n95-day4\`. N95 rendu propre à 09:48, pointeur
+remis où il était.
+
+**Concrètement, pour l'utilisateur** : passer en mode jeu sur un bureau immobile
+montre le pointeur tout de suite (~15 ms de reprise sur le N95, dès le réveil
+suivant de la boucle). Quitter le mode jeu ne laisse plus de pointeur figé dans
+l'image. En régime établi, cela ne coûte rien.
+
 ## 9. Pour l'A/B
 
 Le banc encode vers un puits ; l'A/B se fait sur un vrai flux. Une session
