@@ -8191,5 +8191,30 @@ du Mac avec l'agent utilisateur d'un Mac). Ils sont tapés par le flux dans le c
   - le settings.json des instances dev portait `"always"`, venu d'un ancien `true`. Le banc met
     `"auto"` le temps du passage ;
   - depuis la session du banc, `SetWindowPos(HWND_TOPMOST)` réussit, mais la fenêtre ne devient pas
-    TOPMOST : le centre de l'écran diffusé doit être libre.
-- Restent l'hôte US (le N95) et Sunshine pour Windows.
+    TOPMOST : le centre de l'écran diffusé doit être libre ;
+  - le ^ mort compté faux : le banc demande le caractère attendu à `ToUnicodeEx` après la frappe,
+    quand la disposition garde encore le ^ en attente. Il obtient « ^ » au lieu d'une touche morte,
+    alors que ce qui sort, « ^) », est juste.
+
+**Sunshine pour Windows** (23/10, 13:33-13:36, Sunshine 2026.921 de DualRTX, même hôte FR) : la
+`--dev` ouvre le Desktop de Sunshine comme hôte GameStream, et la session écrit « Sunshine/Windows,
+letters as non-normalized VKs | layout fidelity: auto ».
+
+| Client | Bureau : les lettres du client, le reste en position | Jeu : les positions |
+|---|---|---|
+| AZERTY Windows | 19/19 | 19/19 |
+| QWERTY US | 16/16 sur le fond : q w a z m restent q w a z m ; ; 1 @ donnent m & 2 | 16/16 sur le fond : q w a z m donnent a z q w , |
+| AZERTY Mac | 14/14 : les lettres justes ; § ! - @ donnent - _ = ² ; Option + touche ne tape rien | 14/14 |
+
+- Le cas miroir est réglé. Avant, un QWERTY branché sur un hôte AZERTY tapait « a » pour « q ».
+  Ses lettres partent maintenant en touche virtuelle non normalisée (journal KBD « VK 0x51
+  non-normalized »), et Sunshine les tape dans la disposition de l'hôte.
+- Chiffres et ponctuation restent en position sur Sunshine, comme voulu : jamais de texte à la
+  place d'une vraie touche (règle du 09/09). La ponctuation d'un AZERTY de Mac y reste donc
+  fausse.
+- **Pièges du banc** :
+  - Sunshine filme l'écran principal (DISPLAY5 sur DualRTX), qui n'est pas celui du flux natif ;
+  - son Desktop reste ouvert après un stream : le banc le reprend, et le laisse ouvert ;
+  - le temps de la session, Sunshine fait passer la sortie son par défaut sur « Steam Streaming
+    Speakers ». Il la rend une vingtaine de secondes après la déconnexion du client.
+- Reste l'hôte US (le N95).
