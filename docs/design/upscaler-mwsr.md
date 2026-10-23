@@ -603,7 +603,11 @@ est le pas d'un texel en coordonnées de texture.
 4. Si `contraste < τ`, la sortie est `C`. Fin. Coût : la passe, un échantillon, une dizaine
    d'opérations. **C'est une instruction texture de moins que le chemin plat de SGSR1**
    [attendu : la dérivée n'est pas gratuite partout, mais elle est de l'ordre d'une addition par
-   composante].
+   composante]. *Variante en paramètres (J33, 23/10/2026) : `FLAT_TAPS` 5 ou 9 remplace `C` par le
+   cubique de Mitchell-Netravali (B 0, C `FLAT_C`, 0,5 = Catmull-Rom) sur les 4×4 texels, lu en cinq
+   ou neuf échantillons bilinéaires et borné par eux ; sur les pixels plats il rejoint FSR1 (journal
+   J33), pour cinq ou neuf fois les instructions texture du chemin plat ; défaut 1, le temps réel à
+   juger sur l'appareil.*
 
 **Chemin contour (les quads où `contraste ≥ τ`).**
 

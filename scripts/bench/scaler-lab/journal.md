@@ -1416,3 +1416,55 @@ prochain push de Bruno ; si `text` y restait hors du mètre, ce serait une vraie
 pixels différents, 0 % au-delà de 2), `text` 1/255 (4,89 %, 0 %), `zone` 4/255 (0,48 %, 0,011 %) ; le
 jumeau 1/255, 1/255 et 3/255 (0,009 %) : la différence du jumeau est bien celle des échantillonneurs,
 ici comme sous Linux. Qualité du jumeau contre le noyau inchangée (FLIP 0,000, PSNR ≤ 0,027 dB).
+
+## 2026-10-23 — J33, le chemin plat en paramètres : un cubique d'échantillons bilinéaires
+
+Décision de Bruno (09:55) : « un chemin plat mieux reconstruit, oui, en paramètres ». Le constat de J31
+(le chemin plat **est** le bilinéaire, et c'est là que FSR1 prend son avance sur les pixels plats, 72 %
+de l'étalon à ×1,33) appelait une reconstruction meilleure qu'un échantillon, sans changer le produit.
+
+**Les paramètres (`MwsrShader.js`, 3c42d89d).** Deux constantes de pipeline, dans les deux jumeaux :
+`FLAT_TAPS` (1 : l'échantillon bilinéaire, le défaut ; 5 ou 9 : le cubique de Mitchell-Netravali à
+B 0 et C `FLAT_C` sur les 4×4 texels autour de la position) et `FLAT_C` (0,5 = Catmull-Rom ; plus haut,
+lobe négatif plus profond). Le cubique est lu comme les échantillons bilinéaires que le GPU pèse pour
+rien (Jimenez, Pettineo) : sur chaque axe les deux texels du milieu par un échantillon à leur point
+médian pondéré (`tc + w2 / (w1 + w2)`), les deux texels extérieurs par un échantillon chacun ; neuf
+échantillons, ou cinq sans les quatre coins (les plus petits poids), le reste renormalisé ; le résultat
+borné par les échantillons eux-mêmes, comme le chemin contour. Pour le comparateur, `setMwsrOverrides()`
+sur les deux renderers reconstruit les pipelines ou les programmes (jamais appelé par le produit) ; la
+page a un sélecteur « chemin plat » et un curseur « lobe C » ; les cellules du labo prennent `flat=` et
+`fc=`. Vérifié : golden identique (le défaut ne change pas un pixel), conformité OK des deux côtés,
+1718 tests, `npm run check`.
+
+**Balayage (SwiftShader, `--quality`, PSNR entier / plat / contours par le masque `show=1`, SSIM,
+dépassements ; FSR1 en repère) :**
+
+| ×1,33 | étalon : entier / plat / contours · SSIM · dép. | `game` | `text` |
+|---|---|---|---|
+| FSR1 | 24,15 / 31,45 / 19,20 · 0,941 · 5,0 % | 37,92 / 39,80 / 24,47 · 0,933 · 0,4 % | 21,45 / 42,37 / 15,69 · 0,942 · 0,2 % |
+| `mwsr` (netteté 2) | 23,74 / 31,10 / 18,79 · 0,936 · 0 % | 38,00 / 39,44 / 25,46 · 0,920 · 0 % | 21,81 / 40,11 / 16,07 · 0,950 · 0 % |
+| CR5 (C 0,5) | 23,78 / 31,35 / 18,79 · 0,938 · 0,05 % | 38,16 / 39,67 / 25,46 · 0,925 · 0 % | 21,83 / 41,51 / 16,07 · 0,951 · 0 % |
+| **CR9 (C 0,5)** | **23,78 / 31,35 / 18,79 · 0,938 · 0,05 %** | **38,24 / 39,79 / 25,46 · 0,928 · 0 %** | **21,83 / 41,60 / 16,07 · 0,951 · 0 %** |
+| CR9, C 0,75 | 23,78 / 31,38 / 18,79 · 0,939 · 0,18 % | 38,27 / 39,83 / 25,46 · 0,929 · 0,02 % | 21,83 / 41,89 / 16,07 · 0,951 · 0,01 % |
+| CR9, C 1 | 23,78 / 31,36 / 18,79 · 0,938 · 0,37 % | 38,28 / 39,84 / 25,46 · 0,929 · 0,04 % | 21,83 / 41,98 / 16,07 · 0,951 · 0,01 % |
+
+| ×2 | étalon | `game` | `text` |
+|---|---|---|---|
+| FSR1 | 20,79 / 22,84 / 17,99 · 0,874 · 2,0 % | 35,55 / 38,03 / 22,02 · 0,887 · 0,03 % | 17,57 / 35,13 / 13,04 · 0,845 · 0,3 % |
+| `mwsr` (netteté 2) | 20,52 / 22,80 / 17,55 · 0,862 · 0 % | 35,33 / 37,96 / 21,61 · 0,881 · 0 % | 17,34 / 33,56 / 12,82 · 0,842 · 0 % |
+| CR5 | 20,53 / 22,83 / 17,55 · 0,866 · 0,01 % | 35,37 / 38,04 / 21,61 · 0,884 · 0 % | 17,35 / 34,57 / 12,82 · 0,843 · 0 % |
+| **CR9** | **20,54 / 22,84 / 17,55 · 0,867 · 0,03 %** | **35,39 / 38,07 / 21,61 · 0,886 · 0 %** | **17,35 / 34,61 / 12,82 · 0,843 · 0 %** |
+
+**Lecture.** Sur les pixels plats, CR9 à C 0,5 **rejoint FSR1** : étalon 31,35 contre 31,45 et 22,84 =
+22,84, `game` 39,79 contre 39,80 et 38,07 contre 38,03, `text` à 0,5-0,8 dB ; CR5 en prend les deux
+tiers ; C au-delà de 0,5 n'ajoute que des dépassements. Sur l'image entière le gain est ce que la part
+d'erreur des plats permet : +0,24 dB sur `game` à ×1,33 (MWSR passe devant FSR1 : 38,24 contre 37,92),
++0,04 sur l'étalon, +0,02 sur le texte ; SSIM +0,003 à +0,008 (étalon ×2 : 0,862 → 0,867, FSR1 0,874).
+Pourquoi si peu sur l'étalon : 28 % de ses pixels sont des contours et portent **87 % de l'erreur**
+(18,8 dB contre 31 sur les plats) ; là, c'est la reconstruction à cinq échantillons contre les douze
+texels d'EASU (J7, trois tours, on s'arrête) et la netteté 2 (18,79 contre 18,97 à netteté 1) qui
+comptent, pas le chemin plat. Le comparateur sur SwiftShader (entrée bicubique, ×1,33) dit la même
+chose : CR9 0,9415 / 24,57 contre 0,9386 / 24,52 (FSR1 0,948 / 25,17) ; coût CPU ×3,7 sous SwiftShader,
+qui ne dit rien d'un GPU. **À Bruno** : le temps et l'œil sur l'iPhone (⚙ → chemin plat CR9, C 0,5 ;
+la texture externe y paie deux fetches par échantillon, donc neuf au lieu d'un sur 72 à 98 % des
+pixels) ; si le temps passe, CR9 à C 0,5 est la valeur à retenir, en palier qualité ou par défaut.
