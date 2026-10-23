@@ -3,24 +3,24 @@
  "cases": {
   "code 1280x720->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.138654,
-    "psnrVsBilinear": 35.663,
-    "sha256": "6828130d98d149327c597f14c720212a5d4c274e6731b9381d5d0dcf6b54ffd8"
+    "mean": 0.138061,
+    "psnrVsBilinear": 32.648,
+    "sha256": "763c0020de30c2ef2ce64c242a55f3df4f9ae4b1ee3b6781e4edde038474b93d"
    },
    "mwsr": {
-    "mean": 0.138654,
-    "psnrVsBilinear": 35.663,
-    "sha256": "6828130d98d149327c597f14c720212a5d4c274e6731b9381d5d0dcf6b54ffd8"
+    "mean": 0.138061,
+    "psnrVsBilinear": 32.648,
+    "sha256": "763c0020de30c2ef2ce64c242a55f3df4f9ae4b1ee3b6781e4edde038474b93d"
    },
    "mwsr_c444_1": {
-    "mean": 0.138704,
-    "psnrVsBilinear": 35.458,
-    "sha256": "574ade6925c39077e9630edcd134c5380c81bdc6ee09e6810e0c51f49154b550"
+    "mean": 0.138103,
+    "psnrVsBilinear": 32.571,
+    "sha256": "d783f5f6a3c3f7335dfd7dff3dc8a3b5f16cf94c0efd36d9d5d243fb11df6a92"
    },
    "mwsr_dering_0": {
-    "mean": 0.138657,
-    "psnrVsBilinear": 35.66,
-    "sha256": "a28243007549fca30bb74121568a7a120e666349ad2fb9c480e8b2f80656b0d0"
+    "mean": 0.138085,
+    "psnrVsBilinear": 32.6,
+    "sha256": "6f80648b07df7b8e153e12683e325470c5070f031b602275e98d28898a5d1e0a"
    },
    "tex-s1": {
     "mean": 0.139525,
@@ -29,24 +29,24 @@
   },
   "code 1920x1080->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.136659,
-    "psnrVsBilinear": 40.159,
-    "sha256": "9ccbf00c7cc6adb214a1473970eff624e22eb7170225c9f657d358b53d9d1821"
+    "mean": 0.13658,
+    "psnrVsBilinear": 37.327,
+    "sha256": "f9403ddb70d754c9df53d2faf1402aace8e828f6c3db91f371e648c7a3b0c9c4"
    },
    "mwsr": {
-    "mean": 0.136659,
-    "psnrVsBilinear": 40.159,
-    "sha256": "9ccbf00c7cc6adb214a1473970eff624e22eb7170225c9f657d358b53d9d1821"
+    "mean": 0.13658,
+    "psnrVsBilinear": 37.327,
+    "sha256": "f9403ddb70d754c9df53d2faf1402aace8e828f6c3db91f371e648c7a3b0c9c4"
    },
    "mwsr_c444_1": {
-    "mean": 0.136663,
-    "psnrVsBilinear": 40.024,
-    "sha256": "c9ac0a2b8efc754cad880f4fefe90fff808cbaa1602590b5e39678274a559918"
+    "mean": 0.136581,
+    "psnrVsBilinear": 37.228,
+    "sha256": "2e26cbe7bd055d36ac5d3cef5a4fff0a998481167ccc883979bd509a7eb03dc7"
    },
    "mwsr_dering_0": {
-    "mean": 0.136661,
-    "psnrVsBilinear": 40.147,
-    "sha256": "87d6a5ba0dcae4b022b9ffca5676d4fc0e270bec99bd80f6486ca27fbebbf568"
+    "mean": 0.136599,
+    "psnrVsBilinear": 37.22,
+    "sha256": "2487bd2ad9a2456507469e03f1b752680a0dc311bbde86f5f931429d55ef408d"
    },
    "tex-s1": {
     "mean": 0.136796,
@@ -86,24 +86,24 @@
   },
   "game 1280x720->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.375965,
-    "psnrVsBilinear": 42.314,
-    "sha256": "e355f44b332e28e1e06570d17cf67ed258a5d96f67cbbc6ee01005e836a9a90d"
+    "mean": 0.375974,
+    "psnrVsBilinear": 39.431,
+    "sha256": "03ce9c664b9c32b51b4ffc55c8653881a5260314e965931e302e9f55c7cecb90"
    },
    "mwsr": {
-    "mean": 0.375965,
-    "psnrVsBilinear": 42.314,
-    "sha256": "e355f44b332e28e1e06570d17cf67ed258a5d96f67cbbc6ee01005e836a9a90d"
+    "mean": 0.375974,
+    "psnrVsBilinear": 39.431,
+    "sha256": "03ce9c664b9c32b51b4ffc55c8653881a5260314e965931e302e9f55c7cecb90"
    },
    "mwsr_c444_1": {
-    "mean": 0.375969,
-    "psnrVsBilinear": 42.309,
-    "sha256": "859601163eb097614e6846993d3f99848bd626a2f56b679fb29d2382f91434b5"
+    "mean": 0.375976,
+    "psnrVsBilinear": 39.433,
+    "sha256": "86cc1691c5d11d4f2b5338d0419004544abe24afedd2692010effadd1480e091"
    },
    "mwsr_dering_0": {
-    "mean": 0.375965,
-    "psnrVsBilinear": 42.309,
-    "sha256": "e4b5c46b4494f6bf3b70999e7132df4ecc7d99f750e00119b907c175bc162349"
+    "mean": 0.375977,
+    "psnrVsBilinear": 39.336,
+    "sha256": "8c5cc824dfa8e9bd00f7bc2ef35978413e6b639c6def83d159091d2d0288ef97"
    },
    "tex-s1": {
     "mean": 0.375964,
@@ -112,24 +112,24 @@
   },
   "game 1920x1080->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.37592,
-    "psnrVsBilinear": 48.697,
-    "sha256": "f65155e6eb5f6f9442e35d6de5437f0d46294ccc2ab7426066529baa15ceb10a"
+    "mean": 0.375921,
+    "psnrVsBilinear": 45.184,
+    "sha256": "901c70da0d26326ddf3bbb533791a978969f39c3c22ab66eb87d93b0bbd67197"
    },
    "mwsr": {
-    "mean": 0.37592,
-    "psnrVsBilinear": 48.697,
-    "sha256": "f65155e6eb5f6f9442e35d6de5437f0d46294ccc2ab7426066529baa15ceb10a"
+    "mean": 0.375921,
+    "psnrVsBilinear": 45.184,
+    "sha256": "901c70da0d26326ddf3bbb533791a978969f39c3c22ab66eb87d93b0bbd67197"
    },
    "mwsr_c444_1": {
-    "mean": 0.375921,
-    "psnrVsBilinear": 48.609,
-    "sha256": "ccf0c08d80b318e569b36aad0b4377ba4ec780e67a20b1a72810a765f367c6a5"
+    "mean": 0.375922,
+    "psnrVsBilinear": 45.137,
+    "sha256": "b48effac1db8c709ea68a5a75483e9169301bba30895ab18d36c935a530faf04"
    },
    "mwsr_dering_0": {
-    "mean": 0.37592,
-    "psnrVsBilinear": 48.672,
-    "sha256": "2dfa54b3485043830b263e615d6a4d30d95f3773d02c9e23a7cbf25388e1a0f2"
+    "mean": 0.375923,
+    "psnrVsBilinear": 45.058,
+    "sha256": "d548edc941d8e6714c7e1253755a61ebea51ca68566140f77d2dcca1692b84ab"
    },
    "tex-s1": {
     "mean": 0.375924,
@@ -138,24 +138,24 @@
   },
   "text 1280x720->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.892551,
-    "psnrVsBilinear": 27.113,
-    "sha256": "af8daa707a0b3da8cd22e4b315edc238af07ff9ee0f6438eb948db8927a9eee5"
+    "mean": 0.895622,
+    "psnrVsBilinear": 24.071,
+    "sha256": "fd9b17c601283c6754b6779d6bf41c49b4602c4e9f3fe674ab31a70ca8b481f3"
    },
    "mwsr": {
-    "mean": 0.892551,
-    "psnrVsBilinear": 27.113,
-    "sha256": "af8daa707a0b3da8cd22e4b315edc238af07ff9ee0f6438eb948db8927a9eee5"
+    "mean": 0.895622,
+    "psnrVsBilinear": 24.071,
+    "sha256": "fd9b17c601283c6754b6779d6bf41c49b4602c4e9f3fe674ab31a70ca8b481f3"
    },
    "mwsr_c444_1": {
-    "mean": 0.892643,
-    "psnrVsBilinear": 26.966,
-    "sha256": "82fdbe80fb925923b0363819956d47fa1f4ebd3635b5f391889aed2b86648cf6"
+    "mean": 0.895701,
+    "psnrVsBilinear": 23.983,
+    "sha256": "c7ed4dec3cc815068e51ee8a37f165d84114bd15099764b3d11bc9d18a6d09b0"
    },
    "mwsr_dering_0": {
-    "mean": 0.89252,
-    "psnrVsBilinear": 27.103,
-    "sha256": "a08029fc86f38a7f043b5a5f3dc58332b2a9415818a6ca8c0bce61da1c6a36dc"
+    "mean": 0.895579,
+    "psnrVsBilinear": 24.051,
+    "sha256": "07a11a1902716ab3a1e846dffeeac68a1f66eda64ce786daf183aacb5e260c64"
    },
    "tex-s1": {
     "mean": 0.888722,
@@ -164,24 +164,24 @@
   },
   "text 1920x1080->2560x1440": {
    "chain-mwsr": {
-    "mean": 0.911577,
-    "psnrVsBilinear": 31.682,
-    "sha256": "765e33b4af9d194495fc882fdc03c42176b67378502f049f1f14f58eac11f00d"
+    "mean": 0.91238,
+    "psnrVsBilinear": 28.811,
+    "sha256": "a8f19d5f7dfda57c0e7b0d7fc5b4d52ea33a362fbb0a1fe63fa09f398ba214b6"
    },
    "mwsr": {
-    "mean": 0.911577,
-    "psnrVsBilinear": 31.682,
-    "sha256": "765e33b4af9d194495fc882fdc03c42176b67378502f049f1f14f58eac11f00d"
+    "mean": 0.91238,
+    "psnrVsBilinear": 28.811,
+    "sha256": "a8f19d5f7dfda57c0e7b0d7fc5b4d52ea33a362fbb0a1fe63fa09f398ba214b6"
    },
    "mwsr_c444_1": {
-    "mean": 0.911713,
-    "psnrVsBilinear": 31.667,
-    "sha256": "0b3edacb80374a3ef02488baad599e603d1536112ff89da0bafd0e2b9c2d4617"
+    "mean": 0.912557,
+    "psnrVsBilinear": 28.81,
+    "sha256": "2393b0234c3d3d23d48a4eeb871af64cfbd81464a07e25a493be1f39afd20857"
    },
    "mwsr_dering_0": {
-    "mean": 0.911574,
-    "psnrVsBilinear": 31.661,
-    "sha256": "5292dfc2a09611175e02fc2b49b276b9502c4bfd4ce1525a4acf510e629ca6ae"
+    "mean": 0.912452,
+    "psnrVsBilinear": 28.62,
+    "sha256": "718efec8e9213e32cf6f7a061dac8e8bb4df16610b54f651ae32e46e6e3cb160"
    },
    "tex-s1": {
     "mean": 0.91082,

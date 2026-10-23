@@ -1337,3 +1337,11 @@ sur `game` mais le FLIP du texte à 0,080, à revoir seulement si Bruno trouve 1
 **Proposition : netteté 1,5 par défaut** (une constante, `MWSR_UNIFORMS.sharp`), à appliquer après le
 signal de 59 (un banc C4 sert l'arbre de travail), golden à refaire ; l'œil de Bruno tranche, par les
 curseurs du comparateur (1 / 1,25 / 1,5 / 1,75 sur l'iPhone, bande contre bande).
+
+**Appliqué (09:10, signal de 59 à 08:55)** : `MWSR_UNIFORMS.sharp` 1,5 dans `MwsrShader.js`, le test
+unitaire qui épinglait 1 mis à jour, `golden.json` refait sur SwiftShader (la chaîne du produit égale
+au noyau sur les neuf cas, `chain-mwsr` = `mwsr`), conformité C11 OK des deux côtés (WebGPU 0/255
+partout ; jumeau WebGL2 contre le noyau : FLIP 0,000, PSNR à 0,027 dB, 0 % de dépassement, les écarts
+de pixels restant ceux des dérivées, connus), `npm run check` vert, 1717 tests verts. C'est un
+changement du rendu du produit, à dire dans les notes de version ; le comparateur part désormais de 1,5
+et le bouton « Défauts du produit » y ramène. Le verdict de Bruno à l'œil reste attendu.

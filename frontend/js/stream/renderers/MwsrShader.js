@@ -118,8 +118,9 @@ export const MWSR_CONSTANTS = Object.freeze({
 });
 
 /** The per-draw values of the uniform block: the vote threshold (luma per
- *  input texel) and the sharpness (× W_ACROSS). */
-export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.0 });
+ *  input texel) and the sharpness (× W_ACROSS; 1.5 since the lab's J31 of
+ *  23/10/2026: text as steep as FSR1's at ×1.33, no overshoot). */
+export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.5 });
 
 /** Number of f32 in the uniform block: texel.xy, scale.xy, tau, sharp, pad.xy. */
 export const MWSR_UNIFORM_FLOATS = 8;
