@@ -1338,6 +1338,28 @@ sur `game` mais le FLIP du texte à 0,080, à revoir seulement si Bruno trouve 1
 signal de 59 (un banc C4 sert l'arbre de travail), golden à refaire ; l'œil de Bruno tranche, par les
 curseurs du comparateur (1 / 1,25 / 1,5 / 1,75 sur l'iPhone, bande contre bande).
 
+**Où va le PSNR (09:50, sur les dumps du balayage, le masque `mwsr:show=1`).** Étalon à ×1,33 : 72 % des
+pixels sont sur le chemin plat, où `mwsr` **est** le bilinéaire (31,10 dB = `tex-s1`), FSR1 y fait 31,45 ;
+sur les 28 % de contours, FSR1 19,20, `mwsr` 18,97 (netteté 1), 18,92 (1,5), 18,79 (2), bilinéaire 18,77.
+L'avance de FSR1 sur l'image entière (+0,25 dB au labo, +0,6 dB dans le comparateur de Bruno avec
+l'entrée bicubique, 25,1 contre 24,5) vient donc **pour l'essentiel du chemin plat** (douze texels
+d'EASU contre un échantillon bilinéaire, le prix de la vitesse) et pour le reste de la reconstruction
+des contours ; la netteté ne peut pas l'acheter (elle baisse le PSNR des contours, comme RCAS). Sur la
+mire `text`, les plats sont à 40,1 (= bilinéaire) contre 42,4 pour FSR1, les contours montent avec la
+netteté (15,75 → 16,02 → 16,07). Le comparateur sur SwiftShader donne les chiffres de l'iPhone au
+centième (natif 24,20, `mwsr` 24,54 / 24,57 / 24,52 à 1 / 1,5 / 2, FSR1 25,17, SGSR1 24,83).
+
+**À l'œil (09:50, captures du comparateur sur SwiftShader, WebGL2, les libellés du coin haut gauche de
+l'étalon à ×4 puis ×4 au plus proche voisin).** « Ori.png », blanc sur sombre : natif mou avec un halo
+gris ; 1,0 un peu plus défini ; **1,5 nettement plus net** (bords plus blancs et plus sombres, les
+boucles du n et du g lisibles) ; 2,0 plus net encore, près de FSR1 ; FSR1 le plus propre ; SGSR1 le plus
+dur, mais en escalier sur le O. « 1440p.png », sombre sur clair avec les franges colorées du ClearType :
+tous proches, 1,5 et 2 un peu plus contrastés que 1, FSR1 ≈ 2 ; seul SGSR1 paraît « plus net », par ses
+blocs ; la cohérence `a` prend ces franges pour de la texture et retient le noyau. Verdict : la netteté
+1,5 se voit sur le texte, 2 rapproche de FSR1 sur fond sombre pour −0,1 dB et +0,003 de FLIP ; **le PSNR,
+lui, ne bougera qu'avec un chemin plat mieux reconstruit** (un Catmull-Rom à quatre échantillons
+bilinéaires en palier qualité, +3 échantillons partout : à chiffrer, au go de Bruno).
+
 **Appliqué (09:10, signal de 59 à 08:55)** : `MWSR_UNIFORMS.sharp` 1,5 dans `MwsrShader.js`, le test
 unitaire qui épinglait 1 mis à jour, `golden.json` refait sur SwiftShader (la chaîne du produit égale
 au noyau sur les neuf cas, `chain-mwsr` = `mwsr`), conformité C11 OK des deux côtés (WebGPU 0/255
