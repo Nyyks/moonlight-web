@@ -511,6 +511,11 @@ body.streaming-active::after {
        never overlaps the resolution line (top-right of the stats). */
     padding: 8px 24px 8px 12px;
     min-width: 168px;
+    /* Never wider than the screen it is on, its 10px margin on either side
+       kept: on a phone the open breakdown ran off the right edge. */
+    max-width: calc(
+        100vw - max(10px, env(safe-area-inset-left)) - max(10px, env(safe-area-inset-right))
+    );
     font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
     line-height: 1.45;
     color: rgba(255, 255, 255, 0.7);
@@ -741,6 +746,24 @@ body.streaming-active::after {
 .stats-leg-row .stats-value {
     text-align: right;
     color: rgba(240, 192, 64, 0.75);
+}
+
+/* A phone in portrait: the open breakdown is wider than the screen on one line
+   per row ("Screen (compositor + scan-out)" beside "not measured, ~½–1
+   refresh"), and the card stops at the screen's width. So the words wrap
+   instead, labels at least half the card, values right-aligned against their
+   column. A wider screen keeps every row on one line. */
+@media (max-width: 600px) {
+    .stats-row,
+    .stats-latency-detail {
+        white-space: normal;
+    }
+    .stats-row .stats-value {
+        text-align: right;
+    }
+    .stats-latency-detail {
+        grid-template-columns: minmax(50%, 1fr) auto;
+    }
 }
 
 /* Pipeline observations, revealed with the latency breakdown. One dense
