@@ -8219,22 +8219,36 @@ letters as non-normalized VKs | layout fidelity: auto ».
   - le temps de la session, Sunshine fait passer la sortie son par défaut sur « Steam Streaming
     Speakers ». Il la rend une vingtaine de secondes après la déconnexion du client.
 
-**Hôte US, partiel** (23/10, 15:24-15:25, le N95) : le champ de texte tape en US `00000409`, et
-le serveur de banc est l'exe de la `--dev` de DualRTX, avec le même frontend. Il tourne dans un
-dossier à part, derrière une règle de pare-feu temporaire. Le worker tourne en `"auto"`. Il lit
-d'abord la disposition de l'hôte (`040C040C`), puis à la première touche celle de la fenêtre au
-premier plan : « layout 0x04090409 read — 95 character(s) on keys, 0 through dead keys ».
+**Hôte US** (23/10, le N95 : un premier passage arrêté à 15:25, le banc complet de 18:32 à
+18:35) : le champ de texte tape en US `00000409`, et le serveur de banc est l'exe de la `--dev` de
+DualRTX, avec le même frontend. Il tourne dans un dossier à part, derrière une règle de pare-feu
+temporaire. Le worker tourne en `"auto"`. Il lit d'abord la disposition de l'hôte (`040C040C`),
+puis à la première touche celle de la fenêtre au premier plan : « layout 0x04090409 read — 95
+character(s) on keys, 0 through dead keys ».
 
-- AZERTY Windows au Bureau : 15 touches envoyées, dont 14 jugées, toutes justes (a z q s m , & 1 é
-  è ç à ù !). Lettres et ponctuation partent en vraies touches US : & = Maj+7, ! = Maj+1, : = Maj+;.
-- é è ç à ù n'ont pas de touche US. Ils arrivent en texte Unicode, et le journal dit « no key on
-  this layout | Notepad: OK as Unicode text | Game: KO nothing was pressed ».
-- Le banc s'est arrêté là. Sur le N95, on ne tape pas si quelqu'un a pu se servir du PC dans les
-  deux dernières minutes (GetLastInputInfo), et l'agent ne savait pas encore le lire. Il reste la
-  fin de ce passage, le mode Jeu et les deux autres claviers. La résolution sur une disposition US
-  est couverte par les tests unitaires.
+| Client | Bureau : les caractères du client | Jeu : les positions |
+|---|---|---|
+| AZERTY Windows | 19/19 | 19/19 : a z q m , & 1 é donnent q w a ; m 1 ! 2 |
+| QWERTY US | 16/16 | 16/16 |
+| AZERTY Mac | 14/14, Option comprise ({ } [ ] \|) | 9/9 : § ! - @ donnent 6 8 = `` ` `` ; les 5 touches sous Option ne sont pas envoyées |
+
+- Au Bureau, lettres et ponctuation partent en vraies touches US : & = Maj+7, ! = Maj+1,
+  : = Maj+;, @ = Maj+2, { = Maj+[, | = Maj+\.
+- é è ç à ù, et le § du Mac, n'ont pas de touche US. Ils arrivent en texte Unicode, et le journal
+  dit « no key on this layout | Notepad: OK as Unicode text | Game: KO nothing was pressed ».
+- L'Option d'un Mac : l'hôte lâche l'Alt pour la touche ({ = Maj+[ sans Alt), et le masque d'une
+  touche neutre (0xE8) quand il le lâche et le remet. Ni menu ni bip. Après Option+Maj+5 (« [ »),
+  ] et | sont encore tapés en US : l'Alt et la Maj tenus ensemble n'ont pas changé la langue de
+  l'hôte.
+- En Jeu, une touche sous Option n'est pas envoyée par le banc : Alt + une touche prend le menu de
+  la fenêtre, et Windows bipe. Rien ne doit s'entendre sur le N95.
 - **Pièges du banc** :
   - sur un PC où quelqu'un a des fenêtres ouvertes, la fenêtre de banc ne passe au-dessus que si
     elle se met elle-même TOPMOST, à sa création ;
   - un exe neuf qui écoute ouvre une alerte du pare-feu. Il faut une règle par programme, profil
-    Privé, posée avant le démarrage et retirée à la fin.
+    Privé, posée avant le démarrage et retirée à la fin ;
+  - on ne tape pas si quelqu'un a pu se servir du PC dans les deux dernières minutes. Or
+    GetLastInputInfo compte aussi le clic et les touches du banc. Avant la première, il faut donc
+    deux minutes de calme ; ensuite, une entrée plus récente que la dernière du banc (1,5 s de
+    marge) est celle de quelqu'un. Le premier passage, à 15:25, s'est arrêté faute de savoir le
+    lire.
