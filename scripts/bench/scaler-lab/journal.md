@@ -1619,3 +1619,70 @@ S'il valide, le défaut du produit change, et la netteté avec, sur son oui expl
 RTX 5060 Ti en WebGL2 pendant quelques secondes (figures 0,95131 · 25,525, cohérentes avec
 SwiftShader ; aucun mode d'écran touché ; C4 de f1 était fini). Le pilote force désormais ces deux
 paramètres en mode `gpu`.
+
+## 2026-10-23 — J36, le comparateur sur le parc : six configurations par appareil, pour le choix de Bruno
+
+**Demande de Bruno (12:46)** : « un benchmark sur tous les PC (Mac et realme compris) avec la même
+image, en Q3, Q5, dering 2, avec et sans focus, à la taille en pixels de l'iPhone comme mes captures ».
+Lu comme : l'étalon `00_Background.png`, le cas 1080p → 1440p de ses captures (×1,33), 300 images par
+bande, et trois réglages — Q3 (`flat=3`, netteté 2,0), CR5 (`flat=5`, 2,0) et « borne texels » (`dr=2`,
+netteté 1,5, CR5 : le candidat de J35) — chacun sans et avec la zone du regard (`gaze=1`, valeurs de la
+table, poids tenu à 1) : six pages par appareil, la saveur « auto » du produit (WebGL2 sur PC, Mac et
+Mali ; WebGPU sur l'iPhone). FSR1 et SGSR1 dans les mêmes pages, en repère.
+
+**Outillage** : `scratchpad/fleet/compare_fleet.py` (DevTools de l'appareil par tunnel SSH ou `adb
+forward`, le lab servi en http sur `127.0.0.1:8767` par tunnel inverse ou `adb reverse`, la table lue
+dans `window.mwCompare`, les lignes d'adaptateur du renderer gardées, une capture par page) ;
+`dualrtx.py` (Chrome sans tête épinglé par `--use-adapter-luid`, sonde WebGL2 + WebGPU sur une page du
+lab avant toute mesure — `navigator.gpu` n'existe pas sur une URL `data:` — ; les LUID lus dans
+`HKLM\SOFTWARE\Microsoft\DirectX`, 780M `0,88263`, RTX `0,77960` toujours bons) ; `summary.py`
+(médiane des passes). Sur le realme, `/json/new` répond 500 : les onglets sont faits par le point
+d'entrée navigateur (`Target.createTarget`, `activateTarget`, `closeTarget`), Chrome mis au premier
+plan par `am start -n`. Conditions de 59 : UM790Pro écarté (test de Qwergin), N95 et mw-arm avec une
+tâche planifiée Interactive — que mon classifieur a refusé d'enregistrer à distance : les deux
+attendent la main de Bruno ; Mac libre (dit par Bruno), mot pour Léo affiché puis retiré, Chrome dédié
+`--mute-audio` ; DualRTX annoncé début et fin.
+
+**Mesures (ms par image, moyenne de 300 images ; médiane des passes ; la saveur entre parenthèses) :**
+
+| appareil (saveur) | passes | Q3 | Q3 + zone | CR5 | CR5 + zone | borne texels 1,5 CR5 | borne texels + zone | FSR1 | SGSR1 |
+|---|---|---|---|---|---|---|---|---|---|
+| iPhone 13 Pro, Safari (WebGPU `mwsr`, captures de Bruno 12:13-12:16) | 1 | 4,41 | 4,82 (100 images) | 4,82 | 5,13 | — | — | 7,94-8,26 | 4,39-5,04 |
+| Mac M1 Pro, Chrome 155 (WebGL2 `gl-mwsr`) | 3 | 3,28 | 4,38 | 3,70 | 3,37 | 3,35 | 3,43 | 4,20 | 3,44 |
+| DualRTX 780M, Chrome sans tête (WebGL2) | 1 | 6,13 | 5,86 | 5,85 | 9,46 | 5,32 | 5,67 | 14,93 | 6,60 |
+| realme Note 60, Mali-G57, Chrome 155 (WebGL2) | 1 | 51,6 | 57,3 | 59,2 | 62,1 | 52,6 | 59,3 | 125 | 73 |
+
+Passe par passe : Mac Q3 3,52 / 3,13 / 3,28, Q3 + zone 3,53 / 4,53 / 4,38, CR5 3,24 / 3,70 / 4,74,
+CR5 + zone 8,01 / 3,22 / 3,37, borne texels 3,09 / 4,60 / 3,35, avec zone 3,30 / 4,38 / 3,43 (machine
+chargée : load 5, les jeux de Léo en fond) ; 780M FSR1 de 11,4 à 17,2 et SGSR1 de 6,0 à 10,7 d'une page
+à l'autre. Qualité (la même sur tous les appareils, au millième : les shaders sont déterministes) :
+
+| réglage | SSIM | PSNR |
+|---|---|---|
+| Q3 | 0,940 | 24,5 |
+| Q3 + zone | 0,937 | 24,5 |
+| CR5 | 0,941 | 24,6 |
+| CR5 + zone | 0,938 | 24,5 |
+| borne texels, 1,5, CR5 | 0,951 | 25,5 |
+| borne texels + zone | 0,945 | 25,3 |
+| FSR1 / SGSR1 | 0,948 / 0,946 | 25,2 / 24,8 |
+
+**Lecture.** (1) Le réglage ne change le temps que sur les téléphones : Q3 contre CR5, +9 % sur l'iPhone
+(4,41 → 4,82) et +15 % sur le realme (51,6 → 59,2) ; sur le Mac et le 780M l'écart est dans le bruit
+des passes. La borne texels ne coûte rien de plus que CR5, comme prévu (780M 5,3, realme 52,6, Mac 3,35).
+(2) La zone du regard à poids 1 coûte +0,3-0,4 ms sur l'iPhone (+7-9 %), +3 à +7 ms sur le realme (+5 à
++11 %), rien de lisible sur le Mac et le 780M ; sur toute l'image elle retire 0,003-0,006 de SSIM et
+0,1-0,2 dB (la netteté 2,5 au centre, J34). (3) Partout, MWSR reste loin sous FSR1 (iPhone 4,4-5,1
+contre 8, Mac 3,4 contre 4,2, 780M 5-6 contre 15, realme 52-62 contre 125) et au niveau ou sous SGSR1
+(4,4-5,0 ; 3,4 ; 6,6 ; 73). (4) À qualité égale ou meilleure que FSR1 (0,951 / 25,5 contre 0,948 / 25,2)
+pour le temps de CR5, le candidat de J35 est la configuration à proposer à Bruno ; Q3 reste l'économie
+des téléphones (-9 à -15 %) pour un dixième de SSIM en moins au millième.
+
+**Manques et ratés.** Le mw-arm et le N95 attendent la main de Bruno (voir plus haut) ; l'UM790Pro
+attend la fin du test de Qwergin et son accord explicite. La passe RTX (13:12) est **invalide** : MWSR
+mesuré à 125 ms par image, FSR1 jamais fini, le processus GPU de ce Chrome avec un compteur de
+plantage récent (`--gpu-recent-crash-count`), et le pilote resté pendu 18 min sur sa socket DevTools
+morte au lieu d'abandonner (délai de socket de 60 s ajouté depuis) ; tuée à 13:30:50 à la demande de
+59, qui tenait f1 en attente ; un créneau RTX de deux minutes est demandé pour plus tard. Les deux
+premiers essais DualRTX avaient échoué avant toute mesure (`navigator.gpu` absent sur `data:`, `wmic`
+absent de Windows 11 26200) : les LUID n'étaient pas en cause.
