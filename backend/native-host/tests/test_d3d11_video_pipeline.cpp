@@ -224,6 +224,25 @@ void run_d3d11_video_pipeline_tests()
         CHECK(insideChanged);
         CHECK(outsideSame);
 
+        // A picture converted without the copy lets the old one go: redrawn
+        // over, it would bring back a desktop older than that picture.
+        CHECK(pipeline.convert(capture, source.Get(), capture::CursorState{}, convert::CursorDraw{},
+                               false, error));
+        CHECK(!pipeline.hasHeld());
+
+        // Before a retake, the captured surfaces go and the pipeline's own copy
+        // stays; the next picture is converted through a view made again.
+        CHECK(pipeline.convert(capture, source.Get(), capture::CursorState{}, convert::CursorDraw{},
+                               true, error));
+        CHECK(pipeline.hasHeld());
+        pipeline.forgetCaptured();
+        CHECK(pipeline.hasHeld());
+        CHECK(pipeline.convert(capture, source.Get(), capture::CursorState{}, convert::CursorDraw{},
+                               true, error));
+        std::vector<uint8_t> again;
+        CHECK(readNv12(pipeline.output(), again, pitch, h));
+        CHECK(again == before);
+
         // The load cap's rebuild keeps the copy; any other rebuild drops it.
         pipeline.teardown(true);
         CHECK(pipeline.hasHeld());

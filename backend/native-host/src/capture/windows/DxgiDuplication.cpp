@@ -122,8 +122,7 @@ bool DxgiDuplication::start(std::string& error)
     m_PaintedPointer = PaintedPointer();
 
     ComPtr<IDXGIAdapter1> adapter;
-    ComPtr<IDXGIOutput> output;
-    if (!openAdapterAndOutput(adapter, output, error)) return false;
+    if (!openAdapterAndOutput(adapter, m_Output, error)) return false;
 
     // D3D_DRIVER_TYPE_UNKNOWN is required when an adapter is supplied — asking
     // for HARDWARE here would silently ignore the adapter and pick the default,
@@ -144,47 +143,7 @@ bool DxgiDuplication::start(std::string& error)
         return false;
     }
 
-    // DuplicateOutput1 lets the formats be named, and the list decides what an
-    // HDR desktop becomes. Listing the float format ahead of the 8-bit one
-    // keeps the desktop as it is: FP16 scRGB when it is HDR, BGRA8 when it is
-    // not. Naming 8-bit alone would make DXGI hand an HDR desktop over "tone-
-    // mapped" — clipped at 80 nits, in fact, which is what an SDR stream of a
-    // desktop with the SDR brightness slider up looked like until 16/09/2026:
-    // blown out. The converter takes scRGB on both kinds of session now (an
-    // SDR one tone-maps it, see ColorConvert::init), so this list is the only
-    // one there is. Machines and drivers without Output5 fall back to the
-    // plain path.
-    ComPtr<IDXGIOutput5> output5;
-    if (SUCCEEDED(output.As(&output5))) {
-        const DXGI_FORMAT formats[] = {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM};
-        hr = output5->DuplicateOutput1(m_Device.Get(), 0, static_cast<UINT>(std::size(formats)),
-                                       formats, m_Duplication.ReleaseAndGetAddressOf());
-    } else {
-        hr = E_NOINTERFACE;
-    }
-
-    if (FAILED(hr)) {
-        ComPtr<IDXGIOutput1> output1;
-        if (FAILED(output.As(&output1))) {
-            error = "this display does not support Desktop Duplication";
-            m_RefusalMayPass = false;
-            return false;
-        }
-        hr = output1->DuplicateOutput(m_Device.Get(), m_Duplication.ReleaseAndGetAddressOf());
-    }
-
-    if (FAILED(hr)) {
-        // DXGI_ERROR_UNSUPPORTED is the one worth naming: it is what a hybrid
-        // laptop returns when the display is driven through the other GPU, and
-        // it is exactly the case Windows.Graphics.Capture exists to cover.
-        if (hr == DXGI_ERROR_UNSUPPORTED)
-            error = "Desktop Duplication is not supported for this display";
-        else
-            error = "could not start Desktop Duplication (" + hresultToString(hr) + ")";
-        m_RefusalMayPass = hr != DXGI_ERROR_UNSUPPORTED;
-        return false;
-    }
-    m_RefusalMayPass = false;
+    if (!duplicate(error)) return false;
 
     DXGI_OUTDUPL_DESC duplDesc = {};
     m_Duplication->GetDesc(&duplDesc);
@@ -211,7 +170,7 @@ bool DxgiDuplication::start(std::string& error)
     // Kept exactly as DXGI reports it — see DesktopRect on why the DPI
     // virtualization is wanted here and nowhere else.
     DXGI_OUTPUT_DESC outputDesc = {};
-    if (SUCCEEDED(output->GetDesc(&outputDesc))) {
+    if (SUCCEEDED(m_Output->GetDesc(&outputDesc))) {
         m_DesktopRect.left = static_cast<int>(outputDesc.DesktopCoordinates.left);
         m_DesktopRect.top = static_cast<int>(outputDesc.DesktopCoordinates.top);
         m_DesktopRect.right = static_cast<int>(outputDesc.DesktopCoordinates.right);
@@ -236,6 +195,79 @@ bool DxgiDuplication::start(std::string& error)
                    ? " (SDR, BGRA8)"
                    : " (format " + std::to_string(static_cast<int>(m_Format)) + ")") +
               hz);
+    return true;
+}
+
+bool DxgiDuplication::duplicate(std::string& error)
+{
+    // DuplicateOutput1 lets the formats be named, and the list decides what an
+    // HDR desktop becomes. Listing the float format ahead of the 8-bit one
+    // keeps the desktop as it is: FP16 scRGB when it is HDR, BGRA8 when it is
+    // not. Naming 8-bit alone would make DXGI hand an HDR desktop over "tone-
+    // mapped" — clipped at 80 nits, in fact, which is what an SDR stream of a
+    // desktop with the SDR brightness slider up looked like until 16/09/2026:
+    // blown out. The converter takes scRGB on both kinds of session now (an
+    // SDR one tone-maps it, see ColorConvert::init), so this list is the only
+    // one there is. Machines and drivers without Output5 fall back to the
+    // plain path.
+    HRESULT hr = E_NOINTERFACE;
+    ComPtr<IDXGIOutput5> output5;
+    if (SUCCEEDED(m_Output.As(&output5))) {
+        const DXGI_FORMAT formats[] = {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM};
+        hr = output5->DuplicateOutput1(m_Device.Get(), 0, static_cast<UINT>(std::size(formats)),
+                                       formats, m_Duplication.ReleaseAndGetAddressOf());
+    }
+
+    if (FAILED(hr)) {
+        ComPtr<IDXGIOutput1> output1;
+        if (FAILED(m_Output.As(&output1))) {
+            error = "this display does not support Desktop Duplication";
+            m_RefusalMayPass = false;
+            return false;
+        }
+        hr = output1->DuplicateOutput(m_Device.Get(), m_Duplication.ReleaseAndGetAddressOf());
+    }
+
+    if (FAILED(hr)) {
+        // DXGI_ERROR_UNSUPPORTED is the one worth naming: it is what a hybrid
+        // laptop returns when the display is driven through the other GPU, and
+        // it is exactly the case Windows.Graphics.Capture exists to cover.
+        if (hr == DXGI_ERROR_UNSUPPORTED)
+            error = "Desktop Duplication is not supported for this display";
+        else
+            error = "could not start Desktop Duplication (" + hresultToString(hr) + ")";
+        m_RefusalMayPass = hr != DXGI_ERROR_UNSUPPORTED;
+        return false;
+    }
+    m_RefusalMayPass = false;
+    return true;
+}
+
+bool DxgiDuplication::retake(std::string& error)
+{
+    if (!m_Duplication || !m_Output) {
+        error = "the duplication is not open";
+        return false;
+    }
+    // Let go of the old one before asking for the new: DXGI refuses a second
+    // duplication of an output this process already duplicates. The pointer,
+    // the hidden-pointer override and PaintedPointer's verdict stay — the
+    // display and its driver are the ones they were learned on.
+    release();
+    m_Duplication.Reset();
+    if (!duplicate(error)) {
+        m_RetakeLost = true;
+        return false;
+    }
+    DXGI_OUTDUPL_DESC desc = {};
+    m_Duplication->GetDesc(&desc);
+    if (static_cast<int>(desc.ModeDesc.Width) != m_Width ||
+        static_cast<int>(desc.ModeDesc.Height) != m_Height || desc.ModeDesc.Format != m_Format) {
+        error = "the display changed mode meanwhile";
+        m_RetakeLost = true;
+        return false;
+    }
+    m_Retaking = true;
     return true;
 }
 
@@ -394,6 +426,8 @@ bool DxgiDuplication::updateCursor(const DXGI_OUTDUPL_FRAME_INFO& info)
 
 AcquireStatus DxgiDuplication::acquire(int timeoutMs, CapturedFrame& frame)
 {
+    // Said by the caller already, with the reason retake() gave.
+    if (m_RetakeLost) return AcquireStatus::Lost;
     if (!m_Duplication) return AcquireStatus::Failed;
 
     // Holding two frames at once is not allowed by DXGI, and forgetting to
@@ -468,6 +502,8 @@ AcquireStatus DxgiDuplication::acquire(int timeoutMs, CapturedFrame& frame)
                         ? qpcToMicroseconds(info.LastMouseUpdateTime.QuadPart)
                         : 0;
     frame.accumulated = static_cast<int>(info.AccumulatedFrames);
+    frame.retaken = m_Retaking;
+    m_Retaking = false;
     return AcquireStatus::Ok;
 }
 
@@ -483,6 +519,9 @@ void DxgiDuplication::stop()
 {
     release();
     m_Duplication.Reset();
+    m_Output.Reset();
+    m_Retaking = false;
+    m_RetakeLost = false;
     m_Delivered = false;
     m_Context.Reset();
     m_Device.Reset();

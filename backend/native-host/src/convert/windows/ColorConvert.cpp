@@ -475,6 +475,13 @@ bool ColorConvert::createOutput(std::string& error)
     return true;
 }
 
+void ColorConvert::forgetSource()
+{
+    // Unbound after every draw (convert()), so the view is the last hold.
+    m_SourceView.Reset();
+    m_SourceViewFor = nullptr;
+}
+
 bool ColorConvert::convert(ID3D11Texture2D* source, const capture::CursorState& cursor,
                            const CursorDraw& draw, std::string& error)
 {

@@ -56,6 +56,12 @@ void DdaInterop::unbind()
     m_Device.reset();
 }
 
+void DdaInterop::forgetSurfaces()
+{
+    m_Surfaces.clear();
+    m_NoHandle.clear();
+}
+
 bool DdaInterop::bind(ID3D11Device* captureDevice, const std::shared_ptr<D3d12Device>& device,
                       std::string& refusal)
 {

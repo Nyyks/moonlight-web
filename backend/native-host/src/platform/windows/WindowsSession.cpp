@@ -744,6 +744,10 @@ public:
         // Going back to compositing means the picture must show the pointer
         // again, and the last frame the client has does not.
         if (composite) m_ForceKeyframe.store(true);
+        // Either way the picture is drawn again, the pointer in or out: on a
+        // still screen nothing else would, and the client kept a picture
+        // without it — or one with a pointer frozen beside its own.
+        m_PointerChangedHands.store(true);
     }
 
     void setFrameFloorFps(int fps) override
@@ -1785,6 +1789,9 @@ private:
 
     Restart restartCapture(uint32_t& frameNumber, int64_t floorIntervalUs, std::string& error)
     {
+        // A retake's picture will not come: the capture it was asked of goes.
+        m_RetakePending = false;
+
         // Pipelined: nothing in flight, and what went out taken in, before the
         // chain behind the capture goes.
         if (m_Pipeline->pipelined()) {
@@ -2834,6 +2841,22 @@ private:
                 }
             }
 
+            // The pointer changed hands: the held desktop drawn again with it,
+            // or without it, at once. Without a copy, either the picture had
+            // no pointer of ours to take out, or one is wanted in, and the
+            // capture hands the desktop over again for it (desktopWanted()),
+            // for the acquire below to take.
+            if (m_PointerChangedHands.exchange(false) && m_Pipeline->hasHeld()) {
+                if (!m_Pipeline->convertHeld(*m_Capture, pointerToDraw(), cursorDraw(), error)) {
+                    finish("colour conversion failed: " + error);
+                    return;
+                }
+                if (!emit(frameNumber, resendStamps(steadyNowUs()), error)) return;
+                lastSentUs = steadyNowUs();
+                noteReal();
+            }
+            if (desktopWanted() && !retakeDesktop()) return;
+
             capture::CapturedFrame frame;
             // A duplication that turned out to paint the pointer in is left for
             // Windows.Graphics.Capture, through the ordinary restart: the same
@@ -2926,7 +2949,8 @@ private:
                 m_PointerWakes++;
             else if (status == capture::AcquireStatus::Timeout)
                 m_TimeoutWakes++;
-            countPresents(status);
+            countPresents(status == capture::AcquireStatus::Ok && !frame.retaken);
+            if (m_RetakePending) noteRetake(status, frame);
 
             // Anything but a timeout means the screen is alive again, and the
             // frame about to be encoded is a moving one. Restore the ordinary
@@ -3113,9 +3137,15 @@ private:
                 return;
             }
 
-            m_PresentsSeen++;
-            // Before the gate decides on it, skipped or not.
-            noteLattice(frame.presentUs);
+            // A picture handed over again (retakeDesktop) is the desktop as it
+            // stood, not a present: nothing for the lattice to learn, nothing
+            // for the gate to weigh before it is converted.
+            const bool retaken = frame.retaken;
+            if (!retaken) {
+                m_PresentsSeen++;
+                // Before the gate decides on it, skipped or not.
+                noteLattice(frame.presentUs);
+            }
             const int64_t submittedUs = steadyNowUs();
 
             // pregate=1 (plan « Gels du lien », 21/10/2026): the gate's word
@@ -3130,7 +3160,7 @@ private:
             // windows. The held-for-credit path keeps needing a converted
             // picture, so only the gate moves up, never withheld().
             bool gated = false;
-            if (m_PreGate && !aimedNow) {
+            if (m_PreGate && !aimedNow && !retaken) {
                 const FrameStamps early{frame.presentUs, frame.capturedUs, submittedUs,
                                         submittedUs};
                 if (!gateSays(early, true)) {
@@ -3151,7 +3181,10 @@ private:
             // When the client draws its own, or the pointer is hidden or on
             // another screen (a fullscreen game, the usual latency-critical
             // case), no pointer-only frame can ever need it: the copy is skipped
-            // entirely and the frame path is exactly what it was before.
+            // entirely and the frame path is exactly what it was before — and
+            // an older copy goes, being now an older desktop than the client's
+            // (desktopWanted() has the capture hand the desktop over again
+            // when the pointer needs one).
             //
             // Also on the CPU encoder, whatever the pointer: that is the tier
             // the load cap resizes, and a rebuilt converter needs a picture to
@@ -3166,6 +3199,13 @@ private:
                 return;
             }
             awaitingPicture = false;
+            // Handed over for a copy the conversion could not keep: the next
+            // retake would end the same way.
+            if (retaken && desktopWanted() && !m_RetakeOff) {
+                m_RetakeOff = true;
+                log::info("[native] cursor: the desktop handed over again was not kept for the "
+                          "pointer — no more retakes this session (once per session)");
+            }
 
             // Released before encoding: Desktop Duplication refuses the next
             // acquire while a frame is held, and the conversion has already
@@ -3179,17 +3219,23 @@ private:
             //
             // An aimed picture's t₀ is the instant it was taken: its own present
             // can be a game frame from well before, and the client's lead is
-            // counted from the taking — see DeadlineCadence.h.
-            const FrameStamps stamps{aimedNow ? frame.capturedUs : frame.presentUs,
+            // counted from the taking — see DeadlineCadence.h. So is a retaken
+            // one's, whose present may be seconds old.
+            const FrameStamps stamps{aimedNow || retaken ? frame.capturedUs : frame.presentUs,
                                      frame.capturedUs,
                                      submittedUs,
                                      steadyNowUs(),
                                      false,
                                      heldUs};
-            if (m_Pipeline->pipelined())
+            // A retaken picture goes as a pointer-only one does: now, through
+            // the gate as a picture without a present of its own.
+            if (retaken) {
+                if (!emitPicture(stamps, false)) return;
+            } else if (m_Pipeline->pipelined()) {
                 emitPictureLater(stamps, gated);
-            else if (!emitPicture(stamps, true, gated))
+            } else if (!emitPicture(stamps, true, gated)) {
                 return;
+            }
         }
     }
 
@@ -3565,7 +3611,7 @@ private:
         row.kind = ClickTrace::Kind::Capture;
         row.us = doneUs;
         row.startUs = startUs;
-        row.status = acquireStatusName(status);
+        row.status = frame.retaken ? "retaken" : acquireStatusName(status);
         if (status == capture::AcquireStatus::Ok) {
             row.presentUs = frame.presentUs;
             row.presentRawUs = frame.presentRawUs;
@@ -3862,6 +3908,88 @@ private:
         if (m_OnMouseKeys) m_OnMouseKeys(false, MouseKeysState{});
     }
 
+    /// The pointer is to be drawn into the picture, it is on this display, and
+    /// no copy of the desktop is held to draw it on: right after the switch
+    /// from desktop mode, which keeps none, or once the pointer is back from
+    /// another display, the copy having gone with the first picture converted
+    /// without it. On a still screen nothing else brings a desktop before the
+    /// screen changes, and the pointer stayed out of the picture until then —
+    /// thirty-six moves of it without a picture after a switch to gaming mode
+    /// (click trace of 21/10/2026, plan « Gels du lien »). Keeping the copy in
+    /// desktop mode too would cost every picture 0.9 ms on the N95 (bench
+    /// §8y.5); Bruno chose the retake, 23/10.
+    bool desktopWanted() const
+    {
+        if (!m_CompositeCursor.load() || m_Pipeline->hasHeld()) return false;
+        const capture::CursorState& cursor = m_Capture->cursor();
+        return cursor.visible && !cursor.inImage;
+    }
+
+    /// Have the capture hand the desktop over again (IWindowsCapture::retake),
+    /// for desktopWanted(): the next acquire takes it, and its conversion keeps
+    /// the copy like any other picture with the pointer on it. Once a second
+    /// at most; given up for the session, said once, when the capture cannot,
+    /// hands nothing over, or the copy is not kept. False only when the session
+    /// ends.
+    bool retakeDesktop()
+    {
+        const int64_t askedUs = steadyNowUs();
+        if (m_RetakeOff || m_RetakePending || askedUs < m_NextRetakeUs) return true;
+        m_NextRetakeUs = askedUs + kRetakeIntervalUs;
+        // Nothing in flight and nothing kept of the surfaces about to go, as
+        // before a restart.
+        if (m_Pipeline->pipelined()) {
+            m_Pipeline->settle();
+            if (!absorbDelivered()) return false;
+        }
+        m_Pipeline->forgetCaptured();
+        // DXGI duplicates the desktop of the calling thread: see openCapture().
+        platform::attachThread();
+        std::string why;
+        const int64_t openUs = steadyNowUs();
+        if (!m_Capture->retake(why)) {
+            // The capture says Lost at the next acquire if it let go of what it
+            // had: the ordinary restart follows.
+            m_RetakeOff = true;
+            log::info("[native] cursor: the capture could not hand the desktop over again (" + why +
+                      ") — the pointer waits for the screen to change (once per session)");
+            return true;
+        }
+        m_RetakeOpenUs = steadyNowUs() - openUs;
+        m_RetakeAskedUs = askedUs;
+        m_RetakePending = true;
+        return true;
+    }
+
+    /// What came of retakeDesktop(), at each acquire until it is settled: its
+    /// picture, timed for the log, or kRetakeWaitUs without one, and the
+    /// session gives up on retakes.
+    void noteRetake(capture::AcquireStatus status, const capture::CapturedFrame& frame)
+    {
+        if (status == capture::AcquireStatus::Ok && frame.retaken) {
+            m_RetakePending = false;
+            const int64_t tookUs = frame.capturedUs - m_RetakeAskedUs;
+            m_Retakes++;
+            m_RetakeTotalUs += tookUs;
+            if (tookUs > m_RetakeMaxUs) m_RetakeMaxUs = tookUs;
+            if (m_Retakes <= 3) {
+                char took[64];
+                std::snprintf(took, sizeof(took), "%.1f ms (%.1f to open the capture again)",
+                              tookUs / 1000.0, m_RetakeOpenUs / 1000.0);
+                log::info(std::string("[native] cursor: no desktop held to draw the pointer on — "
+                                      "handed over again in ") +
+                          took);
+            }
+            return;
+        }
+        if (steadyNowUs() - m_RetakeAskedUs < kRetakeWaitUs) return;
+        m_RetakePending = false;
+        m_RetakeOff = true;
+        log::info("[native] cursor: the capture opened again handed no desktop over within " +
+                  std::to_string(kRetakeWaitUs / 1000) +
+                  " ms — the pointer waits for the screen to change (once per session)");
+    }
+
     /// How much the converter shrinks (or stretches) the desktop on its way into
     /// the frame — which is exactly what the pointer bitmap must be multiplied
     /// by. See CursorUpdate::scale.
@@ -4025,13 +4153,14 @@ private:
     }
 
     /// How fast the content changes, for the client's detection
-    /// (CadenceStep.h): the present an acquire returned and those Desktop
-    /// Duplication folded into it, whatever the gate then does with them.
-    /// Every other turn of the loop only moves the clock. Capture thread.
-    void countPresents(capture::AcquireStatus status)
+    /// (CadenceStep.h): the present an acquire returned (@p present) and those
+    /// Desktop Duplication folded into it, whatever the gate then does with
+    /// them. Every other turn of the loop only moves the clock — a retaken
+    /// picture's included. Capture thread.
+    void countPresents(bool present)
     {
         const int64_t nowUs = steadyNowUs();
-        if (status == capture::AcquireStatus::Ok) {
+        if (present) {
             int64_t presents = 1;
             const int64_t folded = m_Capture ? m_Capture->foldedPresents() : -1;
             if (folded >= 0) {
@@ -4221,6 +4350,16 @@ private:
                       std::to_string(m_PointerWakes) + " pointer-only (" +
                       perSecond(m_PointerWakes) + "/s), " + std::to_string(m_TimeoutWakes) +
                       " timeouts (" + perSecond(m_TimeoutWakes) + "/s)");
+            // The desktop handed over again for the pointer (retakeDesktop).
+            if (m_Retakes > 0) {
+                char cost[64];
+                std::snprintf(cost, sizeof(cost), "%.1f ms on average, %.1f at most",
+                              static_cast<double>(m_RetakeTotalUs) / m_Retakes / 1000.0,
+                              m_RetakeMaxUs / 1000.0);
+                log::info("[native] cursor: the desktop handed over again " +
+                          std::to_string(m_Retakes) + " time" + (m_Retakes > 1 ? "s" : "") +
+                          " for the pointer, " + cost);
+            }
             // Presents that happened while the loop was elsewhere — converting,
             // encoding, sending — and that the next acquire folded into one.
             // Against the time the loop spent waiting in the acquire, it says
@@ -4501,6 +4640,21 @@ private:
     int64_t m_RefuseDdaFromUs = 0;
     int64_t m_RefuseDdaUntilUs = 0;
     bool m_DdaLostOnPurpose = false;
+    /// retakeDesktop(): when it may run next; the picture it asked for, still
+    /// to come, and when it asked; how long the capture took to say yes; and
+    /// this session's giving up on it, said once. Capture thread only.
+    int64_t m_NextRetakeUs = 0;
+    bool m_RetakePending = false;
+    int64_t m_RetakeAskedUs = 0;
+    int64_t m_RetakeOpenUs = 0;
+    bool m_RetakeOff = false;
+    /// For the log: the pictures retakes brought, and what they cost the loop
+    /// from the question to the picture.
+    int64_t m_Retakes = 0;
+    int64_t m_RetakeTotalUs = 0;
+    int64_t m_RetakeMaxUs = 0;
+    static constexpr int64_t kRetakeIntervalUs = 1000 * 1000;
+    static constexpr int64_t kRetakeWaitUs = 500 * 1000;
     /// Held from start() to stop(); see StreamPriority.
     StreamPriority m_Priority;
     /// Everything between the captured picture and the bitstream: the
@@ -4574,6 +4728,9 @@ private:
     /// The composited pointer must be redrawn although nothing on the desktop
     /// moved — its requested size changed under a still screen.
     std::atomic<bool> m_CursorDirty{false};
+    /// The pointer went from the client to the picture or back
+    /// (setCompositeCursor): the loop draws the held desktop again.
+    std::atomic<bool> m_PointerChangedHands{false};
     /// Forces one cursor report even though DXGI says the shape is unchanged.
     std::atomic<bool> m_ResendCursor{false};
     /// The shape the client has been told about, so an unchanged pointer is not

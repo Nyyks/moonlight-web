@@ -465,8 +465,35 @@ bool WgcCapture::start(std::string& error)
     return true;
 }
 
+bool WgcCapture::retake(std::string& error)
+{
+    if (!d->session || !m_Device) {
+        error = "the capture is not open";
+        return false;
+    }
+    const ComPtr<ID3D11Device> given = m_Given;
+    const int width = m_Width;
+    const int height = m_Height;
+    m_Given = m_Device;
+    const bool started = start(error);
+    m_Given = given;
+    if (!started) {
+        m_RetakeLost = true;
+        return false;
+    }
+    if (m_Width != width || m_Height != height) {
+        error = "the display changed size meanwhile";
+        m_RetakeLost = true;
+        return false;
+    }
+    m_Retaking = true;
+    return true;
+}
+
 AcquireStatus WgcCapture::acquire(int timeoutMs, CapturedFrame& frame)
 {
+    // Said by the caller already, with the reason retake() gave.
+    if (m_RetakeLost) return AcquireStatus::Lost;
     if (!d->pool || !d->session) return AcquireStatus::Failed;
     if (m_Holding) {
         // The contract is one release() per Ok, and breaking it here would leak
@@ -588,6 +615,8 @@ AcquireStatus WgcCapture::acquire(int timeoutMs, CapturedFrame& frame)
     // therefore a floor rather than a measurement — which is worth saying out
     // loud, and is one more reason DDA stays the primary.
     if (frame.presentUs > frame.capturedUs) frame.presentUs = frame.capturedUs;
+    frame.retaken = m_Retaking;
+    m_Retaking = false;
     return AcquireStatus::Ok;
 }
 
@@ -602,6 +631,8 @@ void WgcCapture::release()
 void WgcCapture::stop()
 {
     release();
+    m_Retaking = false;
+    m_RetakeLost = false;
     if (d->pool && d->token.value != 0) {
         d->pool->remove_FrameArrived(d->token);
         d->token = {};

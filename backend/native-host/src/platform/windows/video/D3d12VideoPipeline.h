@@ -117,6 +117,7 @@ public:
     bool convertBlank(const convert::CursorDraw& draw, std::string& error) override;
     void releaseBlank() override { m_BlankReady = false; }
     void beforeCaptureRelease() override;
+    void forgetCaptured() override;
 
     EncodeResult encode(bool forceKeyframe, uint32_t frameNumber, encode::EncoderOutput& out,
                         std::string& error) override;

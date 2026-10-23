@@ -102,7 +102,8 @@ public:
         int64_t us = 0;
         int64_t startUs = 0;
         int64_t queuedUs = 0;
-        /// Capture: "ok", "pointer", "timeout", "lost" or "failed". Admit:
+        /// Capture: "ok", "retaken" (the desktop handed over again, not a
+        /// present), "pointer", "timeout", "lost" or "failed". Admit:
         /// "press", "grid" or "window".
         const char* status = "";
         int64_t presentUs = 0;

@@ -65,6 +65,12 @@ public:
     AcquireStatus acquire(int timeoutMs, CapturedFrame& frame) override;
     void release() override;
     void stop() override;
+    /// The duplication let go and asked for again, of the same output on the
+    /// same device: a new duplication's first frame is the whole desktop,
+    /// whether anything moved or not. Its size and format must be the ones
+    /// start() read, or the display changed meanwhile and the next acquire()
+    /// says Lost — as it does when DXGI refuses the new duplication.
+    bool retake(std::string& error) override;
 
     ID3D11Device* device() const override { return m_Device.Get(); }
     ID3D11DeviceContext* context() const override { return m_Context.Get(); }
@@ -97,6 +103,10 @@ private:
     bool openAdapterAndOutput(Microsoft::WRL::ComPtr<IDXGIAdapter1>& adapter,
                               Microsoft::WRL::ComPtr<IDXGIOutput>& output, std::string& error);
 
+    /// m_Duplication made of m_Output on m_Device: start()'s, and retake()'s.
+    /// Sets m_RefusalMayPass.
+    bool duplicate(std::string& error);
+
     /// Fold this frame's pointer information into m_Cursor. Returns true when
     /// anything the consumer can see changed (position, visibility or shape).
     bool updateCursor(const DXGI_OUTDUPL_FRAME_INFO& info);
@@ -121,7 +131,15 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D11Device> m_Device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_Context;
+    /// The output start() found, kept for retake(): asked again by index, it
+    /// could be another display by then (OutputMatch.h).
+    Microsoft::WRL::ComPtr<IDXGIOutput> m_Output;
     Microsoft::WRL::ComPtr<IDXGIOutputDuplication> m_Duplication;
+    /// retake() was answered: the next frame is flagged retaken.
+    bool m_Retaking = false;
+    /// retake() let go of the duplication and got none back, or one of
+    /// another mode: the next acquire() says Lost.
+    bool m_RetakeLost = false;
 
     /// The texture handed out by the last successful acquire(). Held so
     /// release() can return it, and so a caller that forgets cannot deadlock

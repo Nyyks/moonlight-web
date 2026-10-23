@@ -140,9 +140,21 @@ bool D3d11VideoPipeline::convert(capture::IWindowsCapture& capture, ID3D11Textur
     ID3D11Texture2D* picture = pictureFor(capture, captured, error);
     if (!picture || !m_Converter->convert(picture, cursor, draw, error)) return false;
 
-    if (retain && !retainDesktop(capture, captured, error))
+    if (!retain) {
+        m_DesktopCopy.Reset();
+    } else if (!retainDesktop(capture, captured, error)) {
+        m_DesktopCopy.Reset();
         log::warning("[native] could not keep a desktop copy: " + error);
+    }
     return true;
+}
+
+void D3d11VideoPipeline::forgetCaptured()
+{
+    // What read them was queued on the capture's own context, and D3D11 keeps
+    // a resource alive for the work queued on it: the references are all.
+    if (m_Converter) m_Converter->forgetSource();
+    if (m_Bridge) m_Bridge->forgetSources();
 }
 
 bool D3d11VideoPipeline::convertHeld(capture::IWindowsCapture& capture,

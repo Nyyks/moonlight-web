@@ -66,6 +66,7 @@ public:
     bool convertBlank(const convert::CursorDraw& draw, std::string& error) override;
     void releaseBlank() override { m_Blank.Reset(); }
     void beforeCaptureRelease() override {}
+    void forgetCaptured() override;
 
     EncodeResult encode(bool forceKeyframe, uint32_t frameNumber, encode::EncoderOutput& out,
                         std::string& error) override;
@@ -133,8 +134,9 @@ private:
     /// carries every frame across, and owns the device the converter and the
     /// encoder are then built on. See CrossGpuBridge.
     std::unique_ptr<CrossGpuBridge> m_Bridge;
-    /// The last captured desktop, kept only while the pointer is on this
-    /// screen — see retainDesktop(). On the CAPTURE's device.
+    /// The last captured desktop, kept only while the pointer is drawn and on
+    /// this screen — see retainDesktop() — and let go by the first conversion
+    /// that does without it. On the CAPTURE's device.
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_DesktopCopy;
     std::unique_ptr<convert::ColorConvert> m_Converter;
     /// Held by interface: which vendor path this is was decided by the

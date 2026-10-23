@@ -75,6 +75,10 @@ struct CapturedFrame
     int64_t mouseUs = 0;
     /// DDA: the presents folded into this frame (AccumulatedFrames).
     int accumulated = -1;
+
+    /// The desktop as it stood when retake() was answered, not a present:
+    /// presentUs says nothing worth measuring from.
+    bool retaken = false;
 };
 
 class IWindowsCapture
@@ -103,6 +107,22 @@ public:
     virtual void release() = 0;
 
     virtual void stop() = 0;
+
+    /// Have the next acquire() hand the desktop over as it stands, still
+    /// screen or not, flagged CapturedFrame::retaken — what a fresh start()
+    /// delivers first, on the same device, so that whatever was built on it
+    /// stays. For the pointer drawn into the picture over a desktop nobody
+    /// kept a copy of (see WindowsSession's retakeDesktop()). The caller lets
+    /// go of every texture it kept from this capture first.
+    ///
+    /// False with @p error when the capture cannot. Where it had already let
+    /// go of what it had, the next acquire() says Lost, and the capture is
+    /// opened again the ordinary way.
+    virtual bool retake(std::string& error)
+    {
+        error = "this capture cannot hand the desktop over again";
+        return false;
+    }
 
     /// The D3D11 device the frames live on — created on the adapter that drives
     /// the captured display, so the encoder can attach to it with no copy.

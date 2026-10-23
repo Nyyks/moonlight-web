@@ -105,6 +105,12 @@ public:
     /// caller has drained the queues first.
     void unbind();
 
+    /// Lets go of the opened surfaces alone, and of the ones known to have no
+    /// handle: the capture hands its surfaces over anew on the same device
+    /// (IWindowsCapture::retake), so the fences stay. The caller has drained
+    /// the queues first.
+    void forgetSurfaces();
+
     bool bound() const { return m_Device11 != nullptr; }
     ID3D11Device* captureDevice() const { return m_Device11.Get(); }
 

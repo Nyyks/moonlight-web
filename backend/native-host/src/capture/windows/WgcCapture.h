@@ -98,6 +98,10 @@ public:
     AcquireStatus acquire(int timeoutMs, CapturedFrame& frame) override;
     void release() override;
     void stop() override;
+    /// start() again on the device in use, as if useDevice() had given it: a
+    /// new pool and a new session, whose first frame is the whole display.
+    /// The device given before, if any, is given back after.
+    bool retake(std::string& error) override;
 
     ID3D11Device* device() const override { return m_Device.Get(); }
     ID3D11DeviceContext* context() const override { return m_Context.Get(); }
@@ -142,6 +146,10 @@ private:
     /// enforced here rather than left to the caller's memory.
     bool m_Holding = false;
     bool m_BorderOff = false;
+    /// As DxgiDuplication's: the next frame is flagged retaken; retake()
+    /// failed, and the next acquire() says Lost.
+    bool m_Retaking = false;
+    bool m_RetakeLost = false;
 };
 
 } // namespace mw::native::capture

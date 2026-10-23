@@ -598,9 +598,14 @@ bool D3d12VideoPipeline::convert(capture::IWindowsCapture& capture, ID3D11Textur
         m_TimerSlot = m_Timer.begin(list);
     }
     // The copy of the desktop for the pointer-only and still-screen paths, in
-    // the same list: read before fence B, like the conversion.
-    if (retain && !m_Converter->recordCopy(list, surface, why))
+    // the same list: read before fence B, like the conversion. Without it, an
+    // older copy goes — nothing reads it any more, beginList() waited.
+    if (!retain) {
+        m_Converter->releaseHeld();
+    } else if (!m_Converter->recordCopy(list, surface, why)) {
+        m_Converter->releaseHeld();
         log::warning("[native] could not keep a desktop copy: " + why);
+    }
     if (!m_Converter->recordConvert(list, surface, cursor, draw, why) || !armFault(fault, why)) {
         m_List->Close();
         lose("conversion: " + why);
@@ -626,6 +631,14 @@ void D3d12VideoPipeline::beforeCaptureRelease()
     if (!m_Interop.beforeRelease(m_CaptureContext, m_ReleaseAfter, m_Sync, kWaitMs, why))
         lose("the capture could not be held until the D3D12 read: " + why);
     m_ReleaseAfter = 0;
+}
+
+void D3d12VideoPipeline::forgetCaptured()
+{
+    // D3D12 keeps nothing alive for the work queued on it: the queue idle
+    // first, then the surfaces opened through their handles.
+    drain();
+    m_Interop.forgetSurfaces();
 }
 
 bool D3d12VideoPipeline::convertHeld(capture::IWindowsCapture& capture,

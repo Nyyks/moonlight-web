@@ -290,6 +290,16 @@ void warpRoundTrip()
     CHECK(interop.open(surface.Get(), context.Get(), error) == opened);
     CHECK_EQ(interop.copiedFrames(), static_cast<size_t>(3));
 
+    // A retake (IWindowsCapture::retake): the surfaces go, the binding and its
+    // fences stay — the next surface opens again, and fence A counts on.
+    interop.forgetSurfaces();
+    CHECK(interop.bound());
+    CHECK_EQ(interop.openedSurfaces(), static_cast<size_t>(0));
+    CHECK(interop.open(surface.Get(), error) != nullptr);
+    CHECK_EQ(interop.openedSurfaces(), static_cast<size_t>(1));
+    CHECK(interop.signalAcquired(context.Get(), d3d12::DdaSync::Gpu, error) == a2 + 1);
+    context->Flush();
+
     // A restart: everything of the old capture device is let go.
     interop.unbind();
     CHECK(!interop.bound());

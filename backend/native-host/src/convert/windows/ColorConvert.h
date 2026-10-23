@@ -181,6 +181,11 @@ public:
     bool convert(ID3D11Texture2D* source, const capture::CursorState& cursor,
                  const CursorDraw& draw, std::string& error);
 
+    /// Let go of the view of the last captured texture, and with it of the
+    /// texture, before the capture hands its surfaces over anew
+    /// (IWindowsCapture::retake). The next convert() makes another.
+    void forgetSource();
+
     /// The texture the last convert() wrote — NV12 or AYUV per chroma().
     /// Owned here and reused every frame: allocating one per frame would be a
     /// VRAM allocation on the hot path for no reason.

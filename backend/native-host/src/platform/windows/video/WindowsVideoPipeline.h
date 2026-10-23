@@ -142,13 +142,15 @@ public:
 
     /// Convert a freshly captured texture, the pointer drawn in. @p retain also
     /// keeps a copy of the desktop for the pointer-only and still-screen paths
-    /// (a failure there is logged, not fatal). False when the conversion itself
-    /// failed, with @p error set.
+    /// (a failure there is logged, not fatal). Without it, the copy an earlier
+    /// conversion kept is let go: it is a desktop older than the picture the
+    /// client has, and the pointer redrawn over it would bring that back. False
+    /// when the conversion itself failed, with @p error set.
     virtual bool convert(capture::IWindowsCapture& capture, ID3D11Texture2D* captured,
                          const capture::CursorState& cursor, const convert::CursorDraw& draw,
                          bool retain, std::string& error) = 0;
 
-    /// Whether a desktop copy is held — see convert().
+    /// Whether a copy of the desktop as last converted is held — see convert().
     virtual bool hasHeld() const = 0;
 
     /// Convert the held desktop again, with @p cursor where it is now.
@@ -170,6 +172,12 @@ public:
     /// Nothing on D3D11; a D3D12 pipeline orders the release after its reads
     /// there.
     virtual void beforeCaptureRelease() = 0;
+
+    /// Before IWindowsCapture::retake(): let go of every captured surface kept
+    /// — a view of the last one, the surfaces opened in another API — once
+    /// nothing reads them any more. The capture's device and what was built
+    /// on it stay; the held copy is the pipeline's own, and stays too.
+    virtual void forgetCaptured() = 0;
 
     // ── The encoder ────────────────────────────────────────────────────────
 
