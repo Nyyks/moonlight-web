@@ -65,6 +65,7 @@ import { VideoRenderer } from './VideoRenderer.js';
 import { nisConfig, nisCoefTexture, readNisSharpness, nisScaleInRange } from './NisTables.js';
 import { fitOutputSize, isIdentityScale } from './scaleRegime.js';
 import { mwsrGlsl, mwsrRegime, mwsrRegimeKey, mwsrRegimes, mwsrUniforms } from './MwsrShader.js';
+import { GazeZone } from '../GazeZone.js';
 
 // ── Shaders ─────────────────────────────────────────────────────────────────
 
@@ -609,6 +610,12 @@ export class WebGlRenderer extends VideoRenderer {
         this._mwsr = null;
         this._mwsrUni = null;
         this._mwsrUniKey = '';
+        /** gl-mwsr's gaze zone (setMwsrZone): null, none; else its values over MWSR_ZONE's. */
+        this._mwsrZone = null;
+        /** Its weight pinned by setMwsrGaze (the lab), or null: the stream's motion decides. */
+        this._mwsrGazePinned = null;
+        /** @type {GazeZone|null} that motion, fed by noteEncodedFrame. */
+        this._gaze = null;
         this.gl = null;
         this._outW = 0;
         this._outH = 0;
@@ -732,6 +739,9 @@ export class WebGlRenderer extends VideoRenderer {
         r.videoCodec = opts.videoCodec;
         r._algo = WEBGL_ALGOS.includes(opts.algo) || opts.algo === 'off' ? opts.algo : 'gl-fsr1';
         r._yuv444 = opts.yuv444 === true;
+        // The gaze zone the caller wants (BrowserDetect.mwsrGazeWanted): the
+        // kernel's programs take it, its weight follows the stream's motion.
+        if (opts.gazeZone) r.setMwsrZone({});
         // Diagnostics: mw_webgl_power picks the GPU preference, for the A/B of
         // 25/09/2026 — FSR1 cost +34 ms of click-to-photon on a three-GPU
         // client and nothing on a one-GPU one, and "high-performance" may put
@@ -872,6 +882,53 @@ export class WebGlRenderer extends VideoRenderer {
         if (this._algo === 'gl-mwsr' && gl && !this.isContextLost()) this._buildAlgo('gl-mwsr');
     }
 
+    /**
+     * The gl-mwsr kernel's gaze zone (MwsrShader's MWSR_ZONE, plan §15.2):
+     * null, the texts have no zone (the product's default); an object, the
+     * zone's values over the defaults, the kernel's programs built with
+     * GAZE 1 (rebuilt now when the pass is the current one) and its weight
+     * following the stream's motion (noteEncodedFrame, GazeZone) unless
+     * setMwsrGaze pins it.
+     * @param {{cx?: number, cy?: number, rx?: number, ry?: number, ring?: number, tau?: number, sharp?: number}|null} zone
+     */
+    setMwsrZone(zone) {
+        const next = zone ? { ...zone } : null;
+        if (JSON.stringify(next) === JSON.stringify(this._mwsrZone)) return;
+        const flip = !next !== !this._mwsrZone;
+        this._mwsrZone = next;
+        this._mwsrUniKey = '';
+        if (next && !this._gaze) this._gaze = new GazeZone();
+        if (!flip || !this._mwsr) return;
+        const gl = this.gl;
+        if (gl && !this.isContextLost())
+            for (const p of this._mwsr.values()) gl.deleteProgram(p.prog);
+        this._mwsr = null;
+        if (this._algo === 'gl-mwsr' && gl && !this.isContextLost()) this._buildAlgo('gl-mwsr');
+    }
+
+    /**
+     * The zone's weight pinned, 0 to 1 (the laboratory: 1 is the zone as on
+     * a moving picture), or null: the stream's motion decides.
+     * @param {number|null} level
+     */
+    setMwsrGaze(level) {
+        this._mwsrGazePinned =
+            level === null || level === undefined ? null : Math.min(Math.max(level, 0), 1);
+        this._mwsrUniKey = '';
+    }
+
+    /** @override The picture's motion, for the gaze zone; nothing without one. */
+    noteEncodedFrame(bytes, key) {
+        if (this._gaze) this._gaze.note(bytes, key, performance.now());
+    }
+
+    /** The zone's weight for a draw of a frame of `area` pixels: 0 without a zone. */
+    _mwsrGazeFor(area) {
+        if (!this._mwsrZone) return 0;
+        if (this._mwsrGazePinned !== null) return this._mwsrGazePinned;
+        return this._gaze ? this._gaze.level(performance.now(), area) : 0;
+    }
+
     _compile(type, src) {
         const gl = this.gl;
         const sh = gl.createShader(type);
@@ -961,7 +1018,11 @@ export class WebGlRenderer extends VideoRenderer {
             for (const reg of mwsrRegimes()) {
                 const overrides =
                     reg.mode === 'up'
-                        ? { CHROMA444: this._yuv444 ? 1 : 0, ...(this._mwsrOverrides || {}) }
+                        ? {
+                              CHROMA444: this._yuv444 ? 1 : 0,
+                              GAZE: this._mwsrZone ? 1 : 0,
+                              ...(this._mwsrOverrides || {}),
+                          }
                         : { R_DOWN: reg.rDown, LINEAR_LIGHT: reg.linearLight };
                 programs.set(
                     mwsrRegimeKey(reg),
@@ -969,6 +1030,8 @@ export class WebGlRenderer extends VideoRenderer {
                         'uTex',
                         'uTexelScale',
                         'uTauSharp',
+                        'uZone',
+                        'uZoneBonus',
                     ]),
                 );
             }
@@ -1146,10 +1209,17 @@ export class WebGlRenderer extends VideoRenderer {
                 // twin, kept while the sizes hold, in two vec4.
                 const reg = mwsrRegime(inW, inH, cw, ch);
                 const p = this._mwsr.get(mwsrRegimeKey(reg));
-                const uniKey = inW + 'x' + inH + '>' + cw + 'x' + ch;
+                // The gaze zone's weight for this draw, 0 without a zone: it
+                // moves in steps of 1/64, so the block is remade rarely.
+                const gaze = this._mwsrGazeFor(inW * inH);
+                const uniKey = inW + 'x' + inH + '>' + cw + 'x' + ch + '@' + gaze;
                 if (this._mwsrUniKey !== uniKey) {
                     this._mwsrUniKey = uniKey;
-                    this._mwsrUni = mwsrUniforms(inW, inH, cw, ch, this._mwsrTuning || {});
+                    this._mwsrUni = mwsrUniforms(inW, inH, cw, ch, {
+                        ...(this._mwsrTuning || {}),
+                        gaze,
+                        zone: this._mwsrZone || undefined,
+                    });
                 }
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, cw, ch);
@@ -1159,6 +1229,10 @@ export class WebGlRenderer extends VideoRenderer {
                 gl.uniform1i(p.u.uTex, 0);
                 gl.uniform4fv(p.u.uTexelScale, this._mwsrUni.subarray(0, 4));
                 gl.uniform4fv(p.u.uTauSharp, this._mwsrUni.subarray(4, 8));
+                // The zone's four values and its bonus: inactive, so null
+                // locations silently ignored, in a text built without GAZE.
+                gl.uniform4fv(p.u.uZone, this._mwsrUni.subarray(8, 12));
+                gl.uniform4fv(p.u.uZoneBonus, this._mwsrUni.subarray(12, 16));
                 gl.drawArrays(gl.TRIANGLES, 0, 3);
             } else if (pass === 'off') {
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);

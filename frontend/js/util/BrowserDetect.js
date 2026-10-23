@@ -423,6 +423,25 @@ export function mwsrPreferred() {
 }
 
 /**
+ * Lab key, no UI, main thread only: localStorage.mw_mwsr_gaze = '1' turns on
+ * the mwsr kernel's gaze zone (docs/design/upscaler-mwsr.md §15.2: a sharper
+ * centre, the table's values at the border) on a phone or a tablet, where its
+ * weight follows the picture's motion (stream/GazeZone.js); never on a
+ * desktop client, which keeps one quality over the whole screen (Bruno,
+ * 23/10/2026). Off by default until his eye on his iPhone settles the zone's
+ * values and its default; where storage is refused, nothing changes.
+ * @returns {boolean}
+ */
+export function mwsrGazeWanted() {
+    if (PLATFORM_TYPE === 'desktop') return false;
+    try {
+        return localStorage.getItem('mw_mwsr_gaze') === '1';
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
  * Pick the auto Video-Enhancement upscaler for this device: 'fsr1' (sharper,
  * three passes) on a desktop, 'sgsr' (one light pass) on a phone or tablet —
  * and 'sgsr' on ANY Snapdragon, a Windows-on-ARM laptop included. SGSR is

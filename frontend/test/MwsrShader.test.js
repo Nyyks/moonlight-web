@@ -6,6 +6,8 @@ import {
     MWSR_OVERRIDES,
     MWSR_OVERRIDE_SPEC,
     MWSR_UNIFORM_FLOATS,
+    MWSR_UNIFORMS,
+    MWSR_ZONE,
     mwsrGlsl,
     mwsrRegime,
     mwsrRegimeKey,
@@ -234,6 +236,50 @@ describe('the mwsr shader text', () => {
         const d = mwsrUniforms(2560, 1440, 1280, 720);
         expect(d[2]).toBe(0.5);
         expect(d[3]).toBe(0.5);
+        // the gaze zone (J34): no weight and the defaults unless asked
+        expect(MWSR_UNIFORM_FLOATS).toBe(16);
+        expect(u[6]).toBe(0);
+        for (const [i, k] of [[8, 'cx'], [9, 'cy'], [10, 'rx'], [11, 'ry'], [12, 'ring'], [13, 'tau'], [14, 'sharp']])
+            expect(u[i]).toBeCloseTo(MWSR_ZONE[k], 6);
+        const z = mwsrUniforms(1920, 1080, 2560, 1440, { gaze: 2, zone: { tau: 0.01, ring: 0 } });
+        expect(z[6]).toBe(1); // clamped
+        expect(z[13]).toBeCloseTo(0.01, 6);
+        expect(z[12]).toBeCloseTo(0.001, 6); // a ring of no width would fold the smoothstep
+        expect(z[14]).toBeCloseTo(MWSR_ZONE.sharp, 6);
+    });
+
+    it("slides the threshold and the sharpness towards the centre's values in the gaze zone (J34)", () => {
+        // the product's texts have no zone
+        expect(MWSR_OVERRIDES.GAZE).toBe(0);
+        expect(MWSR_OVERRIDES.FLAT_ZONE).toBe(0);
+        // the zone: the centre of the picture, a tall ellipse, a ring around it,
+        // a lower threshold and more sharpness than the table's
+        expect(MWSR_ZONE.cx).toBe(0.5);
+        expect(MWSR_ZONE.rx).toBeLessThan(MWSR_ZONE.ry);
+        expect(MWSR_ZONE.ring).toBeGreaterThan(0);
+        expect(MWSR_ZONE.tau).toBeLessThan(MWSR_UNIFORMS.tau);
+        expect(MWSR_ZONE.sharp).toBeGreaterThan(MWSR_UNIFORMS.sharp);
+        for (const text of [tex, glsl]) {
+            expect(text).toContain('if (GAZE != 1u) {');
+            expect(text).toContain('smoothstep(1.0, 1.0 + ');
+            expect(text).toContain('if (SHOW == 2u) {');
+            expect(text).toContain('if (GAZE == 1u && FLAT_ZONE == 1u && zg <= 0.0) {');
+            expect(text).toContain('return mix(C, R, zg);');
+        }
+        // the weight before the vote, in uniform control flow; the threshold
+        // and the sharpness slide by it, in both twins
+        expect(tex).toContain('let zg = gazeWeight(uv);');
+        expect(tex).toContain('let tau = mix(u.tau, u.ztau, zg);');
+        expect(tex).toContain('let sharp = mix(u.sharp, u.zsharp, zg);');
+        expect(tex.indexOf('let zg = gazeWeight(uv);')).toBeLessThan(tex.indexOf('let dx = dpdxCoarse(C)'));
+        expect(glsl).toContain('float zg = gazeWeight(uv);');
+        expect(glsl).toContain('float tau = mix(uTauSharp.x, uZoneBonus.y, zg);');
+        expect(glsl).toContain('float sharp = mix(uTauSharp.y, uZoneBonus.z, zg);');
+        expect(glsl).toContain('uniform vec4 uZone;');
+        expect(glsl).toContain('uniform vec4 uZoneBonus;');
+        const zoned = mwsrGlsl({ overrides: { GAZE: 1, FLAT_ZONE: 1, FLAT_TAPS: 5 } });
+        expect(zoned).toContain('const uint GAZE = 1u;');
+        expect(zoned).toContain('const uint FLAT_ZONE = 1u;');
     });
 
     it('reconstructs the flat path by a cubic of bilinear taps when FLAT_TAPS asks (J33)', () => {
@@ -250,8 +296,8 @@ describe('the mwsr shader text', () => {
             expect(text).toContain('(tn + s * wn / wm)');
             expect(text).toContain('wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;');
             // the flat quad goes through it, the samples bound it
-            expect(text).toContain('flatPath(uv, C)');
-            expect(text).toContain('return clamp(acc / norm, lo, hi);');
+            expect(text).toContain('flatPath(uv, C, zg)');
+            expect(text).toContain('R = clamp(acc / norm, lo, hi);');
         }
         // the middle pair of an axis by one sample at its weighted midpoint
         expect(tex).toContain('let p12 = (tc + w2 / w12) * u.texel;');

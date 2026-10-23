@@ -95,6 +95,16 @@ export class VideoRenderer {
     }
 
     /**
+     * An encoded frame of the stream, before its decode: its size and whether
+     * it is a key frame. The mwsr kernel's gaze zone reads the picture's
+     * motion from the delta frames (stream/GazeZone.js); inert elsewhere, so
+     * the decode paths can call it blind.
+     * @param {number} bytes
+     * @param {boolean} key
+     */
+    noteEncodedFrame(bytes, key) {}
+
+    /**
      * Click-to-photon probe support (see stream/LatencyProbe.js). A canvas that
      * presents through a desynchronized swap chain (WebGL2 here) cannot be
      * read back with drawImage once it is on screen — the drawing buffer is

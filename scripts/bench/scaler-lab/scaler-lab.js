@@ -1428,6 +1428,19 @@ async function runLabInner(p, log) {
     ll: "LINEAR_LIGHT",
     flat: "FLAT_TAPS",
     fc: "FLAT_C",
+    gz: "GAZE",
+    fz: "FLAT_ZONE",
+  };
+  // The gaze zone's uniforms (MwsrShader's MWSR_ZONE): a cell naming one of
+  // them, or gaze=, takes the GAZE text unless gz= says otherwise.
+  const ZONE_KEYS = {
+    zcx: "cx",
+    zcy: "cy",
+    zrx: "rx",
+    zry: "ry",
+    zring: "ring",
+    ztau: "tau",
+    zsharp: "sharp",
   };
   const regimes = {
     soft: mwsrRegime(inW, inH, outW, outH),
@@ -1449,7 +1462,14 @@ async function runLabInner(p, log) {
     }
     for (const [k, v] of Object.entries(opts)) {
       if (k === "tau" || k === "sharp") uni[k] = Number(v);
-      else if (k === "half") half = v === "1";
+      else if (k === "gaze") {
+        uni.gaze = Number(v);
+        if (!("GAZE" in over)) over.GAZE = 1;
+      } else if (k in ZONE_KEYS) {
+        if (!uni.zone) uni.zone = {};
+        uni.zone[ZONE_KEYS[k]] = Number(v);
+        if (!("GAZE" in over)) over.GAZE = 1;
+      } else if (k === "half") half = v === "1";
       else if (k === "fine") fine = v === "1";
       else if (k === "srgb") continue;
       else if (k === "mode") mode = v;

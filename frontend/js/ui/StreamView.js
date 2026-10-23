@@ -79,6 +79,7 @@ import {
     SUPPORTS_CANVAS_TEARING,
     decoderRidesOutGaps,
     isSnapdragonGpu,
+    mwsrGazeWanted,
     mwsrPreferred,
     noteDecoderCannotRideOut,
     noteDecoderRefusesReferenceRepairs,
@@ -2624,6 +2625,8 @@ export class StreamView {
                     hdr: this._hdrEnabled,
                     pacing: this._pacingEnabled,
                     frameSize: this._frameSize,
+                    // mwsr's gaze zone (a lab key, phones and tablets only).
+                    gazeZone: mwsrGazeWanted(),
                 },
                 [offscreen],
             );
@@ -2644,6 +2647,7 @@ export class StreamView {
                 algo: this._videoEnhancementAlgo,
                 ceiling: this._enhancerCeiling,
                 yuv444: this._yuv444,
+                gazeZone: mwsrGazeWanted(),
                 plainWebGl: this._plainWebGl,
                 hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                 hdrTonemap: this._hdrTonemap,
@@ -3791,6 +3795,8 @@ export class StreamView {
                 duration: 16667,
                 data: avccData,
             });
+            // The frame's size: the picture's motion, for the gaze zone of mwsr.
+            if (this._renderer) this._renderer.noteEncodedFrame(avccData.length, isKeyframe);
             this._trackChunkSubmit(timestamp, backendTs, {
                 arrived: arrivalAbs > 0 ? arrivalAbs - performance.timeOrigin : 0,
                 bytes: avccData.length,
@@ -4527,6 +4533,7 @@ export class StreamView {
                 webgpu: false,
                 algo: 'off',
                 ceiling: 'off',
+                gazeZone: mwsrGazeWanted(),
                 plainWebGl: kind === 'webgl',
             });
         } catch (e) {
@@ -4588,6 +4595,7 @@ export class StreamView {
                 isChromeWindowsHevc: this._isChromeWindowsHevc,
                 webgpu: false,
                 yuv444: this._yuv444,
+                gazeZone: mwsrGazeWanted(),
                 ...next,
             });
         } catch (e) {
@@ -5349,6 +5357,8 @@ export class StreamView {
                         ceiling: this._enhancerCeiling,
                         // 4:4:4 negotiated: mwsr reconstructs the chroma too.
                         yuv444: this._yuv444,
+                        // mwsr's gaze zone (a lab key, phones and tablets only).
+                        gazeZone: mwsrGazeWanted(),
                         plainWebGl: this._plainWebGl,
                         hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                         hdrTonemap: this._hdrTonemap,
@@ -8295,6 +8305,7 @@ export class StreamView {
             // pacer sees 0 and this path keeps presenting on decode. The
             // frame's stamp (hostTs) still reaches what measures its age: the
             // detection, the content-age probe, the frame log.
+            if (this._renderer) this._renderer.noteEncodedFrame(obuData.length, isKeyframe);
             this._trackChunkSubmit(timestamp, 0, {
                 arrived: arrivalAbs > 0 ? arrivalAbs - performance.timeOrigin : 0,
                 bytes: obuData.length,

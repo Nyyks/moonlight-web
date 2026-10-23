@@ -766,6 +766,8 @@ function decodeFrame(data, isKeyframe, backendTs, arrivalAbs) {
 
     try {
         const chunk = new EncodedVideoChunk({ type, timestamp, duration: 16667, data: avccData });
+        // The frame's size: the picture's motion, for the gaze zone of mwsr.
+        if (S.renderer) S.renderer.noteEncodedFrame(avccData.length, isKeyframe);
         trackChunkSubmit(timestamp, backendTs);
         if (arrivalAbs > 0) addStageSample(S._arriveSamples, nowAbs() - arrivalAbs);
         S.decoder.decode(chunk);
@@ -858,6 +860,7 @@ function decodeAv1Frame(data, isKeyframe, arrivalAbs) {
         // AV1 has no backendTs here (synthetic chunk timestamps), so the pacer
         // sees 0 and leaves this path on the present-on-decode behavior.
         const chunk = new EncodedVideoChunk({ type, timestamp, duration: 16667, data: obuData });
+        if (S.renderer) S.renderer.noteEncodedFrame(obuData.length, isKeyframe);
         trackChunkSubmit(timestamp, 0);
         if (arrivalAbs > 0) addStageSample(S._arriveSamples, nowAbs() - arrivalAbs);
         S.decoder.decode(chunk);
@@ -1081,6 +1084,8 @@ self.onmessage = (e) => {
                 ceiling: m.ceiling,
                 yuv444: !!m.yuv444,
                 hdr: !!m.hdr,
+                // The mwsr kernel's gaze zone (BrowserDetect.mwsrGazeWanted, on main).
+                gazeZone: !!m.gazeZone,
             }).then((r) => {
                 S.renderer = r;
                 // The setting is the ceiling: the governor only steps below

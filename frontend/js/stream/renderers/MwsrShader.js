@@ -102,6 +102,10 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     FLAT_TAPS: ['u32', 1],
     /** The cubic's C, the depth of its negative lobe: 0.5 is Catmull-Rom; higher is steeper, with more ringing (bounded by the taps). */
     FLAT_C: ['f32', 0.5],
+    /** 1: the gaze zone (plan §15.2): the vote threshold and the sharpness slide from the table's values to MWSR_ZONE's at the centre of the picture, by the pixel's place and the stream's motion (the uniform `gaze`); 0: the text has no zone. */
+    GAZE: ['u32', 0],
+    /** With GAZE 1: 1 the flat path's cubic or quadratic (FLAT_TAPS) inside the zone only, blended by its weight, the periphery keeping the bilinear sample; 0 everywhere. */
+    FLAT_ZONE: ['u32', 0],
     /** Reduction: the span of the tap grid, as a fraction of the pixel's footprint in the input (mwsrRegime() sets it by the grid). */
     R_DOWN: ['f32', 1.0],
     /** Reduction: 0 average the encoded values; 1 in gamma-2 light (square, square root); 2 in sRGB linear light (≤ 0.35 dB better, 15 pow per pixel). */
@@ -126,8 +130,32 @@ export const MWSR_CONSTANTS = Object.freeze({
  *  23/10/2026, Bruno's eye on his iPhone: text near FSR1's, no overshoot). */
 export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 2.0 });
 
-/** Number of f32 in the uniform block: texel.xy, scale.xy, tau, sharp, pad.xy. */
-export const MWSR_UNIFORM_FLOATS = 8;
+/**
+ * The gaze zone's values (plan §15.2, Bruno's picture of 23/10/2026: a green
+ * ring at the centre, about 40 % of the width and most of the height, an
+ * orange ring around it at about 70 % of the width, the rest left readable):
+ * the centre and the half-axes of the green ellipse as fractions of the
+ * picture, the orange ring's width as a fraction of those half-axes (the
+ * weight falls by a smoothstep from the ellipse to 1 + ring times it), and
+ * the vote threshold and the sharpness at the centre, where the eye is — the
+ * table's values (MWSR_UNIFORMS) stay the border's. Read by the `up` text when
+ * its GAZE constant is 1, weighted per draw by the stream's motion (the
+ * uniform `gaze`, 0 on a still picture: one quality everywhere). Values of
+ * the lab, before Bruno's eye on his iPhone.
+ */
+export const MWSR_ZONE = Object.freeze({
+    cx: 0.5,
+    cy: 0.5,
+    rx: 0.2,
+    ry: 0.45,
+    ring: 0.75,
+    tau: 0.02,
+    sharp: 2.5,
+});
+
+/** Number of f32 in the uniform block: texel.xy, scale.xy, tau, sharp, gaze,
+ *  pad, then the zone: centre.xy, half-axes.xy, ring, tau, sharp, pad. */
+export const MWSR_UNIFORM_FLOATS = 16;
 
 /**
  * The reduction's tap grids when the light is software's (LINEAR_LIGHT 1 or
@@ -221,13 +249,36 @@ export function mwsrRegimeKey(reg) {
  * @param {number} inH
  * @param {number} outW
  * @param {number} outH
- * @param {{tau?: number, sharp?: number}} [u]
+ * @param {{tau?: number, sharp?: number, gaze?: number, zone?: Object}} [u]
+ *   `gaze`: the gaze zone's weight, 0 (none, the default) to 1, read by a
+ *   text built with GAZE 1 only; `zone`: its values over MWSR_ZONE's.
  * @returns {Float32Array}
  */
 export function mwsrUniforms(inW, inH, outW, outH, u = {}) {
     const tau = u.tau ?? MWSR_UNIFORMS.tau;
     const sharp = u.sharp ?? MWSR_UNIFORMS.sharp;
-    return new Float32Array([1 / inW, 1 / inH, outW / inW, outH / inH, tau, sharp, 0, 0]);
+    const gaze = Math.min(Math.max(u.gaze ?? 0, 0), 1);
+    const z = { ...MWSR_ZONE, ...(u.zone || {}) };
+    // a ring of no width would put the smoothstep's two edges together
+    z.ring = Math.max(z.ring, 1e-3);
+    return new Float32Array([
+        1 / inW,
+        1 / inH,
+        outW / inW,
+        outH / inH,
+        tau,
+        sharp,
+        gaze,
+        0,
+        z.cx,
+        z.cy,
+        z.rx,
+        z.ry,
+        z.ring,
+        z.tau,
+        z.sharp,
+        0,
+    ]);
 }
 
 function wgslNumber(type, v) {
@@ -289,7 +340,14 @@ struct U {
     scale : vec2f,
     tau : f32,
     sharp : f32,
-    pad : vec2f,
+    gaze : f32,
+    pad : f32,
+    zc : vec2f,
+    zr : vec2f,
+    zring : f32,
+    ztau : f32,
+    zsharp : f32,
+    pad2 : f32,
 };
 
 @group(0) @binding(0) var samp : sampler;
@@ -336,6 +394,18 @@ fn coherence(c : hf, t1 : hf, t2 : hf, x1 : hf, x2 : hf) -> hf {
     return max(step, ridge) / variation;
 }
 
+// The gaze zone's weight at a pixel (GAZE 1, plan §15.2): 1 inside the
+// ellipse of centre u.zc and half-axes u.zr, falling by a smoothstep over the
+// ring to 0 outside, times the stream's motion u.gaze — 0 on a still
+// picture, where the table rules the whole screen.
+fn gazeWeight(uv : vec2f) -> f32 {
+    if (GAZE != 1u) {
+        return 0.0;
+    }
+    let d = length((uv - u.zc) / u.zr);
+    return (1.0 - smoothstep(1.0, 1.0 + u.zring, d)) * u.gaze;
+}
+
 // The flat path's picture: the bilinear sample C, or (FLAT_TAPS 5 or 9) the
 // cubic of Mitchell and Netravali with B 0 and C FLAT_C (0.5: Catmull-Rom)
 // over the 4×4 texels around the position, read as the bilinear samples the
@@ -347,11 +417,16 @@ fn coherence(c : hf, t1 : hf, t2 : hf, x1 : hf, x2 : hf) -> hf {
 // neighbour on the sample's side by one sample at their weighted midpoint,
 // the far one, of negative weight, by one sample — three samples without
 // the corner (J34). Bounded by the samples themselves, as the edge path is.
-fn flatPath(uv : vec2f, C : vec3f) -> vec3f {
+// Inside the gaze zone only when FLAT_ZONE asks, blended by its weight zg.
+fn flatPath(uv : vec2f, C : vec3f, zg : f32) -> vec3f {
     if (FLAT_TAPS != 3u && FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
         return C;
     }
+    if (GAZE == 1u && FLAT_ZONE == 1u && zg <= 0.0) {
+        return C;
+    }
     let sp = uv / u.texel;
+    var R : vec3f;
     if (FLAT_TAPS == 3u) {
         let tn = floor(sp) + 0.5;
         let h = sp - tn;
@@ -365,44 +440,49 @@ fn flatPath(uv : vec2f, C : vec3f) -> vec3f {
         let sm = S(pm);
         let sfx = S(vec2f(pf.x, pm.y));
         let sfy = S(vec2f(pm.x, pf.y));
-        let acc3 = sm * (wm.x * wm.y) + sfx * (wf.x * wm.y) + sfy * (wm.x * wf.y);
-        let norm3 = wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;
-        let lo3 = min(sm, min(sfx, sfy));
-        let hi3 = max(sm, max(sfx, sfy));
-        return clamp(acc3 / norm3, lo3, hi3);
+        let acc = sm * (wm.x * wm.y) + sfx * (wf.x * wm.y) + sfy * (wm.x * wf.y);
+        let norm = wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;
+        let lo = min(sm, min(sfx, sfy));
+        let hi = max(sm, max(sfx, sfy));
+        R = clamp(acc / norm, lo, hi);
+    } else {
+        let tc = floor(sp - 0.5) + 0.5;
+        let f = sp - tc;
+        let c = FLAT_C;
+        let w0 = -c * f * (1.0 - f) * (1.0 - f);
+        let w1 = (2.0 - c) * f * f * f - (3.0 - c) * f * f + 1.0;
+        let w3 = -c * (1.0 - f) * f * f;
+        let w2 = 1.0 - w0 - w1 - w3;
+        let w12 = w1 + w2;
+        let p0 = (tc - 1.0) * u.texel;
+        let p12 = (tc + w2 / w12) * u.texel;
+        let p3 = (tc + 2.0) * u.texel;
+        let s12 = S(p12);
+        let s02 = S(vec2f(p0.x, p12.y));
+        let s32 = S(vec2f(p3.x, p12.y));
+        let s20 = S(vec2f(p12.x, p0.y));
+        let s23 = S(vec2f(p12.x, p3.y));
+        var acc = s12 * (w12.x * w12.y) + s02 * (w0.x * w12.y) + s32 * (w3.x * w12.y)
+            + s20 * (w12.x * w0.y) + s23 * (w12.x * w3.y);
+        var norm = w12.x * w12.y + w0.x * w12.y + w3.x * w12.y + w12.x * w0.y + w12.x * w3.y;
+        var lo = min(min(s12, s02), min(s32, min(s20, s23)));
+        var hi = max(max(s12, s02), max(s32, max(s20, s23)));
+        if (FLAT_TAPS == 9u) {
+            let s00 = S(p0);
+            let s30 = S(vec2f(p3.x, p0.y));
+            let s03 = S(vec2f(p0.x, p3.y));
+            let s33 = S(p3);
+            acc += s00 * (w0.x * w0.y) + s30 * (w3.x * w0.y) + s03 * (w0.x * w3.y) + s33 * (w3.x * w3.y);
+            norm += w0.x * w0.y + w3.x * w0.y + w0.x * w3.y + w3.x * w3.y;
+            lo = min(lo, min(min(s00, s30), min(s03, s33)));
+            hi = max(hi, max(max(s00, s30), max(s03, s33)));
+        }
+        R = clamp(acc / norm, lo, hi);
     }
-    let tc = floor(sp - 0.5) + 0.5;
-    let f = sp - tc;
-    let c = FLAT_C;
-    let w0 = -c * f * (1.0 - f) * (1.0 - f);
-    let w1 = (2.0 - c) * f * f * f - (3.0 - c) * f * f + 1.0;
-    let w3 = -c * (1.0 - f) * f * f;
-    let w2 = 1.0 - w0 - w1 - w3;
-    let w12 = w1 + w2;
-    let p0 = (tc - 1.0) * u.texel;
-    let p12 = (tc + w2 / w12) * u.texel;
-    let p3 = (tc + 2.0) * u.texel;
-    let s12 = S(p12);
-    let s02 = S(vec2f(p0.x, p12.y));
-    let s32 = S(vec2f(p3.x, p12.y));
-    let s20 = S(vec2f(p12.x, p0.y));
-    let s23 = S(vec2f(p12.x, p3.y));
-    var acc = s12 * (w12.x * w12.y) + s02 * (w0.x * w12.y) + s32 * (w3.x * w12.y)
-        + s20 * (w12.x * w0.y) + s23 * (w12.x * w3.y);
-    var norm = w12.x * w12.y + w0.x * w12.y + w3.x * w12.y + w12.x * w0.y + w12.x * w3.y;
-    var lo = min(min(s12, s02), min(s32, min(s20, s23)));
-    var hi = max(max(s12, s02), max(s32, max(s20, s23)));
-    if (FLAT_TAPS == 9u) {
-        let s00 = S(p0);
-        let s30 = S(vec2f(p3.x, p0.y));
-        let s03 = S(vec2f(p0.x, p3.y));
-        let s33 = S(p3);
-        acc += s00 * (w0.x * w0.y) + s30 * (w3.x * w0.y) + s03 * (w0.x * w3.y) + s33 * (w3.x * w3.y);
-        norm += w0.x * w0.y + w3.x * w0.y + w0.x * w3.y + w3.x * w3.y;
-        lo = min(lo, min(min(s00, s30), min(s03, s33)));
-        hi = max(hi, max(max(s00, s30), max(s03, s33)));
+    if (GAZE == 1u && FLAT_ZONE == 1u) {
+        return mix(C, R, zg);
     }
-    return clamp(acc / norm, lo, hi);
+    return R;
 }
 
 @fragment
@@ -410,6 +490,10 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let uv = in.uv;
     let C = S(uv);
     let lC = luma(C);
+    // The gaze zone's weight, 0 without one: the vote threshold and, on the
+    // edge path, the sharpness slide from the table's values to the centre's.
+    let zg = gazeWeight(uv);
+    let tau = mix(u.tau, u.ztau, zg);
     // The vote: the screen derivatives of the bilinear sample, scaled to a
     // change per input texel; coarse, so the whole quad takes the same branch.
     // From the luma, or (CHROMA444) from the channel with the steepest ramp,
@@ -422,12 +506,15 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let c444 = CHROMA444 == 1u;
     let gx = select(dot(dx, LUMA), select(select(dx.r, dx.g, rg), dx.b, b), c444);
     let gy = select(dot(dy, LUMA), select(select(dy.r, dy.g, rg), dy.b, b), c444);
-    let flat = select(abs(gx) + abs(gy), max(m.r, max(m.g, m.b)), c444) < u.tau;
+    let flat = select(abs(gx) + abs(gy), max(m.r, max(m.g, m.b)), c444) < tau;
     if (SHOW == 1u) {
         return vec4f(vec3f(select(1.0, 0.0, flat)), 1.0);
     }
+    if (SHOW == 2u) {
+        return vec4f(vec3f(zg), 1.0);
+    }
     if (flat) {
-        return vec4f(flatPath(uv, C), 1.0);
+        return vec4f(flatPath(uv, C, zg), 1.0);
     }
     // Strength: none at 1:1 (the renderer copies the frame there), full from
     // S_FULL on.
@@ -457,7 +544,8 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         a = h3(coherence(lCh, lT1, lT2, lX1, lX2) * hf(strength));
     }
     let wT = hf(W_ALONG) * a;
-    let wX = max(-hf(W_ACROSS) * hf(u.sharp) * a, h3(hf(W_MIN)));
+    let sharp = mix(u.sharp, u.zsharp, zg);
+    let wX = max(-hf(W_ACROSS) * hf(sharp) * a, h3(hf(W_MIN)));
     var R = vec3f(blend(Ch, T1, T2, X1, X2, wT, wX));
     if (DERING == 1u) {
         // The exact bound: the four input texels around the pixel, the
@@ -591,13 +679,26 @@ mediump float coherence(mediump float c, mediump float t1, mediump float t2, med
     return max(jump, ridge) / variation;
 }
 
+// The gaze zone's weight, the WGSL text's gazeWeight line for line.
+float gazeWeight(vec2 uv) {
+    if (GAZE != 1u) {
+        return 0.0;
+    }
+    float d = length((uv - uZone.xy) / uZone.zw);
+    return (1.0 - smoothstep(1.0, 1.0 + uZoneBonus.x, d)) * uTauSharp.z;
+}
+
 // The flat path's picture, the WGSL text's flatPath line for line.
-vec3 flatPath(vec2 uv, vec3 C) {
+vec3 flatPath(vec2 uv, vec3 C, float zg) {
     if (FLAT_TAPS != 3u && FLAT_TAPS != 5u && FLAT_TAPS != 9u) {
+        return C;
+    }
+    if (GAZE == 1u && FLAT_ZONE == 1u && zg <= 0.0) {
         return C;
     }
     vec2 texel = uTexelScale.xy;
     vec2 sp = uv / texel;
+    vec3 R;
     if (FLAT_TAPS == 3u) {
         vec2 tn = floor(sp) + 0.5;
         vec2 h = sp - tn;
@@ -611,50 +712,57 @@ vec3 flatPath(vec2 uv, vec3 C) {
         vec3 sm = S(pm);
         vec3 sfx = S(vec2(pf.x, pm.y));
         vec3 sfy = S(vec2(pm.x, pf.y));
-        vec3 acc3 = sm * (wm.x * wm.y) + sfx * (wf.x * wm.y) + sfy * (wm.x * wf.y);
-        float norm3 = wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;
-        vec3 lo3 = min(sm, min(sfx, sfy));
-        vec3 hi3 = max(sm, max(sfx, sfy));
-        return clamp(acc3 / norm3, lo3, hi3);
+        vec3 acc = sm * (wm.x * wm.y) + sfx * (wf.x * wm.y) + sfy * (wm.x * wf.y);
+        float norm = wm.x * wm.y + wf.x * wm.y + wm.x * wf.y;
+        vec3 lo = min(sm, min(sfx, sfy));
+        vec3 hi = max(sm, max(sfx, sfy));
+        R = clamp(acc / norm, lo, hi);
+    } else {
+        vec2 tc = floor(sp - 0.5) + 0.5;
+        vec2 f = sp - tc;
+        float c = FLAT_C;
+        vec2 w0 = -c * f * (1.0 - f) * (1.0 - f);
+        vec2 w1 = (2.0 - c) * f * f * f - (3.0 - c) * f * f + 1.0;
+        vec2 w3 = -c * (1.0 - f) * f * f;
+        vec2 w2 = 1.0 - w0 - w1 - w3;
+        vec2 w12 = w1 + w2;
+        vec2 p0 = (tc - 1.0) * texel;
+        vec2 p12 = (tc + w2 / w12) * texel;
+        vec2 p3 = (tc + 2.0) * texel;
+        vec3 s12 = S(p12);
+        vec3 s02 = S(vec2(p0.x, p12.y));
+        vec3 s32 = S(vec2(p3.x, p12.y));
+        vec3 s20 = S(vec2(p12.x, p0.y));
+        vec3 s23 = S(vec2(p12.x, p3.y));
+        vec3 acc = s12 * (w12.x * w12.y) + s02 * (w0.x * w12.y) + s32 * (w3.x * w12.y)
+            + s20 * (w12.x * w0.y) + s23 * (w12.x * w3.y);
+        float norm = w12.x * w12.y + w0.x * w12.y + w3.x * w12.y + w12.x * w0.y + w12.x * w3.y;
+        vec3 lo = min(min(s12, s02), min(s32, min(s20, s23)));
+        vec3 hi = max(max(s12, s02), max(s32, max(s20, s23)));
+        if (FLAT_TAPS == 9u) {
+            vec3 s00 = S(p0);
+            vec3 s30 = S(vec2(p3.x, p0.y));
+            vec3 s03 = S(vec2(p0.x, p3.y));
+            vec3 s33 = S(p3);
+            acc += s00 * (w0.x * w0.y) + s30 * (w3.x * w0.y) + s03 * (w0.x * w3.y) + s33 * (w3.x * w3.y);
+            norm += w0.x * w0.y + w3.x * w0.y + w0.x * w3.y + w3.x * w3.y;
+            lo = min(lo, min(min(s00, s30), min(s03, s33)));
+            hi = max(hi, max(max(s00, s30), max(s03, s33)));
+        }
+        R = clamp(acc / norm, lo, hi);
     }
-    vec2 tc = floor(sp - 0.5) + 0.5;
-    vec2 f = sp - tc;
-    float c = FLAT_C;
-    vec2 w0 = -c * f * (1.0 - f) * (1.0 - f);
-    vec2 w1 = (2.0 - c) * f * f * f - (3.0 - c) * f * f + 1.0;
-    vec2 w3 = -c * (1.0 - f) * f * f;
-    vec2 w2 = 1.0 - w0 - w1 - w3;
-    vec2 w12 = w1 + w2;
-    vec2 p0 = (tc - 1.0) * texel;
-    vec2 p12 = (tc + w2 / w12) * texel;
-    vec2 p3 = (tc + 2.0) * texel;
-    vec3 s12 = S(p12);
-    vec3 s02 = S(vec2(p0.x, p12.y));
-    vec3 s32 = S(vec2(p3.x, p12.y));
-    vec3 s20 = S(vec2(p12.x, p0.y));
-    vec3 s23 = S(vec2(p12.x, p3.y));
-    vec3 acc = s12 * (w12.x * w12.y) + s02 * (w0.x * w12.y) + s32 * (w3.x * w12.y)
-        + s20 * (w12.x * w0.y) + s23 * (w12.x * w3.y);
-    float norm = w12.x * w12.y + w0.x * w12.y + w3.x * w12.y + w12.x * w0.y + w12.x * w3.y;
-    vec3 lo = min(min(s12, s02), min(s32, min(s20, s23)));
-    vec3 hi = max(max(s12, s02), max(s32, max(s20, s23)));
-    if (FLAT_TAPS == 9u) {
-        vec3 s00 = S(p0);
-        vec3 s30 = S(vec2(p3.x, p0.y));
-        vec3 s03 = S(vec2(p0.x, p3.y));
-        vec3 s33 = S(p3);
-        acc += s00 * (w0.x * w0.y) + s30 * (w3.x * w0.y) + s03 * (w0.x * w3.y) + s33 * (w3.x * w3.y);
-        norm += w0.x * w0.y + w3.x * w0.y + w0.x * w3.y + w3.x * w3.y;
-        lo = min(lo, min(min(s00, s30), min(s03, s33)));
-        hi = max(hi, max(max(s00, s30), max(s03, s33)));
+    if (GAZE == 1u && FLAT_ZONE == 1u) {
+        return mix(C, R, zg);
     }
-    return clamp(acc / norm, lo, hi);
+    return R;
 }
 
 void main() {
     vec2 uv = vUv;
     vec3 C = S(uv);
     float lC = luma(C);
+    float zg = gazeWeight(uv);
+    float tau = mix(uTauSharp.x, uZoneBonus.y, zg);
     // GL's window y runs up, WebGPU's framebuffer y runs down: dFdy is the
     // WGSL text's dpdy negated, or the edge normal comes out mirrored and the
     // along and across taps swap on every diagonal (the first conformity run).
@@ -666,13 +774,17 @@ void main() {
     bool c444 = CHROMA444 == 1u;
     float gx = c444 ? (b ? dx.b : (rg ? dx.g : dx.r)) : dot(dx, LUMA);
     float gy = c444 ? (b ? dy.b : (rg ? dy.g : dy.r)) : dot(dy, LUMA);
-    bool isFlat = (c444 ? max(m.r, max(m.g, m.b)) : abs(gx) + abs(gy)) < uTauSharp.x;
+    bool isFlat = (c444 ? max(m.r, max(m.g, m.b)) : abs(gx) + abs(gy)) < tau;
     if (SHOW == 1u) {
         oColor = vec4(vec3(isFlat ? 0.0 : 1.0), 1.0);
         return;
     }
+    if (SHOW == 2u) {
+        oColor = vec4(vec3(zg), 1.0);
+        return;
+    }
     if (isFlat) {
-        oColor = vec4(flatPath(uv, C), 1.0);
+        oColor = vec4(flatPath(uv, C, zg), 1.0);
         return;
     }
     float smin = min(uTexelScale.z, uTexelScale.w);
@@ -699,7 +811,8 @@ void main() {
         a = vec3(coherence(lCh, lT1, lT2, lX1, lX2) * strength);
     }
     mediump vec3 wT = W_ALONG * a;
-    mediump vec3 wX = max(-W_ACROSS * uTauSharp.y * a, vec3(W_MIN));
+    float sharp = mix(uTauSharp.y, uZoneBonus.z, zg);
+    mediump vec3 wX = max(-W_ACROSS * sharp * a, vec3(W_MIN));
     vec3 R = blend(Ch, T1, T2, X1, X2, wT, wX);
     if (DERING == 1u) {
         ivec2 dims = textureSize(uTex, 0);
@@ -783,7 +896,9 @@ precision highp float;
 precision highp int;
 uniform sampler2D uTex;
 uniform vec4 uTexelScale; // texel.xy, scale.xy: the first four of mwsrUniforms()
-uniform vec4 uTauSharp; // tau, sharp, 0, 0: the last four
+uniform vec4 uTauSharp; // tau, sharp, the gaze zone's weight, 0: the next four
+uniform vec4 uZone; // the gaze zone's centre.xy and half-axes.xy (GAZE 1)
+uniform vec4 uZoneBonus; // its ring, and its tau and sharpness at the centre, 0
 in vec2 vUv;
 out vec4 oColor;
 

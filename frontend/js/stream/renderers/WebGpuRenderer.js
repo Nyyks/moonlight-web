@@ -91,6 +91,7 @@ import {
     mwsrUniforms,
     mwsrWgsl,
 } from './MwsrShader.js';
+import { GazeZone } from '../GazeZone.js';
 
 // Full-screen triangle (uv 0..1, v down — matches texture sampling).
 const FULLSCREEN_VS = /* wgsl */ `
@@ -956,6 +957,12 @@ export class WebGpuRenderer extends VideoRenderer {
         this._mwsrHalf = false;
         /** SDR: inputTex and the canvas carry `-srgb` view formats (mwsr's reduction). */
         this._srgbViews = false;
+        /** mwsr's gaze zone (setMwsrZone): null, none; else its values over MWSR_ZONE's. */
+        this._mwsrZone = null;
+        /** Its weight pinned by setMwsrGaze (the lab), or null: the stream's motion decides. */
+        this._mwsrGazePinned = null;
+        /** @type {GazeZone|null} that motion, fed by noteEncodedFrame. */
+        this._gaze = null;
         /** NIS sharpness (0..1, 0.5 neutral) and its re-read throttle. */
         this._nisSharpness = 0.5;
         this._nisKnobsMs = 0;
@@ -995,6 +1002,9 @@ export class WebGpuRenderer extends VideoRenderer {
                 ? opts.algo
                 : 'sgsr';
         r._yuv444 = opts.yuv444 === true;
+        // The gaze zone the caller wants (BrowserDetect.mwsrGazeWanted): the
+        // kernel's pipelines take it, its weight follows the stream's motion.
+        if (opts.gazeZone) r.setMwsrZone({});
         r._mwsrHalf = device.features.has('shader-f16');
         // HDR: rgba16float canvas in extended tone-mapping mode (values > 1.0
         // map to the display's HDR headroom). Gated on opts.hdr; _configure()
@@ -1428,7 +1438,11 @@ export class WebGpuRenderer extends VideoRenderer {
                 entryPoint: 'fs',
                 constants:
                     reg.mode === 'up'
-                        ? { CHROMA444: this._yuv444 ? 1 : 0, ...(this._mwsrOverrides || {}) }
+                        ? {
+                              CHROMA444: this._yuv444 ? 1 : 0,
+                              GAZE: this._mwsrZone ? 1 : 0,
+                              ...(this._mwsrOverrides || {}),
+                          }
                         : { R_DOWN: reg.rDown, LINEAR_LIGHT: reg.linearLight },
                 targets: [{ format: srgb ? this._format + '-srgb' : this._format }],
             },
@@ -2074,6 +2088,47 @@ export class WebGpuRenderer extends VideoRenderer {
     }
 
     /**
+     * The mwsr kernel's gaze zone (MwsrShader's MWSR_ZONE, plan §15.2):
+     * null, the text has no zone (the product's default); an object, the
+     * zone's values over the defaults, the kernel's pipelines built with
+     * GAZE 1 and its weight following the stream's motion (noteEncodedFrame,
+     * GazeZone) unless setMwsrGaze pins it.
+     * @param {{cx?: number, cy?: number, rx?: number, ry?: number, ring?: number, tau?: number, sharp?: number}|null} zone
+     */
+    setMwsrZone(zone) {
+        const next = zone ? { ...zone } : null;
+        if (JSON.stringify(next) === JSON.stringify(this._mwsrZone)) return;
+        const flip = !next !== !this._mwsrZone;
+        this._mwsrZone = next;
+        this._mwsrUniKey = '';
+        if (flip && this._mwsrPipelines) this._mwsrPipelines.clear();
+        if (next && !this._gaze) this._gaze = new GazeZone();
+    }
+
+    /**
+     * The zone's weight pinned, 0 to 1 (the laboratory: 1 is the zone as on
+     * a moving picture), or null: the stream's motion decides.
+     * @param {number|null} level
+     */
+    setMwsrGaze(level) {
+        this._mwsrGazePinned =
+            level === null || level === undefined ? null : Math.min(Math.max(level, 0), 1);
+        this._mwsrUniKey = '';
+    }
+
+    /** @override The picture's motion, for the gaze zone; nothing without one. */
+    noteEncodedFrame(bytes, key) {
+        if (this._gaze) this._gaze.note(bytes, key, performance.now());
+    }
+
+    /** The zone's weight for a draw of a frame of `area` pixels: 0 without a zone. */
+    _mwsrGazeFor(area) {
+        if (!this._mwsrZone) return 0;
+        if (this._mwsrGazePinned !== null) return this._mwsrGazePinned;
+        return this._gaze ? this._gaze.level(performance.now(), area) : 0;
+    }
+
+    /**
      * Switch the upscaler pass at runtime (EnhancerGovernor's ladder). Only the
      * chosen algo's resources are built at create(), so the target's are built
      * on first use and kept — a switch back is then free.
@@ -2601,13 +2656,20 @@ export class WebGpuRenderer extends VideoRenderer {
                 // them; the kernel works in gamma, on the plain views.
                 const reg = mwsrRegime(inW, inH, cw, ch, { srgb: this._srgbViews });
                 const srgb = reg.mode === 'down' && this._srgbViews;
-                const uniKey = inW + 'x' + inH + '>' + cw + 'x' + ch;
+                // The gaze zone's weight for this draw, 0 without a zone: it
+                // moves in steps of 1/64, so the block is rewritten rarely.
+                const gaze = this._mwsrGazeFor(inW * inH);
+                const uniKey = inW + 'x' + inH + '>' + cw + 'x' + ch + '@' + gaze;
                 if (this._mwsrUniKey !== uniKey) {
                     this._mwsrUniKey = uniKey;
                     this._device.queue.writeBuffer(
                         this._mwsrUniform,
                         0,
-                        mwsrUniforms(inW, inH, cw, ch, this._mwsrTuning || {}),
+                        mwsrUniforms(inW, inH, cw, ch, {
+                            ...(this._mwsrTuning || {}),
+                            gaze,
+                            zone: this._mwsrZone || undefined,
+                        }),
                     );
                 }
                 // Pass 1: mwsr inputTex → canvas.

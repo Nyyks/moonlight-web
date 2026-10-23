@@ -103,6 +103,30 @@ const FLAT_CHOICES = [
   [9, "Catmull-Rom, 9 échantillons"],
 ];
 const FC_RANGE = [0.25, 1, 0.05];
+// The gaze zone (MwsrShader's MWSR_ZONE and its GAZE constant, plan §15.2):
+// the green ellipse's centre y and half-axes (fractions of the picture), the
+// orange ring's width (a fraction of the half-axes), and the vote threshold
+// and the sharpness at the centre — the table's values stay the border's.
+// The comparator pins the zone's weight to 1, as on a moving picture; the
+// product follows the stream's motion (GazeZone), behind a lab key.
+const ZONE_DEF = {
+  cx: 0.5,
+  cy: 0.5,
+  rx: 0.2,
+  ry: 0.45,
+  ring: 0.75,
+  tau: 0.02,
+  sharp: 2.5,
+};
+// id in the link, label, [min, max, step], key in the zone, decimals
+const ZONE_SLIDERS = [
+  ["zcy", "centre y", [0.3, 0.7, 0.01], "cy", 2],
+  ["zrx", "demi-axe x", [0.05, 0.5, 0.01], "rx", 2],
+  ["zry", "demi-axe y", [0.1, 0.6, 0.01], "ry", 2],
+  ["zring", "anneau", [0.05, 1.5, 0.05], "ring", 2],
+  ["ztau", "τ centre", [0.005, 0.1, 0.005], "tau", 3],
+  ["zsharp", "netteté centre", [0.5, 3.5, 0.05], "sharp", 2],
+];
 const API_LABEL = { webgpu: "WebGPU", webgl: "WebGL2", canvas2d: "Canvas2D" };
 const DEFAULT_IMAGES = ["/test/test.png", "/test/00_Background.png"];
 const STORE = "mw_compare";
@@ -126,17 +150,38 @@ const state = {
   tau: MWSR_DEF.tau,
   flat: MWSR_DEF.flat,
   fc: MWSR_DEF.fc,
+  // the gaze zone: off (the product on a still picture), its values, the
+  // rings drawn over the bands, the flat path's cubic inside it only
+  gaze: false,
+  gz: { ...ZONE_DEF },
+  rings: true,
+  fz: false,
   soft: false,
 };
 const shown = () => state.order.filter((a) => state.on.has(a));
 const tuning = () => ({ sharp: state.sharp, tau: state.tau });
-const overrides = () =>
-  state.flat === 1 ? {} : { FLAT_TAPS: state.flat, FLAT_C: state.fc };
+const overrides = () => ({
+  ...(state.flat === 1 ? {} : { FLAT_TAPS: state.flat, FLAT_C: state.fc }),
+  ...(state.gaze && state.fz ? { FLAT_ZONE: 1 } : {}),
+});
 const tuned = () =>
   Math.abs(state.sharp - MWSR_DEF.sharp) > 1e-9 ||
   Math.abs(state.tau - MWSR_DEF.tau) > 1e-9 ||
   state.flat !== MWSR_DEF.flat ||
-  (state.flat !== 1 && Math.abs(state.fc - MWSR_DEF.fc) > 1e-9);
+  (state.flat !== 1 && Math.abs(state.fc - MWSR_DEF.fc) > 1e-9) ||
+  state.gaze;
+const zoneText = () =>
+  " · zone " +
+  fr(state.gz.rx, 2) +
+  "×" +
+  fr(state.gz.ry, 2) +
+  " +" +
+  fr(state.gz.ring, 2) +
+  " · τc " +
+  fr(state.gz.tau, 3) +
+  " · nc " +
+  fr(state.gz.sharp, 2) +
+  (state.fz ? " · plat zone" : "");
 const tuningText = () =>
   "netteté " +
   fr(state.sharp, 2) +
@@ -146,7 +191,8 @@ const tuningText = () =>
     ? " · plat Q3"
     : state.flat !== 1
       ? " · plat CR" + state.flat + " C " + fr(state.fc, 2)
-      : "");
+      : "") +
+  (state.gaze ? zoneText() : "");
 const currentCase = () => CASE_BY[state.caseId];
 const sizeOf = (level) => [Math.round((level * 16) / 9), level];
 
@@ -197,6 +243,13 @@ function readState() {
   if (FLAT_CHOICES.some(([n]) => n === fl)) state.flat = fl;
   const fc = parseFloat(q.fc);
   if (fc >= 0 && fc <= 2) state.fc = fc;
+  state.gaze = q.gaze === "1";
+  for (const [id, , [min, max], key] of ZONE_SLIDERS) {
+    const v = parseFloat(q[id]);
+    if (v >= min && v <= max) state.gz[key] = v;
+  }
+  state.rings = q.rings !== "0";
+  state.fz = q.fz === "1";
   state.soft = q.soft === "1";
 }
 
@@ -214,6 +267,12 @@ function writeState() {
   if (state.flat !== 1) {
     p.set("flat", String(state.flat));
     p.set("fc", String(state.fc));
+  }
+  if (state.gaze) {
+    p.set("gaze", "1");
+    for (const [id, , , key] of ZONE_SLIDERS) p.set(id, String(state.gz[key]));
+    if (!state.rings) p.set("rings", "0");
+    if (state.fz) p.set("fz", "1");
   }
   if (state.soft) p.set("soft", "1");
   history.replaceState(null, "", "?" + p.toString());
@@ -444,16 +503,24 @@ const outKey = (algoId) =>
       "|f" +
       state.flat +
       "|c" +
-      state.fc
+      state.fc +
+      (state.gaze
+        ? "|g" +
+          ZONE_SLIDERS.map(([, , , k]) => state.gz[k]).join(",") +
+          (state.fz ? "|z" : "")
+        : "")
     : "");
 
 /** MWSR's settings onto the renderer, before one of its draws: the two
- *  per-draw values, and the flat path's constants (a rebuild of its
- *  pipelines when they change; the renderer skips an unchanged set). */
+ *  per-draw values, the flat path's constants (a rebuild of its pipelines
+ *  when they change; the renderer skips an unchanged set), and the gaze
+ *  zone, its weight pinned to 1: the zone as on a moving picture. */
 function applyTuning(algoId, r) {
   if (algoId !== "mw") return;
   if (r.setMwsrTuning) r.setMwsrTuning(tuning());
   if (r.setMwsrOverrides) r.setMwsrOverrides(overrides());
+  if (r.setMwsrZone) r.setMwsrZone(state.gaze ? { ...state.gz } : null);
+  if (r.setMwsrGaze) r.setMwsrGaze(state.gaze ? 1 : null);
 }
 
 function pixelsOf(bmp, w, h) {
@@ -773,6 +840,18 @@ async function run(g) {
 // fallback without WebGL2, and on ?viewer=2d.
 
 let view = document.getElementById("view");
+// The gaze zone's rings, a 2D canvas over the viewer (under the labels):
+// the green ellipse and the orange one, 1 + ring times it, on every band.
+const rings = document.createElement("canvas");
+rings.id = "rings";
+Object.assign(rings.style, {
+  position: "fixed",
+  inset: "0",
+  width: "100%",
+  height: "100%",
+  pointerEvents: "none",
+});
+view.after(rings);
 const bandsEl = document.getElementById("bands");
 const zoomEl = document.getElementById("zoom");
 const statusEl = document.getElementById("status");
@@ -932,6 +1011,10 @@ function layout() {
     view.width = W;
     view.height = H;
   }
+  if (rings.width !== W || rings.height !== H) {
+    rings.width = W;
+    rings.height = H;
+  }
   const n = Math.max(1, shown().length);
   rects = [];
   for (let i = 0; i < n; i++) {
@@ -1038,6 +1121,48 @@ function requestDraw() {
 function draw() {
   if (gl) drawGl();
   else draw2d();
+  drawRings();
+}
+/** The zone's two ellipses over each band, in the band's own transform. */
+function drawRings() {
+  const c = rings.getContext("2d");
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, W, H);
+  if (!state.gaze || !state.rings) return;
+  const [ow, oh] = outSize();
+  const z = t.zoom;
+  const zn = state.gz;
+  c.lineWidth = Math.max(1.5, 1.5 * dpr);
+  shown().forEach((a, i) => {
+    const rc = rects[i];
+    if (!rc) return;
+    const ox = (state.zone === "same" ? rc.x : 0) + t.x;
+    const oy = (state.zone === "same" ? rc.y : 0) + t.y;
+    const cx = ox + zn.cx * ow * z;
+    const cy = oy + zn.cy * oh * z;
+    c.save();
+    c.beginPath();
+    c.rect(rc.x, rc.y, rc.w, rc.h);
+    c.clip();
+    for (const [k, color] of [
+      [1, "rgba(46, 204, 64, 0.9)"],
+      [1 + zn.ring, "rgba(255, 133, 27, 0.9)"],
+    ]) {
+      c.beginPath();
+      c.ellipse(
+        cx,
+        cy,
+        zn.rx * ow * z * k,
+        zn.ry * oh * z * k,
+        0,
+        0,
+        2 * Math.PI,
+      );
+      c.strokeStyle = color;
+      c.stroke();
+    }
+    c.restore();
+  });
 }
 function drawGl() {
   if (gl.isContextLost()) return;
@@ -1603,6 +1728,9 @@ function buildPanel() {
             state.tau = MWSR_DEF.tau;
             state.flat = MWSR_DEF.flat;
             state.fc = MWSR_DEF.fc;
+            state.gaze = false;
+            state.gz = { ...ZONE_DEF };
+            state.fz = false;
             changed("mwsr");
           },
         },
@@ -1621,6 +1749,81 @@ function buildPanel() {
       "p",
       { class: "note" },
       "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. Chemin plat : ce que rend un quad sous le seuil, l'échantillon bilinéaire, un quadratique de 3 échantillons bilinéaires (Dodgson : bilinéaire à mi-chemin entre deux texels, le lobe C ne s'applique pas) ou un Catmull-Rom de 5 ou 9 (lobe C : 0,5 = Catmull-Rom, plus haut = plus net, plus de sonnerie). La bande MWSR seule est refaite.",
+    ),
+  );
+  // the gaze zone: on or off, its six values, the rings, the flat path in it
+  body.append(el("h3", null, "Zone du regard"));
+  const gazeSel = el("select", {
+    id: "gaze",
+    onchange: () => {
+      state.gaze = gazeSel.value === "1";
+      changed("mwsr");
+    },
+  });
+  gazeSel.append(
+    el("option", { value: "0", selected: !state.gaze }, "non (image fixe)"),
+    el(
+      "option",
+      { value: "1", selected: state.gaze },
+      "oui (comme sur une image en mouvement)",
+    ),
+  );
+  body.append(el("div", { class: "row" }, el("span", null, "zone"), gazeSel));
+  for (const [id, label, range, key, dec] of ZONE_SLIDERS) {
+    const [min, max, step] = range;
+    const val = el(
+      "span",
+      { id: id + "v", class: "val" },
+      fr(state.gz[key], dec),
+    );
+    const input = el("input", {
+      id,
+      type: "range",
+      min,
+      max,
+      step,
+      value: state.gz[key],
+      oninput: () => {
+        val.textContent = fr(parseFloat(input.value), dec);
+      },
+      onchange: () => {
+        state.gz[key] = parseFloat(input.value);
+        changed("mwsr");
+      },
+    });
+    body.append(
+      el("div", { class: "row" }, el("span", null, label), input, val),
+    );
+  }
+  const check = (id, label, key, onchange) =>
+    el(
+      "label",
+      { class: "row" },
+      el("input", {
+        type: "checkbox",
+        id,
+        checked: state[key],
+        onchange: (e) => {
+          state[key] = e.target.checked;
+          onchange();
+        },
+      }),
+      el("span", null, label),
+    );
+  body.append(
+    check("rings", "anneaux dessinés sur les bandes", "rings", () => {
+      writeState();
+      requestDraw();
+    }),
+    check("fz", "chemin plat (CR, Q3) dans la zone seulement", "fz", () =>
+      changed("mwsr"),
+    ),
+  );
+  body.append(
+    el(
+      "p",
+      { class: "note" },
+      "Zone du regard (plan §15.2) : dans l'ellipse verte, le seuil τ et la netteté glissent vers les valeurs « centre » ; sur l'anneau orange, retour progressif (smoothstep) aux valeurs de la table ; dehors, la table. Ici le poids de la zone est tenu à 1 ; dans le produit il suit le mouvement de l'image (taille des images encodées), et reste à 0 sur une image fixe ou un client de bureau.",
     ),
   );
   // the results
@@ -1751,6 +1954,18 @@ function syncPanel() {
   }
   const flatSel = document.getElementById("flat");
   if (flatSel) flatSel.value = String(state.flat);
+  const gazeSel = document.getElementById("gaze");
+  if (gazeSel) gazeSel.value = state.gaze ? "1" : "0";
+  for (const [id, , , key, dec] of ZONE_SLIDERS) {
+    const input = document.getElementById(id);
+    const val = document.getElementById(id + "v");
+    if (input) input.value = state.gz[key];
+    if (val) val.textContent = fr(state.gz[key], dec);
+  }
+  for (const key of ["rings", "fz"]) {
+    const box = document.getElementById(key);
+    if (box) box.checked = state[key];
+  }
   const link = document.getElementById("link");
   if (link) link.value = location.href;
   renderTable();
@@ -1893,10 +2108,12 @@ async function boot() {
       MWSR_DEF.flat = m.MWSR_OVERRIDES.FLAT_TAPS;
       MWSR_DEF.fc = m.MWSR_OVERRIDES.FLAT_C;
     }
+    if (m.MWSR_ZONE) Object.assign(ZONE_DEF, m.MWSR_ZONE);
     state.sharp = MWSR_DEF.sharp;
     state.tau = MWSR_DEF.tau;
     state.flat = MWSR_DEF.flat;
     state.fc = MWSR_DEF.fc;
+    state.gz = { ...ZONE_DEF };
   } catch (e) {
     console.warn("MwsrShader.js :", e);
   }
