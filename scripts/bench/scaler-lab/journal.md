@@ -1345,3 +1345,44 @@ partout ; jumeau WebGL2 contre le noyau : FLIP 0,000, PSNR à 0,027 dB, 0 % de d
 de pixels restant ceux des dérivées, connus), `npm run check` vert, 1717 tests verts. C'est un
 changement du rendu du produit, à dire dans les notes de version ; le comparateur part désormais de 1,5
 et le bouton « Défauts du produit » y ramène. Le verdict de Bruno à l'œil reste attendu.
+
+## 2026-10-23 — J32, C11 option 2 : la réduction du jumeau jugée contre les bilinéaires nus
+
+Décision de Bruno (23/10, par 59) sur la question de J29 : **option 2**, juger l'écart
+`chain-gl-mwsr` / `mwsr` d'une réduction contre l'écart des deux bilinéaires nus des deux API sur les
+mêmes pixels, au lieu de garder la zone plate comme différence connue. Entre-temps la CI de ac6d705b
+(run 39912544431) sortait rouge au pas WebGL2 sur **les trois** réductions 2560×1440 → 1280×720, pas la
+seule zone plate : `code` max 4/255, 0,173 % au-dessus de 2/255 ; `text` max 5/255, 2,80 % (18,6 % de
+pixels différents) ; `zone` max 45/255, 1,01 %.
+
+**La méthode (`p4_flows.py`).** Sur chaque cas de réduction, les deux côtés dumpent aussi leur
+bilinéaire nu : `tex-s1` (la cellule du labo, WebGPU) et `chain-gl-off` (la copie simple du produit,
+WebGL2), un échantillon bilinéaire au centre du pixel de sortie dans les deux cas. Leur écart est
+imprimé (« the samplers' own difference ») et sert de mètre à la paire du jumeau : part de pixels
+au-delà de 2/255 ≤ 4 × la leur, maximum ≤ 2 × le leur, jamais sous la tolérance fixe (0,1 %, 4/255).
+Le 4 : un pixel de la grille 2×2 diffère dès qu'un de ses quatre échantillons diffère ; le 2 : la
+lumière gamma-2 (carré, racine) élargit l'écart d'un échantillon près du noir. Les agrandissements
+restent « reported (derivatives) » et jugés par la qualité ; `ci.yml` ne change pas (mêmes commandes).
+
+**Rejeu de la plateforme du runner (WSL Debian, Chrome stable, SwiftShader, sans GPU, la recette de
+J29), les deux côtés, sortie 0 et 0 :**
+
+| réduction 2560×1440 → 1280×720 | bilinéaires nus (`chain-gl-off` / `tex-s1`) | jumeau (`chain-gl-mwsr` / `mwsr`) | verdict |
+|---|---|---|---|
+| `code` | 2/255, 3,80 % de pixels différents, 0 % au-delà de 2 | 2/255, 3,95 %, 0 % | OK |
+| `text` | 1/255, 4,96 %, 0 % | 1/255, 4,48 %, 0 % | OK |
+| `zone` | **36/255, 1,44 %, 0,854 %** | 45/255, 1,47 %, 1,013 % | OK (≤ 4 × 0,854 %, ≤ 2 × 36) |
+
+La zone plate donne au bit près les chiffres de la CI (45/255, 1,47 %, 1,013 %, 42,5 dB) : c'est bien
+la plateforme, et l'écart du jumeau y est celui des échantillonneurs (36/255 sur 0,85 % pour un seul
+échantillon). `text` et `code` passent ici sous la tolérance fixe (1 à 2/255, 0 %), là où le runner
+voit 5/255 sur 2,8 % : sur le runner, la différence est donc dans l'**entrée** que chaque Chrome
+dessine lui-même (la mire de texte, par Canvas2D : rastérisation CPU d'un côté, ANGLE sur SwiftShader
+de l'autre, un bord de glyphe à quelques 255ᵉ près), pas dans le noyau ; le mètre des bilinéaires la
+porte par construction, puisqu'il voit la même entrée que le jumeau. À vérifier sur le runner au
+prochain push de Bruno ; si `text` y restait hors du mètre, ce serait une vraie différence à lire.
+
+**Côté Windows (SwiftShader, les deux côtés, sortie 0 et 0)** : bilinéaires nus `code` 1/255 (2,12 % de
+pixels différents, 0 % au-delà de 2), `text` 1/255 (4,89 %, 0 %), `zone` 4/255 (0,48 %, 0,011 %) ; le
+jumeau 1/255, 1/255 et 3/255 (0,009 %) : la différence du jumeau est bien celle des échantillonneurs,
+ici comme sous Linux. Qualité du jumeau contre le noyau inchangée (FLIP 0,000, PSNR ≤ 0,027 dB).

@@ -12,6 +12,10 @@ as the kernel cells, are held to the kernel in two ways:
   derivatives, whose quad (coarse) reference row is the implementation's
   choice and differs between the two APIs' window spaces (the first
   conformity run, 21/10/2026), so the twins cannot be identical on an edge;
+  on a reduction the 2/255 is widened to what the two APIs' bare bilinears
+  (`tex-s1`, `chain-gl-off`) differ by on the same pixels, when they differ
+  by more: the samplers' own subtexel precision, which Linux's SwiftShader
+  turns into 36/255 on 1.4 % of the zone plate (Bruno, 23/10/2026);
 - **quality** — on the ground-truth pictures of the quality flow at ×2 (text,
   game, code): PSNR, SSIM, overshoot and FLIP of each twin against the ground
   truth must be the same to the noise (FLIP 0.002, PSNR 0.1 dB, overshoot
@@ -61,6 +65,18 @@ PAIRS = [
     ("chain-gl-mwsr", "mwsr", "mwsr"),
 ]
 GL_CELLS = ["chain-gl-mwsr"]
+# A reduction's yardstick: the two APIs' bare bilinears on the same pixels
+# (the lab's `tex-s1` on WebGPU, the product's plain copy `chain-gl-off` on
+# WebGL2) differ by the samplers' own subtexel precision — 1 to 3/255 on a
+# few pixels with Windows' SwiftShader, 36/255 on 1.4 % of the zone plate
+# with Linux's (J29). The GL twin's reduction is a 2×2 grid of such samples
+# averaged in gamma-2 light, so it is judged against that pair (Bruno,
+# 23/10/2026, option 2 of C11): a grid pixel can differ where any of its four
+# samples does, and the square root widens a sample's difference near black;
+# never below the fixed tolerance above.
+BASE_PAIR = ("chain-gl-off", "tex-s1")
+BASE_SHARE_X = 4
+BASE_WORST_X = 2
 # The quality leg: the ground truth at this size, reduced to the input (×2).
 QUALITY_IN, QUALITY_OUT = "1280x720", "2560x1440"
 QUALITY_CONTENT = ["text", "game", "code"]
@@ -143,11 +159,14 @@ def conformity(a, run_page):
     for content, size_in, size_out in cases():
         down = int(size_out.split("x")[0]) < int(size_in.split("x")[0])
         if gl_side:
-            cells = list(GL_CELLS)
+            cells = list(GL_CELLS) + ([BASE_PAIR[0]] if down else [])
         else:
             cells = sorted({c for p in PAIRS for c in (p[0], p[2] if down else p[1])})
+            if down:
+                # the two bare bilinears, the reduction's yardstick
+                cells += [BASE_PAIR[1], BASE_PAIR[0]]
             if a.swiftshader:
-                cells = [c for c in cells if c not in GL_CELLS]
+                cells = [c for c in cells if not c.startswith("chain-gl-")]
         base = "conf-%s-%s-%s" % (content, size_in, size_out)
         key = "%s %s->%s" % (content, size_in, size_out)
         res = page("in=%s&out=%s&content=%s&codec=none&cells=%s&dump=all%s&nopresent=1&tag=%s" % (
@@ -197,32 +216,60 @@ def conformity(a, run_page):
         down = int(size_out.split("x")[0]) < int(size_in.split("x")[0])
         key = "%s %s->%s" % (content, size_in, size_out)
         base = "conf-%s-%s-%s" % (content, size_in, size_out)
-        for what, up_ref, down_ref in PAIRS:
-            ref = down_ref if down else up_ref
+
+        def diff(what, ref):
+            """(worst, differ, over, psnr) of two dumps; None when one is not
+            there; ("shapes", x, y) when they are not the same size."""
             px, py = dump_path(a, base, what), dump_path(a, base, ref)
             if not (os.path.exists(px) and os.path.exists(py)):
-                pending += 1
-                continue
+                return None
             x, y = metrics.load(px), metrics.load(py)
             if x.shape != y.shape:
-                print("  %-28s %-14s vs %-12s shapes differ %s %s" % (key, what, ref, x.shape, y.shape))
-                bad += 1
-                continue
+                return ("shapes", x.shape, y.shape)
             d = np.abs(np.rint(x * 255.0) - np.rint(y * 255.0))
             worst = int(d.max())
-            differ = float((d > 0).any(axis=-1).mean())
-            over = float((d > CONFORMITY_TOL).any(axis=-1).mean())
-            psnr = metrics.psnr(y, x) if worst else float("inf")
+            return (worst, float((d > 0).any(axis=-1).mean()), float((d > CONFORMITY_TOL).any(axis=-1).mean()),
+                    metrics.psnr(y, x) if worst else float("inf"))
+
+        # the yardstick of a reduction: the two APIs' bare bilinears
+        bil = diff(*BASE_PAIR) if down else None
+        if bil is not None and bil[0] == "shapes":
+            print("  %-28s %-14s vs %-12s shapes differ %s %s" % (key, BASE_PAIR[0], BASE_PAIR[1], bil[1], bil[2]))
+            bad += 1
+            bil = None
+        if bil is not None:
+            rows.append((key, BASE_PAIR[0], BASE_PAIR[1]) + bil + (True, None))
+            print("  %-28s %-14s vs %-12s max %3d/255  differ %6.2f %%  over %6.3f %%  psnr %s  %s" % (
+                key, BASE_PAIR[0], BASE_PAIR[1], bil[0], 100 * bil[1], 100 * bil[2],
+                "exact" if bil[0] == 0 else metrics.fmt(bil[3], 1), "the samplers' own difference"))
+        for what, up_ref, down_ref in PAIRS:
+            ref = down_ref if down else up_ref
+            r = diff(what, ref)
+            if r is None:
+                pending += 1
+                continue
+            if r[0] == "shapes":
+                print("  %-28s %-14s vs %-12s shapes differ %s %s" % (key, what, ref, r[1], r[2]))
+                bad += 1
+                continue
+            worst, differ, over, psnr = r
             # the WebGL2 kernel is held by its quality (below), not by its pixels
             held = not (what == "chain-gl-mwsr" and not down)
-            ok = (over <= CONFORMITY_SHARE and worst <= CONFORMITY_MAX) if held else True
+            share_lim, worst_lim = CONFORMITY_SHARE, CONFORMITY_MAX
+            yard = ""
+            if held and what == "chain-gl-mwsr" and bil is not None:
+                # the GL twin's reduction against the bilinears' own difference
+                share_lim = max(share_lim, BASE_SHARE_X * bil[2])
+                worst_lim = max(worst_lim, BASE_WORST_X * bil[0])
+                yard = " (the bilinears differ by %d/255 on %.3f %%)" % (bil[0], 100 * bil[2])
+            ok = (over <= share_lim and worst <= worst_lim) if held else True
             if not ok:
                 bad += 1
             rows.append((key, what, ref, worst, differ, over, psnr, ok, held))
             print("  %-28s %-14s vs %-12s max %3d/255  differ %6.2f %%  over %6.3f %%  psnr %s  %s" % (
                 key, what, ref, worst, 100 * differ, 100 * over,
                 "exact" if worst == 0 else metrics.fmt(psnr, 1),
-                ("OK" if ok else "OUT OF TOLERANCE") if held else "reported (derivatives)"))
+                (("OK" if ok else "OUT OF TOLERANCE") + yard) if held else "reported (derivatives)"))
     if pending:
         print("  %d pixel pair(s) pending: the other side has not run yet, or not applicable here" % pending)
 
@@ -281,7 +328,8 @@ def conformity(a, run_page):
                     f.write("| %s | `%s` | `%s` | %d | %.2f %% | %.3f %% | %s | %s |\n" % (
                         key, what, ref, worst, 100 * differ, 100 * over,
                         "exact" if worst == 0 else metrics.fmt(psnr, 1),
-                        ("OK" if ok else "**out**") if held else "reported"))
+                        ("OK" if ok else "**out**") if held else
+                        ("the samplers' own difference" if held is None else "reported")))
             if qrows:
                 f.write("\n## Quality against the ground truth (×2)\n\n")
                 f.write("| content | twin | PSNR dB | SSIM | overshoot % | FLIP | ΔFLIP | ΔPSNR | |\n")
