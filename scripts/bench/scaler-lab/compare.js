@@ -162,9 +162,11 @@ function readState() {
     state.api = pick("api");
   const it = parseInt(pick("iters"), 10);
   if (it >= 1 && it <= 100000) state.iters = it;
-  const sh = parseFloat(pick("sharp"));
+  // the sliders come from the link only: a plain /compare starts at the
+  // product's own values, whatever was tried last time
+  const sh = parseFloat(q.sharp);
   if (sh >= 0.1 && sh <= 4) state.sharp = sh;
-  const ta = parseFloat(pick("tau"));
+  const ta = parseFloat(q.tau);
   if (ta >= 0.001 && ta <= 0.5) state.tau = ta;
   state.soft = q.soft === "1";
 }
@@ -194,8 +196,6 @@ function writeState() {
         zone: state.zone,
         api: state.api,
         iters: state.iters,
-        sharp: state.sharp,
-        tau: state.tau,
       }),
     );
   } catch (e) {
