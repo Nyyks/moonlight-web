@@ -2048,6 +2048,18 @@ export class WebGpuRenderer extends VideoRenderer {
     }
 
     /**
+     * The mwsr kernel's per-draw values (MwsrShader's MWSR_UNIFORMS: the
+     * vote threshold `tau`, the sharpness `sharp`), for the laboratory's
+     * side-by-side viewer; the product draws with the defaults. Takes effect
+     * at the next draw.
+     * @param {{tau?: number, sharp?: number}|null} tuning null: the defaults
+     */
+    setMwsrTuning(tuning) {
+        this._mwsrTuning = tuning || null;
+        this._mwsrUniKey = '';
+    }
+
+    /**
      * Switch the upscaler pass at runtime (EnhancerGovernor's ladder). Only the
      * chosen algo's resources are built at create(), so the target's are built
      * on first use and kept — a switch back is then free.
@@ -2581,7 +2593,7 @@ export class WebGpuRenderer extends VideoRenderer {
                     this._device.queue.writeBuffer(
                         this._mwsrUniform,
                         0,
-                        mwsrUniforms(inW, inH, cw, ch),
+                        mwsrUniforms(inW, inH, cw, ch, this._mwsrTuning || {}),
                     );
                 }
                 // Pass 1: mwsr inputTex → canvas.

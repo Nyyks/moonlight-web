@@ -840,6 +840,18 @@ export class WebGlRenderer extends VideoRenderer {
         this._hasOutputSize = true;
     }
 
+    /**
+     * The gl-mwsr kernel's per-draw values (MwsrShader's MWSR_UNIFORMS: the
+     * vote threshold `tau`, the sharpness `sharp`), for the laboratory's
+     * side-by-side viewer; the product draws with the defaults. Takes effect
+     * at the next draw.
+     * @param {{tau?: number, sharp?: number}|null} tuning null: the defaults
+     */
+    setMwsrTuning(tuning) {
+        this._mwsrTuning = tuning || null;
+        this._mwsrUniKey = '';
+    }
+
     _compile(type, src) {
         const gl = this.gl;
         const sh = gl.createShader(type);
@@ -1117,7 +1129,7 @@ export class WebGlRenderer extends VideoRenderer {
                 const uniKey = inW + 'x' + inH + '>' + cw + 'x' + ch;
                 if (this._mwsrUniKey !== uniKey) {
                     this._mwsrUniKey = uniKey;
-                    this._mwsrUni = mwsrUniforms(inW, inH, cw, ch);
+                    this._mwsrUni = mwsrUniforms(inW, inH, cw, ch, this._mwsrTuning || {});
                 }
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, cw, ch);

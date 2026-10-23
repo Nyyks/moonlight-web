@@ -91,8 +91,9 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     R_ACROSS: ['f32', 1.0],
     /** The scale (output / input) from which the kernel is at full strength; 0 at 1:1. */
     S_FULL: ['f32', 1.5],
-    /** The most negative weight of an across tap: the blend's divisor stays >= 1 + 2 W_MIN. */
-    W_MIN: ['f32', -0.3],
+    /** The most negative weight of an across tap: the blend's divisor stays >= 1 + 2 W_MIN
+     *  (0.3 × 1.67 at sharpness 1.67; at the default sharpness 1 the cap is never reached). */
+    W_MIN: ['f32', -0.5],
     /** 1: bound the result by the four input texels around the pixel (four loads, edge path only). */
     DERING: ['u32', 1],
     /** 1: the vote, the coherence and the weights per channel (4:4:4 streams); 0: from the luma, shared by the channels. */
