@@ -1288,3 +1288,52 @@ du temps sur 1000 itérations.
   événement, pour la même raison. Vérifié par le pilote sur SwiftShader : bureau, ajustement puis un
   glisser trop loin de chaque côté, l'arrêt aux valeurs attendues ; émulation 390×844 en bandes
   horizontales, deux glissers vers le bas et la droite, idem.
+
+## 2026-10-23 — J31, la netteté de `mwsr` à l'œil de Bruno : balayage `--quality`, deux curseurs dans le comparateur
+
+**Le constat (iPhone, Safari 26.5, WebGPU, 08:10-08:15).** 1080p → 1440p, 100 images : MWSR
+**3,69 ms** contre FSR1 8,12, SGSR1 5,10, NIS 68,2 (« bien plus rapide que les autres ») ; mais sur le
+texte à ×17, à ×1,33 comme à ×2, « moins sharp que FSR1 et SGSR1, un peu trop flou ». Natif
+(Canvas2D) y mettait 435 ms par image : Safari dessinait la `VideoFrame` faite de pixels par le CPU ;
+le comparateur dessine maintenant le canvas du niveau (543c5cd5), 300 images par défaut.
+
+**Le levier.** La netteté est l'uniforme `sharp` (× `W_ACROSS` 0,3), bornée par `W_MIN` −0,3 : à
+netteté 1 la borne n'était jamais atteinte, et toute netteté > 1 n'agissait que sur les contours peu
+cohérents (a < 1). `W_MIN` passe à **−0,5** (71b7cebc ; pixels identiques à netteté 1, golden OK),
+`setMwsrTuning({tau, sharp})` sur les deux renderers (jamais appelé par le produit), et deux curseurs
+dans `compare.html` (netteté 0,5-2, τ 0,01-0,1 ; l'état dans le lien). À ×1,33 la force vaut 0,667
+(`S_FULL` 1,5) : la netteté 1,5 y donne les poids de la table à ×2.
+
+**Balayage** (SwiftShader, `--quality`, `text` / `game` / étalon, ×2 = 1280×720 → 1440p et ×1,33 =
+1080p → 1440p ; PSNR / SSIM / FLIP, l'étalon au tiers central pour PSNR et SSIM ; « ac » = pente moyenne
+de la luma sur les contours de la vérité terrain, rapportée à la sienne, 1 = aussi raide ; dépassements
+0 % pour toutes les variantes `mwsr`, `DERING` oblige) :
+
+| variante | `text` ×2 | `game` ×2 | étalon ×2 | `text` ×1,33 | `game` ×1,33 | étalon ×1,33 |
+|---|---|---|---|---|---|---|
+| FSR1 | 17,57 / 0,845 / 0,068 · ac 0,55 · dép. 0,3 % | 35,55 / 0,887 / 0,017 · 0,88 | 32,26 / 0,940 / 0,045 · 0,58 · dép. 2 % | 21,45 / 0,942 / 0,042 · 0,77 | 37,92 / 0,933 / 0,013 · 1,00 | 35,94 / 0,976 / 0,035 · 0,82 · dép. 5 % |
+| SGSR1 | 18,13 / 0,869 / 0,067 · 0,66 · dép. 4,4 % | 35,61 / 0,883 / 0,018 · 0,96 | 31,28 / 0,930 / 0,052 · 0,62 · dép. 6,8 % | 21,64 / 0,946 / 0,050 · 0,86 · dép. 2,7 % | 37,70 / 0,925 / 0,014 · 1,04 | 34,55 / 0,970 / 0,040 · 0,87 · dép. 5 % |
+| `mwsr`, netteté 1 (table) | 17,41 / 0,842 / 0,071 · 0,51 | 35,84 / 0,882 / 0,019 · 0,88 | 31,95 / 0,934 / 0,051 · 0,53 | 21,50 / 0,942 / 0,047 · 0,74 | 37,99 / 0,920 / 0,012 · 0,96 | 36,76 / 0,979 / 0,038 · 0,73 |
+| netteté 1,25 | 17,44 / 0,844 / 0,072 · 0,52 | 35,84 / 0,882 / 0,019 · 0,91 | 31,53 / 0,931 / 0,054 · 0,55 | 21,65 / 0,945 / 0,047 · 0,76 | 38,09 / 0,920 / 0,013 · 0,97 | 36,40 / 0,978 / 0,039 · 0,75 |
+| **netteté 1,5** | 17,43 / 0,844 / 0,075 · 0,53 | 35,66 / 0,882 / 0,020 · 0,94 | 30,93 / 0,927 / 0,057 · 0,57 | **21,76 / 0,948 / 0,047 · 0,77** | **38,13 / 0,920 / 0,013 · 0,99** | 35,84 / 0,976 / 0,040 · 0,76 |
+| netteté 1,75 | 17,39 / 0,843 / 0,079 · 0,54 | 35,39 / 0,881 / 0,020 · 0,96 | 30,26 / 0,921 / 0,059 · 0,58 | 21,82 / 0,949 / 0,049 · 0,78 | 38,10 / 0,920 / 0,013 · 1,01 | 35,12 / 0,974 / 0,042 · 0,77 |
+| netteté 2 | 17,34 / 0,842 / 0,082 · 0,54 | 35,33 / 0,881 / 0,020 · 0,96 | 29,97 / 0,918 / 0,060 · 0,58 | 21,81 / 0,950 / 0,052 · 0,79 | 38,00 / 0,920 / 0,013 · 1,02 | 34,29 / 0,971 / 0,043 · 0,78 |
+| 1,5 + `S_FULL` 1,25 | — | — | — | 21,77 / 0,950 / 0,053 · 0,79 | 37,96 / 0,920 / 0,013 · 1,02 | 33,96 / 0,970 / 0,044 · 0,78 |
+| 1,5 + τ 0,03 | 17,43 / 0,844 / 0,075 (36 % des pixels au noyau, contre 35) | 35,67 / 0,882 / 0,020 (2,7 % contre 2,0) | 30,91 / 0,927 / 0,057 (40 % contre 29) | 21,77 / 0,948 / 0,047 | 38,16 / 0,921 / 0,013 (8,2 % contre 1,6) | 35,84 / 0,977 / 0,040 (37 % contre 28) |
+| 1,5 + `R_ACROSS` 1,25 | 17,44 / 0,846 / 0,080 · 0,53 | 36,02 / 0,882 / 0,019 · 0,95 | 30,81 / 0,925 / 0,056 · 0,57 | — | — | — |
+
+**Lecture.** La netteté 1,5 amène le texte à l'acuité de FSR1 à ×1,33 (0,77 = 0,77) avec un meilleur
+PSNR et un meilleur SSIM que lui (21,76 / 0,948 contre 21,45 / 0,942), le même FLIP qu'à 1, et
+`game` au niveau de FSR1 (0,99 contre 1,00) avec le meilleur PSNR de la table ; à ×2 elle reste à 0,015
+de FSR1 sur le texte, le dépasse sur `game`. Son prix, c'est l'étalon (une scène douce, où FSR1 tire
+sa netteté de 2 à 5 % de dépassements, des halos) : −1 dB au centre à ×2 et −0,9 dB à ×1,33 par
+rapport à la table, mais toujours **au-dessus de FSR1 à ×1,33** (35,84 contre 35,94 au centre, FLIP
+0,040 contre 0,035) ; à ×2 le critère C3 déborde de peu (FLIP 0,057 contre 0,055 admis, SSIM −0,0065
+contre −0,005), avec 0 % de dépassements contre 2 % pour FSR1. 1,25 tient C3 partout mais ne change
+presque rien à l'œil (acuité +0,02) ; 1,75 et 2 sortent de C3 sur le texte à ×2 (FLIP 0,079-0,082).
+`S_FULL` 1,25 (force pleine à ×1,33) : −2,8 dB au centre de l'étalon, rejeté ; τ 0,03 : rien aux
+chiffres pour cinq fois plus de pixels au noyau sur `game` à ×1,33, rejeté ; `R_ACROSS` 1,25 : +0,36 dB
+sur `game` mais le FLIP du texte à 0,080, à revoir seulement si Bruno trouve 1,5 insuffisant.
+**Proposition : netteté 1,5 par défaut** (une constante, `MWSR_UNIFORMS.sharp`), à appliquer après le
+signal de 59 (un banc C4 sert l'arbre de travail), golden à refaire ; l'œil de Bruno tranche, par les
+curseurs du comparateur (1 / 1,25 / 1,5 / 1,75 sur l'iPhone, bande contre bande).

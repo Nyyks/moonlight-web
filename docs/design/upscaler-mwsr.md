@@ -1597,3 +1597,49 @@ renderers (comme P4), une campagne allégée (780M, M1, iPhone) et l'A/B de Brun
 débit : trois à quatre sessions, effort `xhigh`. Attendu honnête : un gain de stabilité mesurable sur
 les panoramiques lents et les faibles débits, un gain de résolution nul ; si l'étude dit autrement,
 tant mieux, c'est pour cela qu'on mesure.
+
+## 15. Deux idées de Bruno du 23/10/2026 : les aplats, et les zones du regard
+
+Contexte : le comparateur côte à côte (§6.1, point 4) sur l'iPhone, 1080p → 1440p : `mwsr` 3,7 ms par
+image contre FSR1 8,1, SGSR1 5,1, NIS 68 ; « bien plus rapide », mais « moins sharp que FSR1 et
+SGSR1 ». Le réglage de netteté est au journal J31 (netteté 1,5 proposée, curseurs dans le comparateur).
+Bruno propose deux pistes, « en tant que paramètres ».
+
+### 15.1 Les grandes surfaces monochromes : le mécanisme existe, c'est le vote
+
+« Sur les grandes surfaces monochromes, pas besoin du même niveau, la différence ne se verra pas. »
+C'est exactement le chemin plat du noyau (§3.2) : un quad dont la pente de luma par texel d'entrée est
+sous `τ` (0,05) rend son échantillon bilinéaire et s'arrête, une instruction texture et une dizaine
+d'opérations ; seuls les quads de contour paient les cinq échantillons. Parts mesurées de pixels sur
+le chemin contour (`mwsr:show=1`, J31) : `game` 1,6 à 2 %, l'étalon 28 à 29 %, `text` 26 à 35 % à
+`τ 0,05` ; à `τ 0,03` : `game` 2,7 à 8,2 %, l'étalon 37 à 40 %. Sur une image de jeu, 98 % des pixels
+prennent donc déjà le chemin le moins cher qui existe (la passe et un échantillon, le plancher du
+§3.1) ; un aplat ne coûte rien de plus que le bilinéaire. Le paramètre, c'est `τ`, désormais un curseur
+du comparateur ; entre 0,02 et 0,05 il ne change rien aux chiffres (J2, J31), 0,05 reste.
+
+### 15.2 Les zones du regard : un bonus au centre plutôt qu'une économie au bord
+
+L'image de Bruno : un anneau vert au centre (environ 40 % de la largeur, presque toute la hauteur), un
+anneau orange autour (environ 70 % de la largeur), le reste « doit rester lisible », sans transition
+qui se sente. Deux lectures, et les chiffres tranchent :
+
+- **Économiser au bord.** Comme 98 % des pixels d'une image de jeu sont déjà sur le chemin plat, il n'y
+  a rien à économiser au bord : au mieux 2 % de la passe. Sur du texte dense (26 à 40 % de pixels au
+  noyau) l'économie serait de quelques pour cent de la passe, et la périphérie, c'est là que vivent
+  les ATH : le compteur de munitions, la vie, la mini-carte de l'image de Bruno. Les y rendre moins
+  nets se verrait au moment où on les lit.
+- **Dépenser plus au centre.** C'est la lecture utile : à coût égal, le centre peut recevoir ce que la
+  table refuse à l'image entière, par exemple `τ 0,02` et une netteté plus haute dans l'anneau vert
+  (les chiffres de J31 disent que la netteté 1,5 à 1,75 gagne sur le texte et le jeu et coûte sur les
+  scènes douces : au centre, où l'œil est, le gain ; au bord, la table). Le temps ne bouge presque pas
+  (sur `game`, `τ 0,02` au centre ≈ +3 % de pixels au noyau).
+
+**Les paramètres, si on l'essaie** : une pondération `z(x, y)` de la position du pixel de sortie, 1
+dans l'ellipse verte, descendant par `smoothstep` sur la largeur de l'anneau orange jusqu'à 0 dehors ;
+`τ' = mix(τ_bord, τ_centre, z)` et `netteté' = mix(n_bord, n_centre, z)` : les deux continues, donc
+aucune frontière visible, et six uniformes (centre et rayons de l'ellipse, largeur de l'anneau,
+`τ_centre`, `n_centre`), la table du §3.2 restant les valeurs de bord. Coût sur le chemin plat : un
+produit scalaire et un `smoothstep`, à mesurer (le plancher est sensible à tout). **Chemin** : d'abord
+les curseurs dans le comparateur (une superposition des anneaux, le tiers central déjà mesuré à part par
+`metrics.py`), SwiftShader puis le RTX, l'œil de Bruno sur l'iPhone ; une session, effort `medium`,
+après son verdict sur la netteté 1,5 (J31). Rien dans le produit avant.

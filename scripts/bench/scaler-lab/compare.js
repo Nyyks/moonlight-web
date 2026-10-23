@@ -16,6 +16,9 @@
 //   api=auto|webgpu|webgl  the shader renderers' API; auto is the product's
 //                      choice (plan §9, 22/10/2026): WebGL2, WebGPU on iOS
 //   iters=300          draws per algorithm for the time
+//   sharp=1, tau=0.05  MWSR's per-draw values (MwsrShader's MWSR_UNIFORMS):
+//                      the sharpness (× W_ACROSS) and the edge vote's
+//                      threshold; the defaults are the product's
 //   soft=1             the WebGPU fallback adapter (SwiftShader), for a test
 //   viewer=2d          the bands drawn by Canvas2D drawImage, not WebGL2 (a test)
 //
@@ -83,6 +86,12 @@ const RENDERER_URLS = {
   webgpu: "/frontend/js/stream/renderers/WebGpuRenderer.js",
   webgl: "/frontend/js/stream/renderers/WebGlRenderer.js",
 };
+const MWSR_URL = "/frontend/js/stream/renderers/MwsrShader.js";
+// MWSR's per-draw values and their product defaults (read from the module at
+// boot); the panel's two sliders, applied through the renderers' setMwsrTuning.
+const MWSR_DEF = { sharp: 1, tau: 0.05 };
+const SHARP_RANGE = [0.5, 2, 0.05];
+const TAU_RANGE = [0.01, 0.1, 0.005];
 const API_LABEL = { webgpu: "WebGPU", webgl: "WebGL2", canvas2d: "Canvas2D" };
 const DEFAULT_IMAGES = ["/test/test.png", "/test/00_Background.png"];
 const STORE = "mw_compare";
@@ -102,9 +111,17 @@ const state = {
   zone: "same",
   api: "auto",
   iters: 300,
+  sharp: MWSR_DEF.sharp,
+  tau: MWSR_DEF.tau,
   soft: false,
 };
 const shown = () => state.order.filter((a) => state.on.has(a));
+const tuning = () => ({ sharp: state.sharp, tau: state.tau });
+const tuned = () =>
+  Math.abs(state.sharp - MWSR_DEF.sharp) > 1e-9 ||
+  Math.abs(state.tau - MWSR_DEF.tau) > 1e-9;
+const tuningText = () =>
+  "netteté " + fr(state.sharp, 2) + " · τ " + fr(state.tau, 3);
 const currentCase = () => CASE_BY[state.caseId];
 const sizeOf = (level) => [Math.round((level * 16) / 9), level];
 
@@ -145,6 +162,10 @@ function readState() {
     state.api = pick("api");
   const it = parseInt(pick("iters"), 10);
   if (it >= 1 && it <= 100000) state.iters = it;
+  const sh = parseFloat(pick("sharp"));
+  if (sh >= 0.1 && sh <= 4) state.sharp = sh;
+  const ta = parseFloat(pick("tau"));
+  if (ta >= 0.001 && ta <= 0.5) state.tau = ta;
   state.soft = q.soft === "1";
 }
 
@@ -157,6 +178,8 @@ function writeState() {
   p.set("zone", state.zone);
   p.set("api", state.api);
   p.set("iters", String(state.iters));
+  p.set("sharp", String(state.sharp));
+  p.set("tau", String(state.tau));
   if (state.soft) p.set("soft", "1");
   history.replaceState(null, "", "?" + p.toString());
   try {
@@ -171,6 +194,8 @@ function writeState() {
         zone: state.zone,
         api: state.api,
         iters: state.iters,
+        sharp: state.sharp,
+        tau: state.tau,
       }),
     );
   } catch (e) {
@@ -372,7 +397,18 @@ function apiFor(algoId) {
     api = "webgl";
   return api;
 }
-const outKey = (algoId) => state.caseId + "|" + apiFor(algoId) + "|" + algoId;
+const outKey = (algoId) =>
+  state.caseId +
+  "|" +
+  apiFor(algoId) +
+  "|" +
+  algoId +
+  (algoId === "mw" ? "|s" + state.sharp + "|t" + state.tau : "");
+
+/** MWSR's sliders onto the renderer, before one of its draws. */
+function applyTuning(algoId, r) {
+  if (algoId === "mw" && r.setMwsrTuning) r.setMwsrTuning(tuning());
+}
 
 function pixelsOf(bmp, w, h) {
   const cv = scratch.cv;
@@ -432,6 +468,7 @@ async function renderOnce(algoId, c) {
     r = eng.r;
     r.setAlgo(api === "webgpu" ? def.gpu : def.gl);
     r.setOutputSize(outW, outH);
+    applyTuning(algoId, r);
     await r.draw(frame.clone());
     if (r.failed) throw new Error("le renderer a abandonné");
     path = r.lastDraw.path;
@@ -509,6 +546,7 @@ async function timeAlgo(algoId, c, iters, onProgress, alive) {
     r = eng.r;
     r.setAlgo(api === "webgpu" ? def.gpu : def.gl);
     r.setOutputSize(outW, outH);
+    applyTuning(algoId, r);
     draw = () => r.draw(frame.clone());
     if (api === "webgl") sync = () => glDone(r.gl);
   }
@@ -1065,7 +1103,12 @@ function chipHtml(algoId) {
   const key = outKey(algoId);
   const out = outputs.get(key);
   const rs = results.get(key) || {};
-  const head = "<b>" + esc(def.label) + "</b> · " + API_LABEL[apiFor(algoId)];
+  const head =
+    "<b>" +
+    esc(def.label) +
+    "</b> · " +
+    API_LABEL[apiFor(algoId)] +
+    (algoId === "mw" && tuned() ? " · " + esc(tuningText()) : "");
   if (out && out.error)
     return head + '<br><span class="err">' + esc(out.error) + "</span>";
   if (!out) return head + "<br>rendu…";
@@ -1312,6 +1355,9 @@ function changed(what) {
       rs.time = null;
       rs.timeError = null;
     }
+  } else if (what === "mwsr") {
+    // a new key for MWSR: its output and its figures are made again, the
+    // other bands keep theirs
   } else if (what === "redo") {
     for (const a of shown()) {
       const rs = res(outKey(a));
@@ -1457,6 +1503,61 @@ function buildPanel() {
       "Moyenne du temps d'une image, de l'appel du dessin à la fin du travail du GPU (le « done » du labo), après 20 images de chauffe ; en pause pendant les gestes.",
     ),
   );
+  // MWSR's two per-draw values
+  body.append(el("h3", null, "Réglage MWSR"));
+  const slider = (id, label, range, key, dec) => {
+    const [min, max, step] = range;
+    const val = el("span", { id: id + "v", class: "val" }, fr(state[key], dec));
+    const input = el("input", {
+      id,
+      type: "range",
+      min,
+      max,
+      step,
+      value: state[key],
+      oninput: () => {
+        val.textContent = fr(parseFloat(input.value), dec);
+      },
+      onchange: () => {
+        state[key] = parseFloat(input.value);
+        changed("mwsr");
+      },
+    });
+    body.append(
+      el("div", { class: "row" }, el("span", null, label), input, val),
+    );
+  };
+  slider("sharp", "netteté", SHARP_RANGE, "sharp", 2);
+  slider("tau", "seuil τ", TAU_RANGE, "tau", 3);
+  body.append(
+    el(
+      "div",
+      { class: "row" },
+      el(
+        "button",
+        {
+          type: "button",
+          onclick: () => {
+            state.sharp = MWSR_DEF.sharp;
+            state.tau = MWSR_DEF.tau;
+            changed("mwsr");
+          },
+        },
+        "Défauts du produit (" +
+          fr(MWSR_DEF.sharp, 2) +
+          " · " +
+          fr(MWSR_DEF.tau, 3) +
+          ")",
+      ),
+    ),
+  );
+  body.append(
+    el(
+      "p",
+      { class: "note" },
+      "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. La bande MWSR seule est refaite.",
+    ),
+  );
   // the results
   body.append(el("h3", { id: "restitle" }, "Résultats"));
   body.append(el("div", { id: "table" }));
@@ -1573,6 +1674,15 @@ function syncPanel() {
     }[input.name];
     if (v !== undefined) input.checked = input.value === v;
   }
+  for (const [id, key, dec] of [
+    ["sharp", "sharp", 2],
+    ["tau", "tau", 3],
+  ]) {
+    const input = document.getElementById(id);
+    const val = document.getElementById(id + "v");
+    if (input) input.value = state[key];
+    if (val) val.textContent = fr(state[key], dec);
+  }
   const link = document.getElementById("link");
   if (link) link.value = location.href;
   renderTable();
@@ -1605,7 +1715,12 @@ function renderTable() {
       el(
         "tr",
         { title: rs.path || "" },
-        el("td", null, ALGO_BY[a].label),
+        el(
+          "td",
+          null,
+          ALGO_BY[a].label +
+            (a === "mw" && tuned() ? " (" + tuningText() + ")" : ""),
+        ),
         el("td", null, API_LABEL[apiFor(a)]),
         el("td", null, out && out.error ? "—" : m ? fr(m.ssim, 4) : "…"),
         el(
@@ -1701,6 +1816,16 @@ async function loadDefaultSource() {
 }
 
 async function boot() {
+  try {
+    // the product's defaults of MWSR's two values, so that the sliders
+    // start from them and the "defaults" button means the product's
+    const m = await import(MWSR_URL);
+    Object.assign(MWSR_DEF, m.MWSR_UNIFORMS);
+    state.sharp = MWSR_DEF.sharp;
+    state.tau = MWSR_DEF.tau;
+  } catch (e) {
+    console.warn("MwsrShader.js :", e);
+  }
   readState();
   writeState();
   if (state.soft && navigator.gpu) {
