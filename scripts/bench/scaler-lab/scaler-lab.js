@@ -85,13 +85,7 @@ const CELL_SETS = {
   // completion (gl.finish(), as the WebGPU draw() waits for its work), the
   // GPU's own time by EXT_disjoint_timer_query_webgl2 where the browser has
   // it, and the picture.
-  glchain: [
-    "chain-gl-off",
-    "chain-gl-sgsr",
-    "chain-gl-nis",
-    "chain-gl-fsr1",
-    "chain-gl-mwsr",
-  ],
+  glchain: ["chain-gl-off", "chain-gl-sgsr", "chain-gl-nis", "chain-gl-fsr1", "chain-gl-mwsr"],
   // The mwsr kernel (plan §3.2, §4.3): `mwsr[:key=val;key=val…]` sets its
   // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering,
   // c444, rdown, ll), the uniforms (tau, sharp), half=1 (the f16
@@ -105,14 +99,7 @@ const CELL_SETS = {
   // `tex-s1-srgb` is the bilinear floor through the same views.
   mwsr: ["mwsr", "mwsr:dering=0", "mwsr:half=1", "blit+mwsr"],
   // P3: the reduction grids and lights (the mode follows the scale), 4:4:4.
-  p3: [
-    "mwsr",
-    "mwsr:srgb=1",
-    "mwsr:taps=9",
-    "mwsr:ll=2",
-    "mwsr:c444=1",
-    "smooth2d",
-  ],
+  p3: ["mwsr", "mwsr:srgb=1", "mwsr:taps=9", "mwsr:ll=2", "mwsr:c444=1", "smooth2d"],
 };
 
 const VS = /* wgsl */ `
@@ -580,8 +567,7 @@ async function makePicture(kind, w, h, k) {
   } else if (kind === "ui") drawUi(ctx, w, h);
   else if (kind === "game") drawGame(ctx, w, h);
   else if (kind === "zone") drawZone(ctx, w, h);
-  else if (kind === "code" || kind === "codeiso")
-    drawCode(ctx, w, h, kind === "codeiso");
+  else if (kind === "code" || kind === "codeiso") drawCode(ctx, w, h, kind === "codeiso");
   else drawText(ctx, w, h);
   // frame k: a small moving square, so that an encoded clip has P-frames
   // with motion and the artefacts of a real stream (still.html's anim).
@@ -603,11 +589,7 @@ async function makeFrames(pictures, codec, log) {
   // small for the frame ("no encoder"), as the 4K reduction case did.
   const mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
   const codecString =
-    codec === "hevc"
-      ? "hvc1.1.6.L120.B0"
-      : mbs > 22080
-        ? "avc1.640033"
-        : "avc1.640032";
+    codec === "hevc" ? "hvc1.1.6.L120.B0" : mbs > 22080 ? "avc1.640033" : "avc1.640032";
   const chunks = [];
   const encConfig = {
     codec: codecString,
@@ -698,6 +680,7 @@ async function makeFrames(pictures, codec, log) {
   return { frames, info };
 }
 
+
 // ── the WebGL2 side ────────────────────────────────────────────────────────
 
 // RGBA frames straight from the pictures (codec=none): the exact texels of the
@@ -759,8 +742,7 @@ async function readGlQueries(gl, tq, queries) {
   // results arrive a task later at the earliest
   while (performance.now() - t < 3000) {
     await nextTask();
-    if (qs.every((q) => gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)))
-      break;
+    if (qs.every((q) => gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE))) break;
   }
   const disjoint = gl.getParameter(tq.GPU_DISJOINT_EXT);
   const out = queries.map((q) =>
@@ -783,15 +765,10 @@ async function runGlLab(p, log, ctx) {
   const { batch, batches, warm, rounds, pace, period } = ctx;
   const errors = [];
   const bad = cellNames.filter((c) => !c.startsWith("chain-gl-"));
-  if (bad.length)
-    throw new Error("gl=1 runs chain-gl-* cells only, not " + bad.join(","));
+  if (bad.length) throw new Error("gl=1 runs chain-gl-* cells only, not " + bad.join(","));
   const pictures = [];
-  for (let k = 0; k < 12; k++)
-    pictures.push(await makePicture(content, inW, inH, k));
-  const made =
-    codec !== "none"
-      ? await makeFrames(pictures, codec, log)
-      : makeRgbaFrames(pictures);
+  for (let k = 0; k < 12; k++) pictures.push(await makePicture(content, inW, inH, k));
+  const made = codec !== "none" ? await makeFrames(pictures, codec, log) : makeRgbaFrames(pictures);
   const frames = made.frames;
   log("frames: " + JSON.stringify(made.info));
   const { WebGlRenderer } = await import(WEBGL_RENDERER_URL);
@@ -807,11 +784,7 @@ async function runGlLab(p, log, ctx) {
     r.setOutputSize(outW, outH);
     renderers.set(algo, r);
     const dbg = r.gl.getExtension("WEBGL_debug_renderer_info");
-    gpu = String(
-      dbg
-        ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
-        : r.gl.getParameter(r.gl.RENDERER),
-    );
+    gpu = String(dbg ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : r.gl.getParameter(r.gl.RENDERER));
     if (p.soft === "1" && !/swiftshader/i.test(gpu)) {
       r.dispose();
       throw new Error("soft=1 but WebGL2 runs on " + gpu);
@@ -851,9 +824,7 @@ async function runGlLab(p, log, ctx) {
       queries.push(q);
       if (r.passthrough === true) copies++;
     }
-    const gpu = tq
-      ? (await readGlQueries(r.gl, tq, queries)).filter((v) => v !== null)
-      : [];
+    const gpu = tq ? (await readGlQueries(r.gl, tq, queries)).filter((v) => v !== null) : [];
     return { walls, dones, gpu, copies };
   }
   const t0 = performance.now();
@@ -925,13 +896,7 @@ async function runGlLab(p, log, ctx) {
   for (const f of frames) f.close();
   for (const r of renderers.values()) r.dispose();
   return {
-    adapter: {
-      name: "webgl2: " + gpu,
-      vendor: null,
-      architecture: null,
-      device: null,
-      description: gpu,
-    },
+    adapter: { name: "webgl2: " + gpu, vendor: null, architecture: null, device: null, description: gpu },
     features: [],
     timestamps: false,
     format: "canvas",
@@ -1044,34 +1009,16 @@ async function runLabInner(p, log) {
     p.dump === "all"
       ? cellNames.slice() // chain cells too (SDR), see the dump loop
       : p.dump === "base"
-        ? [
-            "tex-s1",
-            "sgsr-repo",
-            "sgsr-src",
-            "nis",
-            "easu",
-            "fsr1",
-            "mwsr",
-          ].filter((c) => cellNames.includes(c))
+        ? ["tex-s1", "sgsr-repo", "sgsr-src", "nis", "easu", "fsr1", "mwsr"].filter(
+            (c) => cellNames.includes(c),
+          )
         : (p.dump || "").split(",").filter(Boolean);
 
   // gl=1: the WebGL2 side alone, in a Chrome without WebGPU (see runGlLab).
   if (p.gl === "1")
     return runGlLab(p, log, {
-      inW,
-      inH,
-      outW,
-      outH,
-      content,
-      codec,
-      cellNames,
-      dumpList,
-      batch,
-      batches,
-      warm,
-      rounds,
-      pace,
-      period,
+      inW, inH, outW, outH, content, codec, cellNames, dumpList,
+      batch, batches, warm, rounds, pace, period,
     });
 
   if (!navigator.gpu) throw new Error("no WebGPU (navigator.gpu)");
@@ -1110,11 +1057,7 @@ async function runLabInner(p, log) {
       throw new Error("soft=1 but the WebGPU adapter is " + adapterName);
     const gl = cellNames.filter((c) => c.startsWith("chain-gl-"));
     if (gl.length)
-      throw new Error(
-        "soft=1: " +
-          gl.join(",") +
-          " run in the --webgl-swiftshader Chrome (gl=1)",
-      );
+      throw new Error("soft=1: " + gl.join(",") + " run in the --webgl-swiftshader Chrome (gl=1)");
   }
   log(
     `adapter: ${adapterName} | timestamps ${hasTs} f16 ${hasF16} | features ${features.join(" ")}`,
@@ -1137,9 +1080,7 @@ async function runLabInner(p, log) {
     if (!r.ok) throw new Error(content + ": " + r.status);
     halfData = new Uint16Array(await r.arrayBuffer());
     if (halfData.length !== inW * inH * 4)
-      throw new Error(
-        `${content}: ${halfData.length} halves, not ${inW}x${inH}x4`,
-      );
+      throw new Error(`${content}: ${halfData.length} halves, not ${inW}x${inH}x4`);
     if (!hdr) throw new Error("an f16 picture needs hdr=1");
   } else {
     for (let k = 0; k < F; k++)
@@ -1517,9 +1458,7 @@ async function runLabInner(p, log) {
       else throw new Error(name + ": option " + k + "?");
     }
     if (half && !device.features.has("shader-f16"))
-      throw new Error(
-        name + ": the device has no shader-f16 (f16=1 asks for it)",
-      );
+      throw new Error(name + ": the device has no shader-f16 (f16=1 asks for it)");
     if (srgb) {
       if (!srgbViews || feed === "ext" || srcView !== inView)
         throw new Error(name + ": srgb=1 reads the SDR input texture only");
@@ -1605,8 +1544,7 @@ async function runLabInner(p, log) {
         feed: "cpu",
         passes: [],
         run: async () => {
-          if (!pictures.length)
-            throw new Error("smooth2d: no canvas picture (hdr)");
+          if (!pictures.length) throw new Error("smooth2d: no canvas picture (hdr)");
           const cv = new OffscreenCanvas(outW, outH);
           const ctx = cv.getContext("2d", { alpha: false });
           ctx.imageSmoothingEnabled = true;
@@ -1762,11 +1700,7 @@ async function runLabInner(p, log) {
     let gpu = "";
     if (r.gl) {
       const dbg = r.gl.getExtension("WEBGL_debug_renderer_info");
-      gpu =
-        " on " +
-        (dbg
-          ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
-          : r.gl.getParameter(r.gl.RENDERER));
+      gpu = " on " + (dbg ? r.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : r.gl.getParameter(r.gl.RENDERER));
       if (p.soft === "1" && !/swiftshader/i.test(gpu))
         throw new Error("soft=1 but WebGL2 runs" + gpu);
     }
@@ -1838,10 +1772,7 @@ async function runLabInner(p, log) {
     const lost = /\+lost$/.test((r.lastDraw && r.lastDraw.path) || "");
     if (r.failed || lost)
       throw new Error(
-        cell.name +
-          ": no frame reached the renderer's canvas (" +
-          (r.failed ? "it gave up" : "no way in") +
-          ")",
+        cell.name + ": no frame reached the renderer's canvas (" + (r.failed ? "it gave up" : "no way in") + ")",
       );
     if (tq) {
       // the WebGL2 renderer's GPU time per draw, as one pass each
@@ -1877,9 +1808,7 @@ async function runLabInner(p, log) {
       const bmp = r.canvas.transferToImageBitmap();
       try {
         if (bmp.width !== outW || bmp.height !== outH)
-          throw new Error(
-            cell.name + ": canvas " + bmp.width + "x" + bmp.height,
-          );
+          throw new Error(cell.name + ": canvas " + bmp.width + "x" + bmp.height);
         device.queue.copyExternalImageToTexture(
           { source: bmp },
           { texture: outTex },
@@ -1903,8 +1832,7 @@ async function runLabInner(p, log) {
       cap = HOOK.capture;
       HOOK.capture = null;
     }
-    if (!cap.texture)
-      throw new Error(cell.name + ": the renderer drew no canvas texture");
+    if (!cap.texture) throw new Error(cell.name + ": the renderer drew no canvas texture");
     try {
       if (cap.w !== outW || cap.h !== outH)
         throw new Error(cell.name + ": canvas " + cap.w + "x" + cap.h);
@@ -1925,7 +1853,7 @@ async function runLabInner(p, log) {
       buf.unmap();
       buf.destroy();
       // Both canvases take the preferred format; should they differ, swap R and B.
-      const swap = cap.format.startsWith("bgra") !== format.startsWith("bgra");
+      const swap = (cap.format.startsWith("bgra") !== format.startsWith("bgra"));
       if (swap)
         for (let y = 0; y < cap.h; y++)
           for (let o = y * bpr, e = o + cap.w * 4; o < e; o += 4) {
@@ -2147,18 +2075,14 @@ async function runLabInner(p, log) {
   }
   const dumped = [];
   for (const c of cells) {
-    if (!c || !dumpList.includes(c.name) || (c.feed === "chain" && hdr))
-      continue;
+    if (!c || !dumpList.includes(c.name) || (c.feed === "chain" && hdr)) continue;
     try {
       if (c.feed === "chain") await chainToOut(c);
       else await measure(c, 1, false);
       const name = (p.tag || "lab") + "-" + c.name.replace(/[^\w.+-]/g, "_");
       if (hdr) {
         const bytes = await readHalf(device, outTex, outW, outH);
-        await postBlob(
-          "/__bin?name=" + encodeURIComponent(name),
-          new Blob([bytes]),
-        );
+        await postBlob("/__bin?name=" + encodeURIComponent(name), new Blob([bytes]));
       } else {
         const blob = await readPng(device, outTex, format, 0, 0, outW, outH);
         await postBlob("/__png?name=" + encodeURIComponent(name), blob);
@@ -2251,8 +2175,7 @@ async function readHalf(device, tex, cw, ch) {
   await buf.mapAsync(GPUMapMode.READ);
   const a = new Uint8Array(buf.getMappedRange());
   const out = new Uint8Array(cw * ch * 8);
-  for (let r = 0; r < ch; r++)
-    out.set(a.subarray(r * bpr, r * bpr + cw * 8), r * cw * 8);
+  for (let r = 0; r < ch; r++) out.set(a.subarray(r * bpr, r * bpr + cw * 8), r * cw * 8);
   buf.unmap();
   buf.destroy();
   return out;
@@ -2340,24 +2263,15 @@ function installHooks(adapterOpts) {
   const origImport = GPUDevice.prototype.importExternalTexture;
   GPUDevice.prototype.importExternalTexture = function (d) {
     if (HOOK.importFail >= 1 && this !== HOOK.labDevice)
-      throw new DOMException(
-        "Failed to import texture from video (lab importfail=1)",
-        "OperationError",
-      );
+      throw new DOMException("Failed to import texture from video (lab importfail=1)", "OperationError");
     return origImport.call(this, d);
   };
   // importfail=2: their copies of an ImageBitmap too (the lab's own queue
   // copies pictures in, and keeps doing so).
   const origCopyExt = GPUQueue.prototype.copyExternalImageToTexture;
   GPUQueue.prototype.copyExternalImageToTexture = function (src, dst, size) {
-    if (
-      HOOK.importFail >= 2 &&
-      (!HOOK.labDevice || this !== HOOK.labDevice.queue)
-    )
-      throw new DOMException(
-        "Failed to copy content from external image (lab importfail=2)",
-        "OperationError",
-      );
+    if (HOOK.importFail >= 2 && (!HOOK.labDevice || this !== HOOK.labDevice.queue))
+      throw new DOMException("Failed to copy content from external image (lab importfail=2)", "OperationError");
     return origCopyExt.call(this, src, dst, size);
   };
   // importfail=3: and a VideoFrame read back in another format (the lab never
@@ -2365,12 +2279,7 @@ function installHooks(adapterOpts) {
   const origCopyTo = VideoFrame.prototype.copyTo;
   VideoFrame.prototype.copyTo = function (dst, opts) {
     if (HOOK.importFail >= 3 && opts && opts.format)
-      return Promise.reject(
-        new DOMException(
-          "copyTo refused (lab importfail=3)",
-          "NotSupportedError",
-        ),
-      );
+      return Promise.reject(new DOMException("copyTo refused (lab importfail=3)", "NotSupportedError"));
     return origCopyTo.call(this, dst, opts);
   };
   const origDev = GPUAdapter.prototype.requestDevice;
@@ -2400,13 +2309,7 @@ function installHooks(adapterOpts) {
     if (!cap || !this.__cfg) return origCur.call(this);
     const w = this.canvas.width;
     const h = this.canvas.height;
-    if (
-      !cap.texture ||
-      cap.ctx !== this ||
-      cap.device !== this.__cfg.device ||
-      cap.w !== w ||
-      cap.h !== h
-    ) {
+    if (!cap.texture || cap.ctx !== this || cap.device !== this.__cfg.device || cap.w !== w || cap.h !== h) {
       if (cap.texture) cap.texture.destroy();
       cap.ctx = this;
       cap.w = w;
