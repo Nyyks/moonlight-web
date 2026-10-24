@@ -1905,3 +1905,91 @@ affûtage borné du chemin plat (masque flou sur les quatre texels, borné par e
 reçoit les deux tailles, et `strength` par `S_FULL` est déjà une loi d'échelle dans le noyau. Étude au labo
 (`--quality`, FLIP, 720p → 1440p et 1080p → 1440p, SwiftShader puis RTX et 780M), puis l'œil de Bruno sur l'iPhone et
 le PC ; les deux autres voies de J37 restent (FSR1 au-delà de ×1,6 par le gouverneur, ou accepter).
+
+## 2026-10-24 — J39, la netteté selon l'échelle : la loi ×2 en paramètres, le levier est l'uniforme
+
+**Le go de Bruno (12:25) : « étude de la netteté selon l'échelle ».** L'hypothèse de J38 : à ×2 la netteté sature
+sur `W_MIN` et le chemin plat n'affûte pas ; faire suivre l'échelle à `W_MIN` et `R_ACROSS`, affûter le plat.
+
+**Fait (12:30-12:45) : la loi ×2 en paramètres du noyau, dans les deux jumeaux.** Un poids `x2 = clamp((s −
+S_FULL) / (S_X2 − S_FULL))`, 0 jusqu'à ×1,5 et 1 dès `S_X2` (2,0), et cinq constantes qu'il fait entrer :
+`X2_BASE` (le chemin de contour part de l'image du chemin plat, CR5 ou Q3, au lieu de l'échantillon bilinéaire, ce
+qu'une texture perd quand sa cohérence l'envoie au contour), `X2_COH` (un plancher sous la cohérence de la paire en
+travers : la texture affûtée d'au moins autant), `X2_FLAT` (masque flou sur le chemin plat : la crête en travers du
+gradient à `R_ACROSS`, retirée puis bornée par les quatre texels), `X2_R_ACROSS` et `X2_W_MIN` (les valeurs au plein
+poids, par une différence de constantes, pas un `mix` : exact aux défauts). Toutes neutres par défaut, prouvé :
+`--golden-check` au pixel, conformité WebGL2 OK (FLIP 0,000-0,001, ≤ 0,055 dB). La borne par les texels devient une
+fonction (`texelBound`) des deux côtés. Clés du labo `sx2`, `x2base`, `x2flat`, `x2racross` (et `x2coh`, `x2wmin`,
+retirées plus bas) ; 16 tests, `npm run check`.
+
+**Balayage 1 (SwiftShader, `--quality`, ×2 = 1280×720 → 1440p ; parts du chemin de contour : `text` 35 %, `game`
+2 %, étalon 29 % ; PSNR / SSIM / FLIP, l'étalon entier / centre / FLIP ; dépassements 0 % partout) :**
+
+| ×2 | `text` | `game` | étalon |
+|---|---|---|---|
+| FSR1 | 17,57 / 0,845 / 0,068 | 35,55 / 0,887 / 0,017 | 20,79 / 32,26 / 0,045 (dép. 2 %) |
+| `mwsr` (CR5, texels seuls, netteté 1,85 : le produit) | 17,78 / 0,864 / 0,079 | 34,92 / 0,883 / 0,020 | 20,27 / 28,79 / 0,067 |
+| `X2_BASE` 1 | 17,92 / 0,870 / 0,079 | 34,82 / 0,883 / 0,020 | 20,24 / 28,64 / 0,068 |
+| `X2_COH` 0,3 ; 0,5 | = ; = | = ; = | = ; = |
+| `X2_COH` 0,7 | 17,73 / 0,864 / 0,080 | 34,91 / 0,883 / 0,020 | 20,25 / 28,72 / 0,067 |
+| `X2_FLAT` 0,25 | 17,79 / 0,865 / 0,079 | 34,95 / **0,888** / 0,020 | 20,25 / 28,79 / 0,070 |
+| `X2_FLAT` 0,5 ; 1 | 17,79 / 0,865 / 0,079 | 34,92 / 0,888 / 0,020 ; 34,85 / 0,887 / 0,022 | 20,23 / 28,70 / 0,073 ; 20,21 / 28,58 / 0,075 |
+| `X2_R_ACROSS` 0,75 | 17,05 / 0,838 / 0,092 | 34,53 / 0,883 / 0,020 | 20,36 / **29,50** / 0,064 |
+| `X2_R_ACROSS` 1,25 | 17,84 / **0,875** / 0,082 | **35,25** / 0,883 / 0,020 | 20,18 / 28,08 / 0,069 |
+| `X2_W_MIN` −0,6 ; −0,75 | 17,78 / 0,865 / 0,080 | 34,81 / 0,883 / 0,020 | 20,25 / 28,62 / 0,067 |
+| `X2_BASE` + `X2_FLAT` 0,5 | 17,93 / 0,870 / 0,079 | 34,81 / 0,888 / 0,020 | 20,20 / 28,55 / 0,074 |
+
+**Lecture.** L'hypothèse de J38 tombe : le plafond `W_MIN` n'est pas le levier (−0,6 et −0,75 rendent les mêmes
+pixels ou pires), un plancher de cohérence non plus (0,3 et 0,5 : pas un pixel ne change ; 0,7 : pire). La raison
+est dans la forme du noyau : l'affûtage en travers est un laplacien à l'échelle du texel (`X1 + X2 − 2C`), nul sur une
+rampe linéaire — il ne raidit pas un contour anticrénelé, il amplifie la courbure à ses deux bouts, puis la borne
+épingle le pixel au texel. Les constantes qui mordent sont celles du contenu : `X2_R_ACROSS` 1,25 sert le texte et
+`game` (+0,33 dB), 0,75 l'étalon (+0,7 dB au centre), aucune valeur commune ; `X2_BASE` gagne +0,14 dB sur le texte
+et perd 0,03-0,10 ailleurs ; `X2_FLAT` 0,25 porte le SSIM de `game` au-dessus de FSR1 (0,888 contre 0,887) pour un
+FLIP partagé. Rien n'explique le « baveux ». À l'œil sur les dumps (étalon à ×2, trois régions ×3) : MWSR n'est pas
+plus flou que FSR1, il est plus dur — la brique du « 03 » et les mèches du prince se font par **paquets épinglés aux
+texels** (des taches, des escaliers), là où EASU dessine des bords propres et RCAS les relève. « Baveux » = le
+rendu empâté de cet épinglage, pas de la douceur.
+
+**Balayage 2 (mêmes conditions, la netteté par l'uniforme et la borne, à défauts égaux par ailleurs) :**
+
+| ×2 | `text` | `game` | étalon |
+|---|---|---|---|
+| `mwsr` netteté 1,85 (le produit) | 17,78 / 0,864 / 0,079 | 34,92 / 0,883 / 0,0198 | 20,27 / 28,79 / 0,0665 |
+| netteté 1,5 | 17,84 / 0,863 / 0,072 | 35,28 / 0,884 / 0,0194 | 20,44 / 30,03 / 0,061 |
+| **netteté 1,25** | 17,82 / 0,860 / **0,068** | 35,49 / 0,884 / 0,0188 | 20,57 / **31,02** / **0,056** |
+| netteté 1 | 17,73 / 0,854 / 0,066 | 35,57 / 0,884 / 0,0182 | 20,68 / 31,84 / 0,051 |
+| `DERING` 1 | 17,38 / 0,844 / 0,079 | 35,39 / 0,884 / 0,0194 | 20,55 / 30,18 / 0,058 |
+| `DERING` 1 + netteté 1,25 | 17,45 / 0,844 / 0,070 | 35,89 / 0,885 / 0,0184 | 20,71 / 31,65 / 0,052 |
+| 1,25 + `X2_FLAT` 0,25 | 17,83 / 0,860 / 0,068 | 35,52 / 0,888 / 0,0185 | 20,54 / 31,01 / 0,059 |
+| 1,25 + `X2_R_ACROSS` 0,75 | 17,33 / 0,842 / 0,074 | 35,18 / 0,883 / 0,0187 | 20,60 / 31,46 / 0,053 |
+| 1,25 + `X2_BASE` | **17,96** / 0,866 / 0,067 | 35,41 / 0,884 / 0,0192 | 20,51 / 30,66 / 0,059 |
+| nu, `DERING` 1, netteté 1 (la table de J8) | 17,41 / 0,842 / 0,071 | 35,84 / 0,882 / 0,0186 | 20,74 / 31,95 / 0,051 |
+| FSR1 | 17,57 / 0,845 / 0,068 | 35,55 / 0,887 / 0,0171 | 20,79 / 32,26 / 0,045 |
+
+**Lecture : le levier est la netteté elle-même.** La force du noyau monte de 0 à 1:1 à 1 dès `S_FULL` (×1,5) : à
+×1,33, où l'œil de Bruno a réglé 1,85, le poids en travers vaut 1,85 × 2/3 = **1,23** ; à ×2 il vaut **1,85**, la
+moitié de plus que ce qu'il a validé, et c'est ce surcroît qui épingle. Revenir à ce poids à ×2 (netteté 1,25) :
+l'étalon au centre 28,8 → 31,0 dB (FSR1 32,3), FLIP 0,067 → 0,056 (0,045), SSIM 0,862 → 0,873 (0,874) ; `game` 34,9 →
+35,5 (35,55), FLIP 0,0198 → 0,0188 ; `text` garde son avance de PSNR et de SSIM sur FSR1 (17,82 / 0,860 contre 17,57 /
+0,845) et son FLIP rejoint celui de FSR1 (0,068 = 0,068). La netteté 1 va plus loin sur l'étalon et `game` mais le
+texte cède (17,73 / 0,854). La borne : `DERING` 1 à ×2 gagne sur `game` et l'étalon mais rend 0,4 dB sur le texte (les
+traits fins de J35) ; les texels seuls restent. Les constantes ×2 avec 1,25 : `X2_BASE` +0,14 dB sur le texte pour
+−0,1 à −0,4 au centre de l'étalon, `X2_FLAT` 0,25 le SSIM de `game` à 0,888 et de l'étalon à 0,875 (FSR1 0,887 /
+0,874) pour un FLIP d'étalon moins bon : des leviers de contenu, gardés en paramètres de labo (et en réglages du
+comparateur : `x2b`, `x2r`, `x2f`), sans proposition de défaut ; `X2_COH` et `X2_W_MIN`, morts, retirés du noyau
+(golden-check et conformité des deux côtés refaits : OK). À ×1,33 (1080p → 1440p), vérifié : les trois constantes
+réunies rendent les pixels de `mwsr` au millième (22,23 / 0,957 ; étalon 24,21 / 0,941), `x2` y vaut 0. Au passage,
+à ×1,33 la netteté 1,25 est aussi la préférée des mesures (étalon 24,35 / 0,945, centre 36,33 contre 33,97 à 1,85 et
+35,94 pour FSR1 ; texte 22,10 / 0,952, FLIP 0,045 contre 0,049) : l'œil de Bruno a choisi 1,85 là, c'est son choix.
+
+**Proposition à Bruno : la loi d'échelle sur l'uniforme**, `mwsrSharpness(s) = 1,85 × min(1, force(4/3) / force(s))` :
+1,85 jusqu'à ×1,33, puis le poids en travers tenu à 1,23 (1,85 à ×1,33, 1,54 à ×1,4, 1,23 dès ×1,5 et à toute
+échelle au-delà) — le même mélange qu'à ×1,33 partout où l'on agrandit plus. Écrite, exportée, testée (`MWSR_SHARP_REF_SCALE`
+4/3 ; 17 tests), **pas câblée** : `mwsrUniforms()` garde la constante jusqu'à son oui. Le comparateur reçoit un bouton
+« Netteté de la loi d'échelle (J39) à ce facteur » (le curseur prend 1,23 à 720p → 1440p, 1,85 à 1080p → 1440p) et les
+trois constantes ×2 en réglages. Pour son œil : à 720p → 1440p, la bande MWSR à 1,85 (défaut) contre 1,25 (bouton)
+contre FSR1 ; à 1080p → 1440p rien ne change. Les deux autres voies de J37 restent (FSR1 au-delà de ×1,6 par le
+gouverneur ; accepter). En réduction (< 1) l'uniforme n'est pas lu (la grille n'affûte pas) : une loi y passerait par
+un affûtage après la grille, à étudier seulement s'il le demande. Coût de la loi : nul (une valeur par dessin). Rien
+n'a tourné sur GPU : la qualité se mesure au pixel sur SwiftShader (conformité), le créneau RTX + 780M de 14:15 rendu à 59.

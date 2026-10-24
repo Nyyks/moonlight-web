@@ -1237,8 +1237,12 @@ Elles fixent ce que P6 appliquera sur les résultats de P5 ; rien ne devient dé
 - **Netteté : 1,85 pour tout** (message de Bruno de 11:50, fait à midi, journal J38) ; il veut garder la
   possibilité d'une netteté dynamique selon le facteur d'agrandissement et de réduction : étude proposée au §12.
 - **Borne : les texels seuls**, confirmée (« le résultat est bien meilleur » ; le défaut depuis J37).
-- Reste ouvert : le ×2 (accepter / FSR1 au-delà de ×1,6 par le gouverneur / l'affûtage borné de l'étude du §12 :
-  au comparateur la netteté seule ne mord plus à ×2, 0,875-0,877 de 1,85 à 4, plafond `W_MIN`).
+- Le ×2 : étude faite le 24/10 après-midi (journal J39). Le levier est la netteté elle-même, pas le noyau : à ×2
+  le poids en travers vaut 1,85 (force 1) là où son œil l'a réglé à ×1,33 avec 1,85 × 2/3 = 1,23, et ce surcroît
+  épingle les pixels aux texels (le « baveux » : des paquets, pas du flou). **Proposition : la loi d'échelle
+  `mwsrSharpness`** (1,85 jusqu'à ×1,33, 1,23 dès ×1,5 : le même mélange à toutes les échelles), écrite et testée,
+  pas câblée ; à son œil au comparateur (720p → 1440p, bouton « netteté de la loi d'échelle » contre 1,85 et
+  FSR1) ; les deux autres voies de J37 restent (FSR1 au-delà de ×1,6 par le gouverneur, accepter).
 
 Le défaut du produit était encore `FLAT_TAPS 1` (l'échantillon bilinéaire lui-même) jusqu'au 24/10 à midi : le
 chemin plat par classe d'appareil est fait le jour même (P6, §12 ; journal J38 : dorés et conformité refaits sur
@@ -1447,7 +1451,8 @@ upscalers spatiaux.
 **P6 — Défauts, documentation, release**
 - [ ] Bascule de `auto` par classe d'appareil selon les décisions du 22/10 (§9 : `gl-mwsr` sur PC et Mac, `mwsr` sur iPhone, `gl-mwsr` sur Snapdragon, Mali d'entrée de gamme sans upscaler et présentés par WebGPU), sur les résultats de P5 ; `README.next.md` ; wiki ; notes de release ; mémoires [`medium`]
 - [x] **Fait le 24/10 à midi (journal J38)** : chemin plat par classe d'appareil (décisions du 24/10, §9) : CR5 (`FLAT_TAPS 5`, `FLAT_C 0,5`) sur ordinateur, Q3 (`FLAT_TAPS 3`) sur téléphone et tablette, par les constantes de pipeline des deux jumeaux à la création ; dorés et table de conformité refaits ; SwiftShader puis le RTX et le 780M au go de 59 ; TV Android à mesurer si créneau (optionnel, seul reste) [`high`] ; dorés et conformité refaits sur SwiftShader, RTX et 780M vérifiés au comparateur (0,950 / 25,4 dB partout)
-- [ ] Étude « netteté dynamique selon l'échelle » (Bruno, 24/10, après le ×2 « baveux » ; journal J38) : au-delà de ×1,5, `W_MIN` et `R_ACROSS` suivant l'échelle, affûtage borné du chemin plat (masque flou sur les quatre texels, borné par eux ; nul à ×1,5, plein à ×2 ; en réduction après la grille) ; labo `--quality` FLIP à 720p → 1440p et 1080p → 1440p sur SwiftShader puis RTX et 780M, puis l'œil de Bruno sur l'iPhone et le PC ; à juger contre les deux autres voies de J37 [`max`]
+- [x] **Étude « netteté dynamique selon l'échelle », faite le 24/10 (journal J39)** : la loi ×2 en paramètres du noyau (`S_X2`, `X2_BASE`, `X2_FLAT`, `X2_R_ACROSS`, neutres par défaut, dorés intacts ; plancher de cohérence et plafond `W_MIN` par l'échelle mesurés morts, retirés) ; le levier à ×2 est l'uniforme : netteté 1,25 → étalon centre 28,8 → 31,0 dB, FLIP 0,067 → 0,056 (FSR1 32,3 / 0,045), `game` 34,9 → 35,5, texte au FLIP de FSR1 ; `mwsrSharpness(s)` écrite et testée, pas câblée ; comparateur : bouton de la loi et les trois constantes en réglages (`x2b`, `x2r`, `x2f`)
+- [ ] Loi d'échelle de la netteté (J39) : au oui de Bruno, `mwsrUniforms()` prend `mwsrSharpness(scale)` par défaut (dorés à refaire : les cas ×2 seuls), le curseur du comparateur part de sa valeur ; en réduction, un affûtage après la grille seulement s'il le demande [`low`]
 
 **Hors v0.4.1 — étude optionnelle (§14, proposée le 21/10/2026, à la décision de Bruno)**
 - [ ] P7.0 Mode séquence du labo et expérience décisive de la mémoire temporelle : panoramique sous-pixel des images de référence, arrêt, coupure, passés par la boucle WebCodecs à deux débits ; FLIP et PSNR par image, scintillement, traînée, avec et sans histoire ; porte go/no-go du §14.3 [`high`]
