@@ -57,7 +57,22 @@ for the 2nd floor), its IP in the Freebox app or `fbx.py hosts`.
 
 Windows applies one QoS policy per outbound flow, the most specific: the
 executable's own policy (DSCP only) wins for the stream, the catch-all cap
-takes everything else. The QoS Packet Scheduler must be bound to the
+takes everything else.
+
+The same thing from the native host itself is the bench key
+`hostcap=<Mbit/s>` (`native_tuning` or `MW_NATIVE_TUNING`; trial S2). The
+worker sets "MoonlightWeb stream <pid>" and "MoonlightWeb host cap <pid>"
+when the channels open, and a detached PowerShell removes them when the
+session ends. Only a worker with administrator rights can set them: the one
+the launcher service starts as SYSTEM (the DEV edition installed), not a
+`--dev` on the user's plain token. Its log lines start with `[HostCap]`. To
+check by hand that nothing is left, use `hostup_cap.ps1 -Show` (elevated):
+the next worker would sweep anything left behind.
+
+What the relay logs all along (`35d616d2`): `[HostUpload]` while the host
+sends more than max(8 Mbit/s, 20 % of the stream) besides it, and every
+`[LinkFreeze]` line ends with what it sent around the freeze.
+`hostup_report.py --log` counts both by phase. The QoS Packet Scheduler must be bound to the
 adapter the stream leaves by (`Get-NetAdapterBinding -ComponentID ms_pacer`;
 on DualRTX it is, on `vEthernet (LAN)`). A Hyper-V VM leaves by the physical
 adapter and is not capped.

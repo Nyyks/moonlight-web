@@ -2398,6 +2398,69 @@ the send buffer not draining) is in a `rxbuf=0` arm. The received bitrate sat
 around 6 Mbit/s (the clip asks no more of the VE at this quality), so the
 buffer overflows at a sixth of the cap too.
 
+### 24/10/2026 — The host's own upload freezes the stream, AF41 and all (plan « le stream passe avant un gros envoi du PC hôte »)
+
+**What was seen** (the « Divers » session, 21:36-22:50). Freezes of 2 to 27 s
+on Bruno's corporate MacBook Air M3 (Chrome) and on his iPhone (Safari), both
+on the house Wi-Fi, from DualRTX's DEV (`6e332ce9`) as from production v0.4.0,
+on every ICE path (IPv6 direct, IPv4 on the LAN, the Freebox hairpin). Bruno
+found the cause: **TeraBox uploading from DualRTX itself**, 40 to 125 Mbit/s on
+the `Ethernet` adapter. TeraBox paused: « très fluide »; uploading: « ça lag ».
+The Freebox app shows no rate for DualRTX: it shows rates for Wi-Fi devices
+only.
+
+**The host's log.** Every packet left AF41 (`[PacketMarking] DSCP audio 34,
+video 34, data 34`). The freezes read as a full queue, not losses: for example
+`[LinkFreeze] #2 … 13655 ms, 22:13:12.439 to 22:13:26.094, seen by the video's
+send buffer not draining + the input link silent + the receiver's link reports
+missing; SCTP around it: 0 chunks sent again (0 fast), 0 T3`, and over the
+session 16,675 chunks sent, 15 sent again, a few T3. Of that worker's 52
+episodes, 34 were the known false positive of a report the page itself sent
+~500 ms late.
+
+**Timestamped pings from DualRTX** (`System.Net.NetworkInformation.Ping`
+every 200 ms, no new executable):
+
+| Target | When | Pings | Lost | Median | p95 | Max |
+|---|---|---|---|---|---|---|
+| the M3, during the stream | 22:11:04-22:21:04 | 2,085 | 154, each freeze on a burst of them (22:13:12, 22:14:46, 22:16:27, 22:17:58) | — | — | — |
+| the box 192.168.1.254, no stream, TeraBox uploading | 22:33:11-22:33:41 | 143 | 0 | 12 ms | 122 ms | 240 ms |
+
+The session saw 746 ms to the box in another run. A cable to the box gives
+~1 ms. With no stream at all, the queue is therefore somewhere between the
+bench switch and the box. TeraBox's 125 Mbit/s cannot fill DualRTX's 1 Gbit/s
+adapter.
+
+**Why AF41 does not help here (hypothesis, not measured yet).** The bench
+switch hangs off the repeater `ec:68`. On 06/10 that repeater put every class
+in BE toward its own Wi-Fi clients: on what comes in by its cable, it reads no
+mark. The precedence table (AF41 → VI) was only ever read at the box's own
+access point, behind the Wi-Fi 7 link. The class of the frames on that link,
+repeater → box, was never read. Both flows leave the repeater by its radio:
+TeraBox's upload on the link to the box, the stream to the M3, a client of the
+same repeater on the same channel 44. If they share its BE queue, or its
+airtime, TCP fills it and the stream waits behind. Hypotheses to tell apart:
+- H1, the repeater's radio queue;
+- H2, the airtime of channel 44;
+- H3, a queue inside the host: the Hyper-V switch, the adapter;
+- H4, the M3's own Wi-Fi.
+The probes and the trial plan are in `scripts/bench/hostup/README.md`.
+
+**What was built that night, not measured yet.**
+- `scripts/bench/hostup/` (`1cacbfa8`): pings to several targets at once with
+  the adapter's counters, a marked TCP-handshake "ping" (DF against AF41)
+  without administrator rights, a report by phase, and a hand-made cap (two
+  ActiveStore QoS policies) for a trial with Bruno.
+- The relay's log (`35d616d2`): each `[LinkFreeze]` line ends with what the
+  host sent besides the stream around it, and a `[HostUpload]` line marks such
+  an upload above max(8 Mbit/s, 20 % of the stream) while it lasts. This is the
+  adapter of the route to the client, minus the data channels' bytes × 1.12.
+- `hostcap=<Mbit/s>` (`0a92009a`, a bench key): during a native stream, the
+  worker caps every other upload of the PC with two ActiveStore policies. The
+  executable's own policy names its path, so it wins over the catch-all and
+  keeps the stream uncapped. It needs administrator rights: the launcher
+  service's SYSTEM worker has them.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
@@ -2507,6 +2570,18 @@ What the measurements support, in order of the path:
   port's own box, everything BE (checked from the router's port and from the
   bench switch's box, `ec:68`). The audio road would ride VI, not VO, and a
   Linux or macOS host's SCTP rides BK, but only for a client behind the link.
+- The host's own upload (§3, 24/10). Several things are still unknown:
+  - where the queue sits that TeraBox's upload fills (the repeater's radio
+    queue, the airtime of channel 44, or something in the host);
+  - which class the repeater gives a frame it sends over the Wi-Fi 7 link to
+    the box;
+  - whether a cap on the host's other uploads, below what that link carries,
+    empties the queue for a client of the same repeater;
+  - whether Windows' throttle is one budget for everything a policy matches,
+    or one per connection. Microsoft's « Cable Guy » article says aggregate;
+    TeraBox runs several connections, so it is to be checked;
+  - what rate a product default could take without a link speed to read: a
+    fixed one, or one that follows `[HostUpload]` and the freezes.
 
 ## 7. Knobs (bench keys, off by default unless said)
 
@@ -2533,6 +2608,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `audioframe=5\|10\|20` | the native host's Opus frame in ms (5 the product): half or a quarter of the packets, 5 or 15 ms more before each | `ced222aa` |
 | `aroadpace=<x>`, `aroadwin=<KiB>` | the audio road's pacing and send window (both off by default) | `aea2a192`, `89adcb0f` |
 | `aroadbudget=<%>` | the audio road's resend budget, share of what it sent over 100 ms (default 20) | `210318fd` |
+| `hostcap=<Mbit/s>` | during a native stream, every other upload of the host PC capped (two ActiveStore QoS policies, the executable exempt; Windows, a worker with administrator rights; 24/10, not measured yet) | `0a92009a` |
 
 Environment: `MW_SCTP_RTO_MIN_MS`, `MW_SCTP_SACK_DELAY_MS`;
 `MW_LATENCY_FLAG_SOUND=click|tick` (the server's latency flag also beeps,
