@@ -143,6 +143,12 @@ jamais servi chez nous. Une fois rendu vivant, ASan et UBSan l'ont pris en défa
   la fin de la trame attendait le prochain réveil.
 - **Une connexion ouverte pendant le tour de poll** (TCP actif) faisait lire une case au-delà du
   tableau de `poll()`. Le traitement suit maintenant ce que la préparation a mis dans le tableau.
+- **Socket plein, datagrammes jetés** (24/10) : libjuice gardait un datagramme de côté quand le
+  socket TCP bloquait, et jetait les suivants jusqu'à ce qu'il parte. Sur un long aller-retour,
+  SCTP perdait un datagramme à chaque remplissage et attendait sa retransmission. Ils attendent
+  maintenant dans une file bornée à 256 Ko, cadrés et dans l'ordre, et partent sur POLLOUT.
+  Au-delà, on jette encore, comme l'UDP, plutôt que de laisser grandir un retard que le contrôle
+  de congestion du flux ne voit pas.
 
 Reste, en amont et hors du patch :
 - le parseur STUN lit des `uint32_t` non alignés (UBSan), sans effet sur x86-64 et ARM64 ;
@@ -177,8 +183,33 @@ Reste, en amont et hors du patch :
      connexion en attente aussi ; après `COMPLETED`, l'écoute refuse.
    - Passés sous Windows (MSVC, 10 sur 10) et sous Linux (gcc `-Wall -Wextra`, ASan, UBSan,
      ThreadSanitizer, en série).
-3. **Banc** : une `--dev`, sur un créneau de 59, un Chrome dont l'UDP sortant est bloqué par le
-   pare-feu de sa machine (et non par une stratégie Chrome, qui retire tous les candidats). On
-   attend le tunnel puis le flux en TCP passif, à la place de `noRouteError`.
-4. **Mesure** depuis un réseau qui ne laisse sortir que TCP 443/80. Le partage du 443 vient
-   ensuite, et seulement si cette mesure l'exige.
+3. ✅ **Banc** (23/10, 10:12) : une `--dev`, sur un créneau de 59, un Chrome du WSL dont l'UDP
+   sortant est bloqué par nft (et non par une stratégie Chrome, qui retire tous les candidats). Le
+   tunnel puis le flux passent en TCP passif, à la place de `noRouteError`.
+4. ✅ **Mesure depuis Internet** (23/10, 22:44) : un Chromium dans un conteneur jetable sur la VM de
+   prod, UDP sortant jeté. Trois passes sur trois avec image ; la passe témoin, réglage à false,
+   échoue comme prévu. Le partage du 443 attend un réseau qui l'exige.
+5. **La première visite** (24/10) : sur un profil neuf, le bootstrap télécharge toute l'interface
+   (180 fichiers, 5,1 Mo) par le tunnel. Le temps vient de l'aller-retour, pas du débit : au même
+   banc avec 115 ms ajoutées (le RTT entre la VM et la maison), ce téléchargement prend 26,5 s en
+   TCP et 19,4 s en UDP, contre 0,4 s sur le LAN. Chaque réponse attend un aller-retour avant de
+   démarrer, et les trois plus gros fichiers (`StreamView.js`, `gamepadDb.js`, `app.js`) traînent
+   seuls à la fin. Le TCP coûtait un tiers de plus, parce que libjuice jetait les datagrammes que
+   le socket ne prenait pas encore.
+   - v0.4.1 : une file de 256 Ko dans le patch libjuice (§3.7) ; 12 téléchargements à la fois, les
+     plus gros d'abord, avec les tailles du manifeste (`sizes`, une liste à côté de `files`, pour
+     les bootstraps et les hôtes d'avant). Le nouveau `boot.js` part en prod avec la release.
+   - Mesuré au même banc le 24/10 (profil neuf, +115 ms, 174 fichiers). Le nouveau `boot.js` est
+     substitué par CDP, sans déploiement.
+
+     | Passe | Interface | Image |
+     |---|---|---|
+     | TCP avant | 26,6 s | 37,8 s |
+     | TCP, file seule | 12,1 s | 23,6 s |
+     | TCP, file + `boot.js` | 5,6 s | 16,1 s |
+     | UDP avant | 19,4 s | 27,9 s |
+     | UDP, `boot.js` | 2,8 s | 10,7 s |
+   - v0.4.2 : compresser l'interface dans le tunnel (le JS se réduit d'environ 4 fois). L'hôte
+     compresse chaque réponse, `boot.js` la décompresse (`DecompressionStream`). Il faut un
+     drapeau dans le manifeste, pour qu'un `boot.js` récent sache traiter un hôte ancien et
+     l'inverse.
