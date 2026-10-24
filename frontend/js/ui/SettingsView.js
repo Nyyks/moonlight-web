@@ -688,10 +688,14 @@ export class SettingsView {
         // And at the size and rate the pixel budget leaves of them, since that
         // is what the stream will carry — an estimate for a 1440p120 the
         // launch turns into 1080p120 recommends a bitrate for pixels nobody
-        // ever sends (util/StreamResolution.js).
+        // ever sends (util/StreamResolution.js). A named resolution keeps its
+        // lines there too, and the Auto rate pays.
         const bounded =
             choice.mode === 'auto' || chosen <= 0
-                ? fitPixelBudget({ height: ref.height, aspect }, rate, { clientFps: measuredFps() })
+                ? fitPixelBudget({ height: ref.height, aspect }, rate, {
+                      clientFps: measuredFps(),
+                      resolutionNamed: choice.mode !== 'auto',
+                  })
                 : { size: { height: ref.height, aspect }, fps: rate };
         return this._computeAutoBitrate(
             bounded.size.height,

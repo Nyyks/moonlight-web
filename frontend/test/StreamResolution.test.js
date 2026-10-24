@@ -454,9 +454,9 @@ describe('fitPixelBudget', () => {
         expect(1920 * 1080 * 120).toBeLessThanOrEqual(PIXEL_RATE_BUDGET);
     });
 
-    it('spends the resolution before the frame rate', () => {
-        // 1440p120 on a 4K screen is 442 Mpx/s. The rate is what the viewer
-        // feels, so it stands and the lines come down to 1080.
+    it('spends an Auto resolution before the frame rate', () => {
+        // Auto's 1440p120 on a 4K screen is 442 Mpx/s. The rate is what the
+        // viewer feels, so it stands and the lines come down to 1080.
         const out = fitPixelBudget({ height: 1440, aspect: '2560:1440' }, 120, {
             device: uhd,
             clientFps: 120,
@@ -490,17 +490,40 @@ describe('fitPixelBudget', () => {
         expect(out.fps).toBeGreaterThanOrEqual(60);
     });
 
-    it('weighs a rung whose width still belongs to the Auto ratio', () => {
-        // `fixed` fixes no shape: the rung is weighed at the ratio the caller
-        // knows, and comes back with its width still unstated.
-        const out = fitPixelBudget({ height: 2160, aspect: null }, 120, {
+    it('keeps a resolution the viewer named, and lowers the Auto rate instead', () => {
+        // Issue #38: 2160p picked, the rate on Auto at a 120 Hz screen. The
+        // lines used to come down to 1080 for the 120 to stand; the 2160 is
+        // the viewer's, so the rate pays — to its floor, which 4K is over
+        // anyway.
+        const size = { height: 2160, aspect: null };
+        const out = fitPixelBudget(size, 120, {
             device: uhd,
             clientFps: 120,
             aspect: '16:9',
+            resolutionNamed: true,
         });
         expect(out.capped).toBe(true);
-        expect(out.size.aspect).toBe(null);
-        expect(out.size.height).toBe(1080);
+        expect(out.size).toEqual(size);
+        expect(out.fps).toBe(BUDGET_MIN_FPS);
+    });
+
+    it('weighs a rung whose width still belongs to the Auto ratio', () => {
+        // `fixed` fixes no shape: the rung is weighed at the ratio the caller
+        // knows, and comes back with its width still unstated. 2560×1440
+        // fits at 67, 1920×1440 at 90 — the rate comes down only as far as
+        // the budget asks.
+        const at = (aspect) =>
+            fitPixelBudget({ height: 1440, aspect: null }, 120, {
+                device: uhd,
+                clientFps: 120,
+                aspect,
+                resolutionNamed: true,
+            });
+        const wide = at('16:9');
+        expect(wide.size).toEqual({ height: 1440, aspect: null });
+        expect(wide.fps).toBe(67);
+        expect(2560 * 1440 * wide.fps).toBeLessThanOrEqual(PIXEL_RATE_BUDGET);
+        expect(at('4:3').fps).toBe(90);
     });
 
     it('holds its peace when there is no size to weigh', () => {

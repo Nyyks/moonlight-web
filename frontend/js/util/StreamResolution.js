@@ -59,10 +59,12 @@
  * 120 fps is 442 million pixels a second to capture, scale, encode, send,
  * decode and paint — more than a machine on either end holds for an hour of
  * play. So whenever ONE of the two was left to us (Auto resolution or Auto
- * frame rate), the pair is held under PIXEL_RATE_BUDGET, and the reduction
- * goes to the resolution first (fitPixelBudget): a frame rate is felt on
- * every mouse move, a hundred lines of resolution are not. Neither is ever
- * brought below what the client itself does — BUDGET_MIN_HEIGHT and
+ * frame rate), the pair is held under PIXEL_RATE_BUDGET (fitPixelBudget). An
+ * Auto resolution pays first: a frame rate is felt on every mouse move, a
+ * hundred lines of resolution are not. A resolution the viewer named is not
+ * ours to cut — a 4K rung on a 120 Hz screen streams 4K at 60, not 1080p at
+ * 120 (issue #38) — so there the Auto frame rate alone comes down. Neither is
+ * ever brought below what the client itself does — BUDGET_MIN_HEIGHT and
  * BUDGET_MIN_FPS, or this screen's own when it is under them. Two explicit
  * choices are the viewer's business and are left alone.
  *
@@ -149,10 +151,11 @@ function autoCeiling(tv) {
  *  million of them — the reference this number was read off. */
 export const PIXEL_RATE_BUDGET = 250000000;
 
-/** How far down the budget may push each half. The resolution goes first and
- *  stops at 1080 lines, the frame rate follows and stops at 60 — and neither
- *  moves below what this very screen does, since a stream already smaller
- *  than the screen it lands on has nothing left to give. */
+/** How far down the budget may push each half. An Auto resolution goes first
+ *  and stops at 1080 lines (a named one does not move at all), the frame rate
+ *  follows and stops at 60 — and neither moves below what this very screen
+ *  does, since a stream already smaller than the screen it lands on has
+ *  nothing left to give. */
 export const BUDGET_MIN_HEIGHT = 1080;
 export const BUDGET_MIN_FPS = 60;
 
@@ -465,10 +468,11 @@ function aspectRatio(aspect) {
  * frame rate; a viewer who named both is answered as asked. The resolution
  * goes down first, to whatever fits at the rate asked for, and stops at
  * BUDGET_MIN_HEIGHT (or at this screen's own height, when the screen is under
- * it: there is nothing to gain below what the picture lands on). Only then is
- * the frame rate brought down, the same way, to BUDGET_MIN_FPS. A pair that
- * is still over the budget at both floors is let through — the floors are the
- * promise, the budget is the aim.
+ * it: there is nothing to gain below what the picture lands on) — unless the
+ * viewer named it (`resolutionNamed`), and then it stays exactly as named.
+ * Only then is the frame rate brought down, the same way, to BUDGET_MIN_FPS.
+ * A pair that is still over the budget at both floors is let through — the
+ * floors are the promise, the budget is the aim.
  *
  * The height that comes back is a multiple of eight, so a 4K screen at 120 fps
  * asks for the 1920×1080 that 249 Mpx/s was read off and not the 1924×1082 the
@@ -477,10 +481,11 @@ function aspectRatio(aspect) {
  * @param {{height:number, aspect:string|null}} size resolveStreamSize's answer
  * @param {number} fps the rate this launch asks for; 0 (unknown) counts as 60
  * @param {{device?: {width:number,height:number}|null, clientFps?:number,
- *          aspect?:string|null}} [ctx]
- *        this screen and its rate — the two floors are read off them — and the
+ *          aspect?:string|null, resolutionNamed?:boolean}} [ctx]
+ *        this screen and its rate — the two floors are read off them — the
  *        ratio to assume when the size does not fix one (a `fixed` rung, whose
- *        width belongs to the Auto ratio).
+ *        width belongs to the Auto ratio), and whether the viewer named the
+ *        resolution, which leaves the frame rate alone to pay.
  * @returns {{size:object, fps:number, capped:boolean}}
  */
 export function fitPixelBudget(size, fps, ctx) {
@@ -505,8 +510,9 @@ export function fitPixelBudget(size, fps, ctx) {
     const floorFps = Math.min(BUDGET_MIN_FPS, c.clientFps > 0 ? c.clientFps : BUDGET_MIN_FPS);
 
     // 1. The resolution, down to its floor: h × (h × ratio) × rate ≤ budget.
+    //    A named one is the viewer's and is not ours to spend.
     let h = height;
-    if (h > floorHeight) {
+    if (!c.resolutionNamed && h > floorHeight) {
         const room = Math.floor(Math.sqrt(PIXEL_RATE_BUDGET / (ratio * rate)));
         h = Math.max(floorHeight, Math.min(h, room - (room % 8)));
     }
