@@ -22,9 +22,11 @@
 **Faisable sous une seule forme, et pas celle qu'on imagine d'abord.**
 
 - **B0 mesurée le 24/10/2026 : porte non franchie** (§10.4). Au clic → photon,
-  la page devant Sunshine vaut moonlight-qt à 1 ms près ; l'image perdue par
-  MoonlightWeb (≈ 8 ms, une image à 120 Hz) vient de l'hôte natif, pas du
-  navigateur. Le Booster n'a rien à reprendre sur ce chemin ; B1 ne s'ouvre pas.
+  la page devant Sunshine vaut moonlight-qt à 1 ms près. L'image perdue par
+  MoonlightWeb (≈ 8 ms, une image à 120 Hz) **n'a pas été reproduite** le soir
+  même : elle suivait la phase entre l'écran de l'hôte et celui du client, et
+  l'hôte natif vaut Sunshine sur des passes d'un tour de phase entier. Le
+  Booster n'a rien à reprendre sur ce chemin ; B1 ne s'ouvre pas.
 - **Le Booster ne peut pas rendre ses images à la page sans les copier par la
   mémoire du CPU.** Aucune API web n'importe une surface GPU venue d'un autre
   processus : un `VideoFrame` se construit depuis une image du DOM, un autre
@@ -704,7 +706,28 @@ Ubuntu ; et un moment où il n'est pas devant DualRTX, puisque le drapeau
 couvre DISPLAY5, son écran principal, pendant chaque passe. Le PIN de la
 `--dev` prêtée reste le sien : aucun PIN généré ni effacé sans le dire.
 
-### 10.4 Résultats de B0 (banc du 24/10/2026) — porte non franchie
+### 10.4 Résultats de B0 (banc du 24/10/2026) — porte non franchie, écart de l'hôte non reproduit
+
+> **Non reproduit (24/10/2026 au soir).** L'image perdue par l'hôte natif, lue
+> plus bas, ne tient pas. Deux bancs le soir même, même client, même hôte, la
+> page en 1920×1080 à 120 i/s, HEVC, 40 Mbit/s [C] :
+> - huit passes de 60 clics, en deux manches : hôte natif sans plancher de
+>   cadence, avec un plancher à 30 puis à 120 i/s, et Sunshine. Les marches de
+>   8,3 ms changent d'une manche à l'autre sans suivre l'hôte ; en moyenne,
+>   38,9 ms pour l'hôte natif sans plancher, 38,4 ms pour Sunshine. La marche
+>   suit la phase entre l'écran de DualRTX et celui de l'UM790Pro, qui glisse
+>   d'une image toutes les quatre minutes environ. Le plancher ne déplace rien
+>   de façon stable : l'hypothèse du GPU endormi est réfutée ;
+> - quatre passes de 270 clics, chacune un tour de phase entier, hôte natif et
+>   Sunshine alternés : médianes 33,3 · 33,9 · 33,5 · 34,4 ms ; réunies, sur
+>   540 clics de chaque côté, **33,4 ms pour l'hôte natif, 34,1 ms pour
+>   Sunshine**.
+>
+> L'écart de B0 s'explique ainsi [H] : une passe de 60 clics dure 42 s et tombe
+> sur une seule marche, et les passes B sont tombées sur la marche haute. La
+> porte reste non franchie, pour une raison plus simple : sur ce banc, ni la
+> page ni l'hôte natif ne perdent d'image. Fichiers :
+> `bench-out/photon/lost-*.json` et `phase-*.json` [C].
 
 **Ce qui a tourné.** Client : UM790Pro sous Windows 11 26200, Radeon 780M,
 écran M27Q 2560×1440 à 120 Hz, Ethernet 1 Gbit/s, session de `minis`, son
@@ -755,7 +778,8 @@ première passe), B sur la marche 41-42 ms. moonlight-qt a perdu un clic sur 60
   double du débit de moonlight-qt (40 contre 20 Mbit/s), et 1,2 ms à 60 i/s,
   cette fois à réglages égaux ; bien moins qu'une image. La même page, devant
   le même Sunshine, affiche le clic en même temps que le client natif.
-- Donc **l'image perdue vient de l'hôte, pas de la page** : l'hôte natif
+- Donc **l'image perdue vient de l'hôte, pas de la page** (lecture de
+  l'après-midi, non reproduite, voir l'encadré en tête du §10.4) : l'hôte natif
   MoonlightWeb (DDA + NVENC, `--dev` du 24/10) livre le clic une image après
   Sunshine sur le même GPU et le même écran. C'est le deuxième cas du §10.3 :
   **B0 n'est pas franchie pour le Booster**, et le constat part dans les plans
@@ -768,14 +792,13 @@ première passe), B sur la marche 41-42 ms. moonlight-qt a perdu un clic sur 60
   moonlight-qt à 1 ms près. Un présentateur superposé n'aurait donc rien, ou
   presque, à reprendre sur ce chemin : **B1 ne s'ouvre pas**. Reste l'intérêt
   « codecs » du §9.3, à rejuger à part si Bruno le souhaite.
-- La seule marge mesurée, une image à 120 Hz, est **côté hôte natif**, entre
-  sa capture-encodage et celle de Sunshine : image de capture plus tardive,
-  attente d'une image complète avant l'envoi, ou paquetisation. À chiffrer avec
-  les horodatages de l'hôte (capture, fin d'encodage, premier paquet) dans un
-  banc dédié, hors de cette étude.
+- ~~La seule marge mesurée, une image à 120 Hz, est côté hôte natif~~ :
+  non reproduite le soir même (encadré en tête du §10.4). Le banc dédié de
+  l'hôte, avec ses horodatages de capture, d'encodage et d'envoi, a eu lieu ;
+  il trouve l'hôte natif à égalité avec Sunshine.
 - Mesures limitées à un client (780M sous Windows, écran 120 Hz, Ethernet) et à
   un hôte ; aucun élément ne laisse attendre un autre ordre sur un client plus
-  lent, où le décodage pèserait pareil dans les deux clients [S].
+  lent, où le décodage pèserait pareil dans les deux clients [H].
 
 **Incident sans trace.** Au premier lancement de moonlight-qt, la boîte du
 pare-feu Windows s'est ouverte au centre de l'écran du client et a absorbé la
@@ -815,7 +838,8 @@ version de navigateur peut casser la superposition ou le canal.
 ## 13. Décisions pour Bruno
 
 1. ~~**Ouvrir B0** après la v0.4.0~~ — faite le 24/10/2026, non franchie (§10.4) :
-   l'écart est côté hôte natif. À décider : où loger ce constat (plans de l'hôte).
+   l'écart vu côté hôte natif n'a pas été reproduit le soir même (§10.4) ;
+   rien à loger dans les plans de l'hôte.
 2. Si B0 passe : **B1 sur Windows seul**, outil hors produit.
 3. **Canal** (B2) : demande « réseau local » de la page, ou extension par
    navigateur, ou les deux.
