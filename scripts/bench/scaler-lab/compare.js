@@ -643,6 +643,9 @@ const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 // draw nor the flush provokes (nor finish, readPixels or more flushes: J37);
 // a time query closed after the draw forces it, so timeAlgo wraps the draw in
 // one where the extension exists (4.7 ms there, nothing changes elsewhere).
+// The query lives until the fence has signalled: on Qualcomm's D3D11 driver
+// (Adreno 618) a query deleted before that frees nothing, and the renderer's
+// own per-draw fence keeps the wait at some 190 ms; kept, 20 ms (J38).
 async function glDone(gl) {
   const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
   if (!sync) return;
@@ -690,18 +693,23 @@ async function timeAlgo(algoId, c, iters, onProgress, alive) {
       const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2");
       if (timer) {
         const bare = draw;
+        let q = null; // the draw's query, deleted once the fence has signalled
         draw = async () => {
-          const q = gl.createQuery();
+          if (q) gl.deleteQuery(q); // a draw that threw left its query behind
+          q = gl.createQuery();
           gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
           try {
             await bare();
           } finally {
             gl.endQuery(timer.TIME_ELAPSED_EXT);
-            gl.deleteQuery(q);
           }
         };
-      }
-      sync = () => glDone(gl);
+        sync = async () => {
+          await glDone(gl);
+          if (q) gl.deleteQuery(q);
+          q = null;
+        };
+      } else sync = () => glDone(gl);
     }
   }
   for (let i = 0; i < WARM; i++) {

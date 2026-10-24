@@ -1654,6 +1654,7 @@ start-arm.ps1`, 14:15), un Chrome sans tête collé à sa console mourant avec e
 | DualRTX 780M, Chrome sans tête (WebGL2) | 1 | 6,13 | 5,86 | 5,85 | 9,46 | 5,32 | 5,67 | 14,93 | 6,60 |
 | UM790Pro, Radeon 780M, Chrome 155 sans tête (WebGL2 `gl-mwsr`, 18:09, J37) | 1 | 5,06 | 4,27 | 4,15 | 4,12 | 4,09 | 4,07 | 5,73-7,15 | 4,07-7,28 |
 | N95 (mw-intel), Intel UHD, Chrome 155 sans tête (WebGL2) | 1 | 19,3 | 17,5 | 16,5 | 17,2 | 17,2 | 16,3 | 33,3 | 18,2 |
+| mw-arm, Snapdragon 7c, Adreno 618, Chrome 156 sans tête (WebGL2 `gl-mwsr`, comparateur corrigé, 24/10 10:47, J38) | 1 | 21,6 | 18,3 | 20,4 | 20,0 | 21,5 | 18,1 | 31,5-80,3 | 19,3-69,5 |
 | realme Note 60, Mali-G57, Chrome 155 (WebGL2) | 1 | 51,6 | 57,3 | 59,2 | 62,1 | 52,6 | 59,3 | 125 | 73 |
 
 Passe par passe : Mac Q3 3,52 / 3,13 / 3,28, Q3 + zone 3,53 / 4,53 / 4,38, CR5 3,24 / 3,70 / 4,74,
@@ -1826,3 +1827,39 @@ chiffre du labo à P4 (0,8 ms) : les trois shaders sont au plancher d'une passe 
 les écarts entre réglages (0,93-1,03) sont le bruit d'une page à l'autre, comme ceux de FSR1 et SGSR1 (première
 mesure d'une page neuve). Le comparateur donne maintenant sur NVIDIA ce qu'il donnait déjà sur AMD, Intel et
 Apple ; reste mw-arm (Qualcomm, Adreno 618), à la ligne de Bruno après le test dualgpu.
+
+**mw-arm (10:26-10:47, au mot de 59 après le test dualgpu ; Chrome 156 sans tête lancé par la ligne de Bruno,
+tâche Interactive ; serveur du lab relancé sur 8767, Claude Code l'ayant arrêté pour mémoire basse ; 4 connexions
+ssh).** D'abord la sonde CR5 avec le comparateur corrigé de la veille : toujours 298 ms par image (p50 210), FSR1
+341, SGSR1 1 098, la machine saine cette fois (949 Mo libres, échange 464 Mo, charge 1) : la correction de J37 ne
+mord pas sur ce pilote. Quatre micro-bancs dans le même Chrome (`cdpeval.py` à travers le tunnel : `rtxbench.js`,
+`armbench2.js` à `armbench4.js`, 6 à 16 s chacun) :
+(1) contexte nu : dessin trivial + barrière 2,8-8 ms, envoi d'une VideoFrame 1080p + dessin 11-14 ms (35 pour une
+VideoFrame CPU), bitmap 9 ; renderer : dessin + barrière 167-215 ms quel que soit l'intrant (VideoFrame, bitmap),
+l'appel lui-même 0,7 ms ; (2) le redimensionnement du canvas hors de cause : nu, né à 2560×1440 ou redimensionné
+comme le renderer (16 → 1920×1080 → 2560×1440), 3-5 ms ; renderer sans redimensionnement (720p → 1080p) 196 ms ;
+(3) les suspects un à un dans le renderer : **sa barrière par dessin retirée (`_setFence` / `_checkFence`) → 26 ms** ;
+requête de temps gardée jusqu'après la barrière → 21 ms (temps GPU 12-15 ms) ; `gl.finish()` 201 ; gl-fsr1 224,
+gl-sgsr 232, copie simple `off` 175 : ce n'est pas le noyau ; (4) la durée de vie de la requête : supprimée aussitôt
+fermée (la correction de J37) → 195 ms, barrière du renderer retirée ou non (189) ; gardée jusqu'après la barrière →
+23 ms ; lue → 19 ms ; sans requête ni barrière du renderer → 16 ms.
+
+Lecture : sur le pilote D3D11 de Qualcomm comme sur celui de NVIDIA, un objet de synchronisation laissé en attente (la
+barrière que le renderer pose après chaque dessin et lit au dessin suivant ; ou une requête fermée puis supprimée
+avant d'être achevée) retarde de 120 à 190 ms l'achèvement vu par la barrière suivante ; une requête de temps vivante
+jusqu'à la barrière lève l'attente sur les deux pilotes. La boucle du labo n'a pas le problème parce qu'elle mesure
+par lots. **Correction** : `compare.js` garde la requête jusqu'après `glDone` et la supprime ensuite (un dessin qui
+lève laisse la sienne, supprimée au suivant) ; prettier et `node --check` verts ; SwiftShader inchangé (q5 46,7 /
+93,6 / 70,2 ; d2 40,2 / 112,2 / 48,2 ; qualité 0,941 / 24,6 et 0,951 / 25,5). Sonde CR5 ensuite : 18,5 ms (p50 16,8),
+FSR1 34,7, SGSR1 23,7, les chiffres du labo de J25 (`done` p50 14-17 et 29-35). **Les six pages (300 images)** :
+Q3 21,6 (p50 15,8), Q3 + zone 18,3, CR5 20,4, CR5 + zone 20,0, borne texels 1,5 CR5 21,5, avec zone 18,1 ; FSR1
+31,5-80,3 et SGSR1 19,3-69,5 selon la page (machine bruyante, première mesure d'une page neuve) ; qualité au millième
+celle de la table. Ligne ajoutée au tableau de J36 : sur l'Adreno 618 sous Windows, MWSR coûte 18-22 ms par image
+à 1080p → 1440p quel que soit le réglage (p50 15-18), sous SGSR1 et loin sous FSR1, comme au labo (0,63-0,77 ×
+SGSR1 en J25). Ménage vérifié (« chrome left: 0 », « task left: 0 »), tunnel fermé, 0 ssh.
+
+Question pour le produit (P5, à Bruno ; rien changé) : la barrière par dessin du renderer sert au gouverneur
+(`takeGpuBehind`, part des dessins dont le GPU n'a pas fini au dessin suivant). Sur un canvas d'élément le
+compositeur soumet à chaque image et la barrière du RTX signale en 1 ms (banc 3 de J37) ; sur Qualcomm en flux réel,
+vérifier au `/bench` avec `mwsr` qu'elle ne compte pas de faux « GPU en retard » (ce serait une descente d'échelle
+injustifiée sur mw-arm).
