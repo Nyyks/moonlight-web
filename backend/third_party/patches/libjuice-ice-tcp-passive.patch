@@ -15,7 +15,7 @@ index e43db6c..ee5cf45 100644
  
  typedef struct juice_config {
 diff --git a/src/agent.c b/src/agent.c
-index 2378346..1490ca1 100644
+index 2378346..f466229 100644
 --- a/src/agent.c
 +++ b/src/agent.c
 @@ -271,7 +271,7 @@ int agent_gather_candidates(juice_agent_t *agent) {
@@ -52,7 +52,7 @@ index 2378346..1490ca1 100644
  		} else {
  			JLOG_WARN("No local host candidates gathered, unable to add TCP candidates");
  		}
-@@ -769,8 +787,25 @@ int agent_get_selected_candidate_pair(juice_agent_t *agent, ice_candidate_t *loc
+@@ -769,8 +787,47 @@ int agent_get_selected_candidate_pair(juice_agent_t *agent, ice_candidate_t *loc
  		return -1;
  	}
  
@@ -64,7 +64,29 @@ index 2378346..1490ca1 100644
 +		// the listener shares: a UDP one, for a pair over TCP. The local candidate of the same
 +		// transport and family says what the pair runs on: the passive one for a peer that dialled.
 +		bool tcp = pair->remote->transport != ICE_CANDIDATE_TRANSPORT_UDP;
-+		if (!pair->local || (pair->local->transport != ICE_CANDIDATE_TRANSPORT_UDP) != tcp) {
++		// A peer that dialled reached one address of the listener, the one getsockname() named
++		// on its connection: the passive candidate of that address, or one made of it, since a
++		// family offers only its first address (the tunnel rewrites that one anyway).
++		bool named = false;
++		if (pair->remote->transport == ICE_CANDIDATE_TRANSPORT_TCP_TYPE_ACTIVE &&
++		    agent->tcp_passive_local.len > 0) {
++			const addr_record_t *accepted = &agent->tcp_passive_local;
++			for (int i = 0; i < agent->local.candidates_count && !named; ++i) {
++				const ice_candidate_t *c = agent->local.candidates + i;
++				if (c->transport == ICE_CANDIDATE_TRANSPORT_TCP_TYPE_PASSIVE &&
++				    addr_is_equal((const struct sockaddr *)&c->resolved.addr,
++				                  (const struct sockaddr *)&accepted->addr, true)) {
++					*local = *c;
++					named = true;
++				}
++			}
++			if (!named)
++				named = ice_create_local_candidate(ICE_CANDIDATE_TYPE_HOST, 1,
++				                                   agent->local.candidates_count, accepted, local,
++				                                   ICE_CANDIDATE_TRANSPORT_TCP_TYPE_PASSIVE) == 0;
++		}
++		if (!named &&
++		    (!pair->local || (pair->local->transport != ICE_CANDIDATE_TRANSPORT_UDP) != tcp)) {
 +			for (int i = 0; i < agent->local.candidates_count; ++i) {
 +				const ice_candidate_t *c = agent->local.candidates + i;
 +				if ((c->transport != ICE_CANDIDATE_TRANSPORT_UDP) == tcp &&
@@ -79,7 +101,7 @@ index 2378346..1490ca1 100644
  	if (remote)
  		*remote = *pair->remote;
  
-@@ -787,6 +822,28 @@ int agent_conn_recv(juice_agent_t *agent, char *buf, size_t len, const addr_reco
+@@ -787,6 +844,28 @@ int agent_conn_recv(juice_agent_t *agent, char *buf, size_t len, const addr_reco
  	return 0; // ignore errors
  }
  
@@ -108,7 +130,7 @@ index 2378346..1490ca1 100644
  int agent_conn_fail(juice_agent_t *agent) {
  	agent_change_state(agent, JUICE_STATE_FAILED);
  	atomic_store(&agent->selected_entry, NULL); // disallow sending
-@@ -923,7 +980,10 @@ int agent_bookkeeping(juice_agent_t *agent, timestamp_t *next_timestamp) {
+@@ -923,7 +1002,10 @@ int agent_bookkeeping(juice_agent_t *agent, timestamp_t *next_timestamp) {
  				continue;
  
  			if (entry_is_tcp(entry)) {
@@ -120,7 +142,7 @@ index 2378346..1490ca1 100644
  					conn_tcp_connect(agent, &entry->record); // First attempt a TCP connection
  
  				if(entry->tcp_state != TCP_STATE_CONNECTED)
-@@ -2352,13 +2412,22 @@ int agent_add_remote_reflexive_candidate(juice_agent_t *agent, ice_candidate_typ
+@@ -2352,13 +2434,22 @@ int agent_add_remote_reflexive_candidate(juice_agent_t *agent, ice_candidate_typ
  		JLOG_ERROR("Invalid type for remote reflexive candidate");
  		return -1;
  	}
@@ -147,7 +169,7 @@ index 2378346..1490ca1 100644
  		JLOG_ERROR("Failed to create reflexive candidate");
  		return -1;
  	}
-@@ -2396,6 +2465,21 @@ int agent_add_local_tcp_active_candidate(juice_agent_t *agent, addr_record_t *re
+@@ -2396,6 +2487,21 @@ int agent_add_local_tcp_active_candidate(juice_agent_t *agent, addr_record_t *re
  	return 0;
  }
  
@@ -169,7 +191,7 @@ index 2378346..1490ca1 100644
  int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // local may be NULL
                               ice_candidate_t *remote) {
  	ice_candidate_pair_t pair;
-@@ -2411,12 +2495,15 @@ int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // lo
+@@ -2411,12 +2517,15 @@ int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local, // lo
  	}
  
  	if (remote->transport != ICE_CANDIDATE_TRANSPORT_UDP) {
@@ -188,10 +210,21 @@ index 2378346..1490ca1 100644
  			JLOG_INFO("TCP candidate is not passive or simultaneous open, ignoring");
  			return 0;
 diff --git a/src/agent.h b/src/agent.h
-index bccdde3..817dfe0 100644
+index bccdde3..1bd47b0 100644
 --- a/src/agent.h
 +++ b/src/agent.h
-@@ -181,6 +181,7 @@ int agent_get_selected_candidate_pair(juice_agent_t *agent, ice_candidate_t *loc
+@@ -154,6 +154,10 @@ struct juice_agent {
+ 
+ 	thread_t resolver_thread;
+ 	bool resolver_thread_started;
++
++	// MoonlightWeb patch: the local address of the connection the passive listener accepted, as
++	// getsockname() gives it (len 0 before one). Set and read under the conn lock.
++	addr_record_t tcp_passive_local;
+ };
+ 
+ juice_agent_t *agent_create(const juice_config_t *config);
+@@ -181,6 +185,7 @@ int agent_get_selected_candidate_pair(juice_agent_t *agent, ice_candidate_t *loc
  int agent_conn_recv(juice_agent_t *agent, char *buf, size_t len, const addr_record_t *src);
  int agent_conn_update(juice_agent_t *agent, timestamp_t *next_timestamp);
  int agent_conn_tcp_state(juice_agent_t *agent, const addr_record_t *dst, tcp_state_t state);
@@ -199,7 +232,7 @@ index bccdde3..817dfe0 100644
  int agent_conn_fail(juice_agent_t *agent);
  
  int agent_input(juice_agent_t *agent, char *buf, size_t len, const addr_record_t *src,
-@@ -224,6 +225,7 @@ int agent_add_local_reflexive_candidate(juice_agent_t *agent, ice_candidate_type
+@@ -224,6 +229,7 @@ int agent_add_local_reflexive_candidate(juice_agent_t *agent, ice_candidate_type
  int agent_add_remote_reflexive_candidate(juice_agent_t *agent, ice_candidate_type_t type,
                                           uint32_t priority, const addr_record_t *record);
  int agent_add_local_tcp_active_candidate(juice_agent_t *agent, addr_record_t *record);
@@ -263,7 +296,7 @@ index d86b672..0870428 100644
  
  #endif
 diff --git a/src/conn_poll.c b/src/conn_poll.c
-index 7d6ed7b..687f0e2 100644
+index 7d6ed7b..627f99a 100644
 --- a/src/conn_poll.c
 +++ b/src/conn_poll.c
 @@ -31,6 +31,24 @@ typedef struct registry_impl {
@@ -507,7 +540,7 @@ index 7d6ed7b..687f0e2 100644
  	return ret;
  }
  
-@@ -672,6 +763,262 @@ void conn_poll_tcp_connect(juice_agent_t *agent, const addr_record_t *dst) {
+@@ -672,6 +763,273 @@ void conn_poll_tcp_connect(juice_agent_t *agent, const addr_record_t *dst) {
  	mutex_unlock(&conn_impl->registry->mutex);
  }
  
@@ -674,6 +707,17 @@ index 7d6ed7b..687f0e2 100644
 +
 +	const sockopt_t enabled = 1; // the stream rides it, frame by frame
 +	setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&enabled, sizeof(enabled));
++
++	// The address the peer reached, for the selected pair's local candidate: the listener binds
++	// the wildcard, and the candidate offered is only the first address of its family
++	addr_record_t local;
++	memset(&local, 0, sizeof(local));
++	local.len = sizeof(local.addr);
++	if (getsockname(sock, (struct sockaddr *)&local.addr, &local.len) == 0) {
++		addr_unmap_inet6_v4mapped((struct sockaddr *)&local.addr, &local.len);
++		local.socktype = SOCK_STREAM;
++		agent->tcp_passive_local = local;
++	}
 +
 +	mutex_lock(&conn_impl->send_mutex);
 +	conn_impl->tcp_sock = sock;

@@ -7,7 +7,7 @@
  * connect over TCP alone, the listener's gate closes everything that is not an
  * authenticated Binding request, and the listener is gone once the checks are
  * over. Plain C against libjuice itself, so a runner of its own. Everything
- * binds 127.0.0.1: no firewall prompt.
+ * binds 127.0.0.1 (no firewall prompt), but one wildcard listener off Windows.
  */
 #include "juice/juice.h"
 
@@ -106,7 +106,10 @@ static int binding_request(char *buf, size_t size, const char *username, const c
 
 typedef struct side {
 	juice_agent_t *agent;
-	struct side *peer; // passive candidates go there, if set
+	struct side *peer;   // passive candidates go there, if set
+	const char *bind;    // 127.0.0.1 if NULL
+	const char *rewrite; // the address the peer gets them with, like the tunnel's public one
+	char passive_addr[64];
 	atomic(int) passive_port;
 	atomic(int) received;
 	char data[64];
@@ -119,10 +122,22 @@ static void on_candidate(juice_agent_t *agent, const char *sdp, void *user_ptr) 
 		return;
 	char addr[64];
 	int port = 0;
-	if (sscanf(sdp, "a=candidate:%*s %*d %*s %*u %63s %d", addr, &port) == 2)
+	int addr_begin = 0, addr_end = 0;
+	if (sscanf(sdp, "a=candidate:%*s %*d %*s %*u %n%63s%n %d", &addr_begin, addr, &addr_end,
+	           &port) == 2) {
+		snprintf(side->passive_addr, sizeof(side->passive_addr), "%s", addr);
 		atomic_store(&side->passive_port, port);
-	if (side->peer)
+	}
+	if (!side->peer)
+		return;
+	if (side->rewrite && addr_end > addr_begin) {
+		char rewritten[JUICE_MAX_CANDIDATE_SDP_STRING_LEN];
+		snprintf(rewritten, sizeof(rewritten), "%.*s%s%s", addr_begin, sdp, side->rewrite,
+		         sdp + addr_end);
+		juice_add_remote_candidate(side->peer->agent, rewritten);
+	} else {
 		juice_add_remote_candidate(side->peer->agent, sdp);
+	}
 }
 
 static void on_recv(juice_agent_t *agent, const char *data, size_t size, void *user_ptr) {
@@ -138,7 +153,7 @@ static void make(side_t *side, juice_ice_tcp_mode_t mode) {
 	juice_config_t config;
 	memset(&config, 0, sizeof(config));
 	config.concurrency_mode = JUICE_CONCURRENCY_MODE_POLL;
-	config.bind_address = "127.0.0.1";
+	config.bind_address = side->bind ? side->bind : "127.0.0.1";
 	config.cb_candidate = on_candidate;
 	config.cb_recv = on_recv;
 	config.user_ptr = side;
@@ -214,6 +229,49 @@ static void test_connect_over_tcp_only(void) {
 
 	juice_destroy(a.agent);
 	juice_destroy(b.agent);
+}
+
+static void test_selected_local_is_the_address_reached(void) {
+	printf("The selected pair's local side is the address the peer reached\n");
+#ifdef _WIN32
+	// A listener on every interface would raise the firewall's prompt; the CI runs it on Linux
+	printf("  skipped on Windows\n");
+#else
+	// The host listens on every interface but offers its first address only, which the peer
+	// gets rewritten (here to 127.0.0.1, the tunnel's public address in production). Before,
+	// the log named the address offered, not the one that accepted.
+	side_t a = {0}, b = {0};
+	a.bind = "0.0.0.0";
+	a.rewrite = "127.0.0.1";
+	make(&a, JUICE_ICE_TCP_MODE_ACTIVE_PASSIVE);
+	make(&b, JUICE_ICE_TCP_MODE_ACTIVE);
+	a.peer = &b;
+
+	char sdp[JUICE_MAX_SDP_STRING_LEN];
+	juice_get_local_description(a.agent, sdp, sizeof(sdp));
+	juice_set_remote_description(b.agent, sdp);
+	juice_get_local_description(b.agent, sdp, sizeof(sdp));
+	juice_set_remote_description(a.agent, sdp);
+
+	juice_gather_candidates(a.agent);
+	juice_gather_candidates(b.agent);
+
+	CHECK(wait_state(a.agent, JUICE_STATE_COMPLETED, 10000));
+	printf("  offered %s, reached 127.0.0.1%s\n", a.passive_addr,
+	       strcmp(a.passive_addr, "127.0.0.1") == 0 ? " (the same: no other interface)" : "");
+
+	char local[JUICE_MAX_CANDIDATE_SDP_STRING_LEN], remote[JUICE_MAX_CANDIDATE_SDP_STRING_LEN];
+	if (juice_get_selected_candidates(a.agent, local, sizeof(local), remote, sizeof(remote)) == 0) {
+		printf("  host selected: %s -> %s\n", local, remote);
+		CHECK(strstr(local, "tcptype passive") != NULL);
+		CHECK(strstr(local, " 127.0.0.1 ") != NULL);
+	} else {
+		CHECK(!"selected candidates");
+	}
+
+	juice_destroy(a.agent);
+	juice_destroy(b.agent);
+#endif
 }
 
 static void test_gate(void) {
@@ -343,6 +401,7 @@ int main(void) {
 #endif
 	juice_set_log_level(getenv("JUICE_DEBUG") ? JUICE_LOG_LEVEL_DEBUG : JUICE_LOG_LEVEL_WARN);
 	test_connect_over_tcp_only();
+	test_selected_local_is_the_address_reached();
 	test_gate();
 	test_active_only_does_not_listen();
 	printf(failures ? "\n%d FAILURE(S)\n" : "\nall passed\n", failures);
