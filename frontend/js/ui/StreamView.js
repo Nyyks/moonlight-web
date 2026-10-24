@@ -1720,6 +1720,10 @@ export class StreamView {
         this._kbdVisible = false;
         this._kbdBlurAt = 0; // timestamp of last capture blur
         this._onViewportResize = null; // VisualViewport handler (keyboard push-up)
+        // A Mac's invisible key field, where its dead keys compose (see
+        // _buildKeyField); null everywhere else.
+        this._keyField = null;
+        this._onKeyFieldPointerUp = null;
 
         // The owner's Buy me a coffee button in the bar (_mountSupportButton).
         this._supportBtn = null;
@@ -8344,6 +8348,7 @@ export class StreamView {
         // Native paste event: the only permission-free way to read the local
         // clipboard (Ctrl/Cmd+V IS the user's consent). See handlePaste().
         document.addEventListener('paste', this._onPaste);
+        this._buildKeyField();
         // Any pointer gesture is an opportunity to flush a host-clipboard
         // write that was denied for lack of transient activation.
         document.addEventListener('pointerdown', this._onPointerDownFlush, true);
@@ -9406,6 +9411,7 @@ export class StreamView {
         document.removeEventListener('keyup', this._onKeyUp);
         document.removeEventListener('keypress', this._onKeyPress);
         this._dropComposedKey();
+        this._removeKeyField();
         document.removeEventListener('paste', this._onPaste);
         document.removeEventListener('pointerdown', this._onPointerDownFlush, true);
         if (this._pendingPasteKey) {
@@ -10053,7 +10059,11 @@ export class StreamView {
         // A dialog over the stream owns the keyboard. Forwarding its keystrokes
         // to the host — and preventDefault-ing them — made Ctrl+C on the share
         // popin's PIN do nothing locally while sending a copy chord to the game.
-        if (StreamView.isLocalKeyboardTarget(e.target)) return;
+        // The Mac's key field is a text field, and the stream's own.
+        if (e.target !== this._keyField && StreamView.isLocalKeyboardTarget(e.target)) return;
+        // A keystroke that missed the Mac's key field (a toolbar button kept
+        // the focus): the next ones go through it.
+        if (this._keyField && e.target !== this._keyField) this._focusKeyField();
         // The remote's menu is up: nothing reaches the host. Its buttons have
         // the keys through the focus (RemoteNav moves it there).
         if (this._remoteMenu && this._remoteMenu.isOpen) {
@@ -10323,6 +10333,11 @@ export class StreamView {
         if (this._deadPending && !dead && cc && !e.ctrlKey && !e.metaKey && !this._gamingMode) {
             this._deadPending = false;
             this._deferComposedKey(e, vkCode, cc);
+            // A Mac typing into its key field: the browser composed it already,
+            // "~" on the Space itself, and fires no keypress (the keyCode of an
+            // IME's keystroke says so). Nothing to wait for, and the keydown,
+            // the IME's, is left alone all the same.
+            if (e.keyCode === 229) this._flushComposedKey();
             return;
         }
         if (dead) this._deadPending = true;
@@ -10453,6 +10468,79 @@ export class StreamView {
         this._composedKey = null;
     }
 
+    /**
+     * A Mac composes a dead key for a text field only. On the page itself,
+     * Chrome and Safari both report Option+n as 'Dead' and the Space after it
+     * as ' ', in every event, cancelled or not: the "~" is nowhere, and the
+     * native host typed a space for every tilde (Chrome 126 and Safari 27, a
+     * French Mac, 24/10/2026). In a field the next keystroke reads the
+     * composition itself, "~" on the Space and "ñ" on the n, even with the
+     * dead key's keydown cancelled. So a Mac's keys go through this invisible
+     * field, emptied as the compositions land in it.
+     *
+     * Not on a touch device, where a field brings up the on-screen keyboard,
+     * and not in gaming mode (see _focusKeyField).
+     */
+    _buildKeyField() {
+        if (this._keyField || !IS_APPLE || IS_IOS || IS_TOUCH_DEVICE) return;
+        this._keyField = StreamView.createKeyField();
+        (this._rootEl || document.body).appendChild(this._keyField);
+        // A click on the picture leaves the focus nowhere: give it back.
+        this._onKeyFieldPointerUp = (e) => {
+            if (!StreamView.isLocalKeyboardTarget(e.target)) this._focusKeyField();
+        };
+        document.addEventListener('pointerup', this._onKeyFieldPointerUp, true);
+        this._focusKeyField();
+    }
+
+    /** The key field itself: invisible, and empty once a composition is in. */
+    static createKeyField() {
+        const field = document.createElement('textarea');
+        field.className = 'stream-kbd-capture';
+        field.setAttribute('autocomplete', 'off');
+        field.setAttribute('autocorrect', 'off');
+        field.setAttribute('autocapitalize', 'off');
+        field.setAttribute('spellcheck', 'false');
+        field.setAttribute('aria-hidden', 'true');
+        field.setAttribute('tabindex', '-1');
+        const empty = () => {
+            field.value = '';
+        };
+        // Never from inside a composition: emptied under it, the field ends it.
+        field.addEventListener('input', (e) => {
+            const ev = /** @type {InputEvent} */ (e);
+            if (!ev.isComposing && !/Composition/.test(ev.inputType || '')) empty();
+        });
+        field.addEventListener('compositionend', () => setTimeout(empty, 0));
+        return field;
+    }
+
+    /**
+     * The keyboard back on the Mac's key field, unless a text field or a
+     * dialog of the page has it. Never in gaming mode: there a dead key goes
+     * by its position, and a field's press-and-hold (the accents of a held
+     * letter) would stop the repeats of a held key.
+     */
+    _focusKeyField() {
+        const field = this._keyField;
+        if (!field || this._gamingMode || this._quitting) return;
+        const active = document.activeElement;
+        if (active === field || (active && StreamView.isLocalKeyboardTarget(active))) return;
+        try {
+            field.focus({ preventScroll: true });
+        } catch {
+            field.focus();
+        }
+    }
+
+    _removeKeyField() {
+        if (!this._keyField) return;
+        document.removeEventListener('pointerup', this._onKeyFieldPointerUp, true);
+        this._keyField.blur();
+        this._keyField.remove();
+        this._keyField = null;
+    }
+
     handleKeyUp(e) {
         if (e.target === this._kbdCapture) return;
         // Its press, held back for a composition, goes out before its release.
@@ -10470,7 +10558,7 @@ export class StreamView {
         if ((this._remotePointer || this._remotePointerOn) && this._remotePointerKeyUp(e)) return;
         // Same exclusion as handleKeyDown: a release whose press was never sent
         // would land on the host as an unmatched key-up.
-        if (StreamView.isLocalKeyboardTarget(e.target)) return;
+        if (e.target !== this._keyField && StreamView.isLocalKeyboardTarget(e.target)) return;
         if (!e.code && (!e.keyCode || e.keyCode === 229)) {
             e.preventDefault();
             return;
@@ -11562,6 +11650,9 @@ export class StreamView {
             // Hide hint — no pointer lock in desktop mode
             if (this.hintEl) this.hintEl.style.display = 'none';
         }
+        // The Mac's key field is the desktop's only (see _focusKeyField).
+        if (this._gamingMode) this._keyField?.blur();
+        else this._focusKeyField();
 
         // Leaving gaming mode hides the exit reminder and drops the full
         // keyboard lock; entering it keeps the overlay hidden until capture.

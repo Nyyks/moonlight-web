@@ -343,6 +343,126 @@ describe('a dead key and what it composes', () => {
     });
 });
 
+describe("a Mac's dead key, composed in its key field", () => {
+    // Recorded on a French Mac (24/10/2026). On the page itself, Chrome 126 and
+    // Safari 27 never compose: Option+n reads 'Dead' and the Space after it ' ',
+    // in every event, and the native host typed a space for every tilde. In a
+    // text field the Space reads the composition itself, with an IME's keyCode
+    // 229 — still composing in Chrome, composed already in Safari — and no
+    // keypress follows.
+    afterEach(() => vi.useRealTimers());
+
+    const option = { altKey: true };
+
+    function tilde(v, composing) {
+        v.handleKeyDown(ev('AltLeft', 'Alt', option));
+        v.handleKeyDown(ev('KeyN', 'Dead', { ...option, keyCode: 229 }));
+        v.handleKeyUp(ev('KeyN', 'Dead', { ...option, keyCode: 192 }));
+        v.handleKeyUp(ev('AltLeft', 'Alt'));
+        const space = ev('Space', '~', { keyCode: 229, isComposing: composing });
+        let prevented = false;
+        space.preventDefault = () => (prevented = true);
+        v.handleKeyDown(space);
+        return () => prevented;
+    }
+
+    for (const [browser, composing] of [
+        ['Chrome', true],
+        ['Safari', false],
+    ]) {
+        it(`sends the ~ on the Space at once, as ${browser} composes it`, () => {
+            const v = keySink({ _appleKeyboard: true });
+            const prevented = tilde(v, composing);
+            const downs = v.sent.filter((m) => m.type === 'keydown');
+            expect(downs.map((m) => [m.code, m.char, m.dead])).toEqual([
+                ['AltLeft', null, false],
+                ['KeyN', null, true],
+                ['Space', '~', false],
+            ]);
+            // Not held back for a keypress that never comes, and the IME's
+            // keydown is left alone.
+            expect(v._composedKey).toBeNull();
+            expect(prevented()).toBe(false);
+            v.handleKeyUp(ev('Space', ' ', { keyCode: 32 }));
+            expect(v.sent.at(-1)).toMatchObject({ type: 'keyup', code: 'Space', char: '~' });
+        });
+    }
+
+    it('sends ñ on the n', () => {
+        const v = keySink({ _appleKeyboard: true });
+        v.handleKeyDown(ev('AltLeft', 'Alt', option));
+        v.handleKeyDown(ev('KeyN', 'Dead', { ...option, keyCode: 229 }));
+        v.handleKeyUp(ev('AltLeft', 'Alt'));
+        v.handleKeyUp(ev('KeyN', 'ñ', { keyCode: 78 }));
+        v.handleKeyDown(ev('KeyN', 'ñ', { keyCode: 229, isComposing: true }));
+        expect(v.sent.at(-1)).toMatchObject({
+            type: 'keydown',
+            code: 'KeyN',
+            char: 'ñ',
+            dead: false,
+        });
+    });
+
+    it("takes the key field's keys as the stream's, and any other field's as the page's", () => {
+        // A textarea, as far as isLocalKeyboardTarget can tell.
+        const field = { closest: () => field };
+        const v = keySink({ _keyField: field, _focusKeyField: () => {} });
+        v.handleKeyDown(ev('KeyQ', 'a', { target: field }));
+        v.handleKeyUp(ev('KeyQ', 'a', { target: field }));
+        expect(v.sent.map((m) => m.type)).toEqual(['keydown', 'keyup']);
+
+        const page = keySink();
+        page.handleKeyDown(ev('KeyQ', 'a', { target: field }));
+        expect(page.sent).toHaveLength(0);
+    });
+
+    it('takes the keyboard back to the field, not from a text field, not in gaming mode', () => {
+        const focused = [];
+        const field = { closest: () => field, focus: () => focused.push('field') };
+        const focusKeyField = StreamView.prototype._focusKeyField;
+
+        // A key that missed it (a toolbar button kept the focus).
+        const v = keySink({ _keyField: field, _focusKeyField: focusKeyField });
+        v.handleKeyDown(ev('KeyQ', 'a'));
+        expect(focused).toEqual(['field']);
+        expect(v.sent).toHaveLength(1);
+
+        keySink({
+            _keyField: field,
+            _gamingMode: true,
+            _focusKeyField: focusKeyField,
+        }).handleKeyDown(ev('KeyQ', 'a'));
+        expect(focused).toHaveLength(1);
+
+        const input = document.createElement('input');
+        document.body.appendChild(input);
+        input.focus();
+        try {
+            focusKeyField.call({ _keyField: field, _gamingMode: false, _quitting: false });
+            expect(focused).toHaveLength(1);
+        } finally {
+            input.remove();
+        }
+    });
+
+    it('empties itself once a composition is in', () => {
+        vi.useFakeTimers();
+        const field = StreamView.createKeyField();
+        const input = (props) => Object.assign(new Event('input'), props);
+
+        field.value = '~';
+        field.dispatchEvent(input({ isComposing: true, inputType: 'insertCompositionText' }));
+        expect(field.value).toBe('~');
+        field.dispatchEvent(new Event('compositionend'));
+        vi.advanceTimersByTime(1);
+        expect(field.value).toBe('');
+
+        field.value = 'x';
+        field.dispatchEvent(input({ isComposing: false, inputType: 'insertFromPaste' }));
+        expect(field.value).toBe('');
+    });
+});
+
 describe('an AltGr dead key that Chrome does not name', () => {
     // Recorded on Windows Chrome, AZERTY (12/10/2026): AltGr+2 reads 'é', the
     // key's plain character, with AltGraph set and neither Ctrl nor Alt; the
