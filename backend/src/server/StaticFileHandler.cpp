@@ -151,6 +151,12 @@ QStringList StaticFileHandler::listFiles() const
     return paths;
 }
 
+qint64 StaticFileHandler::servedSize(const QString& requestPath) const
+{
+    const QFileInfo info(m_RootDir + servedPath(m_RootDir, requestPath.mid(1)));
+    return info.isFile() ? info.size() : -1;
+}
+
 QString StaticFileHandler::contentTag() const
 {
     // Same set as listFiles(), by construction — it IS listFiles(), so the

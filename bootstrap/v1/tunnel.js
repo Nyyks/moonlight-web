@@ -51,6 +51,24 @@ const FRAME_WS_OPENED = 0x08;
  */
 export const SHELL_CACHE = 'mw-shell';
 
+/**
+ * The order to fetch the application's files in: the largest first.
+ *
+ * Over a long round trip each answer is slow to get going, and a large one that
+ * starts last trails alone at the end while the channel sits half idle (the
+ * bench of 24/10, 115 ms away: 2 to 5 s per large file). Started first, the
+ * large ones overlap everything else. `sizes` runs beside `files` in the host's
+ * manifest since v0.4.1; an older host sends none, and its order is kept.
+ */
+export function shellFetchOrder(files, sizes) {
+    if (!Array.isArray(sizes) || sizes.length !== files.length) return [...files];
+    const size = (i) => (Number.isFinite(sizes[i]) ? sizes[i] : 0);
+    return files
+        .map((path, i) => i)
+        .sort((a, b) => size(b) - size(a) || a - b)
+        .map((i) => files[i]);
+}
+
 /** How long a request may wait for its first byte before it is given up on. */
 const REQUEST_TIMEOUT_MS = 30000;
 

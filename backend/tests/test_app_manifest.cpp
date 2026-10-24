@@ -121,6 +121,16 @@ void run_app_manifest_tests()
     CHECK_EQ(handler.serveFile(QStringLiteral("/js/app.js.map")).statusCode, 200);
     CHECK_EQ(handler.serveFile(QStringLiteral("/index.html")).statusCode, 200);
 
+    SECTION("app manifest — each listed file has its size");
+
+    // The bootstrap orders its downloads by these: the largest first.
+    CHECK_EQ(handler.servedSize(QStringLiteral("/index.html")), qint64(15));
+    CHECK_EQ(handler.servedSize(QStringLiteral("/js/app.js")), qint64(9));
+    CHECK_EQ(handler.servedSize(QStringLiteral("/assets/logo.png")), qint64(4));
+    for (const QString& p : files)
+        CHECK(handler.servedSize(p) >= 0);
+    CHECK_EQ(handler.servedSize(QStringLiteral("/js/missing.js")), qint64(-1));
+
     SECTION("app manifest — paths are request paths, and stable");
 
     // The browser feeds these straight back as request paths, so a missing

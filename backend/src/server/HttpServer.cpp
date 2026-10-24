@@ -1271,9 +1271,15 @@ void HttpServer::serveRequest(HttpRequest req, Arrival arrival, ResponseCallback
     // fetch them in one pass instead of discovering them one redirect at a time.
     if (req.path == QLatin1String("/api/app/manifest")) {
         QJsonArray files;
+        // Beside the paths rather than in them: a bootstrap of before v0.4.1 reads
+        // `files` as a list of strings, and one of now still meets older hosts
+        // that send no sizes.
+        QJsonArray sizes;
         const QStringList paths = m_StaticFiles->listFiles();
-        for (const QString& p : paths)
+        for (const QString& p : paths) {
             files.append(p);
+            sizes.append(m_StaticFiles->servedSize(p));
+        }
 
         // App version + a fingerprint of the served bytes. The bootstrap uses
         // this string alone to decide whether its cached copy of the whole
@@ -1301,8 +1307,9 @@ void HttpServer::serveRequest(HttpRequest req, Arrival arrival, ResponseCallback
                         .toHex()
                         .left(8));
         }
-        HttpResponse manifest = HttpResponse::json(
-            QJsonObject{{QStringLiteral("version"), version}, {QStringLiteral("files"), files}});
+        HttpResponse manifest = HttpResponse::json(QJsonObject{{QStringLiteral("version"), version},
+                                                               {QStringLiteral("files"), files},
+                                                               {QStringLiteral("sizes"), sizes}});
         manifest.headers["Cache-Control"] = "no-store";
         respond(manifest);
         return;

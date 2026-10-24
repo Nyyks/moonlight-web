@@ -30,6 +30,7 @@ import {
     landingPathFromLocation,
     shareTokenFromLocation,
     rememberLastHost,
+    shellFetchOrder,
     SHELL_CACHE,
 } from './tunnel.js';
 
@@ -433,6 +434,8 @@ const STAGE_PROGRESS = {
 };
 const MANIFEST_AT = 0.45;
 const SHELL_AT = 0.92;
+/* How many of the application's files are fetched at once (see fetchShell). */
+const SHELL_FETCH_WORKERS = 12;
 
 /**
  * What the cache currently holds, if anything usable.
@@ -509,10 +512,13 @@ async function fetchShell(tunnel, hostId) {
     const fresh = await caches.open(SHELL_CACHE);
 
     let done = 0;
-    // A handful at a time. One at a time is needlessly slow over a channel with
-    // a round trip; all at once would put the whole application in the host's
-    // send queue at the same moment.
-    const queue = [...files];
+    // A dozen at a time, the largest first. One at a time is needlessly slow over
+    // a channel with a round trip; all at once would put the whole application in
+    // the host's send queue at the same moment, and the last request would wait
+    // out its timeout behind every other answer. Four left the channel half idle
+    // 115 ms away (bench of 24/10): each answer waits a round trip before it
+    // starts, and more of them in flight fill those waits.
+    const queue = shellFetchOrder(files, manifest.sizes);
     const worker = async () => {
         for (;;) {
             const path = queue.shift();
@@ -524,7 +530,7 @@ async function fetchShell(tunnel, hostId) {
             say('Fetching the interface…', `${done} of ${files.length} files`);
         }
     };
-    await Promise.all([worker(), worker(), worker(), worker()]);
+    await Promise.all(Array.from({ length: SHELL_FETCH_WORKERS }, worker));
 
     // The navigation the service worker answers is this one, so it has to be
     // there under the name the worker looks for.
