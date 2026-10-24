@@ -99,8 +99,8 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     DERING: ['u32', 2],
     /** 1: the vote, the coherence and the weights per channel (4:4:4 streams); 0: from the luma, shared by the channels. */
     CHROMA444: ['u32', 0],
-    /** The flat path's reconstruction: 1 the bilinear sample itself; 5 or 9 bilinear taps of a cubic (Mitchell-Netravali, B 0, C FLAT_C) over the 4×4 texels around, the four corners dropped at 5 (J33); 3 the interpolating quadratic of Dodgson over the 3×3 texels around, its corner dropped (J34). */
-    FLAT_TAPS: ['u32', 1],
+    /** The flat path's reconstruction: 1 the bilinear sample itself; 5 or 9 bilinear taps of a cubic (Mitchell-Netravali, B 0, C FLAT_C) over the 4×4 texels around, the four corners dropped at 5 (J33); 3 the interpolating quadratic of Dodgson over the 3×3 texels around, its corner dropped (J34). 5 is the product's default on a computer, 3 on a phone or a tablet (mwsrClassOverrides; Bruno, 24/10/2026, journal J36-J38). */
+    FLAT_TAPS: ['u32', 5],
     /** The cubic's C, the depth of its negative lobe: 0.5 is Catmull-Rom; higher is steeper, with more ringing (bounded by the taps). */
     FLAT_C: ['f32', 0.5],
     /** 1: the gaze zone (plan §15.2): the vote threshold and the sharpness slide from the table's values to MWSR_ZONE's at the centre of the picture, by the pixel's place and the stream's motion (the uniform `gaze`); 0: the text has no zone. */
@@ -117,6 +117,20 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
 export const MWSR_OVERRIDES = Object.freeze(
     Object.fromEntries(Object.entries(MWSR_OVERRIDE_SPEC).map(([k, [, v]]) => [k, v])),
 );
+
+/**
+ * The constants the product lays over the defaults by device class, under
+ * the laboratory's own overrides (Bruno's decisions of 24/10/2026, journal
+ * J36-J38): a computer keeps the defaults, the flat path's Catmull-Rom of
+ * five taps; a phone or a tablet takes the quadratic of three (FLAT_TAPS 3),
+ * 9 to 13 % faster there (iPhone 13 Pro, realme Note 60) for a hundredth of
+ * SSIM. The renderers call it once, with BrowserDetect's IS_HANDHELD.
+ * @param {{handheld: boolean}} device a phone or a tablet, not a TV
+ * @returns {Object<string, number>} name → value, empty on a computer
+ */
+export function mwsrClassOverrides({ handheld }) {
+    return handheld ? { FLAT_TAPS: 3 } : {};
+}
 
 /** Constants shared by the WGSL text and, later, its GLSL twin. */
 export const MWSR_CONSTANTS = Object.freeze({

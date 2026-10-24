@@ -85,6 +85,7 @@ import { nisConfig, nisCoefTexture, readNisSharpness, nisScaleInRange } from './
 import { fitOutputSize, isIdentityScale } from './scaleRegime.js';
 import {
     MWSR_UNIFORM_FLOATS,
+    mwsrClassOverrides,
     mwsrRegime,
     mwsrRegimeKey,
     mwsrRegimes,
@@ -92,6 +93,11 @@ import {
     mwsrWgsl,
 } from './MwsrShader.js';
 import { GazeZone } from '../GazeZone.js';
+import { IS_HANDHELD } from '../../util/BrowserDetect.js';
+
+// The kernel's constants the product sets for this device's class (plan §9,
+// Bruno's decisions of 24/10/2026), under the laboratory's overrides.
+const MWSR_CLASS = mwsrClassOverrides({ handheld: IS_HANDHELD });
 
 // Full-screen triangle (uv 0..1, v down — matches texture sampling).
 const FULLSCREEN_VS = /* wgsl */ `
@@ -1441,6 +1447,7 @@ export class WebGpuRenderer extends VideoRenderer {
                         ? {
                               CHROMA444: this._yuv444 ? 1 : 0,
                               GAZE: this._mwsrZone ? 1 : 0,
+                              ...MWSR_CLASS,
                               ...(this._mwsrOverrides || {}),
                           }
                         : { R_DOWN: reg.rDown, LINEAR_LIGHT: reg.linearLight },
@@ -2076,8 +2083,9 @@ export class WebGpuRenderer extends VideoRenderer {
     /**
      * The mwsr kernel's pipeline constants of the `up` mode beyond the
      * product's (MwsrShader's MWSR_OVERRIDE_SPEC: FLAT_TAPS, FLAT_C…), for
-     * the laboratory's side-by-side viewer; the product never sets any. A
-     * changed set drops the kernel's pipelines, rebuilt at the next draw.
+     * the laboratory's side-by-side viewer, over the device class's
+     * (mwsrClassOverrides), the only ones the product sets. A changed set
+     * drops the kernel's pipelines, rebuilt at the next draw.
      * @param {Object<string, number>|null} overrides null or {}: the product's
      */
     setMwsrOverrides(overrides) {

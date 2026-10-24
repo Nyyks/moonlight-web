@@ -8,6 +8,7 @@ import {
     MWSR_UNIFORM_FLOATS,
     MWSR_UNIFORMS,
     MWSR_ZONE,
+    mwsrClassOverrides,
     mwsrGlsl,
     mwsrRegime,
     mwsrRegimeKey,
@@ -283,9 +284,17 @@ describe('the mwsr shader text', () => {
     });
 
     it('reconstructs the flat path by a cubic of bilinear taps when FLAT_TAPS asks (J33)', () => {
-        // the product's default: the bilinear sample itself, in both twins
-        expect(MWSR_OVERRIDES.FLAT_TAPS).toBe(1);
+        // the product's default on a computer since 24/10/2026 (Bruno): the
+        // Catmull-Rom of five taps in both twins; a phone or a tablet takes
+        // the quadratic of three, laid by the renderers under the lab's set
+        expect(MWSR_OVERRIDES.FLAT_TAPS).toBe(5);
         expect(MWSR_OVERRIDES.FLAT_C).toBe(0.5);
+        expect(glsl).toContain('const uint FLAT_TAPS = 5u;');
+        expect(mwsrClassOverrides({ handheld: false })).toEqual({});
+        expect(mwsrClassOverrides({ handheld: true })).toEqual({ FLAT_TAPS: 3 });
+        expect(mwsrGlsl({ overrides: mwsrClassOverrides({ handheld: true }) })).toContain(
+            'const uint FLAT_TAPS = 3u;',
+        );
         for (const text of [tex, glsl]) {
             expect(text).toContain('if (FLAT_TAPS != 3u && FLAT_TAPS != 5u && FLAT_TAPS != 9u) {');
             expect(text).toContain('if (FLAT_TAPS == 9u) {');

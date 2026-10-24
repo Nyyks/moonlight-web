@@ -87,6 +87,7 @@ const RENDERER_URLS = {
   webgl: "/frontend/js/stream/renderers/WebGlRenderer.js",
 };
 const MWSR_URL = "/frontend/js/stream/renderers/MwsrShader.js";
+const BROWSER_DETECT_URL = "/frontend/js/util/BrowserDetect.js";
 // MWSR's per-draw values and their product defaults (read from the module at
 // boot); the panel's two sliders, applied through the renderers' setMwsrTuning.
 const MWSR_DEF = { sharp: 1, tau: 0.05, flat: 1, fc: 0.5, dr: 1 };
@@ -169,7 +170,10 @@ const state = {
 const shown = () => state.order.filter((a) => state.on.has(a));
 const tuning = () => ({ sharp: state.sharp, tau: state.tau });
 const overrides = () => ({
-  ...(state.flat === 1 ? {} : { FLAT_TAPS: state.flat, FLAT_C: state.fc }),
+  // always named: the product's own default differs by device class
+  // (MwsrShader's mwsrClassOverrides), so a bare set would not mean bilinear
+  FLAT_TAPS: state.flat,
+  FLAT_C: state.fc,
   ...(state.dr === MWSR_DEF.dr ? {} : { DERING: state.dr }),
   ...(state.gaze && state.fz ? { FLAT_ZONE: 1 } : {}),
 });
@@ -1801,7 +1805,11 @@ function buildPanel() {
           " · " +
           fr(MWSR_DEF.tau, 3) +
           " · " +
-          (MWSR_DEF.flat === 1 ? "bilinéaire" : "CR" + MWSR_DEF.flat) +
+          (MWSR_DEF.flat === 1
+            ? "bilinéaire"
+            : MWSR_DEF.flat === 3
+              ? "Q3"
+              : "CR" + MWSR_DEF.flat) +
           ")",
       ),
     ),
@@ -2171,6 +2179,21 @@ async function boot() {
     if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.FLAT_TAPS !== undefined) {
       MWSR_DEF.flat = m.MWSR_OVERRIDES.FLAT_TAPS;
       MWSR_DEF.fc = m.MWSR_OVERRIDES.FLAT_C;
+    }
+    // the product's own class layer (a phone or a tablet takes Q3), so
+    // that the defaults shown and restored are this device's
+    if (m.mwsrClassOverrides) {
+      try {
+        const bd = await import(BROWSER_DETECT_URL);
+        const cls = m.mwsrClassOverrides({ handheld: !!bd.IS_HANDHELD });
+        if (cls.FLAT_TAPS !== undefined) MWSR_DEF.flat = cls.FLAT_TAPS;
+        if (cls.FLAT_C !== undefined) MWSR_DEF.fc = cls.FLAT_C;
+      } catch (e) {
+        console.warn(
+          "classe d'appareil inconnue, défauts de l'ordinateur :",
+          e,
+        );
+      }
     }
     if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.DERING !== undefined)
       MWSR_DEF.dr = m.MWSR_OVERRIDES.DERING;
