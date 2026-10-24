@@ -159,11 +159,25 @@ inline short letterVk(const QString& ch)
     return static_cast<short>(up.unicode());
 }
 
+/// Whether a key message goes by its position: the owner's choice (never), a
+/// host that can do nothing else — or gaming mode under "auto", which the
+/// client marks on the press (`gaming`) and replays on its release and in the
+/// heartbeat, so a key pressed at the desktop and let go in gaming mode lets go
+/// of what it pressed. In gaming mode a key plays by its place: the movement
+/// keys and the weapon slots stay where they are whatever the two keyboards,
+/// as a keyboard plugged into the host would (Bruno's rule of 22/10/2026).
+inline bool byPosition(const QJsonObject& msg, KeyboardMode mode, LayoutFidelity fidelity)
+{
+    return mode == KeyboardMode::Positional || fidelity == LayoutFidelity::Never ||
+           (fidelity == LayoutFidelity::Auto && msg["gaming"].toBool(false));
+}
+
 /// Resolve one keyboard message to what the host should actually receive.
 ///
 /// `code` still carries the physical key, because two international keys have
-/// no US VK at all and must be sent as raw VKs whatever the mode: IntlBackslash
-/// (the ISO key beside left Shift) and IntlRo (the JIS \ key).
+/// no US VK at all and go as raw VKs wherever a position is sent: IntlBackslash
+/// (the ISO key beside left Shift) and IntlRo (the JIS \ key). The native host
+/// at the desktop types their character instead, as it does every other key's.
 ///
 /// `char` carries the character the client's layout produced, for every
 /// printable key; `nonUs` says whether the US layout puts something else at
@@ -186,14 +200,19 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
     KeyPlan plan;
     const QString code = msg["code"].toString();
 
-    if (code == QLatin1String("IntlBackslash")) {
-        plan.keyCode = 0xE2; // VK_OEM_102 (ISO <> key)
+    const bool iso = code == QLatin1String("IntlBackslash");
+    if (iso || code == QLatin1String("IntlRo")) {
+        // VK_OEM_102 (ISO <> key) or VK_ABNT_C1 (JIS Ro key).
+        plan.keyCode = iso ? 0xE2 : 0xC1;
         plan.flags = SS_KBE_FLAG_NON_NORMALIZED;
-        return plan;
-    }
-    if (code == QLatin1String("IntlRo")) {
-        plan.keyCode = 0xC1; // VK_ABNT_C1 (JIS Ro key)
-        plan.flags = SS_KBE_FLAG_NON_NORMALIZED;
+        // Their character on the native host at the desktop, like any other
+        // key's. A Mac's ISO keyboard reports its top-left key as IntlBackslash:
+        // the @ and # of a French Mac went as that position, and a French host
+        // typed "<" and ">" for them (24/10/2026).
+        const QString ch = msg["char"].toString();
+        if (mode == KeyboardMode::Native && !ch.isEmpty() && !msg["dead"].toBool(false) &&
+            !byPosition(msg, mode, fidelity))
+            plan.text = ch;
         return plan;
     }
 
@@ -223,15 +242,7 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
         return plan;
     }
 
-    // By position: the owner's choice (never), a host that can do nothing
-    // else — or gaming mode under "auto", which the client marks on the press
-    // (`gaming`) and replays on its release and in the heartbeat, so a key
-    // pressed at the desktop and let go in gaming mode lets go of what it
-    // pressed. In gaming mode a key plays by its place: the movement keys and
-    // the weapon slots stay where they are whatever the two keyboards, as a
-    // keyboard plugged into the host would (Bruno's rule of 22/10/2026).
-    const bool positional = mode == KeyboardMode::Positional || fidelity == LayoutFidelity::Never ||
-                            (fidelity == LayoutFidelity::Auto && msg["gaming"].toBool(false));
+    const bool positional = byPosition(msg, mode, fidelity);
 
     // A dead key (the client's layout waits for the next key to compose: the
     // tilde of AltGr+2 on a French keyboard). Its composed character arrives

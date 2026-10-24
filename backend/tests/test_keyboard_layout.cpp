@@ -218,11 +218,11 @@ void run_keyboard_layout_tests()
             1);
     }
 
-    // ── International keys keep their own rule, in every mode ────────────────
+    // ── International keys: a raw VK wherever a position goes ────────────────
     //
-    // They have no US virtual key at all, so they are sent as raw VKs whatever
-    // the layout policy says — and a stray character must not override that.
-    for (KeyboardMode mode : allModes) {
+    // They have no US virtual key at all, so a position is their raw VK,
+    // non-normalized: on Sunshine, under "never", in gaming mode.
+    for (KeyboardMode mode : {KeyboardMode::Positional, KeyboardMode::SunshineWindows}) {
         const KeyPlan iso =
             resolveKey(key(0, "IntlBackslash", "<", true), mode, LayoutFidelity::Always);
         CHECK(!iso.isText());
@@ -233,6 +233,40 @@ void run_keyboard_layout_tests()
         CHECK(!ro.isText());
         CHECK_EQ(ro.keyCode, static_cast<short>(0xC1));
         CHECK_EQ(ro.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
+    }
+    {
+        const KeyPlan never = resolveKey(key(0, "IntlBackslash", "@", true), KeyboardMode::Native,
+                                         LayoutFidelity::Never);
+        CHECK(!never.isText());
+        CHECK_EQ(never.keyCode, static_cast<short>(0xE2));
+
+        QJsonObject game = key(0, "IntlBackslash", "@", true);
+        game["gaming"] = true;
+        const KeyPlan play = resolveKey(game, KeyboardMode::Native, LayoutFidelity::Auto);
+        CHECK(!play.isText());
+        CHECK_EQ(play.keyCode, static_cast<short>(0xE2));
+        CHECK_EQ(play.flags, static_cast<char>(SS_KBE_FLAG_NON_NORMALIZED));
+    }
+
+    // …and their character on the native host at the desktop, as any key's. A
+    // Mac's ISO keyboard reports its top-left key, the @ and # of a French Mac,
+    // as IntlBackslash: sent as that position, a French host typed "<" for "@"
+    // (24/10/2026).
+    for (LayoutFidelity f : {LayoutFidelity::Auto, LayoutFidelity::Always}) {
+        const KeyPlan at = resolveKey(key(0, "IntlBackslash", "@", true), KeyboardMode::Native, f);
+        CHECK_EQ(at.text.toStdString(), std::string("@"));
+        CHECK_EQ(at.keyCode, static_cast<short>(0xE2));
+
+        const KeyPlan ro = resolveKey(key(0, "IntlRo", "\\", true), KeyboardMode::Native, f);
+        CHECK_EQ(ro.text.toStdString(), std::string("\\"));
+    }
+    {
+        // A dead key there keeps its position: nothing to type yet.
+        QJsonObject dead = key(0, "IntlBackslash", "^", true);
+        dead["dead"] = true;
+        const KeyPlan plan = resolveKey(dead, KeyboardMode::Native, LayoutFidelity::Always);
+        CHECK(!plan.isText());
+        CHECK_EQ(plan.keyCode, static_cast<short>(0xE2));
     }
 
     // ── Press and release must resolve the same way ──────────────────────────
