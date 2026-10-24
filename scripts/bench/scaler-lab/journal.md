@@ -1993,3 +1993,22 @@ contre FSR1 ; à 1080p → 1440p rien ne change. Les deux autres voies de J37 re
 gouverneur ; accepter). En réduction (< 1) l'uniforme n'est pas lu (la grille n'affûte pas) : une loi y passerait par
 un affûtage après la grille, à étudier seulement s'il le demande. Coût de la loi : nul (une valeur par dessin). Rien
 n'a tourné sur GPU : la qualité se mesure au pixel sur SwiftShader (conformité), le créneau RTX + 780M de 14:15 rendu à 59.
+
+## 2026-10-24 — J40, la loi d'échelle de la netteté câblée (oui de Bruno)
+
+**Le oui (13:20) et le go (21:00, relayé par 59).** `mwsrUniforms()` prend `mwsrSharpness(min(outW/inW, outH/inH))`
+quand l'appelant ne nomme pas de netteté : 1,85 jusqu'à ×1,33, 1,542 à ×1,4, 1,233 dès ×1,5 (le poids en travers de
+×1,33 tenu au-delà, J39). Calculée à la reconstruction du bloc d'uniformes, pas par pixel ; en réduction l'uniforme
+reste 1,85 (la grille ne le lit pas). Aucune UI touchée : le labo et l'appel nommé (`{ sharp }`) gardent la main.
+Le comparateur part de la loi : `state.sharp` vaut `null` (= la loi au cas affiché), le réglage affiche « (loi) »,
+le bouton devient « Netteté par la loi d'échelle (défaut du produit) », la remise à zéro rend la loi, un `sharp=`
+du lien prime.
+
+**Vérifié.** Tests de `MwsrShader` (17) : le bloc à ×2 porte 1,85 × 2/3, à ×1,33 et en réduction 1,85, `{ sharp: 1,85 }`
+rend 1,85 ; vitest 1742 / 1742, `npm run check` vert. `golden.json` refait sur SwiftShader : seules les cellules
+MWSR des trois cas ×2 changent (`mwsr`, `chain-mwsr`, `mwsr_dering_0`, `mwsr_c444_1` : 12 cellules ; PSNR contre
+bilinéaire `text` 19,97 → 22,43, `game` 37,98 → 40,21, `code` 29,13 → 31,38 dB), ×1,33 et réduction au bit près ;
+`--golden-check` OK. Conformité côté WebGL2 (`--webgl-swiftshader`) OK, côté WebGPU OK (jumeau contre noyau : FLIP
+0,000, 0,023-0,047 dB) ; la première passe côté WebGPU, lancée avant la passe WebGL2, avait lu les clichés du jumeau
+d'avant la loi (« pas la même qualité » sur `code`, 0,98 dB) : le faux pas de J37, l'ordre est WebGL2 d'abord.
+Rien n'a tourné sur GPU matériel hors le contexte WebGL2 éphémère de la passe WebGPU (J37). Chrome de labo : 0 resté.

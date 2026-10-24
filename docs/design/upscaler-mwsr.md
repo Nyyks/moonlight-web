@@ -1240,8 +1240,8 @@ Elles fixent ce que P6 appliquera sur les résultats de P5 ; rien ne devient dé
 - Le ×2 : étude faite le 24/10 après-midi (journal J39). Le levier est la netteté elle-même, pas le noyau : à ×2
   le poids en travers vaut 1,85 (force 1) là où son œil l'a réglé à ×1,33 avec 1,85 × 2/3 = 1,23, et ce surcroît
   épingle les pixels aux texels (le « baveux » : des paquets, pas du flou). **Proposition : la loi d'échelle
-  `mwsrSharpness`** (1,85 jusqu'à ×1,33, 1,23 dès ×1,5 : le même mélange à toutes les échelles), écrite et testée,
-  pas câblée ; à son œil au comparateur (720p → 1440p, bouton « netteté de la loi d'échelle » contre 1,85 et
+  `mwsrSharpness`** (1,85 jusqu'à ×1,33, 1,23 dès ×1,5 : le même mélange à toutes les échelles), écrite et testée ;
+  **câblée au oui de Bruno du 24/10 (journal J40)** ; à son œil au comparateur (720p → 1440p, bouton « netteté de la loi d'échelle » contre 1,85 et
   FSR1) ; les deux autres voies de J37 restent (FSR1 au-delà de ×1,6 par le gouverneur, accepter).
 
 Le défaut du produit était encore `FLAT_TAPS 1` (l'échantillon bilinéaire lui-même) jusqu'au 24/10 à midi : le
@@ -1452,7 +1452,8 @@ upscalers spatiaux.
 - [ ] Bascule de `auto` par classe d'appareil selon les décisions du 22/10 (§9 : `gl-mwsr` sur PC et Mac, `mwsr` sur iPhone, `gl-mwsr` sur Snapdragon, Mali d'entrée de gamme sans upscaler et présentés par WebGPU), sur les résultats de P5 ; `README.next.md` ; wiki ; notes de release ; mémoires [`medium`]
 - [x] **Fait le 24/10 à midi (journal J38)** : chemin plat par classe d'appareil (décisions du 24/10, §9) : CR5 (`FLAT_TAPS 5`, `FLAT_C 0,5`) sur ordinateur, Q3 (`FLAT_TAPS 3`) sur téléphone et tablette, par les constantes de pipeline des deux jumeaux à la création ; dorés et table de conformité refaits ; SwiftShader puis le RTX et le 780M au go de 59 ; TV Android à mesurer si créneau (optionnel, seul reste) [`high`] ; dorés et conformité refaits sur SwiftShader, RTX et 780M vérifiés au comparateur (0,950 / 25,4 dB partout)
 - [x] **Étude « netteté dynamique selon l'échelle », faite le 24/10 (journal J39)** : la loi ×2 en paramètres du noyau (`S_X2`, `X2_BASE`, `X2_FLAT`, `X2_R_ACROSS`, neutres par défaut, dorés intacts ; plancher de cohérence et plafond `W_MIN` par l'échelle mesurés morts, retirés) ; le levier à ×2 est l'uniforme : netteté 1,25 → étalon centre 28,8 → 31,0 dB, FLIP 0,067 → 0,056 (FSR1 32,3 / 0,045), `game` 34,9 → 35,5, texte au FLIP de FSR1 ; `mwsrSharpness(s)` écrite et testée, pas câblée ; comparateur : bouton de la loi et les trois constantes en réglages (`x2b`, `x2r`, `x2f`)
-- [ ] Loi d'échelle de la netteté (J39) : au oui de Bruno, `mwsrUniforms()` prend `mwsrSharpness(scale)` par défaut (dorés à refaire : les cas ×2 seuls), le curseur du comparateur part de sa valeur ; en réduction, un affûtage après la grille seulement s'il le demande [`low`]
+- [x] **Loi d'échelle de la netteté (J39), câblée le 24/10 au oui de Bruno (journal J40)** : `mwsrUniforms()` prend `mwsrSharpness(min(outW/inW, outH/inH))` quand l'appelant ne nomme pas de netteté (1,85 jusqu'à ×1,33, 1,542 à ×1,4, 1,233 dès ×1,5 ; réduction inchangée), le comparateur part de la loi (« (loi) » au réglage, `sharp=` du lien prime) ; dorés refaits, conformité des deux côtés ; aucune UI touchée
+- [ ] En réduction, un affûtage après la grille seulement si Bruno le demande [`low`]
 
 **Hors v0.4.1 — étude optionnelle (§14, proposée le 21/10/2026, à la décision de Bruno)**
 - [ ] P7.0 Mode séquence du labo et expérience décisive de la mémoire temporelle : panoramique sous-pixel des images de référence, arrêt, coupure, passés par la boucle WebCodecs à deux débits ; FLIP et PSNR par image, scintillement, traînée, avec et sans histoire ; porte go/no-go du §14.3 [`high`]
