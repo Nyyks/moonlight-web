@@ -123,8 +123,12 @@ class LabHandler(Handler):
 
     def do_GET(self):
         # Short links for a phone: /1, /2, /3 redirect to the long case URLs.
-        target = getattr(self.server, "short", {}).get(self.path)
+        # The query rides along: /compare?case=720-1440 keeps its case.
+        base, sep, query = self.path.partition("?")
+        target = getattr(self.server, "short", {}).get(base)
         if target:
+            if sep:
+                target += ("&" if "?" in target else "?") + query
             self.send_response(302)
             self.send_header("Location", target)
             self.end_headers()
