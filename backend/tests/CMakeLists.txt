@@ -86,6 +86,7 @@ add_executable(run_tests
     test_link_loss.cpp
     test_annexb_filler.cpp
     test_link_freeze_log.cpp
+    test_host_uplink.cpp
     test_rxbuf_section.cpp
     test_capture_key.cpp
     test_signaling_wait.cpp
@@ -128,6 +129,8 @@ add_executable(run_tests
     ${_src}/src/streaming/InputEncoder.cpp
     # The input dead-man switch, exercised against a fake wire.
     ${_src}/src/streaming/InputWatchdog.cpp
+    # The adapter a stream leaves by and its counter: read-only system calls.
+    ${_src}/src/streaming/HostUplinkReader.cpp
     # The HID passthrough's hidattach, read and rebuilt into a descriptor.
     ${_src}/src/streaming/HidCollectionsJson.cpp
     # Its wheels kept between two streams, as they travel between processes.

@@ -717,6 +717,8 @@ DataChannelRelay::~DataChannelRelay()
     qInfo() << "[DataChannelRelay] Destructor";
     // The freezes the stats tick had not told yet, the last one included.
     logClosedFreezes(QDateTime::currentMSecsSinceEpoch(), true);
+    // And the host's own upload, if it was still going.
+    logHostUplink(m_UplinkNotice.finish());
     // What SCTP had to repair during the session. A T3 timeout is a repair
     // that waited out the retransmission timer (200 ms at least) instead of a
     // fast retransmit — on a LAN, the one way a single frame arrives that late.
@@ -2733,6 +2735,8 @@ void DataChannelRelay::onStatsTimerTick()
         m_FreezeSctp.emplace_back(nowMs, mw::sctp::readCounters());
         while (m_FreezeSctp.size() > 2 && nowMs - m_FreezeSctp.front().first > kFreezeSctpKeepMs)
             m_FreezeSctp.pop_front();
+        // Before the freezes' lines, which say what the host sent around them.
+        sampleHostUplink(nowMs);
         logClosedFreezes(nowMs, false);
     }
 
@@ -2836,6 +2840,12 @@ void DataChannelRelay::onStatsTimerTick()
     }
 }
 
+// kbit/s as the log's Mbit/s: one decimal under 10.
+static QString mbps(int64_t kbps)
+{
+    return QString::number(static_cast<double>(kbps) / 1000.0, 'f', kbps < 10000 ? 1 : 0);
+}
+
 void DataChannelRelay::logClosedFreezes(qint64 nowMs, bool all)
 {
     const std::vector<LinkFreezeLog::Episode> closed = m_Freezes.takeClosed(nowMs, all);
@@ -2872,9 +2882,18 @@ void DataChannelRelay::logClosedFreezes(qint64 nowMs, bool all)
                 ? QStringLiteral("; the page sent the report that ended the gap %1 ms late")
                       .arg(ep.pageLateMs)
                 : QString();
+        // What the host itself sent besides the stream meanwhile: a link that
+        // froze under the host's own upload is not one that froze on its own.
+        const mw::hostuplink::Meter::Window up = m_Uplink.around(ep.startMs, ep.endMs);
+        const QString uplink =
+            up.samples > 0
+                ? QStringLiteral(
+                      "; the host sent ~%1 Mbit/s besides this stream around it (peak %2)")
+                      .arg(mbps(up.meanKbps), mbps(up.peakKbps))
+                : QString();
         qInfo().noquote() << QStringLiteral("[LinkFreeze] #%1%2: %3 ms, %4 to %5, seen by %6; "
                                             "SCTP around it: %7 chunks sent again (%8 fast), "
-                                            "%9 T3%10")
+                                            "%9 T3%10%11")
                                  .arg(ep.number)
                                  .arg(ep.stretched ? QStringLiteral(" (stretched)") : QString())
                                  .arg(ep.endMs - ep.startMs)
@@ -2882,7 +2901,85 @@ void DataChannelRelay::logClosedFreezes(qint64 nowMs, bool all)
                                  .arg(d.retrans)
                                  .arg(d.fast)
                                  .arg(d.t3)
-                                 .arg(page);
+                                 .arg(page, uplink);
+    }
+}
+
+void DataChannelRelay::sampleHostUplink(qint64 nowMs)
+{
+    if (!m_Pc) return;
+    // The adapter follows the path: looked up again when the selected pair's
+    // remote address changes, checked every few ticks.
+    if (--m_UplinkRecheckTicks <= 0) {
+        m_UplinkRecheckTicks = kUplinkRecheckTicks;
+        rtc::Candidate local;
+        rtc::Candidate remote;
+        bool selected = false;
+        try {
+            selected = m_Pc->getSelectedCandidatePair(&local, &remote);
+        } catch (const std::exception&) {}
+        const std::optional<std::string> address = selected ? remote.address() : std::nullopt;
+        // No pair yet: look again at the next tick rather than in ten.
+        if (!address && m_UplinkRemote.empty()) m_UplinkRecheckTicks = 1;
+        if (address && *address != m_UplinkRemote) {
+            logHostUplink(m_UplinkNotice.finish());
+            m_UplinkRemote = *address;
+            m_UplinkAdapter = mw::hostuplink::adapterTowards(*address);
+            m_Uplink = {};
+            m_UplinkNotice = {};
+            if (m_UplinkAdapter.valid()) {
+                qInfo().noquote() << QStringLiteral("[HostUpload] watching \"%1\" for what this PC "
+                                                    "sends besides the stream (the route to %2)")
+                                         .arg(QString::fromStdString(m_UplinkAdapter.name),
+                                              QString::fromStdString(*address));
+            } else {
+                qInfo().noquote() << QStringLiteral(
+                                         "[HostUpload] no adapter found on the route to %1: "
+                                         "what this PC sends besides the stream is not measured")
+                                         .arg(QString::fromStdString(*address));
+            }
+        }
+    }
+    if (!m_UplinkAdapter.valid()) return;
+    const std::optional<uint64_t> adapterBytes = mw::hostuplink::sentBytes(m_UplinkAdapter);
+    if (!adapterBytes) return;
+    uint64_t streamBytes = 0;
+    try {
+        streamBytes = m_Pc->bytesSent();
+    } catch (const std::exception&) {
+        return;
+    }
+    if (const auto rate = m_Uplink.add(nowMs, *adapterBytes, m_UplinkAdapter.bits, streamBytes))
+        logHostUplink(m_UplinkNotice.feed(*rate));
+}
+
+void DataChannelRelay::logHostUplink(const mw::hostuplink::Notice::Event& ev)
+{
+    using Kind = mw::hostuplink::Notice::Kind;
+    switch (ev.kind) {
+    case Kind::None: return;
+    case Kind::Started:
+        qInfo().noquote() << QStringLiteral(
+                                 "[HostUpload] this PC sends ~%1 Mbit/s besides the stream "
+                                 "on \"%2\" (the stream's own data: ~%3 Mbit/s), for %4 s already")
+                                 .arg(mbps(ev.lastKbps),
+                                      QString::fromStdString(m_UplinkAdapter.name),
+                                      mbps(ev.streamKbps))
+                                 .arg(ev.durationMs / 1000);
+        return;
+    case Kind::Still:
+        qInfo().noquote() << QStringLiteral("[HostUpload] still ~%1 Mbit/s besides the stream "
+                                            "(mean %2, peak %3) for %4 s")
+                                 .arg(mbps(ev.lastKbps), mbps(ev.meanKbps), mbps(ev.peakKbps))
+                                 .arg(ev.durationMs / 1000);
+        return;
+    case Kind::Ended:
+        qInfo().noquote() << QStringLiteral("[HostUpload] over: ~%1 Mbit/s besides the stream on "
+                                            "average for %2 s, peak %3")
+                                 .arg(mbps(ev.meanKbps))
+                                 .arg(ev.durationMs / 1000)
+                                 .arg(mbps(ev.peakKbps));
+        return;
     }
 }
 

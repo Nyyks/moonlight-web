@@ -19,6 +19,8 @@
 
 #include "RelayBase.h"
 #include "HostLagTracker.h"
+#include "HostUplink.h"
+#include "HostUplinkReader.h"
 #include "LinkFreezeLog.h"
 #include "SendBacklog.h"
 #include "FrameSender.h"
@@ -535,6 +537,21 @@ private:
     /// One [LinkFreeze] line per freeze the log hands out at @p nowMs (see
     /// LinkFreezeLog::takeClosed; @p all: the session is over).
     void logClosedFreezes(qint64 nowMs, bool all);
+    // What the host sends besides this stream, read at every stats tick from
+    // the adapter the route to the client takes (HostUplink.h): for the
+    // [LinkFreeze] lines and the [HostUpload] ones. Relay thread only.
+    mw::hostuplink::Adapter m_UplinkAdapter;
+    std::string m_UplinkRemote;
+    mw::hostuplink::Meter m_Uplink;
+    mw::hostuplink::Notice m_UplinkNotice;
+    int m_UplinkRecheckTicks = 0;
+    /// Ticks between two looks at the selected pair: a new path re-picks the
+    /// adapter.
+    static constexpr int kUplinkRecheckTicks = 10;
+    /// One reading of the adapter and of the stream's bytes at @p nowMs.
+    void sampleHostUplink(qint64 nowMs);
+    /// The [HostUpload] line for @p ev, if it is one.
+    void logHostUplink(const mw::hostuplink::Notice::Event& ev);
     // Bidirectional clipboard sync (only when the streamed host is this
     // machine). Written once on the main thread before the relay moves to its
     // dedicated thread, read from relay/libdatachannel threads afterwards.

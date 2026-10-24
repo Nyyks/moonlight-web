@@ -386,6 +386,7 @@ add_executable(mw-server
     src/streaming/DataChannelRelay.cpp
     src/streaming/PacketMarking.cpp
     src/streaming/SctpCounters.cpp
+    src/streaming/HostUplinkReader.cpp
     src/streaming/SctpFlood.cpp
     src/streaming/FrameSender.cpp
     src/streaming/AroadPacer.cpp

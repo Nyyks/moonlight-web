@@ -45,6 +45,7 @@ void run_send_pacer_tests();
 void run_link_loss_tests();
 void run_annexb_filler_tests();
 void run_link_freeze_log_tests();
+void run_host_uplink_tests();
 void run_rxbuf_section_tests();
 void run_capture_key_tests();
 void run_signaling_wait_tests();
@@ -114,6 +115,7 @@ int main(int argc, char** argv)
     run_link_loss_tests();
     run_annexb_filler_tests();
     run_link_freeze_log_tests();
+    run_host_uplink_tests();
     run_rxbuf_section_tests();
     run_capture_key_tests();
     run_signaling_wait_tests();
