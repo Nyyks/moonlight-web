@@ -712,14 +712,21 @@ coupé. Hôte : DualRTX, écran mesuré DISPLAY5 (RTX 5060 Ti du bus 3, principa
 2560×1440 à 120 Hz), drapeau noir/blanc `flag-window.ps1` par-dessus ; hôte
 natif = la `--dev` de `build\` au commit `18bfea44` (exe et frontend du même
 commit, redémarrée à 15:12), tuile « Display 2 » ; Sunshine 2026.921.13701 en
-configuration par défaut, app « Desktop ». Partout : HEVC, 1920×1080,
-20 Mbit/s, 60 clics par passe espacés de 700 ms, lecture `GetPixel` sur le
-bureau composé du client (`click-photon.ps1` via `run-in-console.ps1`).
+configuration par défaut, app « Desktop ». Partout : HEVC, 60 clics par
+passe espacés de 700 ms, lecture `GetPixel` sur le bureau composé du client
+(`click-photon.ps1` via `run-in-console.ps1`). Le même débit partout, voulu
+par le §10.3, n'a pas été tenu ; les journaux du worker, relus après coup,
+donnent : à 120 i/s, B et C en 1920×1080 à 40 Mbit/s (ce que la page règle
+pour 1080p120), A en 1920×1080 à 20 Mbit/s (`--bitrate 20000`) ; à 60 i/s,
+A et C en 1920×1080 à 20 Mbit/s, mais B en 2560×1440 à 36 Mbit/s (la page
+repassée en « Auto » après le réglage de 60 i/s). **Seule la série à 120 i/s
+compte pour la porte**, et B s'y compare à C, même page et mêmes réglages.
 Case A : moonlight-qt 6.2.0 portable, D3D11VA, fenêtré, V-Sync et cadencement
 coupés. Cases B et C : MoonlightWeb dans un profil Chrome 155 neuf, défauts du
 produit (Canvas2D, 120 puis 60 i/s réglés dans la page), la page en premier
-plan. La pré-passe à l'overlay (non mesurée) a confirmé ce que la page négocie :
-1920×1080, HEVC, transport `webrtc-dc-udp`, latence réseau affichée 4 à 5 ms.
+plan. La pré-passe à l'overlay (non mesurée, à 120 i/s) a confirmé ce que la
+page négocie : 1920×1080, HEVC, transport `webrtc-dc-udp`, latence réseau
+affichée 4 à 5 ms.
 Vingt passes au lieu de douze : quatre de plus à 120 i/s pour asseoir la case B.
 Fichiers : `bench-out/photon/b0-<a|b|c>-<120|60>-<n>.json` [C].
 
@@ -728,22 +735,26 @@ Fichiers : `bench-out/photon/b0-<a|b|c>-<120|60>-<n>.json` [C].
 | Cadence | A — moonlight-qt ↔ Sunshine | B — page ↔ hôte natif | C — page ↔ Sunshine |
 |---|---|---|---|
 | 120 i/s | 32,5 (33,8) · 32,7 (34,3) · 24,9 (33,1) | 33,6 (49,2) · 41,1 (49,6) · 41,8 (50,0) · 41,3 (49,0) | 34,0 (41,6) · 33,4 (40,1) · 34,0 (42,5) |
-| 60 i/s | 33,2 (41,3) · 33,0 (34,6) | 41,3 (48,8) · 41,9 (50,0) | 33,9 (42,6) · 34,5 (42,6) |
+| 60 i/s | 33,2 (41,3) · 33,0 (34,6) | 41,3 (48,8) · 41,9 (50,0) † | 33,9 (42,6) · 34,5 (42,6) |
 | **Toutes les mesures réunies, 120 i/s** | **32,3** (33,6), n = 177 | **41,3** (49,6), n = 240 | **33,6** (42,0), n = 180 |
-| **Toutes les mesures réunies, 60 i/s** | **33,0** (41,0), n = 118 | **41,6** (49,8), n = 120 | **34,3** (42,6), n = 120 |
+| **Toutes les mesures réunies, 60 i/s** | **33,0** (41,0), n = 118 | **41,6** (49,8), n = 120 † | **34,3** (42,6), n = 120 |
 
 Les médianes tombent sur les marches attendues, espacées d'une image de
 l'écran du client (8,33 ms à 120 Hz) : A et C sur la marche 32-34 ms (A une
 fois sur la marche du dessous, 24,9 ; B une fois sur la marche 33,6 à sa
 première passe), B sur la marche 41-42 ms. moonlight-qt a perdu un clic sur 60
-à chaque passe ; la page aucun.
+à chaque passe ; la page aucun. † B à 60 i/s tournait en 2560×1440 à
+36 Mbit/s : ces deux cases ne se comparent pas aux autres.
 
 **La lecture, selon les règles du §10.3.**
-- **A est plus tôt que B d'une image** : 9,0 ms à 120 i/s, 8,6 ms à 60 i/s,
-  soit 1,1 et 1,0 image de l'écran du client, avec un p90 meilleur de 16 ms.
-- **Mais C ≈ A** : 1,3 ms d'écart à 120 i/s, 1,2 ms à 60 i/s, bien moins
-  qu'une image. La même page, devant le même Sunshine, affiche le clic en
-  même temps que le client natif.
+- **A est plus tôt que B d'une image** : 9,0 ms à 120 i/s, soit 1,1 image
+  de l'écran du client, avec un p90 meilleur de 16 ms. À réglages égaux, B
+  est en retard de 7,7 ms sur C. L'écart de 8,6 ms à 60 i/s ne compte pas
+  (B en 1440p).
+- **Mais C ≈ A** : 1,3 ms d'écart à 120 i/s, alors que la page recevait le
+  double du débit de moonlight-qt (40 contre 20 Mbit/s), et 1,2 ms à 60 i/s,
+  cette fois à réglages égaux ; bien moins qu'une image. La même page, devant
+  le même Sunshine, affiche le clic en même temps que le client natif.
 - Donc **l'image perdue vient de l'hôte, pas de la page** : l'hôte natif
   MoonlightWeb (DDA + NVENC, `--dev` du 24/10) livre le clic une image après
   Sunshine sur le même GPU et le même écran. C'est le deuxième cas du §10.3 :
