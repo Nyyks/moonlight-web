@@ -1650,6 +1650,7 @@ start-arm.ps1`, 14:15), un Chrome sans tête collé à sa console mourant avec e
 |---|---|---|---|---|---|---|---|---|---|
 | iPhone 13 Pro, Safari (WebGPU `mwsr`, captures de Bruno 12:13-12:16) | 1 | 4,41 | 4,82 (100 images) | 4,82 | 5,13 | — | — | 7,94-8,26 | 4,39-5,04 |
 | Mac M1 Pro, Chrome 155 (WebGL2 `gl-mwsr`) | 3 | 3,28 | 4,38 | 3,70 | 3,37 | 3,35 | 3,43 | 4,20 | 3,44 |
+| DualRTX RTX 5060 Ti, Chrome sans tête (WebGL2 `gl-mwsr`, comparateur corrigé, 24/10 08:18, J38) | 1 | 0,98 | 0,94 | 0,96 | 1,03 | 0,98 | 0,93 | 0,91-1,99 | 0,94-1,78 |
 | DualRTX 780M, Chrome sans tête (WebGL2) | 1 | 6,13 | 5,86 | 5,85 | 9,46 | 5,32 | 5,67 | 14,93 | 6,60 |
 | UM790Pro, Radeon 780M, Chrome 155 sans tête (WebGL2 `gl-mwsr`, 18:09, J37) | 1 | 5,06 | 4,27 | 4,15 | 4,12 | 4,09 | 4,07 | 5,73-7,15 | 4,07-7,28 |
 | N95 (mw-intel), Intel UHD, Chrome 155 sans tête (WebGL2) | 1 | 19,3 | 17,5 | 16,5 | 17,2 | 17,2 | 16,3 | 33,3 | 18,2 |
@@ -1806,3 +1807,22 @@ qualité 0,941 / 24,6 et 0,951 / 25,5, chemin `gl-mwsr:frame` : les chiffres d'a
 banc 2 : 40 / 89 / 48). Restent, au go : la RTX à remesurer au comparateur (sa ligne du parc) et mw-arm à refaire ;
 la boucle de mesure du labo (`scaler_lab`) n'a pas ce « done » et ses chiffres RTX de P4 étaient sains (0,8 ms) ;
 à faire un autre jour : la colonne du temps GPU par la même requête.
+
+## 2026-10-24 — J38, la RTX au comparateur corrigé : les trois shaders au plancher d'une passe
+
+**Contexte.** Go de Bruno à 07:5x par 59, « à toi » à 08:18 après le banc c2 de dualgpu (les deux cartes rendues
+à 180 W, topologie d'origine). Recette épinglée de J36 (`dualrtx.py --gpu rtx0`) : Chrome sans tête, profil
+propre, muet, `--use-adapter-luid=0,77960` (LUID 0x13088 inchangé : pas de redémarrage depuis le 19/10), sondes
+WebGL2 et WebGPU « NVIDIA », croissance des compteurs WDDM pendant un dessin 21 043 sur 0x13088 et 0 sur le 780M,
+NVENC 0 session, plafond 130 s ; 32 s au total, « chrome left: 0 », ni --dev ni écran touchés.
+
+**Mesures (ms par image, 300 images, chemin `gl-mwsr:frame`)** : Q3 0,98 (p50 0,85), Q3 + zone 0,94, CR5 0,96,
+CR5 + zone 1,03, borne texels 1,5 CR5 0,98, avec zone 0,93 ; FSR1 0,91-1,99 et SGSR1 0,94-1,78 selon la page ;
+qualité au millième celle de la table (0,951 / 25,5 pour la borne texels). Ligne ajoutée au tableau de J36 ; la
+passe du 23/10 à 15:20 (180 ms par itération, le régime 3 de J37) est remplacée.
+
+**Lecture.** Avec la requête de temps autour du dessin, la barrière du comparateur revient en 1 ms sur NVIDIA, le
+chiffre du labo à P4 (0,8 ms) : les trois shaders sont au plancher d'une passe plein écran sur cette carte, et
+les écarts entre réglages (0,93-1,03) sont le bruit d'une page à l'autre, comme ceux de FSR1 et SGSR1 (première
+mesure d'une page neuve). Le comparateur donne maintenant sur NVIDIA ce qu'il donnait déjà sur AMD, Intel et
+Apple ; reste mw-arm (Qualcomm, Adreno 618), à la ligne de Bruno après le test dualgpu.
