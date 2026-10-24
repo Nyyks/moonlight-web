@@ -665,21 +665,39 @@ export class SettingsView {
         };
     }
 
-    /** The recommended bitrate, in Mbps, for what the controls show now. */
-    _estimateBitrate() {
-        const fps = parseInt(this.container.querySelector('#settings-stream-fps')?.value, 10);
-        const chroma444 = this.container.querySelector('#settings-chroma-444')?.checked === true;
-        // The size the choice stands for — this screen's, the custom pair, or
-        // the rung at the ratio below. "auto" resolves to the host's own
-        // format at launch, which is unknown here — aspectToNumber() reads it
-        // as the 16:9 baseline, which is what the estimate wants.
-        const choice = this._readResolutionChoice();
+    /**
+     * The size and rate the stream will carry for this resolution choice at
+     * this rate: what the pixel budget leaves of them, the half the viewer
+     * named kept as named (util/StreamResolution.js). The size is the one the
+     * choice stands for — this screen's, the custom pair, or the rung at the
+     * ratio below. "auto" resolves to the host's own format at launch, which
+     * is unknown here — aspectToNumber() reads it as the 16:9 baseline, which
+     * is what the estimate wants.
+     */
+    _budgetedStream(choice, rate, rateNamed) {
         const ref = bitrateReference(choice, undefined, IS_HANDHELD, IS_TV);
         const aspect =
             choice.mode === 'fixed'
                 ? this.container.querySelector('#settings-stream-aspect')?.value ||
                   this._streamAspect
                 : ref.aspect;
+        const size = { height: ref.height, aspect };
+        if (choice.mode !== 'auto' && rateNamed) return { size, fps: rate };
+        const bounded = fitPixelBudget(size, rate, {
+            clientFps: measuredFps(),
+            resolutionNamed: choice.mode !== 'auto',
+            rateNamed,
+        });
+        return {
+            size: { ...bounded.size, aspect: bounded.size.aspect || aspect },
+            fps: bounded.fps,
+        };
+    }
+
+    /** The recommended bitrate, in Mbps, for what the controls show now. */
+    _estimateBitrate() {
+        const fps = parseInt(this.container.querySelector('#settings-stream-fps')?.value, 10);
+        const chroma444 = this.container.querySelector('#settings-chroma-444')?.checked === true;
         const hdr = this.container.querySelector('#settings-hdr')?.checked ?? this._hdrEnabled;
         // Auto (0) is estimated at the rate this screen runs at — what the
         // stream will actually ask for — and at 60 when none was measured.
@@ -688,22 +706,41 @@ export class SettingsView {
         // And at the size and rate the pixel budget leaves of them, since that
         // is what the stream will carry — an estimate for a 1440p120 the
         // launch turns into 1080p120 recommends a bitrate for pixels nobody
-        // ever sends (util/StreamResolution.js). A named resolution keeps its
-        // lines there too, and the Auto rate pays.
-        const bounded =
-            choice.mode === 'auto' || chosen <= 0
-                ? fitPixelBudget({ height: ref.height, aspect }, rate, {
-                      clientFps: measuredFps(),
-                      resolutionNamed: choice.mode !== 'auto',
-                  })
-                : { size: { height: ref.height, aspect }, fps: rate };
+        // ever sends.
+        const bounded = this._budgetedStream(this._readResolutionChoice(), rate, chosen > 0);
         return this._computeAutoBitrate(
             bounded.size.height,
             bounded.fps,
-            bounded.size.aspect || aspect,
+            bounded.size.aspect,
             chroma444,
             hdr,
         );
+    }
+
+    /**
+     * The line of the Auto frame rate: the rate the stream will really be
+     * sent at for the resolution the controls show. That is this screen's,
+     * under Auto's ceiling — said plainly when the panel runs faster: a
+     * 165 Hz screen reading "Auto (165 FPS)" and then streaming 120 would be
+     * a label that lies, and the 165 rung right below it is there for whoever
+     * wants it — and less again where the pixel budget takes it down, a 4K
+     * rung on a 120 Hz screen streaming at 60.
+     */
+    _autoFpsLabel() {
+        const measured = autoFps();
+        if (!measured) return t('settings.fpsAuto');
+        const streamed = this._budgetedStream(this._readResolutionChoice(), measured, false).fps;
+        if (streamed < measured) return t('settings.fpsAutoBudget', { fps: streamed });
+        const panel = measuredFps();
+        return panel > measured
+            ? t('settings.fpsAutoCapped', { fps: measured, screen: panel })
+            : t('settings.fpsAutoMeasured', { fps: measured });
+    }
+
+    /** Put the Auto frame rate's line in step with the resolution shown. */
+    _syncAutoFpsLabel() {
+        const option = this.container.querySelector('#settings-stream-fps option[value="0"]');
+        if (option) option.textContent = this._autoFpsLabel();
     }
 
     /** Show whether the bitrate is the estimate's or the user's own. */
@@ -1605,18 +1642,9 @@ export class SettingsView {
         // FPS options. Auto first and default: the rate this very screen
         // refreshes at, which is also what the native host's virtual display
         // is created at — one streamed frame per refresh, neither judder nor
-        // frames encoded for nothing. Its label names the rate Auto will ask
-        // for when there is a measurement, and says so plainly when the panel
-        // runs faster than Auto's ceiling: a 165 Hz screen reading "Auto
-        // (165 FPS)" and then streaming 120 would be a label that lies, and
-        // the 165 rung right below it is there for whoever wants it.
-        const measured = autoFps();
-        const panel = measuredFps();
-        const autoLabel = !measured
-            ? t('settings.fpsAuto')
-            : panel > measured
-              ? t('settings.fpsAutoCapped', { fps: measured, screen: panel })
-              : t('settings.fpsAutoMeasured', { fps: measured });
+        // frames encoded for nothing. Its label names the rate Auto will
+        // stream at when there is a measurement (_autoFpsLabel).
+        const autoLabel = this._autoFpsLabel();
         const fpsValues = [15, 30, 60, 75, 90, 120, 144, 165, 240];
         const fpsOptions = [
             `<option value="0" ${this._streamFps > 0 ? '' : 'selected'}>${this.esc(autoLabel)}</option>`,
@@ -2169,6 +2197,7 @@ export class SettingsView {
                 // Auto with it (the debug-only dropdown follows on re-render).
                 this._streamAspect = 'auto';
                 this._applyAutoBitrate();
+                this._syncAutoFpsLabel();
                 const choice = this._readResolutionChoice();
                 const custom = choice.mode === 'custom';
                 const showing = !!this.container.querySelector('#settings-custom-width');
@@ -2192,6 +2221,7 @@ export class SettingsView {
                 const fallback = id.endsWith('width') ? this._customWidth : this._customHeight;
                 input.value = String(clampCustomSize(input.value, fallback) & ~1);
                 this._applyAutoBitrate();
+                this._syncAutoFpsLabel();
                 this._autoSave();
             });
         }
@@ -2203,6 +2233,7 @@ export class SettingsView {
             aspectSelect.addEventListener('change', () => {
                 this._streamAspect = aspectSelect.value;
                 this._applyAutoBitrate();
+                this._syncAutoFpsLabel();
                 this._autoSave();
             });
 

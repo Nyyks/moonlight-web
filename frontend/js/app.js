@@ -3002,8 +3002,9 @@ export const MoonlightApp = {
      * A resolution and a frame rate are picked apart and multiply together;
      * whenever one of the two was ours to pick, the product is ours to keep
      * sane (util/StreamResolution.js, fitPixelBudget) — with the half that
-     * was ours: a resolution the viewer named stays, and only an Auto frame
-     * rate comes down for it. Two explicit choices are left exactly as asked.
+     * was ours: a resolution or a rate the viewer named stays, and only the
+     * Auto one comes down for it. Two explicit choices are left exactly as
+     * asked.
      *
      * `stream_fps_max` is the ceiling the native host must respect: without
      * it, a client presenting on vsync gets the nearest divisor of its own
@@ -3021,6 +3022,7 @@ export const MoonlightApp = {
             clientFps: measuredFps(),
             aspect: settings.stream_aspect,
             resolutionNamed: mode !== 'auto',
+            rateNamed: !fpsAuto,
         });
         if (bounded.capped) {
             console.log(

@@ -20,6 +20,7 @@ import {
     PIXEL_RATE_BUDGET,
     BUDGET_MIN_HEIGHT,
     BUDGET_MIN_FPS,
+    BUDGET_GRID_MAX_LOSS,
     bitrateReference,
     clampCustomSize,
     devicePixelSize,
@@ -468,15 +469,52 @@ describe('fitPixelBudget', () => {
 
     it('takes the frame rate down once the resolution is at its floor', () => {
         // An ultrawide at its own shape: 2560×1080 is already at the floor's
-        // lines, so the rate pays the rest.
+        // lines, so the rate pays the rest — 90 fits, and stays 90 on a
+        // 120 Hz screen: its divisor under it, 60, would cost a third.
         const out = fitPixelBudget({ height: 1080, aspect: '2560:1080' }, 120, {
             device: { width: 2560, height: 1080 },
             clientFps: 120,
         });
         expect(out.size.height).toBe(BUDGET_MIN_HEIGHT);
-        expect(out.fps).toBeLessThan(120);
-        expect(out.fps).toBeGreaterThanOrEqual(BUDGET_MIN_FPS);
+        expect(out.fps).toBe(90);
         expect(2560 * out.size.height * out.fps).toBeLessThanOrEqual(PIXEL_RATE_BUDGET);
+        expect((90 - 60) / 90).toBeGreaterThan(BUDGET_GRID_MAX_LOSS);
+    });
+
+    it("lands a rate it brings down on the screen's grid when that costs little", () => {
+        // A 1440p rung fits at 67: on a 120 Hz screen, 60 is a tenth less and
+        // every frame on a refresh. The ultrawide's 90 on a 240 Hz screen
+        // becomes 80 the same way.
+        const rung = (clientFps) =>
+            fitPixelBudget({ height: 1440, aspect: null }, 120, {
+                device: uhd,
+                clientFps,
+                aspect: '16:9',
+                resolutionNamed: true,
+            }).fps;
+        expect(rung(120)).toBe(60);
+        expect((67 - 60) / 67).toBeLessThanOrEqual(BUDGET_GRID_MAX_LOSS);
+        const ultrawide = fitPixelBudget({ height: 1080, aspect: '2560:1080' }, 120, {
+            device: { width: 2560, height: 1080 },
+            clientFps: 240,
+        });
+        expect(ultrawide.fps).toBe(80);
+        // On a 144 Hz screen, the divisor under 67 is 48, under the floor:
+        // the budget's 67 stands.
+        expect(rung(144)).toBe(67);
+    });
+
+    it('keeps a frame rate the viewer named, and spends the Auto resolution alone', () => {
+        // Auto's 1440 box with 144 picked: the lines come down to their floor
+        // and the 144 stands, over the budget as it may be.
+        const out = fitPixelBudget({ height: 1440, aspect: '2560:1440' }, 144, {
+            device: uhd,
+            clientFps: 144,
+            rateNamed: true,
+        });
+        expect(out.capped).toBe(true);
+        expect(out.size).toEqual({ height: 1080, aspect: '1920:1080' });
+        expect(out.fps).toBe(144);
     });
 
     it('never pushes either half below what this very screen does', () => {
@@ -509,21 +547,21 @@ describe('fitPixelBudget', () => {
 
     it('weighs a rung whose width still belongs to the Auto ratio', () => {
         // `fixed` fixes no shape: the rung is weighed at the ratio the caller
-        // knows, and comes back with its width still unstated. 2560×1440
-        // fits at 67, 1920×1440 at 90 — the rate comes down only as far as
-        // the budget asks.
+        // knows, and comes back with its width still unstated. On a 240 Hz
+        // screen, 2560×1440 fits at 67 and gets 60, 1920×1440 fits at 90 and
+        // gets 80 — the rate comes down only as far as the budget asks.
         const at = (aspect) =>
             fitPixelBudget({ height: 1440, aspect: null }, 120, {
                 device: uhd,
-                clientFps: 120,
+                clientFps: 240,
                 aspect,
                 resolutionNamed: true,
             });
         const wide = at('16:9');
         expect(wide.size).toEqual({ height: 1440, aspect: null });
-        expect(wide.fps).toBe(67);
+        expect(wide.fps).toBe(60);
         expect(2560 * 1440 * wide.fps).toBeLessThanOrEqual(PIXEL_RATE_BUDGET);
-        expect(at('4:3').fps).toBe(90);
+        expect(at('4:3').fps).toBe(80);
     });
 
     it('holds its peace when there is no size to weigh', () => {

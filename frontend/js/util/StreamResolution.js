@@ -59,14 +59,18 @@
  * 120 fps is 442 million pixels a second to capture, scale, encode, send,
  * decode and paint — more than a machine on either end holds for an hour of
  * play. So whenever ONE of the two was left to us (Auto resolution or Auto
- * frame rate), the pair is held under PIXEL_RATE_BUDGET (fitPixelBudget). An
- * Auto resolution pays first: a frame rate is felt on every mouse move, a
- * hundred lines of resolution are not. A resolution the viewer named is not
- * ours to cut — a 4K rung on a 120 Hz screen streams 4K at 60, not 1080p at
- * 120 (issue #38) — so there the Auto frame rate alone comes down. Neither is
- * ever brought below what the client itself does — BUDGET_MIN_HEIGHT and
- * BUDGET_MIN_FPS, or this screen's own when it is under them. Two explicit
- * choices are the viewer's business and are left alone.
+ * frame rate), the pair is held under PIXEL_RATE_BUDGET (fitPixelBudget), and
+ * only the half left to us pays. Auto/Auto spends the resolution first: a
+ * frame rate is felt on every mouse move, a hundred lines of resolution are
+ * not. A half the viewer named is not ours to cut — a 4K rung on a 120 Hz
+ * screen streams 4K at 60, not 1080p at 120 (issue #38), and a 144 picked
+ * with Auto's resolution stays 144. A rate brought down lands on a divisor of
+ * this screen's refresh when one lies close under it, 60 rather than 67 on a
+ * 120 Hz one, so its frames still fall on the screen's grid; farther off, the
+ * budget's own rate stands. Neither half is ever brought below what
+ * the client itself does — BUDGET_MIN_HEIGHT and BUDGET_MIN_FPS, or this
+ * screen's own when it is under them. Two explicit choices are the viewer's
+ * business and are left alone.
  *
  * ── "MoonlightWeb Virtual Display" ─────────────────────────────────────────
  *
@@ -152,12 +156,18 @@ function autoCeiling(tv) {
 export const PIXEL_RATE_BUDGET = 250000000;
 
 /** How far down the budget may push each half. An Auto resolution goes first
- *  and stops at 1080 lines (a named one does not move at all), the frame rate
- *  follows and stops at 60 — and neither moves below what this very screen
- *  does, since a stream already smaller than the screen it lands on has
- *  nothing left to give. */
+ *  and stops at 1080 lines, an Auto frame rate follows and stops at 60 (a
+ *  named half does not move at all) — and neither moves below what this very
+ *  screen does, since a stream already smaller than the screen it lands on
+ *  has nothing left to give. */
 export const BUDGET_MIN_HEIGHT = 1080;
 export const BUDGET_MIN_FPS = 60;
+
+/** How much of a budget-cut frame rate may be given up to land it on a
+ *  divisor of this screen's refresh: 67 becomes 60 on a 120 Hz screen (a
+ *  tenth less, and every frame on a refresh), while 90 stays 90 — a third of
+ *  the rate is too much to give for it (Bruno, 24/10/2026). */
+export const BUDGET_GRID_MAX_LOSS = 0.15;
 
 /** Bounds of a display mode made on demand — what the virtual display driver
  *  will take, and what the decoder on the other side will. The floor is VGA's
@@ -462,6 +472,28 @@ function aspectRatio(aspect) {
 }
 
 /**
+ * The rate a budget-cut frame rate lands on: the budget's own, never under
+ * `floor` — or the highest whole divisor of this screen's refresh under it,
+ * when that gives up no more than BUDGET_GRID_MAX_LOSS of it, so that every
+ * streamed frame falls on a refresh. 67 becomes 60 on a 120 Hz screen and 90
+ * becomes 80 on a 240 Hz one; 90 on a 120 Hz screen stays 90, and so does 67
+ * on a 144 Hz one, whose next divisor down, 48, is under the floor.
+ * @param {number} fits the highest rate the budget takes
+ * @param {number} floor the lowest rate it may give
+ * @param {number} [screenFps] this screen's refresh; 0 or none when unknown
+ */
+function onScreenGrid(fits, floor, screenFps) {
+    const rate = Math.max(floor, fits);
+    if (!(screenFps > 0)) return rate;
+    for (let k = 1; screenFps / k >= floor; k++) {
+        const d = screenFps / k;
+        if (Number.isInteger(d) && d <= rate)
+            return rate - d <= rate * BUDGET_GRID_MAX_LOSS ? d : rate;
+    }
+    return rate;
+}
+
+/**
  * Hold a size and a frame rate under PIXEL_RATE_BUDGET together.
  *
  * Called only when ONE of the two was left to us — Auto resolution or Auto
@@ -470,9 +502,11 @@ function aspectRatio(aspect) {
  * BUDGET_MIN_HEIGHT (or at this screen's own height, when the screen is under
  * it: there is nothing to gain below what the picture lands on) — unless the
  * viewer named it (`resolutionNamed`), and then it stays exactly as named.
- * Only then is the frame rate brought down, the same way, to BUDGET_MIN_FPS.
- * A pair that is still over the budget at both floors is let through — the
- * floors are the promise, the budget is the aim.
+ * Only then is the frame rate brought down, the same way, to BUDGET_MIN_FPS —
+ * unless the viewer named that (`rateNamed`) — and onto a divisor of this
+ * screen's refresh when one lies close under it (onScreenGrid). A pair that
+ * is still over the budget at both floors is let through — the floors are
+ * the promise, the budget is the aim.
  *
  * The height that comes back is a multiple of eight, so a 4K screen at 120 fps
  * asks for the 1920×1080 that 249 Mpx/s was read off and not the 1924×1082 the
@@ -481,11 +515,12 @@ function aspectRatio(aspect) {
  * @param {{height:number, aspect:string|null}} size resolveStreamSize's answer
  * @param {number} fps the rate this launch asks for; 0 (unknown) counts as 60
  * @param {{device?: {width:number,height:number}|null, clientFps?:number,
- *          aspect?:string|null, resolutionNamed?:boolean}} [ctx]
- *        this screen and its rate — the two floors are read off them — the
- *        ratio to assume when the size does not fix one (a `fixed` rung, whose
- *        width belongs to the Auto ratio), and whether the viewer named the
- *        resolution, which leaves the frame rate alone to pay.
+ *          aspect?:string|null, resolutionNamed?:boolean,
+ *          rateNamed?:boolean}} [ctx]
+ *        this screen and its rate — the two floors and the divisors are read
+ *        off them — the ratio to assume when the size does not fix one (a
+ *        `fixed` rung, whose width belongs to the Auto ratio), and which half
+ *        the viewer named, which leaves the other one alone to pay.
  * @returns {{size:object, fps:number, capped:boolean}}
  */
 export function fitPixelBudget(size, fps, ctx) {
@@ -516,11 +551,12 @@ export function fitPixelBudget(size, fps, ctx) {
         const room = Math.floor(Math.sqrt(PIXEL_RATE_BUDGET / (ratio * rate)));
         h = Math.max(floorHeight, Math.min(h, room - (room % 8)));
     }
-    // 2. The frame rate, down to its floor, for what the resolution still costs.
+    // 2. The frame rate, down to its floor, for what the resolution still
+    //    costs — a named one excepted, as above.
     let f = rate;
     const cost = pixelsAt(h);
-    if (cost * f > PIXEL_RATE_BUDGET && f > floorFps)
-        f = Math.max(floorFps, Math.floor(PIXEL_RATE_BUDGET / cost));
+    if (!c.rateNamed && cost * f > PIXEL_RATE_BUDGET && f > floorFps)
+        f = onScreenGrid(Math.floor(PIXEL_RATE_BUDGET / cost), floorFps, c.clientFps);
 
     const capped = h !== height || f !== rate;
     if (!capped) return { size: s, fps, capped: false };
