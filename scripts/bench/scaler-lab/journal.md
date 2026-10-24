@@ -1883,3 +1883,25 @@ restaurée par Chrome, sur SwiftShader à la première page des défauts (11:37,
 six pages suivantes ; le renderer rebâtit ses programmes à la restauration (`_buildResources`). Reste en option : les
 deux TV Android (Mi TV, Freebox POP) pour Android, si créneau. Produit : MWSR reste derrière `mw_mwsr` ; ce défaut
 vaut dès maintenant pour la --dev de 59, qui sert l'arbre (B0 à 15:20). « Chrome left: 0 » après chaque passe.
+
+**Netteté 1,85 et la borne (11:50-12:05, message de Bruno).** Borne : les texels seuls, confirmés (le défaut depuis
+J37). Netteté : `MWSR_UNIFORMS.sharp` passe de 2,0 à 1,85 pour toutes les classes (son œil à ×1,33 sur l'iPhone, J37) ;
+test ajusté (`toBeCloseTo` : le bloc d'uniformes est en f32), dorés régénérés (les mêmes 24 cellules), `--golden-check`
+OK, conformité OK des deux côtés ; une passe côté WebGPU a donné `code` à 0,145 dB entre jumeau et noyau (« pas la
+même qualité »), la passe suivante 0,018 et le côté WebGL2 0,018 : du bruit du chemin WebGL2 du Chrome à drapeau
+WebGPU sur SwiftShader, à surveiller en CI. Page des défauts du comparateur sur SwiftShader : 0,951 / 25,5 dB à ×1,33
+(0,950 / 25,4 à 2,0). `npm run check` et vitest verts ; commit du midi.
+
+**Le ×2 « baveux » (720p → 1440p), question de Bruno : la cause est connue (J31, J37), rien n'est corrigé.** Mesure du
+jour au comparateur sur SwiftShader, 720p → 1440p, la netteté seule : 1,85 → SSIM 0,877 / 21,9 dB ; 2,5 → 0,875 /
+21,9 ; 3 → 0,875 / 21,9 ; 4 → 0,875 / 21,8 (FSR1 0,880 / 22,1 en J37). La netteté ne mord plus au-delà de 1,85 : le
+poids des deux échantillons en travers est plafonné par `W_MIN` (−0,5 ; `W_ACROSS` 0,3 × 1,85 = −0,555, au plafond
+dès la pleine force que `S_FULL` donne à partir de ×1,5), et le chemin plat, CR5 ou Q3, reconstruit sans affûter là où
+RCAS affûte toute l'image après EASU. **Proposition pour la netteté dynamique voulue par Bruno** (plan §12) : une loi
+par l'échelle qui agit sur ce qui mord, pas sur l'uniforme seul : au-delà de ×1,5, faire suivre à l'échelle le plafond
+`W_MIN` et la distance `R_ACROSS` des échantillons en travers (1,0 texel = 2 pixels de sortie à ×2), et ajouter un
+affûtage borné du chemin plat (masque flou sur les quatre texels, borné par eux comme `DERING 2` : aucun halo), nul à
+×1,5 et plein à ×2 ; en réduction, le même affûtage borné après la grille. Le point d'entrée existe : `mwsrUniforms()`
+reçoit les deux tailles, et `strength` par `S_FULL` est déjà une loi d'échelle dans le noyau. Étude au labo
+(`--quality`, FLIP, 720p → 1440p et 1080p → 1440p, SwiftShader puis RTX et 780M), puis l'œil de Bruno sur l'iPhone et
+le PC ; les deux autres voies de J37 restent (FSR1 au-delà de ×1,6 par le gouverneur, ou accepter).
