@@ -78,12 +78,11 @@ import {
     IS_WEBKIT,
     SUPPORTS_CANVAS_TEARING,
     decoderRidesOutGaps,
-    isSnapdragonGpu,
     mwsrGazeWanted,
-    mwsrPreferred,
     noteDecoderCannotRideOut,
     noteDecoderRefusesReferenceRepairs,
     pickAutoEnhancer,
+    plainPresenterIsWebGpu,
     supportsDisplayHdr,
     supportsGamingMode,
 } from '../util/BrowserDetect.js';
@@ -688,19 +687,20 @@ export class StreamView {
         // 'gl-nis', 'gl-fsr1', 'gl-mwsr'), plus 'smooth2d' (Canvas2D
         // resampling at display size). None of the latter ask for WebGPU;
         // createVideoRenderer routes them. 'mwsr' is MoonlightWeb's own
-        // (docs/design/upscaler-mwsr.md); 'auto' takes it, in both flavours,
-        // behind the mw_mwsr dev flag until P6 decides the default.
+        // (docs/design/upscaler-mwsr.md), the one 'auto' takes since v0.4.1.
         //
-        // The production matrix (decided 03/09/2026), 'auto' being the only
-        // value a release build ever saves:
-        //   SDR  Off  → Canvas2D            Auto → FSR1 WebGL2 (desktop)
-        //                                          SGSR1 WebGL2 (phone/tablet,
-        //                                          and any Snapdragon GPU)
-        //   HDR  Off  → WebGPU              Auto → FSR1 WebGPU
-        //                                          (SGSR1 WebGPU on Snapdragon)
+        // The production matrix ('auto' being the only value a release build
+        // ever saves; decided 03/09/2026, MWSR in it since Bruno's 24/10/2026
+        // on his device classes of 22/10, pickAutoEnhancer):
+        //   SDR  Off  → Canvas2D            Auto → MWSR WebGL2 (PC, Mac,
+        //             (WebGPU on an               Snapdragon, other phones)
+        //              entry-level Mali)           MWSR WebGPU (iPhone, iPad)
+        //                                          none (entry-level Mali)
+        //   HDR  Off  → WebGPU              Auto → MWSR WebGPU
         // In SDR the WebGL2 flavour won the click-to-photon runs in a window
-        // and keeps no WebGPU device alive; in HDR WebGPU is the one renderer
-        // with an HDR surface, so everything moves there.
+        // and keeps no WebGPU device alive, except on WebKit, whose WebGL2
+        // upload costs milliseconds of main thread per frame; in HDR WebGPU
+        // is the one renderer with an HDR surface, so everything moves there.
         // Display HDR capability — main thread only (matchMedia doesn't exist in
         // workers) and evaluated once at stream start (renderers can't hot-swap);
         // reflects the OS toggle too (Windows "HDR off" → matches false).
@@ -725,8 +725,8 @@ export class StreamView {
                 sel = 'off';
             }
             if (sel === 'auto') {
-                // A Snapdragon runs Qualcomm's own upscaler in both flavours;
-                // HDR otherwise keeps FSR1, the sharper one, on WebGPU.
+                // MWSR in the flavour this device class runs best, none on an
+                // entry-level Mali (pickAutoEnhancer).
                 //
                 // A device of a gigabyte or less gets none: 'auto' is the
                 // platform's call, and on that GPU class the answer is no. A
@@ -743,9 +743,12 @@ export class StreamView {
                         '[StreamView] Enhancer: none on a TV — its <video> shows every frame',
                     );
                     sel = 'off';
-                } else if (hdr) {
-                    sel = mwsrPreferred() ? 'mwsr' : isSnapdragonGpu() ? 'sgsr' : 'fsr1';
-                } else sel = 'gl-' + pickAutoEnhancer();
+                } else {
+                    sel = pickAutoEnhancer({ hdr });
+                    if (sel === 'off') {
+                        console.log('[StreamView] Enhancer: none on an entry-level Mali');
+                    }
+                }
             }
             // HDR has no WebGL2 or Canvas2D presentation in Chrome (no HDR
             // surface for either), so with HDR on every upscaler runs in its
@@ -772,6 +775,21 @@ export class StreamView {
                 wantWebGpu = true;
                 algo = sel === 'nis' || sel === 'fsr1' || sel === 'mwsr' ? sel : 'sgsr';
             }
+        }
+        // An entry-level Mali presents on WebGPU with no pass as well, the
+        // Enhancer on or off (plainPresenterIsWebGpu); not on a TV, whose
+        // <video> sink presents every frame, nor on a device of a gigabyte or
+        // less, where no bench has seen it.
+        if (
+            algo === 'off' &&
+            !wantWebGpu &&
+            !forceCanvas2d &&
+            !IS_TV &&
+            !IS_LOW_MEMORY &&
+            plainPresenterIsWebGpu()
+        ) {
+            console.log('[StreamView] Presenter: WebGPU on an entry-level Mali');
+            wantWebGpu = true;
         }
         // Whether the user enabled the Enhancer (used to flag it OFF in the overlay
         // when the stream lands on webrtc-media, where it can't be applied).

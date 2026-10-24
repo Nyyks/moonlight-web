@@ -371,55 +371,58 @@ export function physicalScreenSize() {
     return { short: Math.round(Math.min(w, h)), long: Math.round(Math.max(w, h)) };
 }
 
-let snapdragonProbe = null;
+let rendererProbe = null;
 
 /**
- * True when the GPU drawing this page is a Qualcomm Adreno — a Snapdragon.
+ * The WebGL renderer string of the GPU drawing this page, '' when WebGL is
+ * missing or the string is masked.
  *
  * Asked of WebGL, not of the user agent: Chrome on Windows-on-ARM presents
  * itself as "Windows NT 10.0; Win64; x64" and `mobile: false` (measured on the
  * ARM bench, 06/09/2026), so nothing the platform detection reads tells a
  * Snapdragon laptop from an x64 one. The renderer string does — "ANGLE
- * (Qualcomm, Qualcomm(R) Adreno(TM) 618 GPU …)" on that bench — and the GPU is
- * the thing the answer is about anyway. Probed once per page: the GPU does not
- * change under us. A browser that masks the string, or has no WebGL, answers
- * false and keeps the platform rule.
+ * (Qualcomm, Qualcomm(R) Adreno(TM) 618 GPU …)" on that bench, "Mali-G31" on
+ * the Mi TV — and the GPU is the thing the answers below are about anyway.
+ * Probed once per page: the GPU does not change under us.
+ * @returns {string}
  */
-export function isSnapdragonGpu() {
-    if (snapdragonProbe === null) {
-        snapdragonProbe = false;
+export function gpuRendererString() {
+    if (rendererProbe === null) {
+        rendererProbe = '';
         try {
             const canvas = document.createElement('canvas');
             const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
             if (gl) {
                 const ext = gl.getExtension('WEBGL_debug_renderer_info');
-                const renderer = String(
+                rendererProbe = String(
                     gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '',
                 );
-                snapdragonProbe = /adreno|qualcomm/i.test(renderer);
                 const lose = gl.getExtension('WEBGL_lose_context');
                 if (lose) lose.loseContext();
             }
         } catch (e) {
-            snapdragonProbe = false;
+            rendererProbe = '';
         }
     }
-    return snapdragonProbe;
+    return rendererProbe;
+}
+
+/** True when the GPU drawing this page is a Qualcomm Adreno — a Snapdragon. */
+export function isSnapdragonGpu() {
+    return /adreno|qualcomm/i.test(gpuRendererString());
 }
 
 /**
- * Dev flag, no UI, main thread only: localStorage.mw_mwsr = '1' makes 'auto'
- * pick MoonlightWeb's own upscaler, `mwsr` (docs/design/upscaler-mwsr.md), on
- * every device and in both flavours. P4 of that plan integrates the shader
- * behind this flag; P6 decides the default per device class on P5's campaign.
- * Off, or where storage is refused, nothing changes.
+ * True on an entry-level Mali: the Bifrost G31, G51 and G52, the Valhall G57
+ * and G310, and the older Midgard T series. The realme Note 60's Mali-G57 MP1
+ * is the class's measured member: the ladder cut the pass within 2 s at ×1.33
+ * in both flavours (journal J28), and its plain presenter is WebGPU's
+ * (plainPresenterIsWebGpu). The larger Malis (G68, G7x, G610 and up,
+ * Immortalis) are not in it: no bench has seen one, and they take the
+ * handheld's upscaler. A masked string answers false.
  */
-export function mwsrPreferred() {
-    try {
-        return localStorage.getItem('mw_mwsr') === '1';
-    } catch (e) {
-        return false;
-    }
+export function isEntryMaliGpu() {
+    return /\bmali-(t\d+|g(31|51|52|57|310)\b)/i.test(gpuRendererString());
 }
 
 /**
@@ -441,22 +444,48 @@ export function mwsrGazeWanted() {
     }
 }
 
+function hasWebGpu() {
+    return typeof navigator !== 'undefined' && !!navigator.gpu;
+}
+
 /**
- * Pick the auto Video-Enhancement upscaler for this device: 'fsr1' (sharper,
- * three passes) on a desktop, 'sgsr' (one light pass) on a phone or tablet —
- * and 'sgsr' on ANY Snapdragon, a Windows-on-ARM laptop included. SGSR is
- * Qualcomm's upscaler, written for the Adreno's shader cores; on that GPU it is
- * the one to run whatever the form factor (asked by Bruno, 06/09/2026).
- * Decided 03/09/2026 with the SDR matrix: otherwise the platform class is the
- * whole rule — a phone's GPU budget is spent on the decode, whatever its core
- * count. Which API runs it (WebGL2 in SDR, WebGPU in HDR) is StreamView's call.
- * Behind the mw_mwsr flag (mwsrPreferred), 'mwsr' everywhere.
- * @returns {'fsr1'|'sgsr'|'mwsr'}
+ * Pick the auto Video-Enhancement pass for this device, its flavour included:
+ * MoonlightWeb's own upscaler, `mwsr` (docs/design/upscaler-mwsr.md), the
+ * default on every platform for v0.4.1 (Bruno, 24/10/2026), by the device
+ * classes he decided on 22/10 (plan §9):
+ *  - an entry-level Mali (isEntryMaliGpu) gets none;
+ *  - HDR runs it on WebGPU, the one renderer with an HDR surface;
+ *  - an iPhone or an iPad runs it on WebGPU where WebKit has it: WebKit's
+ *    texImage2D upload costs 3-24 ms of main thread per frame, WebGPU drew in
+ *    0.25-0.53 × WebGL2's time and held 60 fps where WebGL2 dropped to 56-58
+ *    (journals J23-J28);
+ *  - everything else runs it on WebGL2: PC and Mac (WebGL2 won the
+ *    click-to-photon runs in a window, 03/09/2026), a Snapdragon in place of
+ *    SGSR1 (0.63-0.77 × SGSR1's time on the Adreno 618), and the mobile GPUs
+ *    no bench has seen, which ran SGSR1 before: mwsr cost less than SGSR1 on
+ *    every GPU measured.
+ * The low-memory and TV rules come first, in StreamView.
+ * @param {{hdr?: boolean}} [opts]
+ * @returns {'off'|'mwsr'|'gl-mwsr'}
  */
-export function pickAutoEnhancer() {
-    if (mwsrPreferred()) return 'mwsr';
-    if (isSnapdragonGpu()) return 'sgsr';
-    return PLATFORM_TYPE === 'desktop' ? 'fsr1' : 'sgsr';
+export function pickAutoEnhancer({ hdr = false } = {}) {
+    if (isEntryMaliGpu()) return 'off';
+    if (hdr) return 'mwsr';
+    if (IS_IOS && hasWebGpu()) return 'mwsr';
+    return 'gl-mwsr';
+}
+
+/**
+ * True when this device's plain presenter — no upscaler, the Enhancer on or
+ * off — is WebGPU rather than Canvas2D: an entry-level Mali (Bruno,
+ * 22/10/2026, plan §9), the one exception to the Canvas2D default of
+ * 03/09/2026. At the realme Note 60's photon WebGPU presented 53-55 frames a
+ * second of a 1080p stream where Canvas2D gave 30, equal at 960×540, with the
+ * same response to a frame (journal J28). Without WebGPU, Canvas2D stays.
+ * @returns {boolean}
+ */
+export function plainPresenterIsWebGpu() {
+    return isEntryMaliGpu() && hasWebGpu();
 }
 
 /**

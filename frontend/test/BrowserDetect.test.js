@@ -14,7 +14,6 @@ import {
     noteDecoderRefusesReferenceRepairs,
     physicalScreenSize,
     pickAutoEnhancer,
-    mwsrPreferred,
     PLATFORM_TYPE,
 } from '../js/util/BrowserDetect.js';
 
@@ -266,26 +265,18 @@ describe('BrowserDetect — enhancer choice + module constants', () => {
         vi.unstubAllGlobals();
     });
 
-    it('PLATFORM_TYPE is a known value and desktop picks fsr1', () => {
+    it('PLATFORM_TYPE is a known value and desktop picks MWSR on WebGL2', () => {
         expect(['mobile', 'tablet', 'desktop']).toContain(PLATFORM_TYPE);
-        expect(pickAutoEnhancer()).toBe('fsr1'); // jsdom default UA → desktop
+        expect(pickAutoEnhancer()).toBe('gl-mwsr'); // jsdom default UA → desktop
     });
 
-    it("the mw_mwsr dev flag makes auto pick MoonlightWeb's own upscaler", () => {
-        expect(mwsrPreferred()).toBe(false);
-        localStorage.setItem('mw_mwsr', '1');
-        try {
-            expect(mwsrPreferred()).toBe(true);
-            expect(pickAutoEnhancer()).toBe('mwsr');
-        } finally {
-            localStorage.removeItem('mw_mwsr');
-        }
-        expect(pickAutoEnhancer()).toBe('fsr1');
+    it('HDR picks MWSR on WebGPU, the one renderer with an HDR surface', () => {
+        expect(pickAutoEnhancer({ hdr: true })).toBe('mwsr');
     });
 
-    it('a beefy 1080p+ Android phone still picks sgsr (re-imported with a stubbed UA)', async () => {
-        // The platform class is the whole rule since 03/09/2026: a phone's GPU
-        // budget goes to the decode, however many cores it has.
+    it('a beefy 1080p+ Android phone picks MWSR on WebGL2 (re-imported with a stubbed UA)', async () => {
+        // MWSR on every class since v0.4.1 (Bruno, 24/10/2026): it costs less
+        // than SGSR1, which phones ran before, on every GPU measured.
         vi.resetModules();
         vi.stubGlobal('navigator', {
             userAgent: UA.androidPhone,
@@ -296,10 +287,10 @@ describe('BrowserDetect — enhancer choice + module constants', () => {
         const m = await import('../js/util/BrowserDetect.js');
         expect(m.IS_ANDROID).toBe(true);
         expect(m.PLATFORM_TYPE).toBe('mobile');
-        expect(m.pickAutoEnhancer()).toBe('sgsr');
+        expect(m.pickAutoEnhancer()).toBe('gl-mwsr');
     });
 
-    it('a weak Android phone picks sgsr', async () => {
+    it('a weak Android phone picks MWSR on WebGL2', async () => {
         vi.resetModules();
         vi.stubGlobal('navigator', {
             userAgent: UA.androidPhone,
@@ -308,14 +299,31 @@ describe('BrowserDetect — enhancer choice + module constants', () => {
         });
         vi.stubGlobal('screen', { width: 720, height: 1280 });
         const m = await import('../js/util/BrowserDetect.js');
-        expect(m.pickAutoEnhancer()).toBe('sgsr');
+        expect(m.pickAutoEnhancer()).toBe('gl-mwsr');
+    });
+
+    it('an iPhone picks MWSR on WebGPU where WebKit has it, on WebGL2 otherwise', async () => {
+        // WebKit's texImage2D upload costs milliseconds of main thread per
+        // frame; WebGPU drew in a quarter to a half of WebGL2's time (J23-J28).
+        for (const [gpu, want] of [
+            [{}, 'mwsr'],
+            [undefined, 'gl-mwsr'],
+        ]) {
+            vi.resetModules();
+            vi.stubGlobal('navigator', { userAgent: UA.iphone, maxTouchPoints: 5, gpu });
+            const m = await import('../js/util/BrowserDetect.js');
+            expect(m.IS_IOS).toBe(true);
+            expect(m.pickAutoEnhancer()).toBe(want);
+            expect(m.pickAutoEnhancer({ hdr: true })).toBe('mwsr');
+        }
     });
 });
 
 // Chrome on Windows-on-ARM says "Win64; x64" and mobile:false — the platform
 // rule reads a Snapdragon laptop as a plain desktop. The GPU string is the one
-// thing that tells, so SGSR (Qualcomm's upscaler) is keyed on it.
-describe('BrowserDetect — Snapdragon picks SGSR whatever the form factor', () => {
+// thing that tells: it picked SGSR (Qualcomm's upscaler) until v0.4.1, and it
+// tells an entry-level Mali, which gets no upscaler, from the rest.
+describe('BrowserDetect — the GPU string keys the auto upscaler', () => {
     const ADRENO =
         'ANGLE (Qualcomm, Qualcomm(R) Adreno(TM) 618 GPU (0x41333830) Direct3D11 vs_5_0 ps_5_0, D3D11)';
     const NVIDIA =
@@ -335,9 +343,9 @@ describe('BrowserDetect — Snapdragon picks SGSR whatever the form factor', () 
             .mockImplementation(() => ({ getContext: () => (renderer === null ? null : gl) }));
     }
 
-    async function freshModule(renderer) {
+    async function freshModule(renderer, nav = {}) {
         vi.resetModules();
-        vi.stubGlobal('navigator', { userAgent: UA.desktop, maxTouchPoints: 0 });
+        vi.stubGlobal('navigator', { userAgent: UA.desktop, maxTouchPoints: 0, ...nav });
         const spy = fakeWebGl(renderer);
         const m = await import('../js/util/BrowserDetect.js');
         return { m, spy };
@@ -348,23 +356,54 @@ describe('BrowserDetect — Snapdragon picks SGSR whatever the form factor', () 
         vi.unstubAllGlobals();
     });
 
-    it('an Adreno under a desktop user agent picks sgsr', async () => {
+    it('an Adreno under a desktop user agent picks MWSR on WebGL2, in place of SGSR1', async () => {
         const { m } = await freshModule(ADRENO);
         expect(m.PLATFORM_TYPE).toBe('desktop');
         expect(m.isSnapdragonGpu()).toBe(true);
-        expect(m.pickAutoEnhancer()).toBe('sgsr');
+        expect(m.pickAutoEnhancer()).toBe('gl-mwsr');
     });
 
-    it('any other desktop GPU keeps fsr1', async () => {
+    it('any other desktop GPU picks MWSR on WebGL2', async () => {
         const { m } = await freshModule(NVIDIA);
         expect(m.isSnapdragonGpu()).toBe(false);
-        expect(m.pickAutoEnhancer()).toBe('fsr1');
+        expect(m.isEntryMaliGpu()).toBe(false);
+        expect(m.pickAutoEnhancer()).toBe('gl-mwsr');
     });
 
     it('without WebGL the platform rule stands', async () => {
         const { m } = await freshModule(null);
+        expect(m.gpuRendererString()).toBe('');
         expect(m.isSnapdragonGpu()).toBe(false);
-        expect(m.pickAutoEnhancer()).toBe('fsr1');
+        expect(m.pickAutoEnhancer()).toBe('gl-mwsr');
+    });
+
+    it('an entry-level Mali gets no upscaler, in SDR or HDR', async () => {
+        for (const r of ['Mali-G31', 'Mali-G52 MC2', 'Mali-G57 MP1', 'Mali-T860', 'Mali-G310']) {
+            const { m } = await freshModule(r, { userAgent: UA.androidPhone, maxTouchPoints: 5 });
+            expect(m.isEntryMaliGpu()).toBe(true);
+            expect(m.pickAutoEnhancer()).toBe('off');
+            expect(m.pickAutoEnhancer({ hdr: true })).toBe('off');
+        }
+    });
+
+    it('a larger Mali takes the handheld upscaler', async () => {
+        for (const r of ['Mali-G68 MC4', 'Mali-G78 MP14', 'Mali-G510 MC2', 'Mali-G710 MC10']) {
+            const { m } = await freshModule(r, { userAgent: UA.androidPhone, maxTouchPoints: 5 });
+            expect(m.isEntryMaliGpu()).toBe(false);
+            expect(m.pickAutoEnhancer()).toBe('gl-mwsr');
+        }
+    });
+
+    it("an entry-level Mali's plain presenter is WebGPU where it exists", async () => {
+        const phone = { userAgent: UA.androidPhone, maxTouchPoints: 5 };
+        let { m } = await freshModule('Mali-G57 MP1', { ...phone, gpu: {} });
+        expect(m.plainPresenterIsWebGpu()).toBe(true);
+        ({ m } = await freshModule('Mali-G57 MP1', phone));
+        expect(m.plainPresenterIsWebGpu()).toBe(false);
+        ({ m } = await freshModule('Mali-G710 MC10', { ...phone, gpu: {} }));
+        expect(m.plainPresenterIsWebGpu()).toBe(false);
+        ({ m } = await freshModule(NVIDIA, { gpu: {} }));
+        expect(m.plainPresenterIsWebGpu()).toBe(false);
     });
 
     it('asks the GPU once per page', async () => {
@@ -372,6 +411,7 @@ describe('BrowserDetect — Snapdragon picks SGSR whatever the form factor', () 
         m.pickAutoEnhancer();
         m.pickAutoEnhancer();
         m.isSnapdragonGpu();
+        m.plainPresenterIsWebGpu();
         expect(spy).toHaveBeenCalledTimes(1);
     });
 });

@@ -52,8 +52,10 @@
  * is MoonlightWeb's own (docs/design/upscaler-mwsr.md), below SGSR1 because
  * it costs less on every GPU measured (0.4 to 0.8 × SGSR1, P0 to P3) for
  * FSR1's sharpness, so a session stepped down keeps a sharp picture one rung
- * longer. The memory (rememberRung) stores names, so the rung slid in needs
- * no migration; 'auto' only picks it behind the mw_mwsr flag until P6.
+ * longer. 'auto' takes it since v0.4.1, so an auto session's ceiling is
+ * `mwsr` and its only step down is 'off'. The memory (rememberRung) stores
+ * names and is read under the same ceiling only: a verdict kept under FSR1 or
+ * SGSR1's ceiling is ignored by an MWSR session, nothing to migrate.
  */
 export const ENHANCER_LADDER = ['fsr1', 'nis', 'sgsr', 'mwsr', 'off'];
 

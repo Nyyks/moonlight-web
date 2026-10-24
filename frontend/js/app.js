@@ -4551,7 +4551,7 @@ export const MoonlightApp = {
             // applicable on the media transport (<video> element, no canvas).
             //
             // 'auto', never a named algorithm: the renderer routes it (F0e) —
-            // FSR1/SGSR on WebGL2 in SDR, WebGPU only in HDR. This used to name
+            // MWSR on WebGL2 in SDR (WebGPU on an iPhone), WebGPU in HDR. This used to name
             // 'sgsr', which forced the WebGPU pass on a stream the user had
             // chosen to run on Canvas2D — the pass that costs 20 ms in a worker
             // on macOS (F0), on exactly the link that was already struggling.
