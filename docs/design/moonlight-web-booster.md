@@ -21,6 +21,10 @@
 
 **Faisable sous une seule forme, et pas celle qu'on imagine d'abord.**
 
+- **B0 mesurée le 24/10/2026 : porte non franchie** (§10.4). Au clic → photon,
+  la page devant Sunshine vaut moonlight-qt à 1 ms près ; l'image perdue par
+  MoonlightWeb (≈ 8 ms, une image à 120 Hz) vient de l'hôte natif, pas du
+  navigateur. Le Booster n'a rien à reprendre sur ce chemin ; B1 ne s'ouvre pas.
 - **Le Booster ne peut pas rendre ses images à la page sans les copier par la
   mémoire du CPU.** Aucune API web n'importe une surface GPU venue d'un autre
   processus : un `VideoFrame` se construit depuis une image du DOM, un autre
@@ -700,6 +704,76 @@ Ubuntu ; et un moment où il n'est pas devant DualRTX, puisque le drapeau
 couvre DISPLAY5, son écran principal, pendant chaque passe. Le PIN de la
 `--dev` prêtée reste le sien : aucun PIN généré ni effacé sans le dire.
 
+### 10.4 Résultats de B0 (banc du 24/10/2026) — porte non franchie
+
+**Ce qui a tourné.** Client : UM790Pro sous Windows 11 26200, Radeon 780M,
+écran M27Q 2560×1440 à 120 Hz, Ethernet 1 Gbit/s, session de `minis`, son
+coupé. Hôte : DualRTX, écran mesuré DISPLAY5 (RTX 5060 Ti du bus 3, principal,
+2560×1440 à 120 Hz), drapeau noir/blanc `flag-window.ps1` par-dessus ; hôte
+natif = la `--dev` de `build\` au commit `18bfea44` (exe et frontend du même
+commit, redémarrée à 15:12), tuile « Display 2 » ; Sunshine 2026.921.13701 en
+configuration par défaut, app « Desktop ». Partout : HEVC, 1920×1080,
+20 Mbit/s, 60 clics par passe espacés de 700 ms, lecture `GetPixel` sur le
+bureau composé du client (`click-photon.ps1` via `run-in-console.ps1`).
+Case A : moonlight-qt 6.2.0 portable, D3D11VA, fenêtré, V-Sync et cadencement
+coupés. Cases B et C : MoonlightWeb dans un profil Chrome 155 neuf, défauts du
+produit (Canvas2D, 120 puis 60 i/s réglés dans la page), la page en premier
+plan. La pré-passe à l'overlay (non mesurée) a confirmé ce que la page négocie :
+1920×1080, HEVC, transport `webrtc-dc-udp`, latence réseau affichée 4 à 5 ms.
+Vingt passes au lieu de douze : quatre de plus à 120 i/s pour asseoir la case B.
+Fichiers : `bench-out/photon/b0-<a|b|c>-<120|60>-<n>.json` [C].
+
+**Les médianes, en millisecondes clic → photon** (p90 entre parenthèses) [C] :
+
+| Cadence | A — moonlight-qt ↔ Sunshine | B — page ↔ hôte natif | C — page ↔ Sunshine |
+|---|---|---|---|
+| 120 i/s | 32,5 (33,8) · 32,7 (34,3) · 24,9 (33,1) | 33,6 (49,2) · 41,1 (49,6) · 41,8 (50,0) · 41,3 (49,0) | 34,0 (41,6) · 33,4 (40,1) · 34,0 (42,5) |
+| 60 i/s | 33,2 (41,3) · 33,0 (34,6) | 41,3 (48,8) · 41,9 (50,0) | 33,9 (42,6) · 34,5 (42,6) |
+| **Toutes les mesures réunies, 120 i/s** | **32,3** (33,6), n = 177 | **41,3** (49,6), n = 240 | **33,6** (42,0), n = 180 |
+| **Toutes les mesures réunies, 60 i/s** | **33,0** (41,0), n = 118 | **41,6** (49,8), n = 120 | **34,3** (42,6), n = 120 |
+
+Les médianes tombent sur les marches attendues, espacées d'une image de
+l'écran du client (8,33 ms à 120 Hz) : A et C sur la marche 32-34 ms (A une
+fois sur la marche du dessous, 24,9 ; B une fois sur la marche 33,6 à sa
+première passe), B sur la marche 41-42 ms. moonlight-qt a perdu un clic sur 60
+à chaque passe ; la page aucun.
+
+**La lecture, selon les règles du §10.3.**
+- **A est plus tôt que B d'une image** : 9,0 ms à 120 i/s, 8,6 ms à 60 i/s,
+  soit 1,1 et 1,0 image de l'écran du client, avec un p90 meilleur de 16 ms.
+- **Mais C ≈ A** : 1,3 ms d'écart à 120 i/s, 1,2 ms à 60 i/s, bien moins
+  qu'une image. La même page, devant le même Sunshine, affiche le clic en
+  même temps que le client natif.
+- Donc **l'image perdue vient de l'hôte, pas de la page** : l'hôte natif
+  MoonlightWeb (DDA + NVENC, `--dev` du 24/10) livre le clic une image après
+  Sunshine sur le même GPU et le même écran. C'est le deuxième cas du §10.3 :
+  **B0 n'est pas franchie pour le Booster**, et le constat part dans les plans
+  de l'hôte natif.
+
+**Ce que cela ferme et ce que cela ouvre.**
+- Le poste « 15 à 25 ms entre le dessin dans le canevas et le bureau
+  composé » du POC Ultra (§0, §2.2) n'apparaît pas ici en défaveur de la page :
+  au clic → photon, en fenêtré, Canvas2D avec tearing, la page vaut
+  moonlight-qt à 1 ms près. Un présentateur superposé n'aurait donc rien, ou
+  presque, à reprendre sur ce chemin : **B1 ne s'ouvre pas**. Reste l'intérêt
+  « codecs » du §9.3, à rejuger à part si Bruno le souhaite.
+- La seule marge mesurée, une image à 120 Hz, est **côté hôte natif**, entre
+  sa capture-encodage et celle de Sunshine : image de capture plus tardive,
+  attente d'une image complète avant l'envoi, ou paquetisation. À chiffrer avec
+  les horodatages de l'hôte (capture, fin d'encodage, premier paquet) dans un
+  banc dédié, hors de cette étude.
+- Mesures limitées à un client (780M sous Windows, écran 120 Hz, Ethernet) et à
+  un hôte ; aucun élément ne laisse attendre un autre ordre sur un client plus
+  lent, où le décodage pèserait pareil dans les deux clients [S].
+
+**Incident sans trace.** Au premier lancement de moonlight-qt, la boîte du
+pare-feu Windows s'est ouverte au centre de l'écran du client et a absorbé la
+première passe A (0 clic mesuré) ; passe refaite après fermeture de la boîte
+sans « Autoriser », et les deux règles « Block » créées par Windows pour cet
+exécutable retirées au rangement. Tout le reste a été défait : moonlight-qt et
+son appairage Sunshine, le profil Chrome de banc, les tâches planifiées, le
+son, la session de banc de la `--dev` ; le PIN laissé tel quel.
+
 ## 11. Coûts de développement et de maintenance
 
 | Poste | Windows | macOS | Linux |
@@ -729,7 +803,8 @@ version de navigateur peut casser la superposition ou le canal.
 
 ## 13. Décisions pour Bruno
 
-1. **Ouvrir B0** après la v0.4.0 (aucun code produit, un banc UM790Pro + hôte).
+1. ~~**Ouvrir B0** après la v0.4.0~~ — faite le 24/10/2026, non franchie (§10.4) :
+   l'écart est côté hôte natif. À décider : où loger ce constat (plans de l'hôte).
 2. Si B0 passe : **B1 sur Windows seul**, outil hors produit.
 3. **Canal** (B2) : demande « réseau local » de la page, ou extension par
    navigateur, ou les deux.
