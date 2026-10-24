@@ -154,6 +154,8 @@ add_executable(run_tests
     # Which of the server's addresses the line opens on: the race behind it,
     # with legs the test answers by hand.
     ${_src}/src/network/AddressRace.cpp
+    # The session location lookup: the request it sends, built and never sent.
+    ${_src}/src/network/GeoIpService.cpp
     # Host persistence: the restart path for a paired host (issue #9).
     ${_src}/src/backend/NvComputer.cpp
     ${_src}/src/backend/NvHTTP.cpp

@@ -17,6 +17,7 @@
 
 #include "GeoIpService.h"
 
+#include "AddressRace.h"
 #include "server/AppSettings.h"
 #include "common/Logger.h"
 
@@ -30,6 +31,26 @@ GeoIpService::GeoIpService(AppSettings* settings, QObject* parent)
     , m_settings(settings)
     , m_nam(new QNetworkAccessManager(this))
 {}
+
+QNetworkRequest GeoIpService::lookupRequest(const QString& ip)
+{
+    // HTTPS provider (ipwho.is): free, no API key, and crucially encrypted so a
+    // network observer cannot harvest the client IPs we look up or tamper with
+    // the geo result. Returns {success, city, country}.
+    QUrl url(QStringLiteral("https://ipwho.is/%1").arg(ip));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("success,city,country"));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setRawHeader("User-Agent", "MoonlightWeb/1.0");
+    // The provider has IPv6 addresses. Over HTTP/2, behind an IPv6 that drops
+    // packets, the lookup would fail at its timeout, and that empty answer is
+    // cached for a day.
+    AddressRace::enableOn(req);
+    req.setTransferTimeout(5000); // 5s timeout
+    return req;
+}
 
 void GeoIpService::lookupIp(const QString& ip, const GeoCallback& callback)
 {
@@ -73,19 +94,7 @@ void GeoIpService::lookupIp(const QString& ip, const GeoCallback& callback)
     // Start new request
     m_pending[ip].append(callback);
 
-    // HTTPS provider (ipwho.is): free, no API key, and crucially encrypted so a
-    // network observer cannot harvest the client IPs we look up or tamper with
-    // the geo result. Returns {success, city, country}.
-    QUrl url(QStringLiteral("https://ipwho.is/%1").arg(ip));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("success,city,country"));
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    req.setRawHeader("User-Agent", "MoonlightWeb/1.0");
-    req.setTransferTimeout(5000); // 5s timeout
-
-    QNetworkReply* reply = m_nam->get(req);
+    QNetworkReply* reply = m_nam->get(lookupRequest(ip));
 
     connect(reply, &QNetworkReply::finished, this, [this, ip, reply]() {
         reply->deleteLater();

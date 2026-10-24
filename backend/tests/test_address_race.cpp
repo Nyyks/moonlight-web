@@ -9,6 +9,7 @@
 #include "test_framework.h"
 
 #include "../src/network/AddressRace.h"
+#include "../src/network/GeoIpService.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -253,5 +254,18 @@ void run_address_race_tests()
         const QVariant h2 = req.attribute(QNetworkRequest::Http2AllowedAttribute);
         CHECK(h2.isValid());
         CHECK(!h2.toBool());
+    }
+
+    SECTION("AddressRace — the session location lookup races too: no HTTP/2");
+    {
+        // ipwho.is has IPv6 addresses and the lookup gives up after 5 s: over
+        // HTTP/2, a silent IPv6 would hold it until then. Built, never sent.
+        const QNetworkRequest req = GeoIpService::lookupRequest(QStringLiteral("203.0.113.7"));
+        CHECK_EQ(req.url().host(), QStringLiteral("ipwho.is"));
+        CHECK_EQ(req.url().path(), QStringLiteral("/203.0.113.7"));
+        const QVariant h2 = req.attribute(QNetworkRequest::Http2AllowedAttribute);
+        CHECK(h2.isValid());
+        CHECK(!h2.toBool());
+        CHECK_EQ(req.transferTimeout(), 5000);
     }
 }
