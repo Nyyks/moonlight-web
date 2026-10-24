@@ -163,9 +163,9 @@ export const MWSR_CONSTANTS = Object.freeze({
 /** The per-draw values of the uniform block: the vote threshold (luma per
  *  input texel) and the sharpness (× W_ACROSS; 1.85 for every device since
  *  24/10/2026, Bruno's eye on his iPhone at ×1.33, J37: text near FSR1's,
- *  no overshoot; 2.0 before, from the lab's J31). The law by the scale is
- *  the kernel's own (the X2_ constants of MWSR_OVERRIDE_SPEC, plan §12):
- *  the uniform stays one value per device. */
+ *  no overshoot; 2.0 before, from the lab's J31). That value holds up to
+ *  ×1.33: mwsrUniforms() takes mwsrSharpness(scale) by default, which keeps
+ *  the across weight of ×1.33 from there up (Bruno's yes, 24/10/2026, J40). */
 export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.85 });
 
 /** The scale whose across weight the sharpness law holds from there up:
@@ -173,9 +173,9 @@ export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.85 });
 export const MWSR_SHARP_REF_SCALE = 4 / 3;
 
 /**
- * The sharpness law by the scale (plan §12, journal J39), proposed to Bruno
- * and not wired in the product (mwsrUniforms() keeps the constant until his
- * yes; the comparator's button shows it): the kernel's strength ramps from
+ * The sharpness law by the scale (plan §12, journals J39 and J40), the
+ * product's since Bruno's yes of 24/10/2026 (mwsrUniforms() takes it when no
+ * sharpness is named; the comparator starts from it): the kernel's strength ramps from
  * 0 at 1:1 to 1 at S_FULL, so the across weight sharp × strength that the
  * eye validated at ×1.33 (1.85 × 2/3 = 1.23) grows to 1.85 at ×1.5 and
  * stays there at ×2, where the same picture pins to the texels and smears
@@ -318,13 +318,15 @@ export function mwsrRegimeKey(reg) {
  * @param {number} outW
  * @param {number} outH
  * @param {{tau?: number, sharp?: number, gaze?: number, zone?: Object}} [u]
+ *   `sharp`: mwsrSharpness at this scale when absent (J40);
  *   `gaze`: the gaze zone's weight, 0 (none, the default) to 1, read by a
  *   text built with GAZE 1 only; `zone`: its values over MWSR_ZONE's.
  * @returns {Float32Array}
  */
 export function mwsrUniforms(inW, inH, outW, outH, u = {}) {
     const tau = u.tau ?? MWSR_UNIFORMS.tau;
-    const sharp = u.sharp ?? MWSR_UNIFORMS.sharp;
+    // the sharpness law by the scale unless the caller names one (J40)
+    const sharp = u.sharp ?? mwsrSharpness(Math.min(outW / inW, outH / inH));
     const gaze = Math.min(Math.max(u.gaze ?? 0, 0), 1);
     const z = { ...MWSR_ZONE, ...(u.zone || {}) };
     // a ring of no width would put the smoothstep's two edges together

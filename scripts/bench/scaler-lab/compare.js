@@ -16,9 +16,11 @@
 //   api=auto|webgpu|webgl  the shader renderers' API; auto is the product's
 //                      choice (plan §9, 22/10/2026): WebGL2, WebGPU on iOS
 //   iters=300          draws per algorithm for the time
-//   sharp=1, tau=0.05  MWSR's per-draw values (MwsrShader's MWSR_UNIFORMS):
+//   sharp=, tau=0.05   MWSR's per-draw values (MwsrShader's MWSR_UNIFORMS):
 //                      the sharpness (× W_ACROSS) and the edge vote's
-//                      threshold; the defaults are the product's
+//                      threshold; the defaults are the product's, the
+//                      sharpness by the scale law (mwsrSharpness, J40)
+//                      unless the link names one
 //   x2b=1, x2r=, x2f=  the ×2 law (MwsrShader's X2_ constants, plan §12, J39):
 //                      the flat path's picture as the edge path's base, the
 //                      across taps' distance, the flat path's unsharp; off by default
@@ -179,7 +181,7 @@ const state = {
   zone: "same",
   api: "auto",
   iters: 300,
-  sharp: MWSR_DEF.sharp,
+  sharp: null, // null: the product's scale law (mwsrSharpness, J40)
   tau: MWSR_DEF.tau,
   flat: MWSR_DEF.flat,
   fc: MWSR_DEF.fc,
@@ -196,7 +198,20 @@ const state = {
   soft: false,
 };
 const shown = () => state.order.filter((a) => state.on.has(a));
-const tuning = () => ({ sharp: state.sharp, tau: state.tau });
+// the sharpness law at this case's scale (MwsrShader's mwsrSharpness):
+// 1.85 up to ×1.33, 1.23 from ×1.5 on
+const lawSharp = () => {
+  const c = currentCase();
+  return mwsrModule && mwsrModule.mwsrSharpness && c
+    ? mwsrModule.mwsrSharpness(c.outLevel / c.inLevel)
+    : MWSR_DEF.sharp;
+};
+const sharpNow = () => (state.sharp === null ? lawSharp() : state.sharp);
+// no sharpness named: the renderer's mwsrUniforms() takes the law itself
+const tuning = () => ({
+  ...(state.sharp === null ? {} : { sharp: state.sharp }),
+  tau: state.tau,
+});
 const overrides = () => ({
   // always named: the product's own default differs by device class
   // (MwsrShader's mwsrClassOverrides), so a bare set would not mean bilinear
@@ -210,7 +225,7 @@ const overrides = () => ({
 });
 const x2rSet = () => Math.abs(state.x2r - MWSR_DEF.x2r) > 1e-9;
 const tuned = () =>
-  Math.abs(state.sharp - MWSR_DEF.sharp) > 1e-9 ||
+  state.sharp !== null ||
   Math.abs(state.tau - MWSR_DEF.tau) > 1e-9 ||
   state.flat !== MWSR_DEF.flat ||
   (state.flat !== 1 && Math.abs(state.fc - MWSR_DEF.fc) > 1e-9) ||
@@ -240,7 +255,8 @@ const x2Text = () =>
     : "";
 const tuningText = () =>
   "netteté " +
-  fr(state.sharp, 2) +
+  fr(sharpNow(), 2) +
+  (state.sharp === null ? " (loi)" : "") +
   " · τ " +
   fr(state.tau, 3) +
   (state.flat === 3
@@ -331,7 +347,7 @@ function writeState() {
   p.set("zone", state.zone);
   p.set("api", state.api);
   p.set("iters", String(state.iters));
-  p.set("sharp", String(state.sharp));
+  if (state.sharp !== null) p.set("sharp", String(state.sharp));
   p.set("tau", String(state.tau));
   if (state.flat !== 1) {
     p.set("flat", String(state.flat));
@@ -570,7 +586,7 @@ const outKey = (algoId) =>
   algoId +
   (algoId === "mw"
     ? "|s" +
-      state.sharp +
+      sharpNow() +
       "|t" +
       state.tau +
       "|f" +
@@ -1788,14 +1804,15 @@ function buildPanel() {
   body.append(el("h3", null, "Réglage MWSR"));
   const slider = (id, label, range, key, dec) => {
     const [min, max, step] = range;
-    const val = el("span", { id: id + "v", class: "val" }, fr(state[key], dec));
+    const cur = () => (key === "sharp" ? sharpNow() : state[key]);
+    const val = el("span", { id: id + "v", class: "val" }, fr(cur(), dec));
     const input = el("input", {
       id,
       type: "range",
       min,
       max,
       step,
-      value: state[key],
+      value: cur(),
       oninput: () => {
         val.textContent = fr(parseFloat(input.value), dec);
       },
@@ -1809,9 +1826,8 @@ function buildPanel() {
     );
   };
   slider("sharp", "netteté", SHARP_RANGE, "sharp", 2);
-  // the sharpness law by the scale (MwsrShader's mwsrSharpness, J39,
-  // proposed, not the product's): the slider set to its value at this case's
-  // scale, 1.85 up to ×1.33, 1.23 from ×1.5 on
+  // back to the product's sharpness law by the scale (MwsrShader's
+  // mwsrSharpness, J40): the slider follows the case's scale again
   body.append(
     el(
       "div",
@@ -1821,14 +1837,11 @@ function buildPanel() {
         {
           type: "button",
           onclick: () => {
-            if (!mwsrModule || !mwsrModule.mwsrSharpness) return;
-            const c = currentCase();
-            const v = mwsrModule.mwsrSharpness(c.outLevel / c.inLevel);
-            state.sharp = Math.round(v * 100) / 100;
+            state.sharp = null;
             changed("mwsr");
           },
         },
-        "Netteté de la loi d'échelle (J39) à ce facteur",
+        "Netteté par la loi d'échelle (défaut du produit)",
       ),
     ),
   );
@@ -1883,7 +1896,7 @@ function buildPanel() {
         {
           type: "button",
           onclick: () => {
-            state.sharp = MWSR_DEF.sharp;
+            state.sharp = null;
             state.tau = MWSR_DEF.tau;
             state.flat = MWSR_DEF.flat;
             state.fc = MWSR_DEF.fc;
@@ -1897,9 +1910,7 @@ function buildPanel() {
             changed("mwsr");
           },
         },
-        "Défauts du produit (" +
-          fr(MWSR_DEF.sharp, 2) +
-          " · " +
+        "Défauts du produit (netteté par l'échelle · " +
           fr(MWSR_DEF.tau, 3) +
           " · " +
           (MWSR_DEF.flat === 1
@@ -2118,8 +2129,9 @@ function syncPanel() {
   ]) {
     const input = document.getElementById(id);
     const val = document.getElementById(id + "v");
-    if (input) input.value = state[key];
-    if (val) val.textContent = fr(state[key], dec);
+    const v = key === "sharp" ? sharpNow() : state[key];
+    if (input) input.value = v;
+    if (val) val.textContent = fr(v, dec);
   }
   const flatSel = document.getElementById("flat");
   if (flatSel) flatSel.value = String(state.flat);
@@ -2305,7 +2317,7 @@ async function boot() {
       MWSR_DEF.x2f = m.MWSR_OVERRIDES.X2_FLAT;
     }
     if (m.MWSR_ZONE) Object.assign(ZONE_DEF, m.MWSR_ZONE);
-    state.sharp = MWSR_DEF.sharp;
+    state.sharp = null;
     state.tau = MWSR_DEF.tau;
     state.flat = MWSR_DEF.flat;
     state.fc = MWSR_DEF.fc;

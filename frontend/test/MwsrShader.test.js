@@ -231,7 +231,9 @@ describe('the mwsr shader text', () => {
         expect(u[2]).toBe(2);
         expect(u[3]).toBe(2);
         expect(u[4]).toBeCloseTo(0.05, 6);
-        expect(u[5]).toBeCloseTo(1.85, 6); // Bruno's sharpness for every device (24/10/2026, J37); f32
+        expect(u[5]).toBeCloseTo((1.85 * 2) / 3, 6); // ×2: the scale law's, the weight of ×1.33 (J40); f32
+        // ×1.33: Bruno's sharpness for every device (24/10/2026, J37)
+        expect(mwsrUniforms(1920, 1080, 2560, 1440)[5]).toBeCloseTo(1.85, 6);
         const v = mwsrUniforms(1920, 1080, 2560, 1440, { tau: 0.03, sharp: 0.5 });
         expect(v[2]).toBeCloseTo(4 / 3, 6);
         expect(v[4]).toBeCloseTo(0.03, 6);
@@ -239,6 +241,7 @@ describe('the mwsr shader text', () => {
         const d = mwsrUniforms(2560, 1440, 1280, 720);
         expect(d[2]).toBe(0.5);
         expect(d[3]).toBe(0.5);
+        expect(d[5]).toBeCloseTo(1.85, 6); // a reduction keeps the constant
         // the gaze zone (J34): no weight and the defaults unless asked
         expect(MWSR_UNIFORM_FLOATS).toBe(16);
         expect(u[6]).toBe(0);
@@ -356,7 +359,7 @@ describe('the mwsr shader text', () => {
         expect(law).toContain('const float X2_R_ACROSS = 0.75;');
     });
 
-    it('holds the across weight of ×1.33 from there up in the sharpness law (J39, proposed, not wired)', () => {
+    it('holds the across weight of ×1.33 from there up in the sharpness law (J39, wired since J40)', () => {
         expect(MWSR_SHARP_REF_SCALE).toBeCloseTo(4 / 3, 12);
         // up to the reference scale the constant; the weight sharp × strength from there on
         expect(mwsrSharpness(1)).toBe(1.85);
@@ -369,7 +372,8 @@ describe('the mwsr shader text', () => {
         // the lab's own sharpness and reference
         expect(mwsrSharpness(2, { sharp: 1.5, ref: 1.5 })).toBe(1.5);
         expect(mwsrSharpness(2, { sharp: 1.5, ref: 1.25 })).toBeCloseTo(0.75, 9);
-        // the product's uniform block still carries the constant: not wired
-        expect(mwsrUniforms(1280, 720, 2560, 1440)[5]).toBeCloseTo(1.85, 6);
+        // the product's uniform block takes it (J40), unless the caller names one
+        expect(mwsrUniforms(1280, 720, 2560, 1440)[5]).toBeCloseTo(mwsrSharpness(2), 6);
+        expect(mwsrUniforms(1280, 720, 2560, 1440, { sharp: 1.85 })[5]).toBeCloseTo(1.85, 6);
     });
 });
