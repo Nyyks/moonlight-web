@@ -594,6 +594,12 @@ struct EncoderTuning
     /// (macOS, iOS) and Chrome on Android keep the section unharmed. rxbuf=0
     /// takes it out.
     bool rxBufVideo = true;
+    /// Every other upload of the host PC capped at this many Mbit/s while the
+    /// stream runs, the stream itself exempt (plan « le stream passe avant un
+    /// gros envoi du PC hôte », S1; Windows host, a worker with administrator
+    /// rights: the launcher service's; HostUploadCap.h). 0, the product:
+    /// nothing capped.
+    int hostCapMbps = 0;
     /// Each audio packet's way through the host — the pacer's tick, its queue,
     /// the frame's peak, the relay thread, the RTP track — written as a CSV
     /// next to the log when the session ends (plan « le son et la priorité des
@@ -650,9 +656,9 @@ struct EncoderTuning
                ultraMbps == 0 && aroadPace < 0 && aroadWindowKb == 0 && aroadBudgetPct == 0 &&
                aroadChunk == 0 && !relayLog && paceMultiple == 0 && paceBurstKb == 0 &&
                retransCutPermille < 0 && sctpBufferKb == 0 && linkHoldMs == 0 && sctpMaxBurst < 0 &&
-               sctpScheduler < 0 && sctpMtu == 0 && !audioLog && audioFrameMs == 0 &&
-               audioGraceUs < 0 && !clickTrace && virtualMouse < 0 && inputAdmit < 0 &&
-               inputAdmitMs == 0 && inputAdmitBurst == 0 && inputAdmitRate == 0 &&
+               sctpScheduler < 0 && sctpMtu == 0 && hostCapMbps == 0 && !audioLog &&
+               audioFrameMs == 0 && audioGraceUs < 0 && !clickTrace && virtualMouse < 0 &&
+               inputAdmit < 0 && inputAdmitMs == 0 && inputAdmitBurst == 0 && inputAdmitRate == 0 &&
                inputAdmitMax == 0 && inputAdmitGapUs < 0 && cadenceLock < 0 && preGate < 0 &&
                vddMatch < 0 && vddMatchMaxHz == 0 && sckQueueDepth == 0 && sckMinIntervalUs < 0;
     }
@@ -778,6 +784,7 @@ struct EncoderTuning
         if (sctpScheduler >= 0) add("sctpss=" + std::to_string(sctpScheduler));
         if (sctpMtu > 0) add("sctpmtu=" + std::to_string(sctpMtu));
         if (!rxBufVideo) add("rxbuf=0");
+        if (hostCapMbps > 0) add("hostcap=" + std::to_string(hostCapMbps));
         if (audioLog) add("audiolog=1");
         if (audioFrameMs > 0) add("audioframe=" + std::to_string(audioFrameMs));
         if (audioGraceUs >= 0) add("audiograce=" + std::to_string(audioGraceUs) + "us");

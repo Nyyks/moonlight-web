@@ -719,6 +719,8 @@ DataChannelRelay::~DataChannelRelay()
     logClosedFreezes(QDateTime::currentMSecsSinceEpoch(), true);
     // And the host's own upload, if it was still going.
     logHostUplink(m_UplinkNotice.finish());
+    // The bench's cap on it (hostcap=), if one was set.
+    m_HostCap.stop();
     // What SCTP had to repair during the session. A T3 timeout is a repair
     // that waited out the retransmission timer (200 ms at least) instead of a
     // fast retransmit — on a LAN, the one way a single frame arrives that late.
@@ -885,6 +887,7 @@ void DataChannelRelay::setLinkBench(const mw::native::EncoderTuning& tuning)
     m_SctpScheduler = tuning.sctpScheduler;
     m_SctpMtu = tuning.sctpMtu;
     m_RxBufVideo = tuning.rxBufVideo;
+    m_HostCapMbps = tuning.hostCapMbps > 0 ? static_cast<unsigned>(tuning.hostCapMbps) : 0;
     if (tuning.relayLog && !m_FrameLog) {
         m_FrameLog = std::make_unique<RelayFrameLog>();
         qWarning() << "[DataChannelRelay] bench frame log on (relaylog=1): each video frame's way "
@@ -1326,6 +1329,10 @@ void DataChannelRelay::createDataChannels()
             // All 3 DataChannels are open when we reach here
             // (they all open together as part of SCTP association)
             emit dataChannelsOpen();
+
+            // The bench's cap on the host's other uploads (hostcap=), the
+            // stream exempt with its own marking.
+            if (m_HostCapMbps > 0) m_HostCap.start(m_HostCapMbps, PacketMarking::current()[1]);
 
             if (m_ClipboardEnabled) {
                 // Advertise clipboard sync, then push the current host

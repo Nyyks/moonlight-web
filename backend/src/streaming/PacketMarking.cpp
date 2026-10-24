@@ -27,11 +27,16 @@
 
 namespace PacketMarking {
 
-void apply()
+std::array<unsigned int, 3> current()
 {
-    const auto values = resolve(
+    return resolve(
         handover(), [] { return AppSettings().packetMarking(); },
         [] { return qEnvironmentVariable("MW_DSCP").toStdString(); });
+}
+
+void apply()
+{
+    const auto values = current();
     rtc::DscpSettings s;
     s.audio = values[0];
     s.video = values[1];

@@ -19,6 +19,7 @@
 
 #include "RelayBase.h"
 #include "HostLagTracker.h"
+#include "HostUploadCap.h"
 #include "HostUplink.h"
 #include "HostUplinkReader.h"
 #include "LinkFreezeLog.h"
@@ -512,6 +513,12 @@ private:
     // setRxBufVideo for a GameStream host's sessions.
     bool m_RxBufVideo = false;
     std::shared_ptr<rtc::Track> m_RxBufTrack;
+    // `hostcap=` (plan « le stream passe avant un gros envoi du PC hôte »,
+    // S1): the host's other uploads capped while the channels are open, 0
+    // none. Set at setup by setLinkBench; the cap set when the channels open,
+    // removed in the destructor (HostUploadCap.h).
+    unsigned m_HostCapMbps = 0;
+    mw::hostcap::Cap m_HostCap;
     // usrsctp's counters at the last link report, for the share of chunks
     // sent again in each report window (LinkFeedback::retransPermille).
     // Relay thread only.

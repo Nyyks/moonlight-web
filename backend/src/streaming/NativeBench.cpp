@@ -262,6 +262,10 @@ const char* const kUsage =
     "  rxbuf=0|1         the offer carries a silent video section, so that Chrome's video\n"
     "                    channel raises the UDP socket's receive buffer from 64 to 256 KB\n"
     "                    (plan Gels du lien, point 1); 1, the default since 20/10\n"
+    "  hostcap=<Mbit/s>  during the stream, every other upload of the host PC capped at\n"
+    "                    that, 1-10000, the stream exempt: two ActiveStore QoS policies\n"
+    "                    (Windows host, a worker with administrator rights: the launcher\n"
+    "                    service's; 0 nothing, the product)\n"
     "  linkhold=<ms>     a picture held, not encoded, once video has waited outside usrsctp\n"
     "                    that long, 1-100; the freshest goes once it drained (Windows host;\n"
     "                    with sctpbuf=)\n"
@@ -738,6 +742,9 @@ bool applyTuningKey(const QString& key, const QString& value, mw::native::Encode
         const int v = value.toInt(&ok);
         ok = ok && (v == 0 || v == 1);
         tuning.rxBufVideo = v == 1;
+    } else if (key == "hostcap") {
+        tuning.hostCapMbps = value.toInt(&ok);
+        ok = ok && tuning.hostCapMbps >= 0 && tuning.hostCapMbps <= 10000;
     } else if (key == "linkhold") {
         tuning.linkHoldMs = value.toInt(&ok);
         ok = ok && tuning.linkHoldMs >= 0 && tuning.linkHoldMs <= 100;

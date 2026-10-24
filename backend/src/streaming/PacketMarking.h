@@ -134,6 +134,10 @@ inline bool carrierOffered()
     return v && std::string(v) == "1";
 }
 
+/// The audio, video and data DSCP this process marks with: the handover's
+/// values, else its own settings and environment.
+std::array<unsigned int, 3> current();
+
 /// Apply the above to libdatachannel, process-wide. Called before each peer
 /// connection is made; cheap, and logs only when the values change.
 void apply();
