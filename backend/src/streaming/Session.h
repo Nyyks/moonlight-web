@@ -105,6 +105,10 @@ public:
     /// may be advertised. See SignalingServer::setClientKind.
     void setClientKind(NetClassify::Kind kind) { m_ClientKind = kind; }
 
+    /// A Public client that is on the host's own network after all (see
+    /// NetClassify::sharesHostNetwork). Forwarded to the SignalingServer.
+    void setClientSameNetwork(bool same) { m_ClientSameNetwork = same; }
+
     /// MW-BIND-v1 material, forwarded to the SignalingServer of whichever relay
     /// this session ends up using. See SignalingServer::setPairingIdentity and
     /// docs/design/pairing-signature.md.
@@ -493,6 +497,7 @@ private:
 
     /// Where the streaming client sits (see setClientKind).
     NetClassify::Kind m_ClientKind = NetClassify::Kind::Public;
+    bool m_ClientSameNetwork = false; ///< see setClientSameNetwork
     QString m_MwBindHostId;
     QByteArray m_MwBindHostKey;
     QByteArray m_MwBindBrowserKey;

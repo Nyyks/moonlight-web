@@ -38,6 +38,7 @@ void run_host_os_probe_tests();
 void run_send_backlog_tests();
 void run_relay_frame_log_tests();
 void run_ice_priority_tests();
+void run_net_classify_tests();
 void run_audio_path_log_tests();
 void run_packet_marking_tests();
 void run_send_pacer_tests();
@@ -106,6 +107,7 @@ int main(int argc, char** argv)
     run_send_backlog_tests();
     run_relay_frame_log_tests();
     run_ice_priority_tests();
+    run_net_classify_tests();
     run_audio_path_log_tests();
     run_packet_marking_tests();
     run_send_pacer_tests();

@@ -683,6 +683,8 @@ int runStreamWorker(QCoreApplication& app)
     // Absent (an older parent) → Public: the conservative reading, since every
     // non-Public verdict grants something.
     session->setClientKind(NetClassify::fromString(cfg["clientKind"].toString()));
+    // Absent (an older parent) → false: the LAN candidate stays for private peers.
+    session->setClientSameNetwork(cfg["clientSameNetwork"].toBool(false));
     // MW-BIND-v1 material, arriving on stdin rather than the command line so the
     // host private key never shows up in the process list.
     session->setPairingIdentity(

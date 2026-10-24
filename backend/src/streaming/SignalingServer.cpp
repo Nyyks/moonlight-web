@@ -352,10 +352,10 @@ void SignalingServer::onNewWsConnection()
     // question, answered by clientIsLocal below.
     const QString peerAddrStr = m_WsClient->peerAddress().toString();
     const bool isInternet = !NetClassify::isPrivateOrLoopback(m_ClientKind);
-    const bool clientIsLocal = NetClassify::isTrustedPeer(m_ClientKind);
+    const bool clientIsLocal = NetClassify::isTrustedPeer(m_ClientKind) || m_ClientSameNetwork;
     qInfo() << "[SignalingServer] Client connected via" << peerAddrStr
             << "— client kind=" << NetClassify::toString(m_ClientKind)
-            << "(isInternet=" << isInternet << ")";
+            << "(isInternet=" << isInternet << ", same network=" << m_ClientSameNetwork << ")";
 
     connect(m_WsClient, &QWebSocket::textMessageReceived, this, &SignalingServer::onWsTextMessage);
     connect(m_WsClient, &QWebSocket::disconnected, this, &SignalingServer::onWsDisconnected);

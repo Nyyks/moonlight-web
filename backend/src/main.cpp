@@ -1341,6 +1341,22 @@ static NetClassify::Kind streamClientKind(const HttpRequest& req)
     return NetClassify::Kind::Public;
 }
 
+// A Public browser that is in fact on the host's own network: one on the LAN
+// that came in through a public link, whose address is then the one the
+// rendezvous tunnel settled on (NetClassify::sharesHostNetwork). It is shown
+// the LAN host candidate beside the public ones, and nothing else changes.
+static bool streamClientSameNetwork(const HttpRequest& req, NetClassify::Kind kind,
+                                    const QStringList& hostPublicIpv4)
+{
+    if (kind != NetClassify::Kind::Public) return false;
+    if (!NetClassify::sharesHostNetwork(req.clientAddress, hostPublicIpv4,
+                                        QNetworkInterface::allAddresses()))
+        return false;
+    qInfo() << "[Session] Browser on the host's own network (" << req.clientAddress
+            << ") — the LAN candidate is offered beside the public ones";
+    return true;
+}
+
 // A browser whose STUN probe got no answer (frontend/js/api/UdpProbe.js) sits
 // on a network that lets no UDP out: each UDP rung would run to its ICE
 // deadline, ten seconds apiece, before the chain reached one that can connect.
@@ -3405,6 +3421,8 @@ int main(int argc, char* argv[])
         // cannot drift apart again. A reverse proxy is seen through here too
         // (streamClientKind).
         const NetClassify::Kind clientKind = streamClientKind(req);
+        const bool clientSameNetwork =
+            streamClientSameNetwork(req, clientKind, {routerPorts.publicIp()});
 
         // ── Session census ─────────────────────────────────────────────────────
         // The shape of this session, for the aggregate counts (SessionMetrics.h:
@@ -3756,6 +3774,7 @@ int main(int argc, char* argv[])
             s->setFollowDisplayShape(body["follow_display_shape"].toBool(false));
             s->setFrameFit(reqFitBox, reqAllowUpscale, reqMatchDisplay, reqFallbackW, reqFallbackH);
             s->setClientKind(clientKind);
+            s->setClientSameNetwork(clientSameNetwork);
             // See the worker path: the administrator-window gate.
             s->setViewerAdmin(req.isLocal);
             // The desktop portal consent this installation already holds, and
@@ -3961,6 +3980,7 @@ int main(int argc, char* argv[])
             cfg["rtpVideo"] = rtpVideoSpec;
             cfg["clientUniqueId"] = reqClientUniqueId;
             cfg["clientKind"] = NetClassify::toString(clientKind);
+            cfg["clientSameNetwork"] = clientSameNetwork;
             cfg["autoMode"] = true;
             // Straight to /resume when joining a live app session: every
             // standby joins the running app by definition, and any uid we know
@@ -5495,6 +5515,8 @@ int main(int argc, char* argv[])
         // /start route): shape only, and nothing at all unless the instance
         // allows it. The network is the guest's, as the config below reads it.
         const NetClassify::Kind clientKind = streamClientKind(req);
+        const bool clientSameNetwork =
+            streamClientSameNetwork(req, clientKind, {routerPorts.publicIp()});
         auto sessionFacts = std::make_shared<SessionMetrics::Facts>();
         sessionFacts->height = height;
         sessionFacts->fps = 60;
@@ -5573,6 +5595,7 @@ int main(int argc, char* argv[])
         // Where the guest is, read off their join request exactly as the
         // owner's /start reads theirs — a proxy in front included.
         cfg["clientKind"] = NetClassify::toString(clientKind);
+        cfg["clientSameNetwork"] = clientSameNetwork;
         cfg["autoMode"] = true;
         // Resume into whatever the owner has up — Sunshine refuses /launch
         // while an app runs, and a guest joining a live session has no

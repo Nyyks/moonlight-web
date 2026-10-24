@@ -231,8 +231,15 @@ public:
     ///  - isPrivateOrLoopback → do we need STUN? A mesh VPN peer says yes, so
     ///    its srflx address survives if the tunnel path fails.
     ///  - isTrustedPeer → may we show it our internal host candidate? A mesh
-    ///    VPN peer says yes too; a public peer never does, or the LAN leaks.
+    ///    VPN peer says yes too; a public peer never does, or the LAN leaks —
+    ///    unless it sits on our own network after all (setClientSameNetwork).
     void setClientKind(NetClassify::Kind kind) { m_ClientKind = kind; }
+
+    /// A Public client on the host's own network (NetClassify::sharesHostNetwork):
+    /// a LAN browser that came in through a public link. It is shown the LAN
+    /// host candidate so it never has to race the router's hairpin; its ICE
+    /// servers stay those of an internet peer.
+    void setClientSameNetwork(bool same) { m_ClientSameNetwork = same; }
 
     // ── MW-BIND-v1 (docs/design/pairing-signature.md) ──────────────────────
     //
@@ -297,6 +304,7 @@ private:
     /// setMediaPort() and mw::routerports::kMediaBasePort.
     quint16 m_MediaPort = 48550;
     NetClassify::Kind m_ClientKind = NetClassify::Kind::Public; // see setClientKind
+    bool m_ClientSameNetwork = false;                           // see setClientSameNetwork
     /// The router hole, as handed down by the parent. See setPresetMapping().
     uint16_t m_UpnpExternalPort = 0;
     QString m_UpnpPublicIP;

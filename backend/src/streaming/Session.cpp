@@ -866,6 +866,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         signaling->setIceTcpPassive(m_IceTcpPassive);
         signaling->setAllowWsFallback(!m_AutoMode);
         signaling->setClientKind(m_ClientKind);
+        signaling->setClientSameNetwork(m_ClientSameNetwork);
         signaling->setPairingIdentity(m_MwBindHostId, m_MwBindHostKey, m_MwBindBrowserKey);
         signaling->setMediaPort(m_MediaPort);
         signaling->setPresetMapping(m_UpnpPublicIp, m_UpnpExternalPort);
@@ -973,6 +974,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         signaling->setIceTcpPassive(m_IceTcpPassive);
         signaling->setAllowWsFallback(!m_AutoMode);
         signaling->setClientKind(m_ClientKind);
+        signaling->setClientSameNetwork(m_ClientSameNetwork);
         signaling->setPairingIdentity(m_MwBindHostId, m_MwBindHostKey, m_MwBindBrowserKey);
         signaling->setMediaPort(m_MediaPort);
         signaling->setPresetMapping(m_UpnpPublicIp, m_UpnpExternalPort);
