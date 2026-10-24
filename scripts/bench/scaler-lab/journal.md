@@ -1863,3 +1863,23 @@ Question pour le produit (P5, à Bruno ; rien changé) : la barrière par dessin
 compositeur soumet à chaque image et la barrière du RTX signale en 1 ms (banc 3 de J37) ; sur Qualcomm en flux réel,
 vérifier au `/bench` avec `mwsr` qu'elle ne compte pas de faux « GPU en retard » (ce serait une descente d'échelle
 injustifiée sur mw-arm).
+
+**P6, le chemin plat par classe d'appareil (11:20-11:50, go de Bruno par 59 ; le gel de e7 sur l'arbre, 11:00-11:35,
+respecté).** Code : `MWSR_OVERRIDE_SPEC.FLAT_TAPS` passe de 1 à 5 (CR5 ; `FLAT_C` 0,5 inchangé) ; `MwsrShader.js`
+exporte `mwsrClassOverrides({ handheld })`, `{ FLAT_TAPS: 3 }` pour un téléphone ou une tablette et vide sinon ; les
+deux renderers la posent à la construction des pipelines sous les surcharges du labo, avec `IS_HANDHELD` de
+`BrowserDetect` (téléphone ou tablette, jamais une TV), si bien qu'un jeu nul rend les défauts de la classe ;
+`compare.js` nomme toujours `FLAT_TAPS` et `FLAT_C` dans ses surcharges (un jeu nu ne veut plus dire bilinéaire), lit
+la classe de l'appareil pour « Défauts du produit » et appelle Q3 le quadratique ; test vitest. Vérifications :
+`npm run check` vert, vitest 162 fichiers et 1 740 tests ; dorés régénérés sur SwiftShader (les quatre cellules MWSR
+des six cas d'agrandissement changent, les trois réductions et `tex-s1` intactes, `chain-mwsr` = `mwsr` sur chaque
+cas), `--golden-check` OK ; conformité OK des deux côtés (jumeau contre noyau : FLIP 0,000-0,001, 0,01-0,06 dB,
+dépassement ≤ 0,035 %). Comparateur, page des défauts (CR5, netteté 2, borne texels ; `compare_fleet.py` page `def`) :
+SwiftShader 0,950 / 25,4 dB ; RTX 0 épinglée (croissance 133 708 sur 0x13088, 0 ailleurs) 1,94 ms par image (p50
+1,41), FSR1 3,54, SGSR1 0,80 ; 780M épinglé (204 579 sur 0x158c7, 0 ailleurs) 5,73 ms (p50 4,92), FSR1 12,32, SGSR1
+9,91 ; la même qualité au millième sur les trois (la table de J36 donnait 0,941 / 24,6 pour CR5 à la borne 1, et
+0,951 / 25,5 pour la borne texels à netteté 1,5). Incident sans suite : une perte de contexte WebGL, perdue puis
+restaurée par Chrome, sur SwiftShader à la première page des défauts (11:37, trois bandes noires), non reproduite sur
+six pages suivantes ; le renderer rebâtit ses programmes à la restauration (`_buildResources`). Reste en option : les
+deux TV Android (Mi TV, Freebox POP) pour Android, si créneau. Produit : MWSR reste derrière `mw_mwsr` ; ce défaut
+vaut dès maintenant pour la --dev de 59, qui sert l'arbre (B0 à 15:20). « Chrome left: 0 » après chaque passe.

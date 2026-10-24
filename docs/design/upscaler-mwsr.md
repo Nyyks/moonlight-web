@@ -1237,8 +1237,9 @@ Elles fixent ce que P6 appliquera sur les résultats de P5 ; rien ne devient dé
 - Restent ouverts : la netteté (1,5 ou 1,85) et le ×2 (accepter / FSR1 au-delà de ×1,6 par le gouverneur /
   affûtage borné à l'étude).
 
-Le défaut du produit au 24/10 est encore `FLAT_TAPS 1` (l'échantillon bilinéaire lui-même) : le chemin plat par
-classe d'appareil est un item de P6 (§12), dorés et conformité à refaire, SwiftShader d'abord.
+Le défaut du produit était encore `FLAT_TAPS 1` (l'échantillon bilinéaire lui-même) jusqu'au 24/10 à midi : le
+chemin plat par classe d'appareil est fait le jour même (P6, §12 ; journal J38 : dorés et conformité refaits sur
+SwiftShader, RTX et 780M vérifiés au comparateur), `mwsrClassOverrides` posé par les deux renderers.
 ## 10. Sources, licences et règles de réutilisation
 
 ### 10.1 Licences des composants étudiés et ce qu'elles imposent
@@ -1442,7 +1443,7 @@ upscalers spatiaux.
 
 **P6 — Défauts, documentation, release**
 - [ ] Bascule de `auto` par classe d'appareil selon les décisions du 22/10 (§9 : `gl-mwsr` sur PC et Mac, `mwsr` sur iPhone, `gl-mwsr` sur Snapdragon, Mali d'entrée de gamme sans upscaler et présentés par WebGPU), sur les résultats de P5 ; `README.next.md` ; wiki ; notes de release ; mémoires [`medium`]
-- [ ] Chemin plat par classe d'appareil (décisions du 24/10, §9) : CR5 (`FLAT_TAPS 5`, `FLAT_C 0,5`) sur ordinateur, Q3 (`FLAT_TAPS 3`) sur téléphone et tablette, par les constantes de pipeline des deux jumeaux à la création ; dorés et table de conformité refaits ; SwiftShader puis le RTX et le 780M au go de 59 ; TV Android à mesurer si créneau (optionnel) [`high`]
+- [x] **Fait le 24/10 à midi (journal J38)** : chemin plat par classe d'appareil (décisions du 24/10, §9) : CR5 (`FLAT_TAPS 5`, `FLAT_C 0,5`) sur ordinateur, Q3 (`FLAT_TAPS 3`) sur téléphone et tablette, par les constantes de pipeline des deux jumeaux à la création ; dorés et table de conformité refaits ; SwiftShader puis le RTX et le 780M au go de 59 ; TV Android à mesurer si créneau (optionnel, seul reste) [`high`] ; dorés et conformité refaits sur SwiftShader, RTX et 780M vérifiés au comparateur (0,950 / 25,4 dB partout)
 
 **Hors v0.4.1 — étude optionnelle (§14, proposée le 21/10/2026, à la décision de Bruno)**
 - [ ] P7.0 Mode séquence du labo et expérience décisive de la mémoire temporelle : panoramique sous-pixel des images de référence, arrêt, coupure, passés par la boucle WebCodecs à deux débits ; FLIP et PSNR par image, scintillement, traînée, avec et sans histoire ; porte go/no-go du §14.3 [`high`]
