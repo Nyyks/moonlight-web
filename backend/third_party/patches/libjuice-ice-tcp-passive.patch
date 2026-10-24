@@ -296,10 +296,10 @@ index d86b672..0870428 100644
  
  #endif
 diff --git a/src/conn_poll.c b/src/conn_poll.c
-index 7d6ed7b..627f99a 100644
+index 7d6ed7b..1d6f166 100644
 --- a/src/conn_poll.c
 +++ b/src/conn_poll.c
-@@ -31,6 +31,24 @@ typedef struct registry_impl {
+@@ -31,6 +31,32 @@ typedef struct registry_impl {
  
  typedef enum conn_state { CONN_STATE_NEW = 0, CONN_STATE_READY, CONN_STATE_FINISHED } conn_state_t;
  
@@ -311,6 +311,14 @@ index 7d6ed7b..627f99a 100644
 +#define TCP_PASSIVE_FIRST_FRAME_TIMEOUT 2000 // msecs
 +#define TCP_PASSIVE_FIRST_FRAME_MIN 20       // a STUN header
 +#define TCP_PASSIVE_FIRST_FRAME_MAX 1024
++
++// MoonlightWeb patch: the datagrams sent while the TCP socket would block. Upstream kept one and
++// dropped every other until it went out: over a long round trip SCTP lost a datagram each time
++// the socket filled, and a page's first download stalled on the retransmissions (2 to 5 s per
++// large file at 115 ms). They wait here, framed and in order, after the one tcp_ice_write()
++// holds. Bounded, so a link that cannot keep up still loses datagrams as UDP would, rather than
++// growing a delay the stream's congestion control cannot see.
++#define TCP_SEND_QUEUE_MAX (256 * 1024)
 +
 +typedef struct tcp_passive_pending {
 +	socket_t sock;
@@ -324,10 +332,12 @@ index 7d6ed7b..627f99a 100644
  typedef struct conn_impl {
  	conn_registry_t *registry;
  	conn_state_t state;
-@@ -43,6 +61,13 @@ typedef struct conn_impl {
+@@ -43,6 +69,15 @@ typedef struct conn_impl {
  	mutex_t send_mutex;
  	int send_ds;
  	timestamp_t next_timestamp;
++	char *tcp_queue;       // MoonlightWeb patch: TCP_SEND_QUEUE_MAX bytes once needed
++	size_t tcp_queue_start, tcp_queue_end;
 +	socket_t listen_sock;  // MoonlightWeb patch: passive ICE-TCP
 +	bool tcp_passive;      // tcp_sock came from the listener
 +	bool polled_tcp;       // what conn_poll_prepare() put in the array, for conn_poll_process()
@@ -338,10 +348,13 @@ index 7d6ed7b..627f99a 100644
  } conn_impl_t;
  
  typedef struct pfds_record {
-@@ -58,6 +83,11 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd);
+@@ -58,6 +93,14 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd);
  void conn_poll_change_tcp_fail(juice_agent_t *agent);
  void conn_poll_change_tcp_state(juice_agent_t *agent, tcp_state_t state);
  int conn_poll_run(conn_registry_t *registry);
++static void tcp_queue_reset(conn_impl_t *conn_impl);
++static bool tcp_queue_push(conn_impl_t *conn_impl, const char *data, size_t size);
++static int tcp_queue_flush(conn_impl_t *conn_impl);
 +static socket_t tcp_passive_listen(socket_t udp_sock);
 +static void tcp_passive_trim(juice_agent_t *agent, timestamp_t now);
 +static void tcp_passive_close(conn_impl_t *conn_impl);
@@ -350,7 +363,7 @@ index 7d6ed7b..627f99a 100644
  
  static thread_return_t THREAD_CALL conn_thread_entry(void *arg) {
  	thread_set_name_self("juice poll");
-@@ -153,10 +183,15 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
+@@ -153,10 +196,15 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
  			continue;
  		}
  
@@ -366,7 +379,7 @@ index 7d6ed7b..627f99a 100644
  	}
  
  	if (pfds->size != size) {
-@@ -203,6 +238,7 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
+@@ -203,6 +251,7 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
  		udp_pfd->events = POLLIN;
  		i++;
  
@@ -374,13 +387,15 @@ index 7d6ed7b..627f99a 100644
  		if (conn_impl->tcp_sock != INVALID_SOCKET) {
  			struct pollfd *tcp_pfd = pfds->pfds + i;
  			tcp_pfd->fd = conn_impl->tcp_sock;
-@@ -210,12 +246,32 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
+@@ -210,12 +259,33 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
  				tcp_pfd->events = POLLOUT;
  			} else {
  				tcp_pfd->events = POLLIN;
+-				if(conn_impl->tcp_ice_write_context.pending)
 +				// MoonlightWeb patch: the senders set it under the send mutex
 +				mutex_lock(&conn_impl->send_mutex);
- 				if(conn_impl->tcp_ice_write_context.pending)
++				if(conn_impl->tcp_ice_write_context.pending ||
++				   conn_impl->tcp_queue_end > conn_impl->tcp_queue_start)
  					tcp_pfd->events |= POLLOUT;
 +				mutex_unlock(&conn_impl->send_mutex);
  			}
@@ -407,7 +422,7 @@ index 7d6ed7b..627f99a 100644
  	}
  
  	mutex_unlock(&registry->mutex);
-@@ -338,16 +394,22 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
+@@ -338,17 +408,30 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
  
  			conn_poll_change_tcp_state(agent, TCP_STATE_CONNECTED);
  		} else {
@@ -424,22 +439,29 @@ index 7d6ed7b..627f99a 100644
 -					JLOG_WARN("TCP send failed, errno=%d", -ret);
 -					conn_poll_change_tcp_fail(agent);
 -					return;
--				}
 +			mutex_lock(&conn_impl->send_mutex);
 +			int ret = 0, err = 0;
 +			if (context->pending) {
 +				ret = tcp_ice_write(conn_impl->tcp_sock, NULL, 0, context);
 +				err = sockerrno;
 +			}
++			if (!context->pending) { // then the queue, behind it
++				int flushed = tcp_queue_flush(conn_impl);
++				if (flushed < 0) {
++					ret = -1;
++					err = -flushed;
+ 				}
+ 			}
 +			mutex_unlock(&conn_impl->send_mutex);
 +			if (ret < 0 && err != SEAGAIN && err != SEWOULDBLOCK) {
 +				JLOG_WARN("TCP send failed, errno=%d", err);
 +				conn_poll_change_tcp_fail(agent);
 +				return;
- 			}
++			}
  		}
  	}
-@@ -400,12 +462,14 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
+ 
+@@ -400,12 +483,15 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
  
  void conn_poll_change_tcp_fail(juice_agent_t *agent) {
  	conn_impl_t *conn_impl = agent->conn_impl;
@@ -450,11 +472,12 @@ index 7d6ed7b..627f99a 100644
  	}
  	memset(&conn_impl->tcp_ice_write_context, 0, sizeof(tcp_ice_write_context_t));
  	memset(&conn_impl->tcp_ice_read_context, 0, sizeof(tcp_ice_read_context_t));
++	tcp_queue_reset(conn_impl);
 +	mutex_unlock(&conn_impl->send_mutex);
  	conn_poll_change_tcp_state(agent, TCP_STATE_FAILED);
  }
  
-@@ -478,15 +542,19 @@ int conn_poll_process(conn_registry_t *registry, pfds_record_t *pfds) {
+@@ -478,15 +564,19 @@ int conn_poll_process(conn_registry_t *registry, pfds_record_t *pfds) {
  		conn_poll_process_udp(agent, udp_pfd);
  		i++;
  
@@ -481,7 +504,7 @@ index 7d6ed7b..627f99a 100644
  	}
  
  	mutex_unlock(&registry->mutex);
-@@ -551,6 +619,10 @@ int conn_poll_init(juice_agent_t *agent, conn_registry_t *registry, udp_socket_c
+@@ -551,6 +641,10 @@ int conn_poll_init(juice_agent_t *agent, conn_registry_t *registry, udp_socket_c
  	memset(&conn_impl->tcp_ice_write_context, 0, sizeof(tcp_ice_write_context_t));
  	memset(&conn_impl->tcp_ice_read_context, 0, sizeof(tcp_ice_read_context_t));
  
@@ -492,7 +515,7 @@ index 7d6ed7b..627f99a 100644
  	agent->conn_impl = conn_impl;
  	return 0;
  }
-@@ -562,6 +634,14 @@ void conn_poll_cleanup(juice_agent_t *agent) {
+@@ -562,7 +656,16 @@ void conn_poll_cleanup(juice_agent_t *agent) {
  
  	mutex_destroy(&conn_impl->send_mutex);
  	closesocket(conn_impl->udp_sock);
@@ -505,16 +528,20 @@ index 7d6ed7b..627f99a 100644
 +		           sizeof(abortive));
 +	}
  	closesocket(conn_impl->tcp_sock);
++	tcp_queue_reset(conn_impl);
  	free(agent->conn_impl);
  	agent->conn_impl = NULL;
-@@ -616,12 +696,21 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
+ }
+@@ -616,14 +719,28 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
  	JLOG_VERBOSE("Sending datagram, size=%d", size);
  
  	int ret;
 +	bool flush_later = false;
  	if (dst->socktype == SOCK_STREAM) {
  		tcp_ice_write_context_t *context = &conn_impl->tcp_ice_write_context;
- 		if (!context->pending) {
+-		if (!context->pending) {
++		bool queued = conn_impl->tcp_queue_end > conn_impl->tcp_queue_start;
++		if (!context->pending && !queued) {
 +			// MoonlightWeb patch: tcp_ice_write() returns send()'s -1, not an errno
  			ret = tcp_ice_write(conn_impl->tcp_sock, data, size, context);
 -			if (context->pending && (ret == SEAGAIN || ret == SEWOULDBLOCK))
@@ -528,10 +555,17 @@ index 7d6ed7b..627f99a 100644
 +					ret = -err;
 +				}
 +			}
++		} else if (size > TCP_ICE_BUFFER_SIZE) {
++			ret = -SEMSGSIZE;
++		} else if (tcp_queue_push(conn_impl, data, size)) {
++			ret = (int)size; // goes out after the ones before it, on POLLOUT
  		} else {
- 			// another datagram is buffered, drop
+-			// another datagram is buffered, drop
++			// MoonlightWeb patch: the queue is full, drop
  			ret = -SEAGAIN;
-@@ -650,6 +739,8 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
+ 		}
+ 	} else {
+@@ -650,6 +767,8 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
  	}
  
  	mutex_unlock(&conn_impl->send_mutex);
@@ -540,10 +574,58 @@ index 7d6ed7b..627f99a 100644
  	return ret;
  }
  
-@@ -672,6 +763,273 @@ void conn_poll_tcp_connect(juice_agent_t *agent, const addr_record_t *dst) {
+@@ -672,6 +791,322 @@ void conn_poll_tcp_connect(juice_agent_t *agent, const addr_record_t *dst) {
  	mutex_unlock(&conn_impl->registry->mutex);
  }
  
++static void tcp_queue_reset(conn_impl_t *conn_impl) {
++	free(conn_impl->tcp_queue);
++	conn_impl->tcp_queue = NULL;
++	conn_impl->tcp_queue_start = conn_impl->tcp_queue_end = 0;
++}
++
++// Under the send mutex. False when it does not fit: the caller drops it.
++static bool tcp_queue_push(conn_impl_t *conn_impl, const char *data, size_t size) {
++	size_t used = conn_impl->tcp_queue_end - conn_impl->tcp_queue_start;
++	if (used + 2 + size > TCP_SEND_QUEUE_MAX)
++		return false;
++
++	if (!conn_impl->tcp_queue && !(conn_impl->tcp_queue = malloc(TCP_SEND_QUEUE_MAX)))
++		return false;
++
++	if (conn_impl->tcp_queue_end + 2 + size > TCP_SEND_QUEUE_MAX) {
++		memmove(conn_impl->tcp_queue, conn_impl->tcp_queue + conn_impl->tcp_queue_start, used);
++		conn_impl->tcp_queue_start = 0;
++		conn_impl->tcp_queue_end = used;
++	}
++	uint16_t header = htons((uint16_t)size); // RFC 4571 framing, as tcp_ice_write() does
++	memcpy(conn_impl->tcp_queue + conn_impl->tcp_queue_end, &header, 2);
++	memcpy(conn_impl->tcp_queue + conn_impl->tcp_queue_end + 2, data, size);
++	conn_impl->tcp_queue_end += 2 + size;
++	return true;
++}
++
++// Under the send mutex, once tcp_ice_write() holds nothing: as much of the queue as the socket
++// takes. 0, or -errno on a failure other than would-block.
++static int tcp_queue_flush(conn_impl_t *conn_impl) {
++#if defined(__APPLE__) || defined(_WIN32)
++	int flags = 0;
++#else
++	int flags = MSG_NOSIGNAL;
++#endif
++	while (conn_impl->tcp_queue_start < conn_impl->tcp_queue_end) {
++		int len = send(conn_impl->tcp_sock, conn_impl->tcp_queue + conn_impl->tcp_queue_start,
++		               (int)(conn_impl->tcp_queue_end - conn_impl->tcp_queue_start), flags);
++		if (len < 0) {
++			int err = sockerrno;
++			return err == SEAGAIN || err == SEWOULDBLOCK ? 0 : -err;
++		}
++		conn_impl->tcp_queue_start += (size_t)len;
++	}
++	conn_impl->tcp_queue_start = conn_impl->tcp_queue_end = 0;
++	return 0;
++}
++
 +bool conn_poll_tcp_listening(juice_agent_t *agent) {
 +	conn_impl_t *conn_impl = agent->conn_impl;
 +	return conn_impl->listen_sock != INVALID_SOCKET;
@@ -724,6 +806,7 @@ index 7d6ed7b..627f99a 100644
 +	memcpy(&conn_impl->tcp_dst, &src, sizeof(conn_impl->tcp_dst));
 +	memset(&conn_impl->tcp_ice_write_context, 0, sizeof(tcp_ice_write_context_t));
 +	memset(&conn_impl->tcp_ice_read_context, 0, sizeof(tcp_ice_read_context_t));
++	tcp_queue_reset(conn_impl);
 +	conn_impl->tcp_state = TCP_STATE_CONNECTED;
 +	conn_impl->tcp_passive = true;
 +	mutex_unlock(&conn_impl->send_mutex);

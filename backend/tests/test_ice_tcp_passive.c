@@ -99,7 +99,22 @@ static int binding_request(char *buf, size_t size, const char *username, const c
 	snprintf(msg.credentials.username, STUN_MAX_USERNAME_LEN, "%s", username);
 	msg.priority = 1845501695;
 	msg.ice_controlling = 0x0123456789ABCDEFull;
+	msg.use_candidate = true; // nominates the pair: the agent connects on it
 	return stun_write(buf, size, &msg, password);
+}
+
+// One RFC 4571 frame, or -1 when none came within `ms`.
+static int read_frame(socket_t sock, char *buf, int size, int ms) {
+	set_timeout(sock, ms);
+	uint16_t header = 0;
+	if (recv(sock, (char *)&header, 2, MSG_WAITALL) != 2)
+		return -1;
+	int len = ntohs(header);
+	if (len > size)
+		return -1;
+	if (len > 0 && recv(sock, buf, len, MSG_WAITALL) != len)
+		return -1;
+	return len;
 }
 
 // ── Agents ──────────────────────────────────────────────────────────────────
@@ -274,30 +289,176 @@ static void test_selected_local_is_the_address_reached(void) {
 #endif
 }
 
+// A host agent whose remote is a raw peer ("peer" and `peer_pwd`), listening. The UDP socket
+// takes an ephemeral port, whose TCP side another socket of this machine may hold: then there is
+// no listener and no passive candidate, as designed. Another agent.
+static void listening_host(side_t *h, const char *peer_pwd) {
+	char sdp[JUICE_MAX_SDP_STRING_LEN];
+	snprintf(sdp, sizeof(sdp), "a=ice-ufrag:peer\r\na=ice-pwd:%s\r\n", peer_pwd);
+	for (int attempt = 0; attempt < 5 && !h->passive_port; ++attempt) {
+		if (h->agent)
+			juice_destroy(h->agent);
+		memset(h, 0, sizeof(*h));
+		make(h, JUICE_ICE_TCP_MODE_ACTIVE_PASSIVE);
+		juice_set_remote_description(h->agent, sdp);
+		juice_gather_candidates(h->agent);
+		for (int t = 0; t < 1000 && !h->passive_port; t += 50)
+			sleep_ms(50);
+	}
+}
+
+static void host_credentials(side_t *h, char ufrag[64], char pwd[64]) {
+	char local_sdp[JUICE_MAX_SDP_STRING_LEN];
+	juice_get_local_description(h->agent, local_sdp, sizeof(local_sdp));
+	read_attr(local_sdp, "a=ice-ufrag:", ufrag, 64);
+	read_attr(local_sdp, "a=ice-pwd:", pwd, 64);
+}
+
+#define BURST_SIZE 1200 // an SCTP packet over libdatachannel
+#define BURST_MAX 8000  // 9.6 MB: past what the sockets and the queue hold
+#define QUEUE_AT_LEAST (128 * 1024) // half the patch's TCP_SEND_QUEUE_MAX: socket sizes vary
+
+// How many bytes an accepted socket of this machine takes, toward a loopback peer that has a
+// small receive buffer and does not read, before it would block: what the host's socket alone
+// holds in the test below.
+static size_t socket_capacity(void) {
+	struct sockaddr_in sin;
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = htonl(0x7F000001);
+	socklen_t sin_len = sizeof(sin);
+	socket_t lst = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	bind(lst, (struct sockaddr *)&sin, sizeof(sin));
+	listen(lst, 1);
+	getsockname(lst, (struct sockaddr *)&sin, &sin_len);
+
+	socket_t cli = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	const int rcvbuf = 4096;
+	setsockopt(cli, SOL_SOCKET, SO_RCVBUF, (const char *)&rcvbuf, sizeof(rcvbuf));
+	connect(cli, (struct sockaddr *)&sin, sizeof(sin));
+	socket_t srv = accept(lst, NULL, NULL);
+	ctl_t nbio = 1;
+	ioctlsocket(srv, FIONBIO, &nbio);
+
+	char frame[2 + BURST_SIZE];
+	memset(frame, 'x', sizeof(frame));
+	size_t total = 0;
+	for (int i = 0; i < BURST_MAX; ++i) {
+		int len = send(srv, frame, (int)sizeof(frame), 0);
+		if (len <= 0)
+			break;
+		total += (size_t)len;
+		if (len < (int)sizeof(frame))
+			break;
+	}
+	closesocket(srv);
+	closesocket(cli);
+	closesocket(lst);
+	return total;
+}
+
+static void test_burst_over_tcp(void) {
+	printf("A burst the socket cannot take at once arrives whole and in order\n");
+	// Upstream kept one datagram aside when the socket would block and dropped the rest: over a
+	// long round trip SCTP lost one each time the socket filled, and a first page load stalled.
+	// The peer here is a raw connection with a small receive buffer that stops reading once the
+	// host is connected, which is what a far browser looks like from the host's socket.
+	const char *peer_pwd = "pw01234567890123456789";
+	side_t h = {0};
+	listening_host(&h, peer_pwd);
+	CHECK(h.passive_port > 0);
+	char ufrag[64], pwd[64], user[160];
+	host_credentials(&h, ufrag, pwd);
+	snprintf(user, sizeof(user), "%s:peer", ufrag);
+
+	socket_t peer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	const int rcvbuf = 4096; // before connect, so the window it offers stays small
+	setsockopt(peer, SOL_SOCKET, SO_RCVBUF, (const char *)&rcvbuf, sizeof(rcvbuf));
+	struct sockaddr_in sin;
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_port = htons((uint16_t)h.passive_port);
+	sin.sin_addr.s_addr = htonl(0x7F000001);
+	CHECK(connect(peer, (struct sockaddr *)&sin, sizeof(sin)) == 0);
+
+	// The peer's check, nominating, then answers to the host's own checks until it connects.
+	char buf[2048];
+	int len = binding_request(buf, sizeof(buf), user, pwd);
+	send_frame(peer, buf, (uint16_t)len, (size_t)len);
+	for (int t = 0; t < 5000 && juice_get_state(h.agent) != JUICE_STATE_CONNECTED &&
+	                juice_get_state(h.agent) != JUICE_STATE_COMPLETED;
+	     t += 50) {
+		len = read_frame(peer, buf, sizeof(buf), 50);
+		stun_message_t in;
+		memset(&in, 0, sizeof(in));
+		if (len <= 0 || stun_read(buf, (size_t)len, &in) < 0 ||
+		    in.msg_class != STUN_CLASS_REQUEST || in.msg_method != STUN_METHOD_BINDING)
+			continue;
+		stun_message_t resp;
+		memset(&resp, 0, sizeof(resp));
+		resp.msg_class = STUN_CLASS_RESP_SUCCESS;
+		resp.msg_method = STUN_METHOD_BINDING;
+		memcpy(resp.transaction_id, in.transaction_id, STUN_TRANSACTION_ID_SIZE);
+		resp.mapped.len = sizeof(resp.mapped.addr);
+		getpeername(peer, (struct sockaddr *)&resp.mapped.addr, &resp.mapped.len);
+		len = stun_write(buf, sizeof(buf), &resp, peer_pwd);
+		send_frame(peer, buf, (uint16_t)len, (size_t)len);
+	}
+	juice_state_t state = juice_get_state(h.agent);
+	CHECK(state == JUICE_STATE_CONNECTED || state == JUICE_STATE_COMPLETED);
+
+	// Nothing reads now: the burst goes on until the host refuses one.
+	size_t capacity = socket_capacity();
+	char datagram[BURST_SIZE];
+	memset(datagram, 'x', sizeof(datagram));
+	int accepted = 0;
+	for (uint32_t seq = 0; seq < BURST_MAX; ++seq) {
+		memcpy(datagram, &seq, sizeof(seq));
+		if (juice_send(h.agent, datagram, sizeof(datagram)) != 0)
+			break;
+		++accepted;
+	}
+	size_t accepted_bytes = (size_t)accepted * (2 + BURST_SIZE);
+	printf("  a socket alone holds %zu KB, the host took %zu KB before refusing one\n",
+	       capacity / 1024, accepted_bytes / 1024);
+	CHECK(accepted < BURST_MAX); // it did fill up
+	// Where the socket stopped, the queue took over. Upstream refused the second datagram the
+	// socket could not take.
+	CHECK(accepted_bytes >= capacity + QUEUE_AT_LEAST);
+
+	// What was accepted arrives, all of it and in order.
+	int received = 0, disorder = 0, misses = 0;
+	while (received < accepted && misses < 10) {
+		len = read_frame(peer, buf, sizeof(buf), 300);
+		if (len < 0) {
+			++misses;
+			continue;
+		}
+		if (len != BURST_SIZE || is_stun_datagram(buf, (size_t)len))
+			continue; // the host's own checks and keepalives
+		uint32_t seq;
+		memcpy(&seq, buf, sizeof(seq));
+		if (seq != (uint32_t)received)
+			++disorder;
+		++received;
+	}
+	printf("  accepted %d, received %d, out of order %d\n", accepted, received, disorder);
+	CHECK(received == accepted);
+	CHECK(disorder == 0);
+
+	closesocket(peer);
+	juice_destroy(h.agent);
+}
+
 static void test_gate(void) {
 	printf("The gate closes what is not an authenticated Binding request\n");
 	side_t h = {0};
 	const char *peer_pwd = "pw01234567890123456789";
-	char sdp[JUICE_MAX_SDP_STRING_LEN];
-	snprintf(sdp, sizeof(sdp), "a=ice-ufrag:peer\r\na=ice-pwd:%s\r\n", peer_pwd);
-	// The UDP socket takes an ephemeral port, whose TCP side another socket of this machine
-	// may hold: then there is no listener and no passive candidate, as designed. Another agent.
-	for (int attempt = 0; attempt < 5 && !h.passive_port; ++attempt) {
-		if (h.agent)
-			juice_destroy(h.agent);
-		memset(&h, 0, sizeof(h));
-		make(&h, JUICE_ICE_TCP_MODE_ACTIVE_PASSIVE);
-		juice_set_remote_description(h.agent, sdp);
-		juice_gather_candidates(h.agent);
-		for (int t = 0; t < 1000 && !h.passive_port; t += 50)
-			sleep_ms(50);
-	}
+	listening_host(&h, peer_pwd);
 	CHECK(h.passive_port > 0);
 
-	char local_sdp[JUICE_MAX_SDP_STRING_LEN], ufrag[64], pwd[64];
-	juice_get_local_description(h.agent, local_sdp, sizeof(local_sdp));
-	read_attr(local_sdp, "a=ice-ufrag:", ufrag, sizeof(ufrag));
-	read_attr(local_sdp, "a=ice-pwd:", pwd, sizeof(pwd));
+	char ufrag[64], pwd[64];
+	host_credentials(&h, ufrag, pwd);
 	char good_user[160], bad_user[160];
 	snprintf(good_user, sizeof(good_user), "%s:peer", ufrag);
 	snprintf(bad_user, sizeof(bad_user), "zz%s:peer", ufrag);
@@ -402,6 +563,7 @@ int main(void) {
 	juice_set_log_level(getenv("JUICE_DEBUG") ? JUICE_LOG_LEVEL_DEBUG : JUICE_LOG_LEVEL_WARN);
 	test_connect_over_tcp_only();
 	test_selected_local_is_the_address_reached();
+	test_burst_over_tcp();
 	test_gate();
 	test_active_only_does_not_listen();
 	printf(failures ? "\n%d FAILURE(S)\n" : "\nall passed\n", failures);
