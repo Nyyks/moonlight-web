@@ -88,7 +88,8 @@ const CELL_SETS = {
   glchain: ["chain-gl-off", "chain-gl-sgsr", "chain-gl-nis", "chain-gl-fsr1", "chain-gl-mwsr"],
   // The mwsr kernel (plan §3.2, §4.3): `mwsr[:key=val;key=val…]` sets its
   // overrides (show, walong, wacross, ralong, racross, sfull, wmin, dering,
-  // c444, rdown, ll), the uniforms (tau, sharp), half=1 (the f16
+  // c444, rdown, ll, flat, fc, gz, fz, and the ×2 law's sx2, x2base, x2flat,
+  // x2racross: MWSR_KEYS), the uniforms (tau, sharp), half=1 (the f16
   // module; the page needs f16=1), mode=up|down (default: by the scale),
   // taps=1|4|9|16 (the reduction's grid) and srgb=1 (SDR only: the input
   // read and the output written through `-srgb` views, the sampler decoding
@@ -1430,6 +1431,13 @@ async function runLabInner(p, log) {
     fc: "FLAT_C",
     gz: "GAZE",
     fz: "FLAT_ZONE",
+    // the ×2 law (plan §12, J39): its full scale, the flat picture as the
+    // edge path's base, the flat path's unsharp, R_ACROSS at the law's
+    // full weight
+    sx2: "S_X2",
+    x2base: "X2_BASE",
+    x2flat: "X2_FLAT",
+    x2racross: "X2_R_ACROSS",
   };
   // The gaze zone's uniforms (MwsrShader's MWSR_ZONE): a cell naming one of
   // them, or gaze=, takes the GAZE text unless gz= says otherwise.

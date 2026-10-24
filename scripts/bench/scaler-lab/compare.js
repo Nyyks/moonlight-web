@@ -19,6 +19,9 @@
 //   sharp=1, tau=0.05  MWSR's per-draw values (MwsrShader's MWSR_UNIFORMS):
 //                      the sharpness (× W_ACROSS) and the edge vote's
 //                      threshold; the defaults are the product's
+//   x2b=1, x2r=, x2f=  the ×2 law (MwsrShader's X2_ constants, plan §12, J39):
+//                      the flat path's picture as the edge path's base, the
+//                      across taps' distance, the flat path's unsharp; off by default
 //   soft=1             the WebGPU fallback adapter (SwiftShader), for a test
 //   viewer=2d          the bands drawn by Canvas2D drawImage, not WebGL2 (a test)
 //
@@ -90,7 +93,18 @@ const MWSR_URL = "/frontend/js/stream/renderers/MwsrShader.js";
 const BROWSER_DETECT_URL = "/frontend/js/util/BrowserDetect.js";
 // MWSR's per-draw values and their product defaults (read from the module at
 // boot); the panel's two sliders, applied through the renderers' setMwsrTuning.
-const MWSR_DEF = { sharp: 1, tau: 0.05, flat: 1, fc: 0.5, dr: 1 };
+const MWSR_DEF = {
+  sharp: 1,
+  tau: 0.05,
+  flat: 1,
+  fc: 0.5,
+  dr: 1,
+  x2b: 0,
+  x2r: 1,
+  x2f: 0,
+};
+// MwsrShader's module once loaded (boot): its sharpness law by the scale
+let mwsrModule = null;
 const SHARP_RANGE = [0.5, 3, 0.05];
 const TAU_RANGE = [0.01, 0.1, 0.005];
 // The flat path's reconstruction (MwsrShader's FLAT_TAPS, FLAT_C overrides):
@@ -111,6 +125,17 @@ const BOUND_CHOICES = [
   [1, "cinq échantillons, puis texels"],
   [2, "texels seuls"],
 ];
+// The ×2 law (MwsrShader's X2_ constants, plan §12, J39), weighing in from
+// ×1.5 to ×2: the edge path's base (the bilinear sample, or the flat path's
+// picture), the distance of the across pair (1.25 helps text, 0.75 a game's
+// soft edges, J39) and the flat path's unsharp, bounded by the texels.
+// Pipeline constants: the renderer rebuilds. Off in the product.
+const X2B_CHOICES = [
+  [0, "échantillon bilinéaire"],
+  [1, "chemin plat (CR5 ou Q3)"],
+];
+const X2R_RANGE = [0.5, 1.5, 0.05];
+const X2F_RANGE = [0, 1.5, 0.05];
 // The gaze zone (MwsrShader's MWSR_ZONE and its GAZE constant, plan §15.2):
 // the green ellipse's centre y and half-axes (fractions of the picture), the
 // orange ring's width (a fraction of the half-axes), and the vote threshold
@@ -159,6 +184,9 @@ const state = {
   flat: MWSR_DEF.flat,
   fc: MWSR_DEF.fc,
   dr: MWSR_DEF.dr,
+  x2b: MWSR_DEF.x2b,
+  x2r: MWSR_DEF.x2r,
+  x2f: MWSR_DEF.x2f,
   // the gaze zone: off (the product on a still picture), its values, the
   // rings drawn over the bands, the flat path's cubic inside it only
   gaze: false,
@@ -176,13 +204,20 @@ const overrides = () => ({
   FLAT_C: state.fc,
   ...(state.dr === MWSR_DEF.dr ? {} : { DERING: state.dr }),
   ...(state.gaze && state.fz ? { FLAT_ZONE: 1 } : {}),
+  ...(state.x2b ? { X2_BASE: 1 } : {}),
+  ...(x2rSet() ? { X2_R_ACROSS: state.x2r } : {}),
+  ...(state.x2f > 0 ? { X2_FLAT: state.x2f } : {}),
 });
+const x2rSet = () => Math.abs(state.x2r - MWSR_DEF.x2r) > 1e-9;
 const tuned = () =>
   Math.abs(state.sharp - MWSR_DEF.sharp) > 1e-9 ||
   Math.abs(state.tau - MWSR_DEF.tau) > 1e-9 ||
   state.flat !== MWSR_DEF.flat ||
   (state.flat !== 1 && Math.abs(state.fc - MWSR_DEF.fc) > 1e-9) ||
   state.dr !== MWSR_DEF.dr ||
+  state.x2b !== MWSR_DEF.x2b ||
+  x2rSet() ||
+  Math.abs(state.x2f - MWSR_DEF.x2f) > 1e-9 ||
   state.gaze;
 const zoneText = () =>
   " · zone " +
@@ -196,6 +231,13 @@ const zoneText = () =>
   " · nc " +
   fr(state.gz.sharp, 2) +
   (state.fz ? " · plat zone" : "");
+const x2Text = () =>
+  state.x2b || x2rSet() || state.x2f > 0
+    ? " · ×2" +
+      (state.x2b ? " base plate" : "") +
+      (x2rSet() ? " travers " + fr(state.x2r, 2) : "") +
+      (state.x2f > 0 ? " plat " + fr(state.x2f, 2) : "")
+    : "";
 const tuningText = () =>
   "netteté " +
   fr(state.sharp, 2) +
@@ -211,6 +253,7 @@ const tuningText = () =>
     : state.dr === 1
       ? " · borne cinq puis texels"
       : "") +
+  x2Text() +
   (state.gaze ? zoneText() : "");
 const currentCase = () => CASE_BY[state.caseId];
 const sizeOf = (level) => [Math.round((level * 16) / 9), level];
@@ -264,6 +307,11 @@ function readState() {
   if (fc >= 0 && fc <= 2) state.fc = fc;
   const dr = parseInt(q.dr, 10);
   if (BOUND_CHOICES.some(([n]) => n === dr)) state.dr = dr;
+  state.x2b = q.x2b === "1" ? 1 : MWSR_DEF.x2b;
+  const xr = parseFloat(q.x2r);
+  if (xr >= 0.5 && xr <= 1.5) state.x2r = xr;
+  const xf = parseFloat(q.x2f);
+  if (xf >= 0 && xf <= 1.5) state.x2f = xf;
   state.gaze = q.gaze === "1";
   for (const [id, , [min, max], key] of ZONE_SLIDERS) {
     const v = parseFloat(q[id]);
@@ -290,6 +338,9 @@ function writeState() {
     p.set("fc", String(state.fc));
   }
   if (state.dr !== MWSR_DEF.dr) p.set("dr", String(state.dr));
+  if (state.x2b) p.set("x2b", "1");
+  if (x2rSet()) p.set("x2r", String(state.x2r));
+  if (state.x2f > 0) p.set("x2f", String(state.x2f));
   if (state.gaze) {
     p.set("gaze", "1");
     for (const [id, , , key] of ZONE_SLIDERS) p.set(id, String(state.gz[key]));
@@ -528,6 +579,12 @@ const outKey = (algoId) =>
       state.fc +
       "|d" +
       state.dr +
+      "|x" +
+      state.x2b +
+      "," +
+      state.x2r +
+      "," +
+      state.x2f +
       (state.gaze
         ? "|g" +
           ZONE_SLIDERS.map(([, , , k]) => state.gz[k]).join(",") +
@@ -1752,6 +1809,29 @@ function buildPanel() {
     );
   };
   slider("sharp", "netteté", SHARP_RANGE, "sharp", 2);
+  // the sharpness law by the scale (MwsrShader's mwsrSharpness, J39,
+  // proposed, not the product's): the slider set to its value at this case's
+  // scale, 1.85 up to ×1.33, 1.23 from ×1.5 on
+  body.append(
+    el(
+      "div",
+      { class: "row" },
+      el(
+        "button",
+        {
+          type: "button",
+          onclick: () => {
+            if (!mwsrModule || !mwsrModule.mwsrSharpness) return;
+            const c = currentCase();
+            const v = mwsrModule.mwsrSharpness(c.outLevel / c.inLevel);
+            state.sharp = Math.round(v * 100) / 100;
+            changed("mwsr");
+          },
+        },
+        "Netteté de la loi d'échelle (J39) à ce facteur",
+      ),
+    ),
+  );
   slider("tau", "seuil τ", TAU_RANGE, "tau", 3);
   const flatSel = el("select", {
     id: "flat",
@@ -1780,6 +1860,20 @@ function buildPanel() {
   body.append(
     el("div", { class: "row" }, el("span", null, "borne (arêtes)"), drSel),
   );
+  const x2bSel = el("select", {
+    id: "x2b",
+    onchange: () => {
+      state.x2b = parseInt(x2bSel.value, 10);
+      changed("mwsr");
+    },
+  });
+  for (const [n, label] of X2B_CHOICES)
+    x2bSel.append(el("option", { value: n, selected: state.x2b === n }, label));
+  body.append(
+    el("div", { class: "row" }, el("span", null, "×2 : base"), x2bSel),
+  );
+  slider("x2r", "×2 : distance en travers", X2R_RANGE, "x2r", 2);
+  slider("x2f", "×2 : affûtage plat", X2F_RANGE, "x2f", 2);
   body.append(
     el(
       "div",
@@ -1794,6 +1888,9 @@ function buildPanel() {
             state.flat = MWSR_DEF.flat;
             state.fc = MWSR_DEF.fc;
             state.dr = MWSR_DEF.dr;
+            state.x2b = MWSR_DEF.x2b;
+            state.x2r = MWSR_DEF.x2r;
+            state.x2f = MWSR_DEF.x2f;
             state.gaze = false;
             state.gz = { ...ZONE_DEF };
             state.fz = false;
@@ -1818,7 +1915,7 @@ function buildPanel() {
     el(
       "p",
       { class: "note" },
-      "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. Chemin plat : ce que rend un quad sous le seuil, l'échantillon bilinéaire, un quadratique de 3 échantillons bilinéaires (Dodgson : bilinéaire à mi-chemin entre deux texels, le lobe C ne s'applique pas) ou un Catmull-Rom de 5 ou 9 (lobe C : 0,5 = Catmull-Rom, plus haut = plus net, plus de sonnerie). La bande MWSR seule est refaite.",
+      "Netteté : multiplie le poids des deux échantillons pris en travers du contour (W_ACROSS 0,3 ; borne W_MIN −0,5, atteinte à 1,67 sur un contour net). Seuil τ : la pente de luma par texel en dessous de laquelle le quad reste bilinéaire ; plus bas, plus de pixels passent par le noyau, pour plus de temps. Chemin plat : ce que rend un quad sous le seuil, l'échantillon bilinéaire, un quadratique de 3 échantillons bilinéaires (Dodgson : bilinéaire à mi-chemin entre deux texels, le lobe C ne s'applique pas) ou un Catmull-Rom de 5 ou 9 (lobe C : 0,5 = Catmull-Rom, plus haut = plus net, plus de sonnerie). Loi d'échelle (J39, proposée) : le poids en travers que l'œil a réglé à ×1,33 (1,85 × force 2/3) tenu au-delà, soit 1,23 dès ×1,5 ; à ×2 le même poids qu'à ×1,33, là où 1,85 épingle les pixels aux texels et bave. Loi ×2 (constantes du noyau, de ×1,5 à ×2, rien à ×1,33) : base, le chemin de contour part du chemin plat au lieu de l'échantillon bilinéaire ; distance en travers, celle des deux échantillons pris en travers du contour, en texels (1,25 sert le texte, 0,75 les contours doux d'un jeu) ; affûtage plat, le masque flou borné par les texels sur le chemin plat. La bande MWSR seule est refaite.",
     ),
   );
   // the gaze zone: on or off, its six values, the rings, the flat path in it
@@ -2016,6 +2113,8 @@ function syncPanel() {
     ["sharp", "sharp", 2],
     ["tau", "tau", 3],
     ["fc", "fc", 2],
+    ["x2r", "x2r", 2],
+    ["x2f", "x2f", 2],
   ]) {
     const input = document.getElementById(id);
     const val = document.getElementById(id + "v");
@@ -2026,6 +2125,8 @@ function syncPanel() {
   if (flatSel) flatSel.value = String(state.flat);
   const drSel = document.getElementById("dr");
   if (drSel) drSel.value = String(state.dr);
+  const x2bSel = document.getElementById("x2b");
+  if (x2bSel) x2bSel.value = String(state.x2b);
   const gazeSel = document.getElementById("gaze");
   if (gazeSel) gazeSel.value = state.gaze ? "1" : "0";
   for (const [id, , , key, dec] of ZONE_SLIDERS) {
@@ -2175,6 +2276,7 @@ async function boot() {
     // the product's defaults of MWSR's two values, so that the sliders
     // start from them and the "defaults" button means the product's
     const m = await import(MWSR_URL);
+    mwsrModule = m;
     Object.assign(MWSR_DEF, m.MWSR_UNIFORMS);
     if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.FLAT_TAPS !== undefined) {
       MWSR_DEF.flat = m.MWSR_OVERRIDES.FLAT_TAPS;
@@ -2197,12 +2299,20 @@ async function boot() {
     }
     if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.DERING !== undefined)
       MWSR_DEF.dr = m.MWSR_OVERRIDES.DERING;
+    if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.X2_BASE !== undefined) {
+      MWSR_DEF.x2b = m.MWSR_OVERRIDES.X2_BASE;
+      MWSR_DEF.x2r = m.MWSR_OVERRIDES.X2_R_ACROSS;
+      MWSR_DEF.x2f = m.MWSR_OVERRIDES.X2_FLAT;
+    }
     if (m.MWSR_ZONE) Object.assign(ZONE_DEF, m.MWSR_ZONE);
     state.sharp = MWSR_DEF.sharp;
     state.tau = MWSR_DEF.tau;
     state.flat = MWSR_DEF.flat;
     state.fc = MWSR_DEF.fc;
     state.dr = MWSR_DEF.dr;
+    state.x2b = MWSR_DEF.x2b;
+    state.x2r = MWSR_DEF.x2r;
+    state.x2f = MWSR_DEF.x2f;
     state.gz = { ...ZONE_DEF };
   } catch (e) {
     console.warn("MwsrShader.js :", e);
