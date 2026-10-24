@@ -717,6 +717,8 @@ install(TARGETS mw-server RUNTIME DESTINATION . BUNDLE DESTINATION .)
 # Ship only the served assets: dev tooling (node_modules, tests, lint/TS configs,
 # internal .claude notes) must never reach user machines — and trips codesign on
 # macOS. Top-level dirs are excluded by REGEX so e.g. js/ subtrees stay intact.
+# isDevOnly() in StaticFileHandler.cpp holds the same list for a run from the
+# source tree: change both together.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../frontend" DESTINATION .
     REGEX "/frontend/(\\.claude|node_modules|test|scripts|build|coverage)$" EXCLUDE
     PATTERN ".prettierignore" EXCLUDE
