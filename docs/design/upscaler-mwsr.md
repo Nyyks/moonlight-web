@@ -1419,6 +1419,7 @@ upscalers spatiaux.
 - [ ] Matrice du §7.3 (DualRTX complet ; étoile ailleurs) [`xhigh`]
 - [ ] Énergie : `powermetrics` sur M1, décharge iPhone, occupation GPU `mw-arm` ; décharge du realme, présentateur WebGPU contre WebGL2 (décision du 22/10, §9) [`xhigh`]
 - [ ] `/bench` avec `mwsr` ; clic → photon plein écran [`high`]
+- [ ] Au prochain `/bench` complet, sur Qualcomm (`mw-arm`) : vérifier que la barrière que le renderer pose après chaque dessin (`_setFence`, lue au dessin suivant par `takeGpuBehind`) ne fait pas compter au gouverneur de faux « GPU en retard » (descente d'échelle injustifiée). Journal J38 du 24/10 : sur un OffscreenCanvas, cette barrière retarde de 120 à 190 ms l'achèvement vu par une barrière suivante sur les pilotes D3D11 de NVIDIA et de Qualcomm (26 ms sans elle sur l'Adreno 618) ; sur un canvas d'élément la RTX signale en 1 ms (J37, banc 3), Qualcomm en flux réel reste à voir. Décision de Bruno du 24/10 (par 59) ; rien dans le produit avant [`high`]
 - [ ] A/B subjectif de Bruno (texte, bureau, jeu ; LAN et Internet ; HDR sur le M27Q)
 - [ ] Rapport : objectif par objectif, démontré / attendu, non mesurables [`xhigh`]
 
