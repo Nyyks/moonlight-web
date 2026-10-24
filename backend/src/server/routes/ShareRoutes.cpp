@@ -18,16 +18,15 @@
 #include "server/routes/ShareRoutes.h"
 
 #include "common/Logger.h"
+#include "network/UPNPClient.h"
 #include "server/AuthManager.h"
 #include "server/HttpServer.h"
 #include "server/RestRouter.h"
 #include "server/routes/LogRoutes.h"
 
-#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QNetworkInterface>
 
 namespace {
 
@@ -83,17 +82,14 @@ QJsonObject slotJson(const ShareManager::SlotStatus& st)
     return obj;
 }
 
-/// This machine's first routable IPv4 — the address a player on the LAN can
-/// reach. Loopback would produce a link that only works on the host itself.
+/// This machine's LAN IPv4 — the address a player on the LAN can reach. The
+/// first adapter Windows lists can be Tailscale or a Hyper-V/VirtualBox switch,
+/// which no other machine of the house reaches, so it is the ranked list's
+/// head: the default-route address, else an adapter that has a gateway.
+/// Loopback would produce a link that only works on the host itself.
 QString lanIPv4()
 {
-    for (const QHostAddress& addr : QNetworkInterface::allAddresses()) {
-        if (addr.isLoopback() || addr.isNull()) continue;
-        if (addr.protocol() != QAbstractSocket::IPv4Protocol) continue;
-        if (addr.isLinkLocal()) continue;
-        return addr.toString();
-    }
-    return QStringLiteral("127.0.0.1"); // nothing better to offer
+    return UPNPClient::getLocalIPs().value(0, QStringLiteral("127.0.0.1"));
 }
 
 /// Slot number from a :n path parameter, or -1 when it is not a player slot.

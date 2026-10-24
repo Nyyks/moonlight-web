@@ -103,7 +103,7 @@ address changed hands out the current form without being revoked.
   so the bootstrap infers it. The bootstrap carries the token across the handover
   and the guest's page ends up at `/p#{id}&t={token}`. A link minted before this
   and spelling the page out (`#p=/p&t={token}`) is still honoured.
-- Otherwise: `https://{LAN IPv4}[:port]/p/{token}`, and `local_only` is **true**.
+- Otherwise: `https://{the host's default-route LAN IPv4}[:port]/p/{token}`, and `local_only` is **true**.
   Self-signed, same network only. Never loopback — the guest is on another PC.
 
 Only those two forms are ever minted. A share link lives for weeks in somebody
