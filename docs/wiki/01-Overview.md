@@ -15,7 +15,7 @@ Headline capabilities:
 - **Full input**: keyboard, mouse (pointer-lock), touch trackpad, Xbox/PS **gamepads** with rumble, **wheels, flight sticks and RC radios** — as an Xbox pad or sent to the game as themselves, force feedback included ([§4.9](04-Frontend.md#49-wheels-and-radios-as-themselves)) — bidirectional **clipboard**.
 - **Other hosts too** — Sunshine/Apollo, Wolf (Games-on-Whales) and MultiSeat, found on the LAN by mDNS or added by IP.
 - **Internet access** (opt-in consent): per-session UPnP media mapping for remote streams, plus the **remote entry link** — one outgoing connection to an introduction server, which is how the instance is reached from outside without publishing anything: no DNS record, no certificate in its name, no open web port.
-- **Video Enhancement**: GPU upscaling & sharpening (FSR1 / SGSRv1 on WebGL2, or WebGPU in HDR) in the browser.
+- **Video Enhancement**: GPU upscaling & sharpening in the browser, MoonlightWeb's own upscaler (MWSR) on WebGL2, or WebGPU in HDR and on iPhone.
 
 ## 1.1 The User's journey
 
@@ -52,7 +52,7 @@ Per-browser preferences (stored in `localStorage`, with server defaults) are edi
 
 - **Bitrate** 1–150 Mbps or auto (recommendation derived from resolution/FPS/HDR), **resolution** 720p–2160p or *Native Host*, **FPS** 15–240, **codec** auto/H.264/HEVC/AV1 (unsupported options greyed out live via `VideoDecoder.isConfigSupported`), plus **PyroWave (Wired LAN only)** for a device on Ethernet streaming a native Windows host (greyed out, with the reason, where no host here codes it, the browser has neither WebGPU nor WebGL2, or HDR is ticked), **HDR**, **4:4:4 chroma**, aspect ratio, allow-tearing (on by default where the browser can tear; off = VSync pacing), performance stats, gaming mode, touch sensitivity / touch-screen mode (mobile & tablet only), and a mobile **Power Saving** mode that forces the lightest pipeline.
 - Changing quality mid-stream is **seamless**: a second stream is prepared in the background and the display switches on its first frame — no loader, no reconnection (the same mechanism the automatic congestion ladder uses).
-- **Video Enhancement** (GPU upscaling + sharpening): one switch, the algorithm picked by the device (FSR1 on a desktop, SGSR1 on a phone or tablet; WebGL2, or WebGPU in HDR):
+- **Video Enhancement** (GPU upscaling + sharpening): one switch, MoonlightWeb's own upscaler (MWSR) in the flavour the device runs best (WebGL2 on a computer and on Android, WebGPU on iPhone and iPad and in HDR), none on an entry-level Mali GPU:
 
 ![Video Enhancement — 720p upscaled to 1440p](../screenshots/video_enhancement.gif)
 

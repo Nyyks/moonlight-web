@@ -2012,3 +2012,39 @@ bilinéaire `text` 19,97 → 22,43, `game` 37,98 → 40,21, `code` 29,13 → 31,
 0,000, 0,023-0,047 dB) ; la première passe côté WebGPU, lancée avant la passe WebGL2, avait lu les clichés du jumeau
 d'avant la loi (« pas la même qualité » sur `code`, 0,98 dB) : le faux pas de J37, l'ordre est WebGL2 d'abord.
 Rien n'a tourné sur GPU matériel hors le contexte WebGL2 éphémère de la passe WebGPU (J37). Chrome de labo : 0 resté.
+
+## 2026-10-24 — J41, MWSR par défaut (P6) ; la Mi TV au comparateur : Q3 devant CR5 sous Android aussi
+
+**Le go (21:05, mot pour mot : « MWSR défaut en v0.4.1 »).** Bruno avance la bascule de P6 avant la campagne P5.
+`pickAutoEnhancer({ hdr })` rend désormais la saveur, selon ses classes du 22/10 (plan §9) : `gl-mwsr` sur PC,
+Mac, Snapdragon (à la place de SGSR1) et les GPU mobiles qu'aucun banc n'a vus (SGSR1 avant : MWSR coûte moins sur
+tout GPU mesuré) ; `mwsr` sur iPhone et iPad quand WebGPU est là (`gl-mwsr` sinon), et en HDR partout ; `off` sur
+un Mali d'entrée de gamme. La classe est lue dans la chaîne du renderer WebGL (`gpuRendererString`, une sonde par
+page, qui sert aussi `isSnapdragonGpu`) : `isEntryMaliGpu` = G31, G51, G52, G57, G310 et la série T ; les Mali plus
+gros (G68, G7x, G510, G610 et au-delà, Immortalis), jamais mesurés, prennent l'upscaler des téléphones. La Mi TV
+répond `Mali-G31`, sans nombre de cœurs : la règle se fait sur le modèle seul. Frontière proposée, à confirmer par
+Bruno. Sur cette classe, le présentateur simple passe à WebGPU, amélioration activée ou non
+(`plainPresenterIsWebGpu`, Canvas2D sans WebGPU), sauf sur une TV (puits `<video>`) et un appareil d'un gigaoctet
+(jamais mesuré). Les règles TV et mémoire basse passent avant, inchangées. Le drapeau `mw_mwsr` est retiré. La
+mémoire du gouverneur ne demande pas de migration : elle n'est lue que sous le même plafond, et un verdict gardé sous
+FSR1 ou SGSR1 est ignoré par une session MWSR, dont le seul cran plus bas est `off`. Tests (`BrowserDetect`, 35) :
+chaque classe, le HDR, l'iPhone avec et sans WebGPU, les Mali des deux côtés de la frontière, le présentateur, une
+sonde par page ; vitest 1746 / 1746. README.next, wiki (ch. 1, 3, 4, 7), brouillon des notes v0.4.1 ; le chapitre
+du wiki sur MWSR reste à écrire.
+
+**La Mi TV (Mali-G31, TV Bro = WebView 153, WebGL2) au comparateur, demande de Bruno (23:00).** La Freebox POP est
+en veille profonde (adb muet) : la Mi TV la remplace, par `adb forward` des DevTools et `adb reverse` du labo
+(8767), son coupé d'origine et laissé tel quel, TV remise en veille à la fin. 1080p → 1440p, étalon, 300 images
+par bande, une passe chacun (23:11, 23:17, 23:24), ms par image (moyenne / p50) :
+
+| réglage | MWSR | FSR1 | SGSR1 | SSIM / PSNR de MWSR |
+|---|---|---|---|---|
+| défaut du produit (une TV n'est pas un téléphone : CR5) | 208,8 / 195,4 | 621,4 | 225,0 | 0,951 / 25,5 |
+| `flat=3` (Q3) | **176,6** / 163,6 | 623,7 | 231,6 | 0,949 / 25,5 |
+| `flat=5&fc=0.5` (CR5) | 208,1 / 194,1 | 623,9 | 222,2 | 0,951 / 25,5 |
+
+**Lecture.** Q3 est 15 % plus rapide que CR5 sur la Mali-G31, dans le sens du realme (−13 %) et de l'iPhone
+(−9 %) : Android ne se comporte pas autrement, et Q3 sur téléphone et tablette tient. MWSR y coûte 0,34 × FSR1 et
+0,78-0,93 × SGSR1. À ~200 ms par image, aucun upscaler n'a sa place sur ce GPU : l'Auto d'une TV reste sans
+upscaler (règle TV, et la Mi TV est aussi sous un gigaoctet), et le Mali d'entrée de gamme sans upscaler est
+cohérent avec cette mesure.

@@ -324,7 +324,7 @@ Prefer to build it yourself? See [Fork & build](#fork--build).
 
 ## Video Enhancement (bonus)
 
-Browser‑side image enhancement on the GPU (WebGL2, or WebGPU in HDR): **upscaling (FSR1 & SGSRv1)** + **sharpening**, to gain sharpness when the stream resolution differs from the display resolution.
+Browser‑side image enhancement on the GPU (WebGL2, or WebGPU in HDR and on iPhone): **MoonlightWeb's own upscaler**, FSR1's sharpness for less than SGSRv1's cost, its sharpening following the scale, to gain sharpness when the stream resolution differs from the display resolution.
 
 <div align="center">
 
