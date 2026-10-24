@@ -141,9 +141,11 @@ export const MWSR_CONSTANTS = Object.freeze({
 });
 
 /** The per-draw values of the uniform block: the vote threshold (luma per
- *  input texel) and the sharpness (× W_ACROSS; 2.0 since the lab's J31 of
- *  23/10/2026, Bruno's eye on his iPhone: text near FSR1's, no overshoot). */
-export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 2.0 });
+ *  input texel) and the sharpness (× W_ACROSS; 1.85 for every device since
+ *  24/10/2026, Bruno's eye on his iPhone at ×1.33, J37: text near FSR1's,
+ *  no overshoot; 2.0 before, from the lab's J31). A law by the scale may
+ *  replace the constant: mwsrUniforms() has the sizes of both ends. */
+export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.85 });
 
 /**
  * The gaze zone's values (plan §15.2, Bruno's picture of 23/10/2026: a green

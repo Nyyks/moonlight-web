@@ -229,7 +229,7 @@ describe('the mwsr shader text', () => {
         expect(u[2]).toBe(2);
         expect(u[3]).toBe(2);
         expect(u[4]).toBeCloseTo(0.05, 6);
-        expect(u[5]).toBe(2); // the sharpness of the lab's J31 (23/10/2026)
+        expect(u[5]).toBeCloseTo(1.85, 6); // Bruno's sharpness for every device (24/10/2026, J37); f32
         const v = mwsrUniforms(1920, 1080, 2560, 1440, { tau: 0.03, sharp: 0.5 });
         expect(v[2]).toBeCloseTo(4 / 3, 6);
         expect(v[4]).toBeCloseTo(0.03, 6);
