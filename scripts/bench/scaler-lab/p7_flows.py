@@ -14,6 +14,14 @@ scaler_lab.py (--p7, --p7-table) with its `run_page`.
                          [--p7-hist none,pull:a=0.5;t=6,…] [--p7-kbps 20000,10000]
                          [--p7-roi full] [--p7-warm 60] --page-timeout 7200
     python scaler_lab.py --tag p7ss --p7-table p7ss      (the tables again, no Chrome)
+
+P8.0 (§14.6) measures a deblocking pass before the kernel the same way (the
+variants dbe and dbd of seq-lab.js), on the pictures or on windows of the CoD
+capture played as clips, the truth being the clip's frame:
+
+    python scaler_lab.py --tag p8v --swiftshader --p7 --p7-case x2 --p7-seq vid
+                         --p7-video cloud=121.5,boom=38 --p7-content cloud,boom
+                         --p7-hist "none,dbd:t=3;n=16,dbd:t=12;n=16;c=4" --p7-kbps 10000,4000
 """
 import glob
 import json
@@ -49,7 +57,12 @@ SEQS = {
     # path of the page in a few frames, one crop at the cut
     "try": ("pan:3,stop:1,cutpan:2", 1.0, 0.0),
     "tryobj": ("obj:6", 0.0, 8.0),
+    # P8.0: a clip of the CoD capture (--p7-video), the window still on the
+    # whole frame: 60 frames after the warm-up's, and the trial's few
+    "vid": ("pan:60", 0.0, 0.0),
+    "tryvid": ("pan:6", 0.0, 0.0),
 }
+VIDEO_SEQS = ("vid", "tryvid")
 DEFAULT_SEQS = "slow,mid,fast,rapid,obj"
 SLOW = ("slow", "mid")
 FAST = ("rapid", "obj")
@@ -74,6 +87,13 @@ ROI_OBJ = (64, 360, 1280, 720)
 WARM = 60
 HIST = "none,pull:a=0.5;t=6,pull:a=0.75;t=10,soft:a=0.75;t=16,clamp:a=0.75,mcpull:a=0.75;t=10,mcclamp:a=0.75,outmc:a=0.75"
 KBPS = "20000,10000"
+# P8.0's clips: the capture of the offline step (2560x1440, 60 fps), each
+# window from its start minus the warm-up, as PNG frames in the run's
+# directory (made once, shared by the tags), the warm-up's then the
+# sequence's; the page's window is the whole frame.
+COD = os.path.join(os.path.expanduser("~"), ".mw-bench", "content", "cod.webm")
+VID_FRAMES = WARM + 60
+VID_BOX = (0, 0, 2560)
 
 # The gate of §14.3, the plan's figures until Bruno sets his: on the slow pans,
 # +0.3 dB or 0.005 of FLIP, and the flicker halved; no trail measurable beyond
@@ -98,6 +118,21 @@ def dump_frames(segs):
     return frames
 
 
+def clip_frames(a, name, start):
+    """The frames of a window of the capture, <dir>/vid-<name>-000.png and
+    on (ffmpeg BelowNormal, 8 threads), made if missing; → their prefix for
+    the page."""
+    prefix = "vid-%s-" % name
+    if not os.path.exists(os.path.join(a.dir, "%s%03d.png" % (prefix, VID_FRAMES - 1))):
+        subprocess.run([
+            "ffmpeg", "-v", "error", "-y", "-threads", "8", "-ss", "%.3f" % (start - WARM / 60.0), "-i", COD,
+            "-frames:v", str(VID_FRAMES), "-an",
+            "-vf", "scale=in_color_matrix=bt709:in_range=tv:flags=accurate_rnd+full_chroma_int,format=rgb24",
+            "-start_number", "0", os.path.join(a.dir, prefix + "%03d.png")],
+            check=True, creationflags=getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0))
+    return "/__dir/" + prefix
+
+
 def contents(a):
     """name → (the picture's URL, the picture after the cut): the text picture
     (--p7-text, copied into the run's directory) and the game screenshot of
@@ -108,12 +143,18 @@ def contents(a):
         shutil.copyfile(a.p7_text, os.path.join(a.dir, name))
         pics["text"] = "/__dir/" + name
     pics["game"] = "/test/01_4K.png"
+    clips = {}
+    for item in (a.p7_video or "").split(","):
+        if item:
+            name, _, start = item.partition("=")
+            clips[name] = clip_frames(a, name, float(start))
     wanted = [c for c in (a.p7_content or "text,game").split(",") if c]
     for c in wanted:
-        if c not in pics:
-            raise SystemExit("--p7-content %s: no picture (--p7-text for the text)" % c)
+        if c not in pics and c not in clips:
+            raise SystemExit("--p7-content %s: no picture (--p7-text for the text, --p7-video for a clip)" % c)
     others = {c: next((o for o in pics if o != c), c) for c in pics}
-    return {c: (pics[c], pics[others[c]]) for c in wanted}
+    # a clip: (its frames' prefix, None)
+    return {c: (clips[c], None) if c in clips else (pics[c], pics[others[c]]) for c in wanted}
 
 
 def run(a, run_page):
@@ -127,6 +168,8 @@ def run(a, run_page):
         size_in, size_out = CASES[case]
         for content, (src, src2) in pics.items():
             for seq in seqs:
+                if (src2 is None) != (seq in VIDEO_SEQS):
+                    continue  # a clip plays its own sequences (vid), a picture the others
                 segs, v, ov = SEQS[seq]
                 name = "%s-%s-%s-%s" % (a.tag, case, content, seq)
                 crop = CROP_OBJ if seq in ("obj", "tryobj") else CROP
@@ -135,8 +178,9 @@ def run(a, run_page):
                     roi = (0, 0) + tuple(map(int, size_out.split("x")))
                 warm = WARM if a.p7_warm is None else a.p7_warm
                 query = "&".join("%s=%s" % (k, q(val)) for k, val in [
-                    ("seq", 1), ("in", size_in), ("out", size_out), ("src", src), ("src2", src2),
-                    ("box", ",".join(map(str, BOX))), ("segs", segs), ("v", v), ("ov", ov),
+                    ("seq", 1), ("in", size_in), ("out", size_out),
+                    *([("vid", src)] if src2 is None else [("src", src), ("src2", src2)]),
+                    ("box", ",".join(map(str, VID_BOX if src2 is None else BOX))), ("segs", segs), ("v", v), ("ov", ov),
                     ("kbps", a.p7_kbps or KBPS), ("vcodec", a.p7_vcodec or "avc"),
                     ("hist", a.p7_hist or HIST), ("dump", ",".join(map(str, dump_frames(segs)))),
                     ("crop", ",".join(map(str, crop))), ("roi", ",".join(map(str, roi))),

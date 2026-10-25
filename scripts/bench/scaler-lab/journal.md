@@ -2173,3 +2173,169 @@ https://claude.ai/artifact/U4rU6NYjEa7g91RsUCWJ2i
 - Deux images sources seulement.
 - Un quart de l'écran.
 - Deux réglages par famille d'historique, choisis d'avance.
+
+## 2026-10-25 — J43, P8.0 : le déblocage côté client mesuré, la porte reste fermée
+
+**Le cadre.** C'est le premier pas mesurable du §14.5, la question posée à la fin de P7 ; Bruno a répondu « Go »
+le 25/10. Le travail s'est fait en deux étapes, sur le processeur puis sur SwiftShader, aux règles de 59 :
+BelowNormal, 8 fils au plus (le Chrome de labo épinglé sur les CPU 16 à 23), son propre profil, `--mute-audio`,
+aucun Chrome resté. Les passes Chrome ont attendu le « libre » de 59. `mwsr` n'est pas touché, et rien n'est activé
+dans le produit.
+
+**L'étape hors ligne** (`scripts/bench/scaler-lab/p8/`, ffmpeg 9.0.1, numpy).
+
+- **Les sources.** Le clip CoD des bancs (`~/.mw-bench/content/cod.webm`, 2560×1440 à 59,94 i/s, une capture déjà
+  compressée en VP9) donne trois fenêtres de 180 images :
+  - 38 s, une explosion contre un mur, avec une coupure dedans ;
+  - 121,5 s, le ciel, puis un vol rapide au-dessus d'une ville ;
+  - 33 s, une scène calme.
+
+  Le texte du labo et la capture de 0 A.D. y ajoutent un panoramique de 3 px de la source 4K par image. Tout passe
+  en 720p et en 1080p (Lanczos).
+- **Les encodages.**
+  - x264 : veryfast, zerolatency, High, sans images B, une seule tranche (les tranches parallèles laissaient des
+    coutures).
+  - x265 : veryfast, zerolatency.
+  - libaom : temps réel, cpu-used 8.
+
+  Tous ont un tampon d'une image (`bufsize` = débit/60, comme `RateControl.h`). Débits : 4, 8 et 16 Mbit/s en 720p,
+  6, 12 et 24 en 1080p, deux seulement en HEVC et en AV1. Les 60 premières images chauffent l'encodeur, puis 40 sont
+  mesurées, une sur trois.
+- **Les mesures**, sur la luminance, contre l'entrée de l'encodeur :
+  - le PSNR, sur toute l'image, les aplats et les textures ;
+  - R, l'énergie des marches de l'erreur sur la grille de 8, rapportée à celle des phases 2, 3, 5 et 6 ;
+  - TR, le même rapport sur les moyennes des blocs.
+
+  La part des marches qui reste vaut (R − 1)/(R sans filtre − 1).
+- **Sans filtre.** x264 laisse une grille : R de 1,2 à 1,35, et de 1,3 à 1,4 dans les aplats. x265 et libaom n'en
+  laissent presque aucune dans les aplats. Les images fixes n'en ont pas : leur erreur est du détail perdu.
+- **Les filtres**, aveugles, sur la luminance :
+  - les bords façon H.264 (`edge`, force s) ;
+  - le seuillage DCT sur des grilles 8×8 décalées : 16 décalages au pas de 2, 4 au pas de 4, ou 8 en damier. Il
+    efface les coefficients sous le seuil T et garde la composante continue. Une variante bornée limite la retouche
+    d'un pixel à ±c ;
+  - un champ des moyennes de blocs (`dc_field`), abandonné car nuisible : sur une image déjà déblocée par le
+    décodeur, changer l'ajustement d'un bloc ajoute des marches ;
+  - ffmpeg : `deblock`, et `spp`, `pp7`, `fspp` nourris du QP réel de chaque macrobloc
+    (`-export_side_data venc_params`).
+
+Le premier balayage (`p8_sweep.py`) a écarté plusieurs pistes :
+- les seuils au-delà de 8, de −0,5 à −4 dB ;
+- le DCT à 4 décalages, qui fait sa propre grille de 4 px ;
+- `deblock` de ffmpeg, à −0,35 dB, qui multiplie la grille par 4 ;
+- `spp`, `pp7` et `fspp`, de −3,9 à −7 dB même avec le QP réel : réglés pour MPEG-2, bien trop forts sur du H.264.
+
+Une force aveugle, seuil = 3 + 4 × la marche visible, vaut le seuil fixe 3 : la marche visible prédit mal le
+meilleur seuil.
+
+Le second balayage (`p8_sweep2.py`, `p8_policy.py`) donne les moyennes contre le flux sans filtre, en dB, avec entre
+parenthèses la part des marches qui reste :
+
+| réglage | CoD H.264 | CoD HEVC | CoD AV1 | texte | jeu |
+|---|---|---|---|---|---|
+| DCT, seuil 3 | +0,33 (0,58) | +0,33 | +0,26 | +0,03 | −0,04 |
+| DCT, seuil 4 | +0,28 (0,46) | +0,28 | +0,22 | +0,04 | −0,09 |
+| DCT, seuil 6 borné à 2 | +0,18 (0,35) | +0,17 | +0,11 | +0,02 | −0,26 |
+| DCT, seuil 8 borné à 2 | +0,04 (0,27) | +0,04 | −0,01 | −0,03 | −0,43 |
+| DCT, seuil 12 borné à 4 | −0,40 (−0,05) | −0,42 | −0,45 | −0,22 | −1,18 |
+| DCT en damier (8 décalages), seuil 4 | +0,26 (0,47) | +0,26 | +0,20 | +0,03 | −0,11 |
+| bords façon H.264, s 2 | +0,09 (0,72) | +0,12 | +0,09 | −0,06 | −0,00 |
+| seuil = 0,25 × Qstep(QP de l'image) | +0,35 (0,40) | +0,37 | – | +0,03 | −0,05 |
+| meilleur seuil de chaque image | +0,39 (0,30) | +0,38 | +0,34 | +0,04 | −0,04 |
+
+Le QP de chaque image, que l'hôte pourrait envoyer, ajoute +0,02 dB au seuil fixe 3 et efface 20 % de marches en
+plus, près du plafond.
+
+**Le labo.** Le mode séquence de P7 (`seq-lab.js`) reçoit trois ajouts.
+
+- **Les variantes de déblocage.**
+  - `dbe:s` est le filtre des bords, en deux passes de rendu.
+  - `dbd:t;n;c` est le seuillage DCT : un dispatch de calcul par décalage, dans un tampon, puis une passe qui ajoute
+    la retouche de la luminance aux trois canaux, bornée par c.
+
+  Les forces sont en niveaux de Y du flux (plage limitée). Les passes ne travaillent que sur la région du flux que
+  voit la région mesurée, plus 16 px. Le calcul a été vérifié avant toute passe Chrome : une transcription fil par
+  fil du WGSL en numpy (`p8_check_wgsl.py`) redonne les filtres à 4e-5 près pour le DCT, exactement pour les bords.
+- **La lecture d'un clip** (`vid=<préfixe>`). Les images PNG d'une fenêtre du clip sont copiées dans la texture
+  source avant chaque image, et la fenêtre reste fixe sur l'image entière. L'image vraie en 1440p est donc l'image
+  du clip elle-même, ce que vérifie au bit près un recadrage. Le pilote extrait ces images
+  (`--p7-video cloud=121.5,boom=38`, ffmpeg en BelowNormal).
+- **Les séquences** `vid` (60 images après 60 d'échauffement) et `tryvid` (6).
+
+**Les essais.**
+- **Sur les images fixes** (`p8try`, x2), les passes compilent et tournent : 89 s par page, environ 570 s de CPU.
+  Mais aucun réglage ne bouge le PSNR de plus de 0,01 dB, faute de grille.
+- **Sur le clip** (`p8vtry`, x2 sur le ciel, x133 sur l'explosion), le gain croît avec la force.
+- **La porte a donc été amendée avant la campagne.**
+  - Le critère des blocs se juge sur deux fenêtres du clip, avec les mêmes seuils.
+  - Le filtre des bords, à +0,002 dB à l'essai et le plus faible hors ligne aussi, cède sa place à un réglage plus
+    fort, `dbd:t=12;n=16;c=4`.
+  - Les images fixes ne passent qu'ensuite, et seulement si un réglage franchit le critère des blocs.
+
+**La campagne `p8v`** (25/10, de 15:25 à 16:25). Quatre pages : ×2 (720p → 1440p) à 4 et 10 Mbit/s, ×1,33
+(1080p → 1440p) à 6 et 12 Mbit/s, sur les deux fenêtres.
+- Le débit est tenu : 3,9 à 4,3 Mbit/s pour 4 demandés.
+- Le coût : 23 200 s de CPU, environ 6,5 des 8 fils permis, aucun Chrome ni ffmpeg resté.
+
+Le tableau donne les moyennes des deux fenêtres sur les images du panoramique (rôle `pan`, t ≥ 3), en Δ PSNR (dB)
+/ Δ FLIP contre `mwsr` seul :
+
+| réglage | 720p · 4 Mbit/s | 1080p · 6 Mbit/s | 720p · 10 Mbit/s | 1080p · 12 Mbit/s | instabilité | passe ? |
+|---|---|---|---|---|---|---|
+| DCT, seuil 3 | +0,02 / −0,0001 | +0,02 / −0,0001 | +0,05 / −0,0002 | +0,06 / −0,0001 | ×0,99 | non |
+| DCT, seuil 4 | +0,04 / −0,0002 | +0,04 / −0,0002 | +0,06 / −0,0002 | +0,08 / −0,0002 | ×0,99 | non |
+| DCT, seuil 6 borné à 2 | +0,05 / −0,0003 | +0,06 / −0,0002 | +0,07 / −0,0002 | +0,11 / −0,0002 | ×0,99 | non |
+| DCT, seuil 8 borné à 2 | +0,06 / −0,0004 | +0,07 / −0,0003 | +0,06 / −0,0001 | +0,12 / −0,0003 | ×0,99 | non |
+| DCT, seuil 12 borné à 4 | +0,09 / −0,0003 | +0,13 / −0,0005 | −0,01 / +0,0006 | +0,17 / −0,0000 | ×0,98 | non |
+
+La porte, fixée avant la campagne :
+- à bas débit, +0,1 dB ou −0,002 de FLIP, en 720p et en 1080p chacun ;
+- à haut débit, rien sous −0,05 dB, ni au-delà de +0,001 de FLIP ;
+- l'instabilité au plus ×1,05.
+
+Le seuil 12 borné à 4 passe en 1080p, pas en 720p ; les autres ne passent nulle part. Les images fixes (`p8c`)
+n'ont pas été lancées.
+
+**Lecture.**
+
+1. **Ce que le filtre efface sur le flux ne se retrouve presque pas après `mwsr`.** En 1440p, l'erreur vient surtout
+   du détail que l'encodeur a perdu, et le filtre ne le rend pas. Le meilleur réglage choisi image par image est un
+   oracle de la force, ce qu'une aide parfaite de l'hôte donnerait. Il fait +0,100 dB en 720p à 4 Mbit/s, +0,105
+   à 10, +0,129 en 1080p à 6 et +0,204 à 12.
+2. **Le classement s'inverse entre le flux et l'écran.**
+   - Hors ligne, le seuil 3 est en tête et les forts perdent.
+   - Au labo, le seuil 12 borné à 4 est en tête, sauf à haut débit sur l'explosion : là, il efface du vrai détail
+     (−0,14 dB, FLIP +0,0024).
+   - Plusieurs causes sont possibles, non séparées : l'encodeur (celui de Chrome n'est pas x264), l'affinage de
+     `mwsr`, qui ferait ressortir le bruit que le filtre efface, et la vérité (l'image en 1440p plutôt que l'entrée
+     de l'encodeur).
+3. **Les grandes marches restent.** Dans le ciel, les marches entre blocs de 16 px dépassent les seuils : le filtre
+   les prend pour de vraies arêtes, et la borne c les laisse.
+4. **FLIP ne bouge pas** (au mieux −0,001). À l'œil, la différence se voit à peine sur les recadrages.
+5. **Le coût.** Les 16 grilles décalées font environ 500 multiplications par pixel du flux : 0,5 milliard par image
+   720p, 28 milliards par seconde à 60 i/s. C'est peu pour une RTX, beaucoup pour un Mali d'entrée de gamme. Rien
+   n'est chronométré sur GPU. Sur SwiftShader, une image 1440p demande 10 s en 720p et 15 s en 1080p, pour `mwsr`
+   seul et cinq réglages à deux débits.
+
+**Verdict : non.** P8 se ferme à P8.0 : pas de passe de déblocage dans le produit, `mwsr` inchangé.
+
+L'aide de l'hôte pour le déblocage (découpage et QP des blocs) est écartée : même une force parfaite ne donne que
++0,10 dB après `mwsr`. De la troisième version imaginée par Bruno restent le drapeau de scène et les vecteurs (P7.0,
+§14.5), à sa décision.
+
+La page de comparaison (artefact privé de Bruno) montre recadrages, cartes d'erreur, courbes par image et tableaux :
+https://claude.ai/artifact/9xph62X9iSGa8PBK2PzKEQ
+
+**Pour rejouer.**
+- Hors ligne, dans `scripts/bench/scaler-lab/p8/` : `python p8_offline.py prep`, puis `python p8_offline.py encode`,
+  puis `p8_q1.py`, `p8_sweep.py`, `p8_sweep2.py` et `p8_policy.py`.
+- Au labo :
+  `scaler_lab.py --tag p8v --swiftshader --p7 --p7-case x2 --p7-seq vid --p7-video cloud=121.5,boom=38 --p7-content cloud,boom --p7-kbps 10000,4000 --p7-hist "none,dbd:t=3;n=16,…"`,
+  puis `--p7-table p8v` et `p8_gate.py p8v`.
+
+**Limites.**
+- Un seul clip de jeu, lui-même déjà compressé en VP9.
+- L'encodeur de Chrome en logiciel n'est pas NVENC.
+- Un quart de l'écran.
+- Des forces choisies d'avance.
+- Des mesures (PSNR, FLIP), sans comparaison à l'œil en aveugle.

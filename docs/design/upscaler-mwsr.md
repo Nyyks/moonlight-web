@@ -1459,7 +1459,8 @@ upscalers spatiaux.
 **Hors v0.4.1 — étude optionnelle (§14, proposée le 21/10/2026, à la décision de Bruno)**
 - [x] **P7.0, faite le 25/10 (journal J42, §14.4) : la porte reste fermée.** Mode séquence du labo (`seq-lab.js`, `p7_flows.py`), WebCodecs logiciel à deux débits, sept variantes d'historique contre `mwsr` seul, vingt séquences sur SwiftShader. Aucune variante ne passe : sans mouvement connu, de −0,01 à −0,13 dB et pas de stabilité gagnée ; même avec le mouvement exact, +0,11 dB en moyenne et des traînées
 - [ ] ~~P7.1 (si go) noyau `mwsr` avec histoire adaptative au mouvement, cran `mwsr-t` des deux renderers, campagne allégée, A/B de Bruno à faible débit~~ : sans objet, la porte de P7.0 est restée fermée
-- [ ] Après P7, à la décision de Bruno (§14.5) : un déblocage côté client mesuré avec le même labo, puis peut-être l'aide de l'hôte (drapeau de scène, vecteurs, découpage et QP des blocs) [`high`]
+- [x] **P8.0, faite le 25/10 (journal J43, §14.6) : la porte reste fermée.** Déblocage côté client avant `mwsr`, un seuillage DCT sur des grilles 8×8 décalées : +0,33 dB sur le flux seul (x264), mais après `mwsr`, sur le clip CoD en 1440p, +0,02 à +0,09 dB en 720p à 4 Mbit/s (la porte demandait +0,1) ; pas de passe dans le produit
+- [ ] L'aide de l'hôte (drapeau de scène, vecteurs) : à la décision de Bruno ; le déblocage guidé par le découpage et le QP des blocs est écarté par P8.0 [`high`]
 
 **Dépendances à demander tôt** : un téléphone Android de prêt (Snapdragon 8 Gen 1 ou plus, et
 un Mali si possible) ; les créneaux Mac et iPhone pour P0 et P5 ; `malioc` installé sur DualRTX.
@@ -1710,6 +1711,55 @@ limites : la force du lissage suivrait la compression. Le mode séquence de ce l
   chantier.
 
 Ces choix reviennent à Bruno. Le premier pas mesurable est le déblocage au labo.
+
+### 14.6 Le verdict de P8.0 (25/10/2026) : non
+
+L'étude est faite (journal J43, outils dans `scripts/bench/scaler-lab/p8/`). Elle mesure un déblocage côté client,
+entre le décodeur et `mwsr`, en deux temps.
+
+**Hors ligne, sur le flux seul, sur le processeur.**
+- **Le dispositif.** Trois fenêtres du clip CoD des bancs (une explosion, un vol rapide au-dessus d'une ville, une
+  scène calme), plus le texte du labo et la capture de 0 A.D. en panoramique. Encodage en 720p et 1080p à 60 i/s
+  par x264, x265 et libaom en temps réel, avec un tampon d'une image comme l'hôte natif. La vérité est l'entrée de
+  l'encodeur.
+- **Le constat.** x264 laisse une grille nette ; x265 et libaom presque aucune dans les aplats. Les images fixes n'en
+  ont pas : ce qu'elles perdent, c'est du détail.
+- **Le meilleur filtre.** C'est un seuillage DCT sur des grilles 8×8 décalées, appliqué à la luminance. À seuil
+  fixe 3, il gagne +0,33 dB sur le clip en H.264 (+0,33 en HEVC, +0,26 en AV1) et efface 42 % des marches de la
+  grille. Il ne touche pas au texte (+0,03 dB) et perd −0,04 dB sur le jeu.
+- **Les autres.** Le filtre des bords à la H.264 gagne peu (+0,09 dB). Les filtres de ffmpeg (`deblock`, `spp`,
+  `pp7`, `fspp`, même nourris du QP réel de chaque bloc) perdent tous.
+- **L'aide de l'hôte.** Un seuil réglé sur le QP de chaque image donne +0,35 dB et efface 60 % des marches. Le
+  meilleur seuil de chaque image, le plafond, donne +0,39 dB.
+
+**Au labo, dans la chaîne du produit.**
+- **Le dispositif.** Le mode séquence de P7 a reçu les passes WGSL du filtre (`dbd`, et `dbe` pour le filtre des
+  bords). Il lit aussi le clip lui-même (`vid=`) : chaque image du clip est la vérité en 1440p. L'encodeur est celui
+  de Chrome en logiciel, puis `mwsr` agrandit en 1440p.
+- **L'essai sur les images fixes** confirme qu'elles n'ont pas de grille : moins de 0,01 dB pour chaque réglage. La
+  porte a donc été amendée avant la campagne : le critère des blocs se juge sur deux fenêtres du clip, la ville et
+  l'explosion, avec les mêmes seuils.
+- **La campagne** (`p8v`, quatre pages, une heure sur SwiftShader). À bas débit, les gains vont de +0,02 dB (seuil
+  3) à +0,09 dB (seuil 12 borné à 4) en 720p à 4 Mbit/s, et de +0,02 à +0,13 dB en 1080p à 6 Mbit/s. FLIP ne bouge
+  presque pas (au mieux −0,001). L'image devient un peu plus stable (×0,98 à ×0,99).
+- **Le classement s'inverse.** Sur le flux seul, le réglage léger gagne et les forts perdent, jusqu'à −1,2 dB sur le
+  jeu. Après `mwsr`, c'est le plus fort qui gagne le plus, sans doute parce qu'il efface aussi le bruit que
+  l'affinage ferait ressortir. Mais il abîme le détail fin à haut débit : −0,14 dB sur l'explosion à 10 Mbit/s.
+- **Le plafond d'une force adaptée à chaque image**, le meilleur réglage image par image, ne donne que +0,10 dB en
+  720p à 4 Mbit/s.
+- **À l'œil**, la différence est à peine visible. Ce que le débit fait perdre après `mwsr`, c'est surtout du
+  détail, et dans le ciel les grandes marches entre blocs restent visibles même avec le réglage le plus fort.
+
+**La porte**, fixée avant la campagne : +0,1 dB ou −0,002 de FLIP à bas débit, en 720p et en 1080p chacun ; rien sous
+−0,05 dB à haut débit ; pas d'instabilité en plus. Le seuil 12 borné à 4 passe en 1080p (+0,13 dB) mais pas en 720p
+(+0,09) ; les autres ne passent nulle part. Les images fixes, qui devaient vérifier qu'on n'abîme rien, n'ont pas
+été lancées, faute de candidat.
+
+P8 se ferme donc à P8.0. Il n'y aura pas de passe de déblocage dans le produit, et `mwsr` reste tel quel. L'aide de
+l'hôte pour le déblocage (découpage et QP des blocs) ne vaut pas son coût : même une force parfaite ne donne que
++0,10 dB après `mwsr`. Le filtre coûterait environ 500 multiplications par pixel du flux sur 16 grilles, la moitié
+en damier ; il n'a pas été chronométré sur GPU. La page de comparaison faite pour Bruno montre recadrages, cartes
+d'erreur, courbes par image et tableaux.
 
 ## 15. Deux idées de Bruno du 23/10/2026 : les aplats, et les zones du regard
 

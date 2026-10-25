@@ -363,6 +363,8 @@ def main():
     ap.add_argument("--p7-hist", default="", help="P7.0: the variants (seq-lab.js, HIST)")
     ap.add_argument("--p7-kbps", default="", help="P7.0: the bitrates in kbit/s (20000,10000 by default)")
     ap.add_argument("--p7-vcodec", default="", help="P7.0: avc, vp9 or av1 (avc by default)")
+    ap.add_argument("--p7-video", default="",
+                    help="P8.0: name=seconds,…: windows of the CoD capture as clips (their sequence: vid)")
     ap.add_argument("--p7-roi", default="auto", choices=("auto", "full"),
                     help="P7.0: the region shaded at 1440p, a quarter (auto) or the whole screen (full)")
     ap.add_argument("--p7-warm", type=int, default=None, help="P7.0: the encoder's warm-up in frames (60)")

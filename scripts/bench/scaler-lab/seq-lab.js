@@ -10,12 +10,19 @@
 // frame through mwsr alone and through mwsr with a history (HIST below), side
 // by side, against the frame's ground truth. The measures are made on the
 // GPU, per frame and per variant (see METRICS_WGSL), the outputs of a few
-// frames posted as crops for the driver's FLIP (p7_flows.py).
+// frames posted as crops for the driver's FLIP (p7_flows.py). P8.0 (§14.6)
+// measures the same way a deblocking pass between the decoder and the kernel
+// (the variants dbe and dbd).
 //
 // Driven by scaler-lab.html when the query has seq=1:
 //   in=1280x720 out=2560x1440      the stream's and the screen's sizes
 //   src=<url> src2=<url>           the picture, and the one after a cut (the
 //                                  same size; the driver draws the text one)
+//   vid=<url prefix>               P8.0: a clip instead of a picture, its
+//                                  frames <prefix>000.png, 001.png…, the
+//                                  warm-up's first, then the sequence's; pan
+//                                  segments only, v=0, the window still on
+//                                  the whole frame (box=0,0,<its width>)
 //   box=bx,by,bw                   the window of the first frame in the
 //                                  source, source pixels (its height follows
 //                                  the output's ratio)
@@ -29,7 +36,7 @@
 //   kbps=20000,10000 vcodec=avc|vp9|av1   the encodes, one per bitrate
 //   accel=sw|hw                    WebCodecs' acceleration (sw under soft=1,
 //                                  whatever the query says)
-//   hist=none,pull:a=0.5;t=6,…     the variants (HIST)
+//   hist=none,pull:a=0.5;t=6,…     the variants (HIST; dbe, dbd: deblocking)
 //   mw=flat=3;sharp=1.5            the kernel's options, as a lab cell's
 //   dump=10,30,61 crop=x,y,w,h     the frames whose outputs (and truth) are
 //                                  posted as crops of the screen-size picture,
@@ -77,8 +84,18 @@ const ROI_MARGIN = 128;
 //                    history fetched where the content was and clamped into the
 //                    output's 3×3 neighbourhood: the ceiling of an accumulation
 //                    at the output's size, the one road to resolution (§14.2)
+//   dbe:s            P8.0: no history; the decoded frame deblocked before the
+//                    kernel, the grid's steps smoothed (vertical edges, then
+//                    horizontal: an H.264-like filter, blind, strength s)
+//   dbd:t;n;c        P8.0: shifted 8×8 DCTs of the frame, the coefficients
+//                    under t zeroed (the DC kept), n = 16 or 4 shifts averaged,
+//                    the change of a pixel's luma bounded by c (0: unbounded)
 // Options: a (the history's weight), t (in 1/255 of the encoded value), f=8 or
-// 16 (the history's texture: rgba8unorm, or rgba16float, the default).
+// 16 (the history's texture: rgba8unorm, or rgba16float, the default). For
+// dbe and dbd, s, t and c are in code values of the stream's Y (limited range),
+// and f=16 the deblocked frame's texture (rgba8unorm by default, as a product
+// pass would write it). The deblocking reads the luma of the decoded RGB and
+// adds its change to the three channels: the product's frame is RGB.
 const HIST_MODES = {
   none: 0,
   pull: 1,
@@ -88,7 +105,14 @@ const HIST_MODES = {
   mcpull: 1,
   mcclamp: 4,
   outmc: 0,
+  dbe: 0,
+  dbd: 0,
 };
+
+// The stream's region the deblocking works on: the kernel's view of the roi,
+// and this many stream pixels around it (the kernel's taps, the edge filter's
+// reach, the DCT's block), on the 8×8 grid.
+const DB_MARGIN = 16;
 
 const VS = /* wgsl */ `
 struct VSOut {
@@ -390,6 +414,178 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     }
     let w = u.alpha * clamp(1.0 - dY / max(u.tau, 1e-5), 0.0, 1.0);
     return vec4f(mix(C, H, w), 1.0);
+}
+`;
+
+// P8.0's deblocking: what the passes read (the frame's size, the region of
+// the stream they work on, a shift or a direction, the strength).
+const DB_COMMON = /* wgsl */ `
+struct DU {
+    size : vec2i,
+    base : vec2i,
+    hi : vec2i,
+    shift : vec2i,
+    thr : f32,
+    n : f32,
+    cmax : f32,
+    pad1 : f32,
+};
+`;
+
+// The orthonormal 8-point DCT, D[k * 8 + n].
+const DCT8 = Array.from({ length: 64 }, (_, i) => {
+  const k = Math.floor(i / 8);
+  const c = Math.sqrt((k ? 2 : 1) / 8);
+  return (c * Math.cos((Math.PI * (2 * (i % 8) + 1) * k) / 16)).toFixed(9);
+}).join(", ");
+
+// One shift of the DCT shrinkage: a workgroup per 8×8 block of the shifted
+// grid, the luma's coefficients under thr zeroed (the DC kept), the block
+// added into acc (one block per pixel and shift: no two writers).
+const DB_DCT_WGSL = /* wgsl */ `
+${COMMON}
+${DB_COMMON}
+@group(0) @binding(0) var src : texture_2d<f32>;
+@group(0) @binding(1) var<storage, read_write> acc : array<f32>;
+@group(0) @binding(2) var<uniform> u : DU;
+
+var<private> D8 : array<f32, 64> = array<f32, 64>(${DCT8});
+var<workgroup> sa : array<f32, 64>;
+var<workgroup> sb : array<f32, 64>;
+
+fn lumaMirror(p : vec2i) -> f32 {
+    var q = select(p, -p, p < vec2i(0));
+    q = select(q, 2 * (u.size - 1) - q, q >= u.size);
+    return dot(textureLoad(src, q, 0).rgb, L709) * 255.0;
+}
+
+@compute @workgroup_size(8, 8)
+fn cs(@builtin(workgroup_id) wg : vec3u, @builtin(local_invocation_id) l : vec3u) {
+    let i = l.x;
+    let j = l.y;
+    let p = u.base + vec2i(wg.xy) * 8 - vec2i(8) + u.shift + vec2i(l.xy);
+    sa[j * 8u + i] = lumaMirror(p);
+    workgroupBarrier();
+    var a = 0.0;
+    for (var n = 0u; n < 8u; n++) {
+        a += D8[i * 8u + n] * sa[j * 8u + n];
+    }
+    sb[j * 8u + i] = a;
+    workgroupBarrier();
+    var c = 0.0;
+    for (var m = 0u; m < 8u; m++) {
+        c += D8[j * 8u + m] * sb[m * 8u + i];
+    }
+    if ((i != 0u || j != 0u) && abs(c) < u.thr) {
+        c = 0.0;
+    }
+    sa[j * 8u + i] = c;
+    workgroupBarrier();
+    var b = 0.0;
+    for (var k = 0u; k < 8u; k++) {
+        b += D8[k * 8u + j] * sa[k * 8u + i];
+    }
+    sb[j * 8u + i] = b;
+    workgroupBarrier();
+    var r = 0.0;
+    for (var k = 0u; k < 8u; k++) {
+        r += D8[k * 8u + i] * sb[j * 8u + k];
+    }
+    if (all(p >= u.base) && all(p < u.hi)) {
+        let idx = u32(p.y) * u32(u.size.x) + u32(p.x);
+        acc[idx] = acc[idx] + r;
+    }
+}
+`;
+
+// The shrinkage's end: the shifts' mean luma, its change (bounded by cmax if
+// set) added to the RGB.
+const DB_FIN_WGSL = /* wgsl */ `
+${VS}
+${COMMON}
+${DB_COMMON}
+@group(0) @binding(0) var src : texture_2d<f32>;
+@group(0) @binding(1) var<storage, read> acc : array<f32>;
+@group(0) @binding(2) var<uniform> u : DU;
+
+@fragment
+fn fs(in : VSOut) -> @location(0) vec4f {
+    let p = vec2i(in.pos.xy);
+    let c = textureLoad(src, p, 0);
+    let y = dot(c.rgb, L709);
+    let yd = acc[u32(p.y) * u32(u.size.x) + u32(p.x)] / (255.0 * u.n);
+    var dy = yd - y;
+    if (u.cmax > 0.0) {
+        dy = clamp(dy, -u.cmax / 255.0, u.cmax / 255.0);
+    }
+    return vec4f(clamp(c.rgb + vec3f(dy), vec3f(0.0), vec3f(1.0)), c.a);
+}
+`;
+
+// The edge filter, one direction (u.shift: (1, 0) the vertical edges, (0, 1)
+// the horizontal ones): a step on the 8×8 grid under alpha that the pixels on
+// each side do not explain (under beta) is spread over p1..q1, or p2..q2
+// where both sides are flat, as H.264's filter does in the decoder's loop.
+const DB_EDGE_WGSL = /* wgsl */ `
+${VS}
+${COMMON}
+${DB_COMMON}
+@group(0) @binding(0) var src : texture_2d<f32>;
+@group(0) @binding(1) var<uniform> u : DU;
+
+fn lumaAt(p : vec2i) -> f32 {
+    return dot(textureLoad(src, clamp(p, vec2i(0), u.size - 1), 0).rgb, L709) * 255.0;
+}
+
+@fragment
+fn fs(in : VSOut) -> @location(0) vec4f {
+    let p = vec2i(in.pos.xy);
+    let c = textureLoad(src, p, 0);
+    let dir = u.shift;
+    let x = dot(p, dir);
+    let len = dot(u.size, dir);
+    let k = x % 8;
+    let e = select(x - k + 8, x - k, k <= 2);
+    let o = x - e;
+    if (k == 3 || k == 4 || e < 4 || e > len - 4) {
+        return c;
+    }
+    // p3 p2 p1 p0 | q0 q1 q2 q3
+    var L : array<f32, 8>;
+    for (var i = 0; i < 8; i++) {
+        L[i] = lumaAt(p + dir * (i - 4 - o));
+    }
+    let alpha = 3.0 * u.thr;
+    let beta = 0.5 * u.thr + 1.0;
+    let tc = 0.5 * u.thr;
+    let d = L[4] - L[3];
+    if (!(abs(d) < alpha && abs(L[2] - L[3]) < beta && abs(L[5] - L[4]) < beta)) {
+        return c;
+    }
+    let ap = abs(L[1] - L[3]) < beta;
+    let aq = abs(L[6] - L[4]) < beta;
+    // the new p2 p1 p0 q0 q1 q2
+    var nv : array<f32, 6>;
+    if (ap && aq && abs(d) < alpha / 4.0 + 2.0) {
+        nv[0] = (2.0 * L[0] + 3.0 * L[1] + L[2] + L[3] + L[4]) / 8.0;
+        nv[1] = (L[1] + L[2] + L[3] + L[4]) / 4.0;
+        nv[2] = (L[1] + 2.0 * L[2] + 2.0 * L[3] + 2.0 * L[4] + L[5]) / 8.0;
+        nv[3] = (L[6] + 2.0 * L[5] + 2.0 * L[4] + 2.0 * L[3] + L[2]) / 8.0;
+        nv[4] = (L[6] + L[5] + L[4] + L[3]) / 4.0;
+        nv[5] = (2.0 * L[7] + 3.0 * L[6] + L[5] + L[4] + L[3]) / 8.0;
+    } else {
+        let tce = tc + f32(ap) + f32(aq);
+        let delta = clamp((4.0 * d + (L[2] - L[5])) / 8.0, -tce, tce);
+        let mid = (L[3] + L[4]) / 2.0;
+        nv[0] = L[1];
+        nv[1] = select(L[2], L[2] + clamp((L[1] + mid - 2.0 * L[2]) / 2.0, -tc, tc), ap);
+        nv[2] = L[3] + delta;
+        nv[3] = L[4] - delta;
+        nv[4] = select(L[5], L[5] + clamp((L[6] + mid - 2.0 * L[5]) / 2.0, -tc, tc), aq);
+        nv[5] = L[6];
+    }
+    let v = L[o + 4];
+    return vec4f(clamp(c.rgb + vec3f(nv[o + 3] - v) / 255.0, vec3f(0.0), vec3f(1.0)), c.a);
 }
 `;
 
@@ -725,9 +921,13 @@ export function parseHist(s) {
     .filter(Boolean)
     .map((kv) => kv.split("="));
   const o = Object.fromEntries(pairs);
+  const db = { dbe: "edge", dbd: "dct" }[kind] || null;
   for (const k of Object.keys(o))
-    if (!["a", "t", "f"].includes(k))
+    if (!(db ? ["s", "t", "n", "c", "f"] : ["a", "t", "f"]).includes(k))
       throw new Error(s + ": option " + k + "?");
+  const shifts = Number(o.n ?? 16);
+  if (db && shifts !== 16 && shifts !== 4)
+    throw new Error(s + ": n=16 or n=4");
   return {
     name: [kind, ...pairs.map(([k, val]) => k + val)].join("-"),
     kind,
@@ -736,7 +936,13 @@ export function parseHist(s) {
     out: kind === "outmc",
     alpha: Number(o.a ?? 0.75),
     tau: Number(o.t ?? 10) / 255,
-    fmt: o.f === "8" ? "rgba8unorm" : "rgba16float",
+    fmt: (db ? o.f === "16" : o.f !== "8") ? "rgba16float" : "rgba8unorm",
+    db,
+    // the strength and the bound in the luma the shaders read (full range, 0
+    // to 255)
+    dbThr: db ? (Number(db === "edge" ? (o.s ?? 3) : (o.t ?? 8)) * 255) / 219 : 0,
+    dbClamp: db ? (Number(o.c ?? 0) * 255) / 219 : 0,
+    shifts: db ? shifts : 0,
   };
 }
 
@@ -1086,10 +1292,38 @@ export async function runSeq(p, log = () => {}) {
   device.onuncapturederror = (e) => errors.push(e.error.message);
   log(`adapter: ${adapterName} | codecs ${accel}`);
 
-  const src = [await loadSource(device, p.src)];
-  src.push(p.src2 ? await loadSource(device, p.src2) : src[0]);
+  // P8.0's clip (vid): one texture, each frame's picture copied into it
+  // before the frame is drawn (phase 1, then its truth in phase 3)
+  const vidUrl = (k) => p.vid + String(k).padStart(3, "0") + ".png";
+  const src = [await loadSource(device, p.vid ? vidUrl(0) : p.src)];
+  src.push(
+    p.src2 && !p.vid ? await loadSource(device, p.src2) : src[0],
+  );
   if (src[1].w !== src[0].w || src[1].h !== src[0].h)
     throw new Error("src2: another size than src");
+  if (
+    p.vid &&
+    (v !== 0 ||
+      segs.some((x) => x.kind !== "pan") ||
+      variants.some((x) => x.mc || x.out))
+  )
+    throw new Error("vid: pan segments at v=0 only, no mc or outmc variant");
+  const loadVid = async (k) => {
+    const r = await fetch(vidUrl(k));
+    if (!r.ok) throw new Error(vidUrl(k) + ": " + r.status);
+    const bmp = await createImageBitmap(await r.blob(), {
+      colorSpaceConversion: "none",
+      premultiplyAlpha: "none",
+    });
+    if (bmp.width !== src[0].w || bmp.height !== src[0].h)
+      throw new Error(vidUrl(k) + ": another size than the first frame");
+    device.queue.copyExternalImageToTexture(
+      { source: bmp },
+      { texture: src[0].tex },
+      { width: bmp.width, height: bmp.height },
+    );
+    bmp.close();
+  };
   const srcW = src[0].w;
   const srcH = src[0].h;
   const box = (p.box || `0,0,${Math.floor(srcW * 0.75)}`)
@@ -1101,9 +1335,12 @@ export async function runSeq(p, log = () => {}) {
   const frames = seqFrames(seqQ);
   const N = frames.length;
   const wf = warmFrames(seqQ, frames, warm);
+  // the clip's frame of each (vid): the warm-up's first
+  wf.forEach((f, k) => (f.vk = k));
+  frames.forEach((f, t) => (f.vk = wf.length + t));
   const sOut = bw / outW; // source pixels per screen pixel
   log(
-    `sequence: ${N} frames, ${segs.map((s) => s.kind + ":" + s.n).join(",")}, v ${v}, window ${bw}x${bh.toFixed(1)} of ${srcW}x${srcH}, region ${rx},${ry} ${rw}x${rh}, warm-up ${wf.length} frames`,
+    `sequence: ${N} frames, ${segs.map((s) => s.kind + ":" + s.n).join(",")}, v ${v}, window ${bw}x${bh.toFixed(1)} of ${srcW}x${srcH}, region ${rx},${ry} ${rw}x${rh}, warm-up ${wf.length} frames${p.vid ? ", clip " + p.vid : ""}`,
   );
 
   const T = GPUTextureUsage;
@@ -1306,6 +1543,7 @@ export async function runSeq(p, log = () => {}) {
   const made = [...wf, ...frames];
   const orig = [];
   for (const f of made) {
+    if (p.vid) await loadVid(f.vk);
     writeLanczos(lanczos.in, f);
     const enc = device.createCommandEncoder();
     drawLanczos(enc, lanczos.in, f);
@@ -1375,6 +1613,35 @@ export async function runSeq(p, log = () => {}) {
     rgba8unorm: render(HIST_WGSL, ["rgba8unorm"], "hist-8"),
   };
   const plAcc = render(ACC_WGSL, ["rgba16float", "rgba8unorm"], "acc");
+  const fmts = ["rgba8unorm", "rgba16float"];
+  const plDbDct = compute(DB_DCT_WGSL, "db-dct");
+  const plDbFin = Object.fromEntries(
+    fmts.map((f) => [f, render(DB_FIN_WGSL, [f], "db-fin-" + f)]),
+  );
+  const plDbEdge = Object.fromEntries(
+    fmts.map((f) => [f, render(DB_EDGE_WGSL, [f], "db-edge-" + f)]),
+  );
+  // the deblocking's region of the stream (DB_MARGIN), and its uniforms
+  const g8 = (x, up) => (up ? Math.ceil(x / 8) : Math.floor(x / 8)) * 8;
+  const dbX0 = Math.max(0, g8((rx * inW) / outW - DB_MARGIN, false));
+  const dbY0 = Math.max(0, g8((ry * inH) / outH - DB_MARGIN, false));
+  const dbX1 = Math.min(inW, g8(((rx + rw) * inW) / outW + DB_MARGIN, true));
+  const dbY1 = Math.min(inH, g8(((ry + rh) * inH) / outH + DB_MARGIN, true));
+  const dbSc = [dbX0, dbY0, dbX1 - dbX0, dbY1 - dbY0];
+  const dbWide = [
+    Math.max(0, dbX0 - 8),
+    Math.max(0, dbY0 - 8),
+    Math.min(inW, dbX1 + 8) - Math.max(0, dbX0 - 8),
+    Math.min(inH, dbY1 + 8) - Math.max(0, dbY0 - 8),
+  ];
+  const dbUniform = (sh, thr, n, cmax = 0) => {
+    const b = new ArrayBuffer(48);
+    new Int32Array(b, 0, 8).set([inW, inH, dbX0, dbY0, dbX1, dbY1, ...sh]);
+    new Float32Array(b, 32, 3).set([thr, n, cmax]);
+    const u = ubuf(48);
+    device.queue.writeBuffer(u, 0, b);
+    return u;
+  };
   const plM = compute(METRICS_WGSL, "metrics");
   const plR = compute(REDUCE_WGSL, "reduce");
   const plA = compute(ADVANCE_WGSL, "advance");
@@ -1434,6 +1701,35 @@ export async function runSeq(p, log = () => {}) {
         );
         slot.histOut = hv;
         slot.gK = [0, 1].map((q) => bind(plK, [sampler, hv[q], kU]));
+      } else if (vr.db) {
+        const usage = T.RENDER_ATTACHMENT | T.TEXTURE_BINDING;
+        slot.dbOut = viewOf(tex(inW, inH, vr.fmt, usage));
+        if (vr.db === "dct") {
+          slot.acc = buffer(inW * inH * 4, B.STORAGE | B.COPY_DST);
+          const step = vr.shifts === 4 ? 4 : 2;
+          slot.dbDct = [];
+          for (let dy = 0; dy < 8; dy += step)
+            for (let dx = 0; dx < 8; dx += step)
+              slot.dbDct.push(
+                bind(plDbDct, [
+                  lane.cView,
+                  slot.acc,
+                  dbUniform([dx, dy], vr.dbThr, vr.shifts),
+                ]),
+              );
+          slot.dbFin = bind(plDbFin[vr.fmt], [
+            lane.cView,
+            slot.acc,
+            dbUniform([0, 0], vr.dbThr, vr.shifts, vr.dbClamp),
+          ]);
+        } else {
+          slot.dbMid = viewOf(tex(inW, inH, vr.fmt, usage));
+          slot.dbEdge = [
+            bind(plDbEdge[vr.fmt], [lane.cView, dbUniform([1, 0], vr.dbThr, 0)]),
+            bind(plDbEdge[vr.fmt], [slot.dbMid, dbUniform([0, 1], vr.dbThr, 0)]),
+          ];
+        }
+        slot.gK = [0, 1].map(() => bind(plK, [sampler, slot.dbOut, kU]));
       } else {
         slot.gK = [0, 1].map(() => bind(plK, [sampler, lane.cView, kU]));
       }
@@ -1506,6 +1802,7 @@ export async function runSeq(p, log = () => {}) {
   for (let t = 0; t < N; t++) {
     const f = frames[t];
     const q = t & 1;
+    if (p.vid) await loadVid(f.vk);
     writeLanczos(lanczos.gt, f);
     const r = wake(t);
     const mb = new ArrayBuffer(48);
@@ -1571,6 +1868,16 @@ export async function runSeq(p, log = () => {}) {
           new Uint32Array([wgx * wgy, (t * NB + lane.b) * V + s.k, 0, 0]),
         );
         if (s.vr.mode) draw(enc, plHist[s.vr.fmt], s.gHist[q], [s.histOut[q]]);
+        if (s.vr.db === "dct") {
+          enc.clearBuffer(s.acc);
+          const wx = (dbX1 - dbX0) / 8 + 1;
+          const wy = (dbY1 - dbY0) / 8 + 1;
+          for (const g of s.dbDct) dispatch(enc, plDbDct, g, wx, wy);
+          draw(enc, plDbFin[s.vr.fmt], s.dbFin, [s.dbOut], dbSc);
+        } else if (s.vr.db === "edge") {
+          draw(enc, plDbEdge[s.vr.fmt], s.dbEdge[0], [s.dbMid], dbWide);
+          draw(enc, plDbEdge[s.vr.fmt], s.dbEdge[1], [s.dbOut], dbSc);
+        }
         draw(enc, plK, s.gK[q], [outView], s.vr.out ? scAcc : scK);
         if (s.vr.out)
           draw(enc, plAcc, s.gAcc[q], [s.accOut[q], dispView], scAcc);
@@ -1671,6 +1978,7 @@ export async function runSeq(p, log = () => {}) {
       box: [box[0], box[1], bw, bh],
       src: p.src,
       src2: p.src2 || p.src,
+      vid: p.vid || null,
       vcodec: family,
       roi: [rx, ry, rw, rh],
       warm: wf.length,
