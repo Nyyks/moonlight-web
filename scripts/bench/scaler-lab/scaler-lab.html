@@ -41,14 +41,23 @@
       // the lab's own server (seen once in fifty on the software adapter)
       // then becomes a result the driver reloads at once, where a failed
       // static import left the page silent until the driver's deadline.
-      window.__labResult = import('./scaler-lab.js')
-        .then(({ runLab }) => runLab(params, log))
-        .catch((e) => ({
-          error: String(e && e.stack ? e.stack : e),
-        }));
+      // seq=1: the sequence mode (seq-lab.js, plan §14.3), with a result of
+      // its own: per frame and per variant, no cells.
+      window.__labResult = (
+        params.seq === '1'
+          ? import('./seq-lab.js').then(({ runSeq }) => runSeq(params, log))
+          : import('./scaler-lab.js').then(({ runLab }) => runLab(params, log))
+      ).catch((e) => ({
+        error: String(e && e.stack ? e.stack : e),
+      }));
       window.__labResult.then(async (r) => {
         window.__labDone = r; // what the driver polls for (a value, not a promise)
         if (r.error) log('ERROR ' + r.error);
+        else if (r.seq)
+          log(
+            'done: ' + r.frames.length + ' frames × ' + Object.keys(r.metrics).length +
+              ' bitrates × ' + r.variants.length + ' variants in ' + r.seconds.toFixed(0) + ' s',
+          );
         else {
           log('done: ' + r.cells.length + ' cells');
           for (const c of r.cells)

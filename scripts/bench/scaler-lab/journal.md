@@ -2048,3 +2048,128 @@ par bande, une passe chacun (23:11, 23:17, 23:24), ms par image (moyenne / p50) 
 0,78-0,93 × SGSR1. À ~200 ms par image, aucun upscaler n'a sa place sur ce GPU : l'Auto d'une TV reste sans
 upscaler (règle TV, et la Mi TV est aussi sous un gigaoctet), et le Mali d'entrée de gamme sans upscaler est
 cohérent avec cette mesure.
+
+## 2026-10-25 — J42, P7.0 : la mémoire des images mesurée, la porte reste fermée
+
+**Le cadre.** C'est l'étude du plan §14.3. Elle répond au mandat de nuit de Bruno du 24/10 : « utiliser un historique
+d'image pour améliorer le shader actuel, aussi bien d'un point de vue qualité, que d'un point de vue performance ».
+Elle s'est faite le 25/10 au matin, aucun réveil n'ayant été programmé pour la nuit. Le travail s'est fait dans un
+worktree de brouillon, sur SwiftShader seul (règle de 59). Les passes Chrome ont attendu le « libre » de 59, après
+les tests réseau E1-E3. `mwsr` n'est pas touché, et rien n'est activé dans le produit.
+
+**Le mode séquence.** Il vit dans `seq-lab.js` (le `seq=1` de la page) et se pilote par `p7_flows.py`
+(`scaler_lab.py --p7`, `--p7-table`).
+
+- **Les séquences.** Une image fixe de 3840×2160 (le texte du labo, ou la capture de 0 A.D.) devient une séquence :
+  - un panoramique à 0,3, 1, 2 ou 6 px du flux par image, en direction (1 ; 0,25) ;
+  - puis un arrêt, puis une coupure vers l'autre image ;
+  - ou bien un bloc rayé qui traverse l'image fixe à 8 px par image.
+- **La vérité.** Chaque image est tirée de la même fenêtre de la source, à la taille du flux et en 1440p (Lanczos-3
+  en lumière linéaire, comme `make_input`). La vérité est donc exacte, image par image.
+- **Le flux.** Il passe par WebCodecs en logiciel (`prefer-software` sous `soft=1` : OpenH264, `avc1.640033`
+  accepté), à débit constant et en `realtime`, à 20 et 10 Mbit/s, encodé puis décodé.
+- **Les variantes.** Chaque image décodée passe par `mwsr` seul et par sept variantes côte à côte :
+  - le tirage borné `pull` (H' = C + a·clamp(H − C, ±t)) ;
+  - le poids doux `soft` ;
+  - le bornage 3×3 `clamp`, qui est un TAA sans vecteurs ;
+  - `mcpull` et `mcclamp`, les mêmes avec le mouvement exact de la séquence : des oracles, lus en Catmull-Rom au
+    point d'origine ;
+  - `outmc` : la sortie accumulée en 1440p avec le mouvement exact, bornée par son voisinage 3×3. C'est le plafond
+    d'une accumulation, la seule voie vers la résolution (§14.2).
+- **Les mesures.** Elles se font sur le GPU, par image et par variante :
+  - le PSNR ;
+  - |ΔE|, l'instabilité de l'erreur, sur toute l'image et sur les contours de la vérité ;
+  - |Δout|, le changement de la sortie pendant l'arrêt, où l'image vraie est fixe ;
+  - l'erreur dans le sillage du bloc.
+
+  FLIP se calcule côté pilote, sur des recadrages.
+
+**Deux réglages en cours de route, avec le go de 59.**
+
+- **La région d'intérêt (`roi=`).** La vérité, le noyau et les mesures ne tournent que sur un quart de l'écran 1440p :
+  le centre, ou la trajectoire du bloc pour `obj`. L'historique reste calculé sur toute l'image à la taille du flux.
+  L'accumulation `outmc` couvre la région plus 128 px autour : un pixel dont l'historique vient d'au-delà repart de
+  zéro, comme au bord de l'écran.
+  - Le coût passe de 22 s à 6,6 s par image.
+  - Le contrôle contre l'écran entier (`--p7-roi full`, même page) donne, sur le panoramique, les mêmes écarts à
+    0,01-0,1 dB près et les mêmes rapports d'instabilité à 0,01-0,04 près.
+  - Après la coupure, sur le jeu, les écarts sont 10-15 % plus grands, car la région est plus dense que l'image
+    moyenne (MWSR seul : 22,2 contre 22,8 dB). Le classement et les signes ne changent pas.
+- **L'échauffement de l'encodeur (`warm=60`).** Sans lui, l'image clé du départ fait à elle seule le débit d'une
+  séquence courte : à 10 Mbit/s, on a mesuré plus de bits qu'à 20. Une image fixe en échauffement ne marche pas non
+  plus : l'encodeur met des bits de côté, puis les dépense (74 Mbit/s mesurés pour 10 demandés).
+  - L'échauffement retenu (`warmFrames`) rejoue le premier mouvement à l'envers jusqu'à la première image : 60 images,
+    ou 31 et 47 sur le panoramique rapide, faute de place dans la source.
+  - Le débit est alors tenu dès la première image mesurée : 9,8 et 20,1 Mbit/s.
+
+**La campagne `p7c`** (25/10, de 09:15 à 12:35). Elle couvre ×2 (720p → 1440p) et ×1,33 (1080p → 1440p), sur les
+deux images et cinq séquences :
+- lent, moyen et rapide : 60 images de panoramique, 20 d'arrêt, 20 après la coupure ;
+- très rapide : 30, 10 et 10 ;
+- le bloc : 40 images.
+
+Chaque image est mesurée par huit chaînes, à deux débits.
+
+- **Le coût.** 20 pages, 3 h 20 de mur, 102 000 s de CPU (8 à 9 des 24 fils, Chrome de labo en BelowNormal) et
+  aucun Chrome resté.
+- **Un incident.** Un « Failed to fetch » sur le post d'un recadrage a coûté un rechargement de page (12 min) ; la page
+  renvoie maintenant un post raté jusqu'à trois fois.
+
+La porte, en moyenne sur les deux cas, les deux images et les deux débits. Qualité et stabilité se lisent sur le lent
+et le moyen ; les traînées sur le très rapide, le bloc et les cinq images après chaque coupure :
+
+| variante | Δ PSNR | Δ FLIP | instabilité des contours | pire traînée | passe ? |
+|---|---|---|---|---|---|
+| `pull` a 0,5, t 6 | −0,01 | +0,0006 | ×0,99 | −0,11 | non |
+| `pull` a 0,75, t 10 | −0,13 | +0,0067 | ×1,00 | −0,88 | non |
+| `soft` a 0,75, t 16 | −0,02 | +0,0009 | ×1,00 | −0,07 | non |
+| `clamp` a 0,75 | −1,71 | +0,0387 | ×1,28 | −8,08 | non |
+| `mcpull` (oracle) | −0,03 | −0,0013 | ×0,98 | −0,88 | non |
+| `mcclamp` (oracle) | −0,21 | +0,0001 | ×0,99 | −8,08 | non |
+| `outmc` (oracle) | +0,11 | −0,0023 | ×0,92 | −6,39 | non |
+
+Les seuils sont ceux du plan : +0,3 dB ou −0,005 de FLIP, l'instabilité au plus ×0,5, aucune traînée sous −0,1 dB.
+Le débit : à 10 Mbit/s, aucune variante ne rattrape `mwsr` seul à 20. `mwsr` seul y perd −0,61 dB, la meilleure
+variante (`outmc`, un oracle) −0,41.
+
+**Lecture.**
+
+1. **À l'arrêt, il n'y a rien à filtrer.** Le flux décodé ne bouge plus, car l'encodeur répète ses blocs : `mwsr` seul
+   donne |Δout| = 0,007/255 sur le jeu lent à 20 Mbit/s. L'historique, lui, se recale encore après le panoramique :
+   l'image bouge de 5 à 60 % de plus qu'avec MWSR seul, et le rapport monte à ×14-×70 là où `mwsr` seul est presque
+   immobile. Le §14.1 l'annonçait (« il n'y a rien à accumuler »).
+2. **En panoramique, sans mouvement connu, rien ne se gagne.** `pull` et `soft` font de −0,47 à +0,07 dB selon le cas,
+   avec une instabilité inchangée. `clamp` sans vecteurs perd de 1,5 à 6 dB : le texte se dédouble.
+3. **Avec le mouvement exact, l'accumulation en 1440p gagne un peu.**
+   - Le gain va de +0,04 à +0,28 dB en ×2 et de +0,20 à +0,58 dB en ×1,33 (le haut sur le texte), et le FLIP baisse
+     de 0,006 à 0,010 sur le jeu.
+   - Ce gain est plat le long du panoramique : +0,21, +0,20 puis +0,19 dB sur les images 1-9, 10-29 et 30-59 du jeu
+     lent. C'est donc un débruitage, pas une résolution accumulée.
+   - Les oracles qui travaillent à la taille du flux (`mcpull`, `mcclamp`) perdent ou font jeu égal : le Catmull-Rom
+     adoucit un peu à chaque image.
+4. **Les traînées touchent tout le monde.** Toutes les variantes perdent à la coupure (jusqu'à −6,5 dB sur cinq
+   images) et derrière le bloc (jusqu'à −8,1 dB), oracles compris : elles ne connaissent que le mouvement de la
+   caméra.
+5. **Le débit ne se gagne pas non plus.** Aucune variante ne compense la moitié du débit.
+
+**Verdict : non.** P7 se ferme à P7.0, comme le §14.3 le prévoyait si la porte restait fermée. `mwsr` et le §3.5
+restent tels quels : rien dans le produit, pas de cran `mwsr-t`.
+
+Pour la troisième version imaginée par Bruno (l'hôte natif enverrait un drapeau de scène, des vecteurs ou une image
+légère), les oracles donnent le plafond :
+- des vecteurs parfaits rendraient +0,2 à +0,6 dB sur un panoramique ;
+- il faudrait encore le drapeau de scène et des vecteurs par bloc contre les traînées ;
+- le tout pour une passe de plus en 1440p et 59 Mo de mémoire.
+
+Le déblocage côté client reste une piste mesurable avec ce même labo, avec ou sans le découpage et le QP des blocs
+venus de l'hôte. Il est proposé à Bruno.
+
+La page de comparaison (artefact privé de Bruno) montre recadrages, cartes d'erreur, courbes par image et coûts :
+https://claude.ai/artifact/U4rU6NYjEa7g91RsUCWJ2i
+
+**Limites.**
+- OpenH264 n'est pas NVENC : il a placé une image clé toutes les 17 images sur le panoramique rapide du jeu à
+  10 Mbit/s.
+- Deux images sources seulement.
+- Un quart de l'écran.
+- Deux réglages par famille d'historique, choisis d'avance.

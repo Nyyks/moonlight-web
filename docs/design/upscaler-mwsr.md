@@ -1457,8 +1457,9 @@ upscalers spatiaux.
 - [ ] En réduction, un affûtage après la grille seulement si Bruno le demande [`low`]
 
 **Hors v0.4.1 — étude optionnelle (§14, proposée le 21/10/2026, à la décision de Bruno)**
-- [ ] P7.0 Mode séquence du labo et expérience décisive de la mémoire temporelle : panoramique sous-pixel des images de référence, arrêt, coupure, passés par la boucle WebCodecs à deux débits ; FLIP et PSNR par image, scintillement, traînée, avec et sans histoire ; porte go/no-go du §14.3 [`high`]
-- [ ] P7.1 (si go) noyau `mwsr` avec histoire adaptative au mouvement, cran `mwsr-t` des deux renderers, campagne allégée, A/B de Bruno à faible débit [`xhigh`]
+- [x] **P7.0, faite le 25/10 (journal J42, §14.4) : la porte reste fermée.** Mode séquence du labo (`seq-lab.js`, `p7_flows.py`), WebCodecs logiciel à deux débits, sept variantes d'historique contre `mwsr` seul, vingt séquences sur SwiftShader. Aucune variante ne passe : sans mouvement connu, de −0,01 à −0,13 dB et pas de stabilité gagnée ; même avec le mouvement exact, +0,11 dB en moyenne et des traînées
+- [ ] ~~P7.1 (si go) noyau `mwsr` avec histoire adaptative au mouvement, cran `mwsr-t` des deux renderers, campagne allégée, A/B de Bruno à faible débit~~ : sans objet, la porte de P7.0 est restée fermée
+- [ ] Après P7, à la décision de Bruno (§14.5) : un déblocage côté client mesuré avec le même labo, puis peut-être l'aide de l'hôte (drapeau de scène, vecteurs, découpage et QP des blocs) [`high`]
 
 **Dépendances à demander tôt** : un téléphone Android de prêt (Snapdragon 8 Gen 1 ou plus, et
 un Mali si possible) ; les créneaux Mac et iPhone pour P0 et P5 ; `malioc` installé sur DualRTX.
@@ -1639,6 +1640,76 @@ renderers (comme P4), une campagne allégée (780M, M1, iPhone) et l'A/B de Brun
 débit : trois à quatre sessions, effort `xhigh`. Attendu honnête : un gain de stabilité mesurable sur
 les panoramiques lents et les faibles débits, un gain de résolution nul ; si l'étude dit autrement,
 tant mieux, c'est pour cela qu'on mesure.
+
+### 14.4 Le verdict de P7.0 (25/10/2026) : non
+
+L'étude est faite (journal J42). **Le dispositif :**
+- des séquences tirées d'une image fixe de 3840×2160, texte du labo ou capture de jeu : panoramique de 0,3 à 6 px du
+  flux par image, arrêt, coupure ; ou un bloc qui traverse l'image ;
+- une vérité exacte, tirée de la même fenêtre ;
+- WebCodecs en logiciel à 10 et 20 Mbit/s, avec un échauffement qui rejoue le premier mouvement à l'envers, pour que
+  le débit soit tenu ;
+- ×2 et ×1,33 vers 1440p ;
+- sept variantes d'historique contre `mwsr` seul : trois sans mouvement connu (tirage borné, poids doux, bornage
+  3×3), trois avec le mouvement exact (des oracles), dont l'accumulation de la sortie en 1440p.
+
+**Aucune variante ne franchit la porte du §14.3 :**
+- **Sans mouvement connu, rien ne se gagne.** Les historiques bon marché, ceux qui marcheraient avec tout hôte, font
+  de −0,01 à −0,13 dB, avec une instabilité des contours inchangée (×0,99-1,00). À l'arrêt, ils font bouger la
+  sortie de 5 à 60 % de plus que `mwsr` seul, car ils se recalent encore après le panoramique. Le flux décodé, lui,
+  ne bouge plus : l'encodeur répète ses blocs, comme le prévoyait le §14.1. Le bornage 3×3 sans vecteurs perd de 1,5
+  à 6 dB.
+- **Avec le mouvement exact, le gain reste petit.** L'accumulation en 1440p gagne +0,11 dB et −0,002 de FLIP en
+  moyenne, jusqu'à +0,58 dB sur le texte en ×1,33. Ce gain est plat le long du panoramique : c'est un débruitage,
+  pas de la résolution. L'instabilité ne baisse que de 8 % (×0,92), et il reste des traînées : jusqu'à −6,4 dB.
+- **Personne n'échappe aux traînées.** Toutes les variantes perdent à la coupure et derrière un objet qui bouge
+  autrement que la caméra : jusqu'à −8 dB sur cinq images pour le bornage 3×3.
+- **Pas de débit à gagner.** À 10 Mbit/s, aucune variante ne rattrape `mwsr` seul à 20 : −0,41 dB pour la meilleure,
+  contre −0,61 pour `mwsr` seul.
+
+P7 se ferme donc à P7.0. `mwsr` et le §3.5 restent tels quels, et il n'y aura pas de cran `mwsr-t`. La page de
+comparaison faite pour Bruno montre recadrages, cartes d'erreur, courbes par image et coûts.
+
+### 14.5 Après P7 : l'aide de l'hôte et le déblocage (idées de Bruno du 25/10/2026)
+
+Bruno propose une troisième version, qui dépendrait de l'hôte natif. Celui-ci enverrait :
+- un drapeau de nouvelle scène ;
+- des vecteurs de mouvement, à faible débit (facile en LAN) ;
+- ou une image légère, monochrome, de contours ;
+- puis la taille des blocs, pour un déblocage côté client.
+
+**Ce que P7.0 en dit déjà.**
+- **Le plafond des vecteurs.** Les oracles sont exactement ce que des vecteurs parfaits permettraient : +0,2 à
+  +0,6 dB sur un panoramique, sans stabilité gagnée.
+- **Ce qu'il faudrait encore.** Le drapeau de scène supprime la traînée de la coupure, pour quelques bits par image.
+  Seuls des vecteurs par bloc supprimeraient celle des objets qui bougent seuls.
+- **Le coût.** Une passe d'accumulation en 1440p et 59 Mo de mémoire.
+
+**Les débits en jeu.**
+- Un vecteur par bloc de 16×16 en 720p représente environ 7 Mbit/s brut, sans doute de 0,3 à 0,7 Mbit/s compressé.
+  Un seul mouvement de caméra tient en quelques octets.
+- Sur le bureau, les rectangles de déplacement de DXGI (`GetFrameMoveRects`) donnent un mouvement exact et gratuit.
+- Une image de contours en pleine résolution coûte presque ce que coûterait de monter le débit du flux principal.
+  L'encodeur dépense mieux ces bits. La forme normalisée de cette idée est LCEVC (MPEG-5 partie 2, brevets V-Nova) :
+  une couche de base, plus une couche d'amélioration légère appliquée par un shader.
+
+**Le déblocage, mesurable avant tout.** Les blocs visibles dans les scènes rapides (le clip CoD des bancs, lui-même
+une capture YouTube en VP9 à 12,3 Mbit/s, réencodée) ne sont touchés ni par `mwsr` ni par un historique. Une passe
+de déblocage côté client connaîtrait la grille du flux. Elle lisserait les petites marches posées sur cette grille,
+dans les zones plates, sans toucher aux vraies arêtes. Ses limites viennent de la taille variable des blocs en HEVC
+et en AV1, et des détails réels posés sur la grille. Le découpage et le QP de chaque bloc lèveraient ces deux
+limites : la force du lissage suivrait la compression. Le mode séquence de ce labo la mesure telle quelle : flux à
+10 Mbit/s avec de vrais blocs, vérité connue.
+
+**Deux routes pour obtenir le découpage, le QP et les vecteurs :**
+- **L'hôte natif les envoie.** C'est léger pour le client, mais limité au natif. NVENC donne au moins le QP moyen de
+  chaque image ; ses statistiques par bloc restent à vérifier.
+- **Le client les lit lui-même dans le flux.** Ces informations sont déjà dans le flux H.264, HEVC ou AV1 que reçoit
+  le client, mais WebCodecs ne les expose pas. Un analyseur d'entropie en WASM, qui ne reconstruit pas l'image, les
+  lirait pour tout hôte, sans aucun débit en plus. En contrepartie, il coûte du CPU au client et c'est un gros
+  chantier.
+
+Ces choix reviennent à Bruno. Le premier pas mesurable est le déblocage au labo.
 
 ## 15. Deux idées de Bruno du 23/10/2026 : les aplats, et les zones du regard
 

@@ -6,6 +6,7 @@ its own: scaler-lab.html, case after case, each case a query of scaler-lab.js.
                          [--swiftshader | --webgl-swiftshader] [--serve 0.0.0.0:8766]
                          [--conformity] [--golden | --golden-check] [--page-timeout S]
                          [--p4 | --p4-table TAG] [--gl] [--screen WxH]
+                         [--p7 --p7-text PNG [--p7-case …] [--p7-seq …] | --p7-table TAG]
 
 Without --case, the P0 set below: the feed experiment (§6.4: N bilinear taps
 on the external texture against pass 0 + N on RGBA) and the baselines of the
@@ -25,6 +26,13 @@ in WebGL2 on the same pictures, saturated and at 60 Hz; --p4-table TAG reads
 a run's files and writes <dir>/<TAG>-gate.md with the verdict's figures. With
 --serve, --p4 gives a phone the same links (--gl: the WebGL2 page alone, for
 a device without WebGPU; --screen WxH adds the cases at the device's size).
+
+--p7 (p7_flows.py) is P7.0, the study of a history (plan §14.3): sequences
+made by seq-lab.js — a sub-pixel pan, a stop, a cut, a fast pan, a block
+crossing a still picture — through WebCodecs at two bitrates (in software on
+the software adapter), mwsr alone against mwsr with a history, per frame;
+--p7-table TAG writes <dir>/<TAG>-p7.md, the tables and the gate's verdict,
+from a run's files.
 
 --serve also links /compare, compare.html: the side-by-side viewer of the
 upscalers for the eye (the product's renderers on C:\\Test\\test.png, else
@@ -345,6 +353,19 @@ def main():
     ap.add_argument("--screen", default="", help="WxH: with --p4, the gate's cases at the device's own size too")
     ap.add_argument("--conformity", action="store_true",
                     help="the twins against the kernel cells on the golden cases (C11: 2/255); exit 1 beyond")
+    ap.add_argument("--p7", action="store_true",
+                    help="P7.0 (p7_flows.py): mwsr with a history against mwsr alone, on sequences through WebCodecs")
+    ap.add_argument("--p7-table", action="append", default=[], help="TAG: P7.0's tables of that run's files (no Chrome)")
+    ap.add_argument("--p7-text", default="", help="P7.0: the text picture (3840x2160) its sequences pan over")
+    ap.add_argument("--p7-content", default="", help="P7.0: text,game (both by default)")
+    ap.add_argument("--p7-case", default="", help="P7.0: x2,x133 (both by default)")
+    ap.add_argument("--p7-seq", default="", help="P7.0: slow,mid,fast,rapid,obj (all by default)")
+    ap.add_argument("--p7-hist", default="", help="P7.0: the variants (seq-lab.js, HIST)")
+    ap.add_argument("--p7-kbps", default="", help="P7.0: the bitrates in kbit/s (20000,10000 by default)")
+    ap.add_argument("--p7-vcodec", default="", help="P7.0: avc, vp9 or av1 (avc by default)")
+    ap.add_argument("--p7-roi", default="auto", choices=("auto", "full"),
+                    help="P7.0: the region shaded at 1440p, a quarter (auto) or the whole screen (full)")
+    ap.add_argument("--p7-warm", type=int, default=None, help="P7.0: the encoder's warm-up in frames (60)")
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab"))
     ap.add_argument("--chrome-arg", action="append", default=[])
     ap.add_argument("--headed", default="", help="X,Y,W,H: a shown window there instead of headless")
@@ -379,6 +400,13 @@ def main():
         import p4_flows
         for tag in a.p4_table:
             p4_flows.gate_table(a, tag)
+        return
+
+    if a.p7_table:
+        sys.path.insert(0, HERE)
+        import p7_flows
+        for tag in a.p7_table:
+            p7_flows.table(a, tag)
         return
 
     if a.serve:
@@ -526,6 +554,12 @@ def main():
                     sys.stdout.flush()
             res["url"] = url
             return res
+
+        if a.p7:
+            sys.path.insert(0, HERE)
+            import p7_flows
+            p7_flows.run(a, run_page)
+            return
 
         if a.conformity:
             sys.path.insert(0, HERE)
