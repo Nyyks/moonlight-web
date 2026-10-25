@@ -689,7 +689,16 @@ void MoonlightShim::sendKeyEvent(short keyCode, bool down, char modifiers, char 
     k.modifiers = modifiers;
     k.flags = flags;
     k.hold = hold;
-    m_Watchdog->noteKey(k, down);
+    // A press of a key already down is the client's auto-repeat, and a
+    // GameStream host makes its own: Sunshine drops it on arrival ("already
+    // pressed", input.cpp) and repeats from its key_repeat_delay; Wolf hands
+    // every one to inputtino, whose keyboard appends it to the list its repeat
+    // thread walks, unlocked, every 50 ms. Thirty presses a second grew that
+    // list for as long as a key was held, and a release landing mid-walk was
+    // pressed again by the thread from the list's stale tail: the key stuck
+    // down on the host (Discord, 24/10/2026). moonlight-qt drops them too.
+    // The release always goes, whatever the watchdog thinks is held.
+    if (m_Watchdog->noteKey(k, down)) return;
     LiSendKeyboardEvent2(keyCode | 0x8000, down ? KEY_ACTION_DOWN : KEY_ACTION_UP, modifiers,
                          flags);
 }
