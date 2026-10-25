@@ -2529,6 +2529,65 @@ handshakes to the box's port 80, DF and AF41 in turn.
 - **Verdict:** `hostcap=` must not be used as it is: it caps the stream with
   the rest.
 
+### 25/10/2026 — The M3 on the repeater: a direct pair, and the repeater's radio still queues (same plan)
+
+**Setup** (09:33-09:36, Bruno at the M3). The `--dev` on DualRTX, TeraBox
+uploading ~83 Mbit/s on average (peak 143). The M3 in Chrome, on the
+repeater's Wi-Fi (BSSID `…:ec:68:b4`, channel 44 at 160 MHz, RSSI -58,
+MCS 5, 2 streams).
+- The pair was host → host on the LAN (192.168.1.66 → 192.168.1.21): no
+  hairpin through the box.
+- Bruno: « plus d'une dizaine de gels, ça saccade pendant au moins 1 à 2 s à
+  chaque fois ». The page's `[perf]` lines say the same: 10 seconds out of 110
+  drew fewer than 45 frames, and 45 seconds saw a frame arrive 150 to 375 ms
+  late. The relay counted 6 real freezes (the video's send buffer not
+  draining: 1.7, 2.5, 2.2 s and three of ~0.3 s).
+- Pings during the stream: the M3 23 ms median, p95 133, max 326; the box
+  66 / 306 / 954; the repeater by cable 0 / 6. The stream down to the M3 and
+  TeraBox up to the box share the repeater's radio.
+- 20 more `[LinkFreeze]` lines, from 09:35:08 to ~09:35:58, were the page's
+  report timer firing once a second (`late` ≈ 500 ms), ending at the page's
+  « Back from the background » line. Chrome on macOS held the page hidden
+  although Bruno saw the tab in front all along. The trigger is unknown: an
+  overlay (the screenshot tool, the Wi-Fi menu, the log export) or the energy
+  saver. The host only logs those gaps, so they cost the picture nothing.
+
+### 25/10/2026 — Windows spares a flow from the cap with `-Precedence 255`, or by its port (same plan, S1 bis)
+
+**Setup** (09:39-09:43 and 10:14-10:27, Bruno typed one elevated line through
+the production instance each time, then left). No stream. A stand-in from
+`C:\Python314\python.exe`:
+- `udp_rtt.py` sends DNS queries to the box, five a second, on four sockets in
+  turn:
+  - an IPv4 socket opened before any policy;
+  - a dual-stack socket like libjuice's;
+  - the same with AF41 set the way libjuice's patch sets it;
+  - a fresh socket for each query.
+- `tcp_rtt.py` makes a fresh connection for each probe.
+
+The load was TeraBox at ~100 Mbit/s, then 50 under the cap; the box stayed at
+3-5 ms under the cap. A 50 Mbit/s `-Default` cap each time unless said:
+
+| Step | The stand-in's policy | Its probes, median / p95 |
+|---|---|---|
+| A | python.exe by path, DSCP 34, no throttle | held 0.3-1.25 s, every socket alike |
+| B | the same, with a throttle of its own (10 Gbit/s) | 250-310 / ~700 ms |
+| C | UDP local ports 49951-49953, 10 Gbit/s, no application | the three ports: 3 / 8 ms; the fresh socket and TCP, outside it: 315-430 / 790-950 ms |
+| D | as B, plus `-Precedence 255` | 3 / 10-15 ms, every socket and TCP |
+| E | as B, against an all-TCP-and-UDP cap instead of `-Default` | 290-370 / 930-1080 ms |
+
+- At equal precedence (127), Windows applies the cap, not the policy naming
+  the application, against what the documentation's "more specific wins"
+  suggests. That is why the stream was never exempt in E2 and E3b. A policy on
+  the local port does win at 127.
+- `-Precedence 255` on the application's policy spares everything that process
+  sends. The socket changes nothing: opened before or after the policy, IPv4
+  or dual-stack, with or without its own class.
+- In A, TeraBox's first upload stopped 25 s into the cap and never resumed
+  after the cap went; a second upload held at 50 for 12 minutes through B-E.
+- Not tried yet: `-Precedence 255` without the high throttle, and a real
+  stream through `hostcap=` once fixed.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
@@ -2644,10 +2703,13 @@ What the measurements support, in order of the path:
   - a cap of 50 Mbit/s empties it;
   - Windows' throttle is one budget for everything a policy matches: TeraBox's
     several connections went flat at the cap together.
+  - the executable's policy loses to the cap at equal precedence;
+    `-Precedence 255`, or a policy on the local UDP port, exempts the flow
+    (S1 bis);
+  - the M3 freezes on a direct pair too, on the repeater's Wi-Fi: not the
+    hairpin.
   Still open:
-  - why the executable's own policy does not exempt the stream from the cap;
-  - whether the 24/10 freezes came from the Freebox hairpin or from the M3's
-    own Wi-Fi;
+  - the stream through `hostcap=` with `-Precedence 255`, on the M3;
   - what rate a product default could take without a link speed to read: a
     fixed one, or one that follows `[HostUpload]` and the freezes.
 
@@ -2676,7 +2738,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `audioframe=5\|10\|20` | the native host's Opus frame in ms (5 the product): half or a quarter of the packets, 5 or 15 ms more before each | `ced222aa` |
 | `aroadpace=<x>`, `aroadwin=<KiB>` | the audio road's pacing and send window (both off by default) | `aea2a192`, `89adcb0f` |
 | `aroadbudget=<%>` | the audio road's resend budget, share of what it sent over 100 ms (default 20) | `210318fd` |
-| `hostcap=<Mbit/s>` | during a native stream, every other upload of the host PC capped (two ActiveStore QoS policies; Windows, a worker with administrator rights). 25/10: the cap works, but the stream is capped too, the executable's policy notwithstanding: do not use as it is | `0a92009a` |
+| `hostcap=<Mbit/s>` | during a native stream, every other upload of the host PC capped (two ActiveStore QoS policies; Windows, a worker with administrator rights). 25/10: the cap works, but the stream is capped too, the executable's policy notwithstanding: do not use as it is. S1 bis: its policy needs `-Precedence 255` | `0a92009a` |
 
 Environment: `MW_SCTP_RTO_MIN_MS`, `MW_SCTP_SACK_DELAY_MS`;
 `MW_LATENCY_FLAG_SOUND=click|tick` (the server's latency flag also beeps,

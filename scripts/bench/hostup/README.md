@@ -17,6 +17,7 @@ No new executable, nothing that listens, no elevation, except `hostup_cap.ps1
 |---|---|
 | `hostup_probe.ps1` | timestamped ICMP pings to several targets at once (one runspace each, 200 ms), and the adapter's byte counters once a second, into one folder; `-Mark <phase>` opens a phase |
 | `tcp_rtt.py` | a marked "ping" without administrator rights: TCP handshake times to an open port, the classes taking turns (DF, AF41, ...) |
+| `udp_rtt.py` | a UDP "ping" without administrator rights: DNS round trips to the box on four sockets in turn (IPv4 opened at start, dual-stack like libjuice's, the same with AF41, a fresh one each query), fixed local ports 49951-49953 |
 | `hostup_report.py` | one table per phase: each path's median / p95 / max and losses, the host's upload, and the worker logs' freezes |
 | `hostup_cap.ps1` | the hand-made cap of trial S0: two ActiveStore QoS policies (all TCP and UDP capped, the MoonlightWeb executable exempt), `-Off`, `-Show`, `-DryRun` |
 
@@ -62,8 +63,12 @@ alone, and against a `-Catch Default` cap, the adapter stayed flat at the cap
 with the stream inside it, and the stream froze for 4 to 52 s. The cap itself
 works: under 50 Mbit/s the repeater's queue empties (the box at 3-4 ms). What
 the cap does not exempt waits in Windows' own pacer (0.2-1.2 s for a TCP
-handshake). Next to try at the bench: a throttle of its own on the
-executable's policy, or the exemption by the stream's local UDP ports.
+handshake). The bench's S1 bis (25/10, `udp_rtt.py` and `tcp_rtt.py` from
+python.exe as the stand-in) found why: at equal precedence (127) Windows
+applies the cap, not the policy naming the application, even with a throttle
+of its own on it. `-Precedence 255` on the application's policy exempts all it
+sends (3 ms against 250-370 ms for the rest); so does a policy on the local
+UDP port. `hostup_cap.ps1` does not set the precedence yet.
 
 A PowerShell typed by Bruno through a stream must be in the production
 instance: a `--dev` worker runs on his plain token and cannot type into an
