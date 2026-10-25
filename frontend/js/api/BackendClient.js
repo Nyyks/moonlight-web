@@ -538,6 +538,18 @@ export class BackendClient {
         return this.post('/api/share/feed', { height });
     }
     /**
+     * The address a host's guest links carry: `auto`, `lan`, `tailscale` or
+     * `iface:<adapter>`, kept per host. Live shares keep their token and PIN.
+     * @param {string} hostUuid
+     * @param {string} linkAddress
+     */
+    static async shareLinkAddress(hostUuid, linkAddress) {
+        return this.post('/api/share/link-address', {
+            host_uuid: hostUuid,
+            link_address: linkAddress,
+        });
+    }
+    /**
      * Open a player row: mint a fresh link + PIN, revoking the previous pair.
      * With a stream running the invitation binds to it and `target` is ignored.
      * With nothing running — the board opened from a host's kebab — `target`

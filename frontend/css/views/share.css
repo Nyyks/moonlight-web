@@ -150,6 +150,12 @@
     border-bottom: 1px solid var(--border-1);
 }
 
+/* Which address the host's guest links carry: Automatic, the LAN, Tailscale. */
+.share-board-address {
+    padding: 4px 2px 10px;
+    border-bottom: 1px solid var(--border-1);
+}
+
 .share-feed-choice {
     display: flex;
     flex-wrap: wrap;

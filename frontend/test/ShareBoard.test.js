@@ -28,6 +28,7 @@ vi.mock('../js/api/BackendClient.js', () => ({
         shareTtl: vi.fn(async () => ({})),
         shareRename: vi.fn(async () => ({})),
         shareFeedHeight: vi.fn(async (height) => ({ feed_height: height })),
+        shareLinkAddress: vi.fn(async (host, id) => ({ link_address: id })),
     },
 }));
 // No locale is loaded in the TNR: render the key so the assertions can name it.
@@ -477,6 +478,113 @@ describe('ShareBoard', () => {
         it('says nothing on a row that was never opened', async () => {
             await openBoard([slot(2), slot(3), slot(4)], undefined, { remote_reachable: false });
             expect(reachOf(2)).toBeNull();
+        });
+    });
+
+    describe('lets the owner pick the address a link carries', () => {
+        const menu = () => document.querySelector('.share-address-select');
+        const detailFor = (n) => document.querySelector(`.share-brow-detail[data-slot="${n}"]`);
+        const networks = [
+            { id: 'auto' },
+            { id: 'lan', kind: 'lan', address: '192.168.1.66', adapter: 'vEthernet (LAN)' },
+            { id: 'tailscale', kind: 'tailscale', address: '100.116.41.43', adapter: 'Tailscale' },
+        ];
+        const tailscaleCreds = {
+            available: true,
+            url: 'https://100.116.41.43:8443/p/tok',
+            pin: '482917',
+            reach: 'tailscale',
+            local_only: true,
+        };
+
+        beforeEach(() => {
+            BackendClient.shareCredentials.mockResolvedValue({
+                available: true,
+                url: 'https://x/p/tok',
+                pin: '482917',
+                reach: 'public',
+                local_only: false,
+            });
+        });
+
+        it('offers no menu when Automatic is the only choice', async () => {
+            await openBoard([slot(2), slot(3), slot(4)], undefined, {
+                link_addresses: [{ id: 'auto' }],
+                link_address: 'auto',
+            });
+            expect(menu()).toBeNull();
+        });
+
+        it('lists the networks, with the pick of this host selected', async () => {
+            await openBoard([slot(2), slot(3), slot(4)], undefined, {
+                link_addresses: networks,
+                link_address: 'tailscale',
+            });
+            expect([...menu().options].map((o) => o.value)).toEqual(['auto', 'lan', 'tailscale']);
+            expect(menu().value).toBe('tailscale');
+        });
+
+        it('stores the pick for this host and reads the live link again', async () => {
+            await openBoard([slot(2, { state: 'shared' }), slot(3), slot(4)], undefined, {
+                link_addresses: networks,
+                link_address: 'auto',
+            });
+            BackendClient.shareCredentials.mockClear();
+            BackendClient.shareCredentials.mockResolvedValue(tailscaleCreds);
+            menu().value = 'tailscale';
+            menu().dispatchEvent(new Event('change'));
+            await vi.waitFor(() => expect(BackendClient.shareCredentials).toHaveBeenCalledWith(2));
+            expect(BackendClient.shareLinkAddress).toHaveBeenCalledWith('h', 'tailscale');
+            // The token and the PIN stay; only the address in front of them moved.
+            await vi.waitFor(() =>
+                expect(detailFor(2).querySelector('.share-link-input').value).toBe(
+                    'https://100.116.41.43:8443/p/tok',
+                ),
+            );
+        });
+
+        it('says a Tailscale link is for the tailnet, with the direct-path hint', async () => {
+            BackendClient.shareCredentials.mockResolvedValue(tailscaleCreds);
+            await openBoard([slot(2, { state: 'shared' }), slot(3), slot(4)], undefined, {
+                link_addresses: networks,
+                link_address: 'tailscale',
+            });
+            const reach = detailFor(2).querySelector('.share-reach[data-reach]');
+            expect(reach.dataset.reach).toBe('reachTailscale');
+            expect(detailFor(2).querySelector('.share-tailscale-hint').textContent).toContain(
+                'sharing.tailscaleHint',
+            );
+        });
+
+        it('shows the hint on no other link', async () => {
+            BackendClient.shareCredentials.mockResolvedValue({
+                available: true,
+                url: 'https://192.168.1.66:8443/p/tok',
+                pin: '482917',
+                reach: 'lan',
+                local_only: true,
+            });
+            await openBoard([slot(2, { state: 'shared' }), slot(3), slot(4)], undefined, {
+                link_addresses: networks,
+                link_address: 'lan',
+            });
+            // Pinned to the LAN on purpose: no nudge towards internet access.
+            expect(detailFor(2).querySelector('.share-reach').dataset.reach).toBe('reachLan');
+            expect(detailFor(2).querySelector('.share-tailscale-hint')).toBeNull();
+        });
+
+        it('keeps a pick whose network is gone, and says so', async () => {
+            await openBoard([slot(2), slot(3), slot(4)], undefined, {
+                link_addresses: networks.slice(0, 2),
+                link_address: 'tailscale',
+                link_address_missing: true,
+            });
+            const picked = [...menu().options].find((o) => o.selected);
+            expect(picked.value).toBe('tailscale');
+            expect(picked.disabled).toBe(true);
+            expect(
+                document.querySelector('.share-board-address .is-warning').textContent,
+            ).toContain('sharing.linkAddressMissing');
         });
     });
 

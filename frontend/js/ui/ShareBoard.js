@@ -127,7 +127,7 @@ export class ShareBoard {
         this._pendingTtl = new Map();
         this._pollTimer = null;
         this.overlay = null;
-        this._secrets = new Map(); // slot → {url, pin, local_only} | {available:false}
+        this._secrets = new Map(); // slot → {url, pin, reach, local_only} | {available:false}
         /**
          * Whether this machine answers from outside at this moment.
          *
@@ -150,6 +150,15 @@ export class ShareBoard {
         this._ownerHeight = false;
         /** Those guests share one stream of it: a change resizes it live. */
         this._sharedFeed = false;
+        /**
+         * The networks this host's links can carry (`auto`, then the LAN,
+         * Tailscale, other cards: LinkAddresses on the backend), and the
+         * owner's pick for this host, kept there. A pick whose network is gone
+         * stays the pick, flagged missing, while links fall back to Automatic.
+         */
+        this._linkAddresses = [];
+        this._linkAddress = 'auto';
+        this._linkAddressMissing = false;
         /**
          * Called once the board is gone, so whoever opened it can refresh what
          * it was covering — a host card's kebab state, the header's guest count.
@@ -255,6 +264,9 @@ export class ShareBoard {
         }
         this._ownerHeight = data.owner_height === true;
         this._sharedFeed = data.shared_feed === true;
+        this._linkAddresses = Array.isArray(data.link_addresses) ? data.link_addresses : [];
+        this._linkAddress = typeof data.link_address === 'string' ? data.link_address : 'auto';
+        this._linkAddressMissing = data.link_address_missing === true;
 
         // Every live row shows its link and PIN, so every live row needs them.
         // Only ones we have never read: they do not change under us, and asking
@@ -283,6 +295,9 @@ export class ShareBoard {
             this._feedHeight,
             this._ownerHeight,
             this._sharedFeed,
+            this._linkAddress,
+            this._linkAddressMissing,
+            this._linkAddresses.map((a) => `${a.id}=${a.address || ''}`),
             this.slots.map((s) => [
                 s.slot,
                 s.state,
@@ -391,6 +406,7 @@ export class ShareBoard {
             </div>
             ${this._appPickerHtml()}
             ${this._feedHtml()}
+            ${this._linkAddressHtml()}
             ${
                 this._error
                     ? `<p class="share-board-note is-warning">${escapeHtml(this._error)}</p>`
@@ -406,6 +422,7 @@ export class ShareBoard {
             .addEventListener('click', () => this.close());
         this._wireAppPicker();
         this._wireFeed();
+        this._wireLinkAddress();
         this.slots.forEach((s) => this._wirePlayerRow(s));
     }
 
@@ -466,6 +483,62 @@ export class ShareBoard {
                 <p class="share-board-note">${escapeHtml(
                     t(this._sharedFeed ? 'sharing.feedHintShared' : 'sharing.feedHint'),
                 )}</p>
+            </div>
+        `;
+    }
+
+    /** The name a pick goes by in a sentence: "Tailscale", a card's own name. */
+    _linkAddressName(id = this._linkAddress) {
+        if (id === 'lan') return t('sharing.networkLan');
+        if (id === 'tailscale') return 'Tailscale';
+        const entry = this._linkAddresses.find((a) => a.id === id);
+        return entry?.adapter || id.replace(/^iface:/, '');
+    }
+
+    /** One menu entry: the network, and the address a guest would open. */
+    _linkAddressLabel(entry) {
+        if (entry.id === 'auto') return t('sharing.linkAddressAuto');
+        const vars = { address: entry.address, name: entry.adapter };
+        if (entry.kind === 'lan') return t('sharing.linkAddressLan', vars);
+        if (entry.kind === 'tailscale') return t('sharing.linkAddressTailscale', vars);
+        return t('sharing.linkAddressOther', vars);
+    }
+
+    /**
+     * Which address this host's guest links carry. Only once the PC has a
+     * network to offer besides Automatic, and only on a board that knows its
+     * host, since the pick is kept per host.
+     */
+    _linkAddressHtml() {
+        if (!this.ctx.hostUuid || this._linkAddresses.length < 2) return '';
+        const options = this._linkAddresses.map(
+            (a) =>
+                `<option value="${escapeHtml(a.id)}" ${a.id === this._linkAddress ? 'selected' : ''}>` +
+                `${escapeHtml(this._linkAddressLabel(a))}</option>`,
+        );
+        const name = this._linkAddressName();
+        if (this._linkAddressMissing) {
+            // Still the pick, shown as such: the owner chose it, and it comes
+            // back by itself once the network does.
+            options.push(
+                `<option value="${escapeHtml(this._linkAddress)}" selected disabled>` +
+                    `${escapeHtml(t('sharing.linkAddressGone', { name }))}</option>`,
+            );
+        }
+        return `
+            <div class="share-board-address">
+                <label class="share-field-label" for="share-address-select">${escapeHtml(
+                    t('sharing.linkAddressLabel'),
+                )}</label>
+                <select class="share-app-select share-address-select"
+                        id="share-address-select">${options.join('')}</select>
+                ${
+                    this._linkAddressMissing
+                        ? `<p class="share-board-note is-warning">${escapeHtml(
+                              t('sharing.linkAddressMissing', { name }),
+                          )}</p>`
+                        : ''
+                }
             </div>
         `;
     }
@@ -580,9 +653,15 @@ export class ShareBoard {
         // the other says it can and the machine simply is not answering just now.
         // The first is fixed by turning internet access on; the second fixes
         // itself, and the link is already in someone's chat window either way.
+        //
+        // A link the owner pinned to one network says which, rather than
+        // pointing at internet access as if the LAN were an accident.
         let reach = '';
         if (live && creds?.available !== false) {
-            if (creds?.local_only) reach = 'lanOnly';
+            const where = creds?.reach || (creds?.local_only ? 'lan' : 'public');
+            if (where === 'lan') reach = this._linkAddress === 'lan' ? 'reachLan' : 'lanOnly';
+            else if (where === 'tailscale') reach = 'reachTailscale';
+            else if (where === 'other') reach = 'reachOther';
             else if (!this._remoteReachable) reach = 'offline';
         }
 
@@ -617,7 +696,14 @@ export class ShareBoard {
                     ${
                         reach
                             ? `<p class="share-reach" data-reach="${reach}">${escapeHtml(
-                                  t(`sharing.${reach}`),
+                                  t(`sharing.${reach}`, { name: this._linkAddressName() }),
+                              )}</p>`
+                            : ''
+                    }
+                    ${
+                        reach === 'reachTailscale'
+                            ? `<p class="share-reach share-tailscale-hint">${escapeHtml(
+                                  t('sharing.tailscaleHint'),
                               )}</p>`
                             : ''
                     }
@@ -786,6 +872,36 @@ export class ShareBoard {
                 }
                 this._paint();
             });
+        });
+    }
+
+    _wireLinkAddress() {
+        const select = /** @type {HTMLSelectElement | null} */ (
+            this.board.querySelector('.share-address-select')
+        );
+        if (!select) return;
+        select.addEventListener('change', async () => {
+            const id = select.value;
+            const was = this._linkAddress;
+            const wasMissing = this._linkAddressMissing;
+            this._linkAddress = id;
+            this._linkAddressMissing = false;
+            try {
+                const data = await this._write(() =>
+                    BackendClient.shareLinkAddress(this.ctx.hostUuid, id),
+                );
+                if (typeof data?.link_address === 'string') this._linkAddress = data.link_address;
+                // A live row keeps its token and PIN: only the address in front
+                // of them moved, so its link is read again.
+                const live = this.slots.filter((s) => s.state !== 'off');
+                live.forEach((s) => this._secrets.delete(s.slot));
+                await this._write(() => Promise.all(live.map((s) => this._fetchSecrets(s.slot))));
+            } catch (err) {
+                console.warn('[ShareBoard] link address refused:', err);
+                this._linkAddress = was;
+                this._linkAddressMissing = wasMissing;
+            }
+            this._paint();
         });
     }
 
