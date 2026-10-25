@@ -148,7 +148,9 @@ static bool generateSelfSignedToFiles(const QString& certPath, const QString& ke
 }
 
 /// Enumerate all private/local addresses on this machine (excluding loopback).
-/// Covers RFC 1918 IPv4 + IPv6 link-local (fe80::/10) and ULA (fc00::/7).
+/// Covers RFC 1918 IPv4, the 100.64.0.0/10 range a mesh VPN hands out
+/// (Tailscale: a guest link can carry it), and IPv6 link-local (fe80::/10) and
+/// ULA (fc00::/7, Tailscale's fd7a:115c:a1e0::/48 among them).
 /// Used to populate SANs in the self-signed certificate so local IP connections
 /// do not trigger hostname mismatch warnings.
 static QList<QHostAddress> getPrivateLanAddresses()
@@ -165,9 +167,10 @@ static QList<QHostAddress> getPrivateLanAddresses()
 
             if (addr.protocol() == QAbstractSocket::IPv4Protocol) {
                 quint32 ip = addr.toIPv4Address();
-                // RFC 1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                // RFC 1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, then
+                // 100.64.0.0/10 (CGNAT, what Tailscale hands out)
                 if ((ip & 0xFF000000) == 0x0A000000 || (ip & 0xFFF00000) == 0xAC100000 ||
-                    (ip & 0xFFFF0000) == 0xC0A80000) {
+                    (ip & 0xFFFF0000) == 0xC0A80000 || (ip & 0xFFC00000) == 0x64400000) {
                     result << addr;
                 }
             } else if (addr.protocol() == QAbstractSocket::IPv6Protocol) {
@@ -713,7 +716,7 @@ bool CertManager::generateSelfSignedCert()
 
     // Build SAN list dynamically: localhost, loopback, and all detected LAN IPs.
     // This ensures the self-signed certificate matches all local access methods
-    // (localhost, 127.0.0.1, ::1, 192.168.x.x, 10.x.x.x, etc.) and the browser
+    // (localhost, 127.0.0.1, ::1, 192.168.x.x, 10.x.x.x, Tailscale's 100.x, etc.) and the browser
     // only shows a single "untrusted CA" warning (no hostname mismatch).
     QStringList sans;
     sans << "DNS:localhost"
