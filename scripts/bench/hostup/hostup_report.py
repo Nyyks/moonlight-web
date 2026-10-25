@@ -98,7 +98,7 @@ def nic_rates(rows):
 
 
 FREEZE = re.compile(r"^\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d\.\d+)\] .*\[LinkFreeze\] #(\d+)[^:]*: (\d+) ms, "
-                    r"(\d\d:\d\d:\d\d\.\d+) to .*?(?:ended the gap (-?\d+) ms late)?$")
+                    r"(\d\d:\d\d:\d\d\.\d+) to (?:.*?ended the gap (-?\d+) ms late)?")
 HOSTUP = re.compile(r"^\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d\.\d+)\] .*\[HostUpload\]")
 
 
