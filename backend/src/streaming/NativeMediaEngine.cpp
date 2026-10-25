@@ -300,7 +300,11 @@ void NativeMediaEngine::startCapture(const StartParams& params)
                                  << "ignored:" << parseError;
     }
     // The client's decoder takes no reference repairs (/start's
-    // ref_invalidation): one reference, and a keyframe for a loss.
+    // ref_invalidation): one reference, and a keyframe for a loss. One
+    // reference is not enough on its own — NVENC and VA-API keep invalidating
+    // with it — so the engine turns every repair into a keyframe as well
+    // (invalidateReference, referenceInvalidation).
+    m_ClientTakesRepairs.store(params.refInvalidation, std::memory_order_release);
     if (!params.refInvalidation && mw::native::refuseReferenceRepairs(config.tuning))
         qInfo().noquote() << "[NativeMediaEngine] the client's decoder takes no reference "
                              "repairs: one reference, keyframes on loss";
@@ -1013,8 +1017,9 @@ void NativeMediaEngine::releaseInputBlock()
 void NativeMediaEngine::invalidateReference(uint32_t frameNumber)
 {
     // No repair by reference on the shared feed (referenceInvalidation says
-    // so): a lost frame there is the wave's to heal, or a keyframe's.
-    if (m_Subscriber) {
+    // so): a lost frame there is the wave's to heal, or a keyframe's. Nor for
+    // a client whose decoder refuses them: a keyframe it is.
+    if (m_Subscriber || !m_ClientTakesRepairs.load(std::memory_order_acquire)) {
         requestIdrFrame();
         return;
     }
@@ -1105,8 +1110,10 @@ bool NativeMediaEngine::referenceInvalidation() const
     // Never on the shared feed: a repair aimed at one guest's loss would be
     // every guest's next frame. The feed's intra-refresh repairs instead.
     if (m_Subscriber) return false;
+    // Nor for a client that asked for none, whatever the encoder can do.
     return m_Session && m_Connected.load(std::memory_order_acquire) &&
-           m_Session->info().referenceInvalidation;
+           mw::native::healsByReference(m_Session->info().referenceInvalidation,
+                                        m_ClientTakesRepairs.load(std::memory_order_acquire));
 }
 
 bool NativeMediaEngine::nameLinkDrops() const
@@ -1200,7 +1207,9 @@ QString NativeMediaEngine::describeSession() const
     if (info.yuv444) text += QStringLiteral(" 4:4:4");
     if (info.hdr) text += QStringLiteral(" HDR");
     if (info.intraRefresh) text += QStringLiteral(" intra-refresh");
-    if (info.referenceInvalidation && nameLinkDrops())
+    if (mw::native::healsByReference(info.referenceInvalidation,
+                                     m_ClientTakesRepairs.load(std::memory_order_acquire)) &&
+        nameLinkDrops())
         text += QStringLiteral(" [link drops named]");
     if (info.crossGpuCopy) text += QStringLiteral(" [cross-GPU copy]");
     if (info.hostMuted) text += QStringLiteral(" [host muted]");

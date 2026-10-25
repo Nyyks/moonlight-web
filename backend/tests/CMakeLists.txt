@@ -88,6 +88,7 @@ add_executable(run_tests
     test_link_freeze_log.cpp
     test_host_uplink.cpp
     test_host_upload_cap.cpp
+    test_reference_repairs.cpp
     test_rxbuf_section.cpp
     test_capture_key.cpp
     test_signaling_wait.cpp

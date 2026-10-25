@@ -148,8 +148,9 @@ public:
     void setRideOutLoss(bool enabled) { m_RideOutLoss = enabled; }
 
     /// False when the browser's decoder falls silent under the encoder's
-    /// reference repairs: the native engine then keeps one reference and heals
-    /// a loss by a keyframe (mw::native::refuseReferenceRepairs). Ignored by
+    /// reference repairs: the native engine then keeps one reference, heals
+    /// every loss by a keyframe and answers ref_invalidation false
+    /// (mw::native::refuseReferenceRepairs, healsByReference). Ignored by
     /// every other path.
     void setRefInvalidation(bool allowed) { m_RefInvalidation = allowed; }
 

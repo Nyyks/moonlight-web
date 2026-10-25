@@ -2236,11 +2236,14 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
         // no longer remembers, or a hole wider than a DPB could cover, is
         // answered the old way. Never for a GameStream engine, which has no
         // such call: the receiver only sends this when /start said it could.
+        // Nor when the engine says it no longer can (a client that refuses
+        // repairs, the shared feed): one keyframe, not one per id.
         auto* native = qobject_cast<NativeMediaEngine*>(m_Shim);
         const qint64 from = msg["from"].toDouble(-1);
         const qint64 to = msg["to"].toDouble(-1);
         bool healed = false;
-        if (native && from >= 0 && to >= from && to - from < 16) {
+        if (native && native->referenceInvalidation() && from >= 0 && to >= from &&
+            to - from < 16) {
             healed = true;
             for (qint64 id = from; id <= to; ++id) {
                 const int64_t slot =
@@ -2255,7 +2258,10 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
         }
         if (!healed) {
             qInfo() << "[DataChannelRelay] invalidateref" << from << ".." << to
-                    << "could not be mapped — requesting a keyframe instead";
+                    << (native && !native->referenceInvalidation()
+                            ? "not healed by reference on this stream"
+                            : "could not be mapped")
+                    << "— requesting a keyframe instead";
             std::lock_guard<std::mutex> lk(m_VideoMutex);
             m_AwaitingIdr = true;
             sendIdrRequestThrottled();

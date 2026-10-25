@@ -1121,6 +1121,23 @@ decoding on », « reference invalidated: frame 222 never reached the receiver,
 healing with a delta », aucune IDR demandée, aucune erreur de décodeur, 53
 images/s et 5,2 ms pendant l'exercice (NVENC).
 
+**Un client qui refuse les réparations (25/10/2026).** Il le dit à `/start`
+(`ref_invalidation:false`) : Apple depuis `c0bcdfd8`, la Freebox Player POP.
+Jusque-là, l'hôte se contentait d'une seule référence
+(`refuseReferenceRepairs`). AMF, oneVPL, D3D12 et Vulkan s'arrêtent là, mais
+NVENC et VA-API gardent l'invalidation avec une référence, et `/start`
+répondait `true`. Le Mac décodait donc par-dessus chaque trou, et VideoToolbox
+rejetait les deltas orphelins : 32 erreurs de décodeur dans un A/B, chacune
+une reconstruction du décodeur et l'attente d'une keyframe. Désormais,
+`NativeMediaEngine` retient le refus :
+- `referenceInvalidation()` répond faux (`healsByReference`, `EncoderTuning.h`) ;
+- `invalidateReference()` devient une demande de keyframe ;
+- le relais répond à un `invalidateref` reçu quand même par une seule keyframe.
+
+Les évictions (§9.10.2) et l'image jetée au calage posent la même question au
+moteur et suivent. Le client fait le même ET de son côté (`decodesThroughGaps`,
+`5baa0f42`).
+
 ### 9.10.1 AMF : la même réparation par références long terme (06/09/2026)
 
 ⚠️ **plan corrigé** : le plan disait « pas d'équivalent AMF (AMF n'a pas

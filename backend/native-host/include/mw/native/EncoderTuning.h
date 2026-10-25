@@ -852,13 +852,29 @@ inline bool overflowLowersGoodByDefault(int overflowGood)
 /// Freebox Player POP (Amlogic, 01/10/2026): AMF marked a long-term reference
 /// every frame at 30 fps, and the box's decoder gave no picture back every
 /// 2.5 s; with dpb=1, 25 fps steady. Nothing changes for any other client,
-/// and a bench's own dpb= is left as it set it.
+/// and a bench's own dpb= is left as it set it. One reference alone does not
+/// stop every encoder: NVENC and VA-API keep invalidating with it — hence
+/// healsByReference.
 /// @returns whether the tuning changed
 inline bool refuseReferenceRepairs(EncoderTuning& tuning)
 {
     if (tuning.dpbFrames != 0) return false;
     tuning.dpbFrames = 1;
     return true;
+}
+
+/// Whether a frame the receiver never got is healed by a delta (a reference
+/// repair) rather than a keyframe: what /start's `ref_invalidation` answers,
+/// and what the relay asks before it names a loss to the encoder. Both ends
+/// must take part — an encoder that really invalidates
+/// (SessionInfo::referenceInvalidation), a client that takes the repairs.
+/// Seen on 25/10/2026: an Apple client refused them, NVENC kept invalidating
+/// with its one reference, /start said true, and the Mac decoded on through
+/// each gap; VideoToolbox rejected every orphan delta (32 decoder errors in
+/// one A/B, each a decoder rebuild and a keyframe's wait).
+inline bool healsByReference(bool encoderInvalidates, bool clientTakesRepairs)
+{
+    return encoderInvalidates && clientTakesRepairs;
 }
 
 } // namespace mw::native

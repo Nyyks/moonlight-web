@@ -332,12 +332,15 @@ public:
     /// EncodedFrame::frameNumber — the relay maps its wire ids to it): the
     /// encoder predicts the next pictures from older frames and the stream
     /// heals with a delta instead of a keyframe (Session::invalidateReference).
-    /// Safe from any thread; dropped when no session runs.
+    /// A keyframe instead on the shared feed and for a client that refuses
+    /// repairs (StartParams::refInvalidation false). Safe from any thread;
+    /// dropped when no session runs.
     void invalidateReference(uint32_t frameNumber);
 
     /// Whether the session's encoder really heals a lost frame with a delta —
     /// what the receiver needs to know before it keeps decoding through a gap.
-    /// False until a session started, false on encoders without it.
+    /// False until a session started, false on encoders without it, false for
+    /// a client that refuses repairs.
     bool referenceInvalidation() const;
 
     /// Whether the delta the relay drops when the link stops draining is
@@ -608,6 +611,11 @@ private:
     /// The session's EncoderTuning::nameLinkDrops key, for the relay's thread.
     std::atomic<mw::native::EncoderTuning::Choice> m_NameLinkDropsKey{
         mw::native::EncoderTuning::Choice::Default};
+
+    /// False when the client's decoder takes no reference repairs (/start's
+    /// ref_invalidation): every loss is healed by a keyframe, whatever the
+    /// encoder can do (healsByReference). For the relay's thread.
+    std::atomic<bool> m_ClientTakesRepairs{true};
 
     /// Samples per channel of the session's Opus frames (EncoderTuning's
     /// `audioframe=`), the relays' RTP step: 240 unless the bench says 480/960.
