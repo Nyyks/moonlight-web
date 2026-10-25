@@ -2523,7 +2523,7 @@ handshakes to the box's port 80, DF and AF41 in turn.
   - they are removed ~1 s after the quit, and the adapter follows both times;
   - a worker without administrator rights says so in one line and caps
     nothing (E3a);
-  - a page that reconnects 34 s after a quit starts a new session, which sets
+  - a stream Bruno reopened 34 s after a quit was a new session, which set
     the cap again.
 - `-IPProtocolMatchCondition Both` reads back as `None`.
 - **Verdict:** `hostcap=` must not be used as it is: it caps the stream with
