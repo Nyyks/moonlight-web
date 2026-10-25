@@ -2457,9 +2457,77 @@ The probes and the trial plan are in `scripts/bench/hostup/README.md`.
   adapter of the route to the client, minus the data channels' bytes × 1.12.
 - `hostcap=<Mbit/s>` (`0a92009a`, a bench key): during a native stream, the
   worker caps every other upload of the PC with two ActiveStore policies. The
-  executable's own policy names its path, so it wins over the catch-all and
-  keeps the stream uncapped. It needs administrator rights: the launcher
-  service's SYSTEM worker has them.
+  executable's own policy names its path, so it should win over the catch-all
+  and keep the stream uncapped (25/10: it does not, below). It needs
+  administrator rights: the launcher service's SYSTEM worker has them.
+
+### 25/10/2026 — The queue is the repeater's way up, and Windows' cap does not spare the stream (same plan, trials E1-E3)
+
+**Setup** (06:18-08:25, with Bruno). DualRTX by cable to the bench switch,
+the switch to the repeater `ec:68`, the repeater to the box over Wi-Fi 7.
+TeraBox uploaded 84-100 Mbit/s on average from DualRTX (peaks ~180). It was
+resumed and paused through its window's accessibility tree, with Bruno's go,
+and each change checked on the adapter's counters. The client was Bruno's
+iPhone on the house Wi-Fi, most probably on the same repeater: its pings
+stayed below the box's. Probes from `scripts/bench/hostup/`: ICMP to the box,
+the repeater and the iPhone every 200 ms; the adapter every second; TCP
+handshakes to the box's port 80, DF and AF41 in turn.
+
+**Where the queue is (E1).**
+
+| Path from DualRTX | TeraBox paused | TeraBox uploading |
+|---|---|---|
+| the repeater, by cable | median 0 ms, p95 1 | median 0 ms, p95 ≤ 8 |
+| the box, across the repeater's Wi-Fi link | 2 ms, p95 4 | 22-126 ms, p95 400-540, max ~1 s, ~2 % lost |
+| the iPhone, a client of the repeater | 3-4 ms, p95 26-32 | 4-34 ms, p95 27-264 |
+| TCP handshake to the box, DF | 4 ms, p95 26 | 20-148 ms, p95 235-734 |
+| TCP handshake to the box, AF41 | 3 ms, p95 26 | 16-29 ms, p95 75-180 |
+
+- Neither the host nor the cable queues (H3 out). The queue is the
+  repeater's radio on its way up to the box (H1 or H2).
+- On that way up, the repeater does read the mark, partly: the AF41 handshake
+  waits a fourth to a fifth of the DF one. The "everything BE" of 06/10 was the
+  repeater toward its own Wi-Fi clients.
+- A stream to the iPhone on the LAN (host pairs, IPv4 or IPv6 direct) does
+  not cross that way up. With TeraBox uploading, Bruno saw 3 freezes of
+  ~200 ms in 3 min (the log: 3, the longest 0.9 s), then « fluide » on a later
+  stream (61 fps, 33 ms). The freezes of 24/10 (2 to 27 s) were not reproduced
+  on the iPhone. Two suspects remain:
+  - the Freebox hairpin: a pair srflx → prflx 192.168.1.254 crosses the full
+    way up twice, and a production stream took it that morning;
+  - the M3's own Wi-Fi (H4).
+- The relay logged dozens of other freezes while Bruno was in another app:
+  iOS pauses the page, so there is no retransmission and the page's report
+  comes ~500 ms late. The report counts them apart again (`b54109a2`).
+
+**The cap (E2 by hand, E3 the bench key).**
+- A cap of 50 Mbit/s on the host's other uploads empties the repeater's
+  queue: the box falls back to 3-4 ms median (p95 11-42), and TeraBox's
+  upload goes flat at 50.
+- The stream was never exempt. Three forms were tried:
+  - the executable's policy by its full path, against an all-TCP-and-UDP cap;
+  - the same, against a `-Default` cap;
+  - the executable by its name alone, against a `-Default` cap.
+  Each time the adapter stayed flat at the cap with the stream inside it. The
+  stream's data fell to 0.4-2.8 Mbit/s and its send buffer overflowed: freezes
+  of 4 to 52 s, 1 to 23 s of latency on Bruno's overlay. Whatever the cap does
+  not exempt waits in Windows' own pacer: the TCP handshakes took 0.2-1.2 s.
+  The precedence rule read in Microsoft's documentation did not hold here.
+- An untested reading: the executable's policy gives the flow its DSCP but no
+  throttle, and the cap's throttle applies anyway. To try at the bench first:
+  a throttle of its own on the executable's policy (very high), or the
+  exemption by the stream's local UDP ports.
+- The bench key's mechanism works (E3b, the installed DEV edition at
+  `ce44ad5f`, its SYSTEM worker):
+  - the two policies are set 0.75 s after the channels open;
+  - they are removed ~1 s after the quit, and the adapter follows both times;
+  - a worker without administrator rights says so in one line and caps
+    nothing (E3a);
+  - a page that reconnects 34 s after a quit starts a new session, which sets
+    the cap again.
+- `-IPProtocolMatchCondition Both` reads back as `None`.
+- **Verdict:** `hostcap=` must not be used as it is: it caps the stream with
+  the rest.
 
 ## 4. The model so far (04/10/2026)
 
@@ -2570,16 +2638,16 @@ What the measurements support, in order of the path:
   port's own box, everything BE (checked from the router's port and from the
   bench switch's box, `ec:68`). The audio road would ride VI, not VO, and a
   Linux or macOS host's SCTP rides BK, but only for a client behind the link.
-- The host's own upload (§3, 24/10). Several things are still unknown:
-  - where the queue sits that TeraBox's upload fills (the repeater's radio
-    queue, the airtime of channel 44, or something in the host);
-  - which class the repeater gives a frame it sends over the Wi-Fi 7 link to
-    the box;
-  - whether a cap on the host's other uploads, below what that link carries,
-    empties the queue for a client of the same repeater;
-  - whether Windows' throttle is one budget for everything a policy matches,
-    or one per connection. Microsoft's « Cable Guy » article says aggregate;
-    TeraBox runs several connections, so it is to be checked;
+- The host's own upload (§3, 24/10 and 25/10). Answered on 25/10:
+  - the queue is the repeater's radio on its way up to the box, not the host;
+  - on that way up, the repeater reads AF41 in part;
+  - a cap of 50 Mbit/s empties it;
+  - Windows' throttle is one budget for everything a policy matches: TeraBox's
+    several connections went flat at the cap together.
+  Still open:
+  - why the executable's own policy does not exempt the stream from the cap;
+  - whether the 24/10 freezes came from the Freebox hairpin or from the M3's
+    own Wi-Fi;
   - what rate a product default could take without a link speed to read: a
     fixed one, or one that follows `[HostUpload]` and the freezes.
 
@@ -2608,7 +2676,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `audioframe=5\|10\|20` | the native host's Opus frame in ms (5 the product): half or a quarter of the packets, 5 or 15 ms more before each | `ced222aa` |
 | `aroadpace=<x>`, `aroadwin=<KiB>` | the audio road's pacing and send window (both off by default) | `aea2a192`, `89adcb0f` |
 | `aroadbudget=<%>` | the audio road's resend budget, share of what it sent over 100 ms (default 20) | `210318fd` |
-| `hostcap=<Mbit/s>` | during a native stream, every other upload of the host PC capped (two ActiveStore QoS policies, the executable exempt; Windows, a worker with administrator rights; 24/10, not measured yet) | `0a92009a` |
+| `hostcap=<Mbit/s>` | during a native stream, every other upload of the host PC capped (two ActiveStore QoS policies; Windows, a worker with administrator rights). 25/10: the cap works, but the stream is capped too, the executable's policy notwithstanding: do not use as it is | `0a92009a` |
 
 Environment: `MW_SCTP_RTO_MIN_MS`, `MW_SCTP_SACK_DELAY_MS`;
 `MW_LATENCY_FLAG_SOUND=click|tick` (the server's latency flag also beeps,

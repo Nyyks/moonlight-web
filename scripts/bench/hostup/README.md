@@ -55,9 +55,19 @@ for the 2nd floor), its IP in the Freebox app or `fbx.py hosts`.
 .\hostup_cap.ps1 -Show      # must end with "none of ours"
 ```
 
-Windows applies one QoS policy per outbound flow, the most specific: the
-executable's own policy (DSCP only) wins for the stream, the catch-all cap
-takes everything else.
+Microsoft's precedence rules say the executable's own policy (DSCP only)
+wins for the stream and the catch-all cap takes everything else. Measured on
+25/10/2026, it does not: with the executable named by its path, by its name
+alone, and against a `-Catch Default` cap, the adapter stayed flat at the cap
+with the stream inside it, and the stream froze for 4 to 52 s. The cap itself
+works: under 50 Mbit/s the repeater's queue empties (the box at 3-4 ms). What
+the cap does not exempt waits in Windows' own pacer (0.2-1.2 s for a TCP
+handshake). Next to try at the bench: a throttle of its own on the
+executable's policy, or the exemption by the stream's local UDP ports.
+
+A PowerShell typed by Bruno through a stream must be in the production
+instance: a `--dev` worker runs on his plain token and cannot type into an
+elevated window.
 
 The same thing from the native host itself is the bench key
 `hostcap=<Mbit/s>` (`native_tuning` or `MW_NATIVE_TUNING`; trial S2). The
@@ -65,7 +75,10 @@ worker sets "MoonlightWeb stream <pid>" and "MoonlightWeb host cap <pid>"
 when the channels open, and a detached PowerShell removes them when the
 session ends. Only a worker with administrator rights can set them: the one
 the launcher service starts as SYSTEM (the DEV edition installed), not a
-`--dev` on the user's plain token. Its log lines start with `[HostCap]`. To
+`--dev` on the user's plain token. Its log lines start with `[HostCap]`
+(25/10: set 0.75 s after the channels open, removed ~1 s after the quit; a
+`--dev` worker says « no administrator rights … nothing capped »). It caps
+the stream too, like the hand-made cap above. To
 check by hand that nothing is left, use `hostup_cap.ps1 -Show` (elevated):
 the next worker would sweep anything left behind.
 

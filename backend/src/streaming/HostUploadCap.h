@@ -28,10 +28,10 @@
 //
 // 24/10/2026: the stream from DualRTX to a Wi-Fi client froze for 2 to 27 s
 // whenever TeraBox uploaded 40-125 Mbit/s from DualRTX itself. The stream
-// already left marked AF41, but the queue it waited in sits in a Freebox
-// repeater that reads no mark on what comes in by its cable (06/10). The one
-// lever left to the host, short of touching the house's network, is its own
-// upload: kept under what the path carries, the queue there stays empty.
+// already left marked AF41. The queue sits in the radio of the Freebox
+// repeater the host hangs off, on its way up to the box (measured 25/10). The
+// one lever left to the host, short of touching the house's network, is its
+// own upload: kept under what the path carries, the queue there stays empty.
 //
 // ── How ─────────────────────────────────────────────────────────────────────
 //
@@ -40,12 +40,14 @@
 //  - "MoonlightWeb stream <pid>": this executable's own traffic, its DSCP
 //    (PacketMarking's video value), no cap;
 //  - "MoonlightWeb host cap <pid>": all TCP and UDP, capped at the rate.
-// Windows applies one policy to each outbound flow, the most specific one,
-// and a policy that names an application's path beats one that names none
-// (Microsoft, "Manage QoS Policy", precedence rules): the stream keeps its
-// rate, everything else shares the cap. The QoS Packet Scheduler applies
-// it on the adapters it is bound to (vEthernet (LAN) on DualRTX); a Hyper-V
-// VM leaves by the physical adapter and is not capped.
+// Microsoft's precedence rules ("Manage QoS Policy") say a policy that names
+// an application's path beats one that names none, so the stream would keep
+// its rate. Measured on 25/10/2026, it does not: the stream was capped with
+// everything else, by its path, by its name alone, and against a -Default
+// cap too. Until that is understood, this key caps the stream as well: a
+// bench key only. The QoS Packet Scheduler applies the cap on the adapters
+// it is bound to (vEthernet (LAN) on DualRTX); a Hyper-V VM leaves by the
+// physical adapter and is not capped.
 //
 // Setting a policy takes an administrator: the native host's worker, which
 // the launcher service starts as SYSTEM, has the rights; the server, and a
