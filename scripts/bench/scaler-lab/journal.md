@@ -1829,7 +1829,7 @@ mesure d'une page neuve). Le comparateur donne maintenant sur NVIDIA ce qu'il do
 Apple ; reste mw-arm (Qualcomm, Adreno 618), à la ligne de Bruno après le test dualgpu.
 
 **mw-arm (10:26-10:47, au mot de 59 après le test dualgpu ; Chrome 156 sans tête lancé par la ligne de Bruno,
-tâche Interactive ; serveur du lab relancé sur 8767, Claude Code l'ayant arrêté pour mémoire basse ; 4 connexions
+tâche Interactive ; serveur du lab relancé sur 8767 après un arrêt pour mémoire basse ; 4 connexions
 ssh).** D'abord la sonde CR5 avec le comparateur corrigé de la veille : toujours 298 ms par image (p50 210), FSR1
 341, SGSR1 1 098, la machine saine cette fois (949 Mo libres, échange 464 Mo, charge 1) : la correction de J37 ne
 mord pas sur ce pilote. Quatre micro-bancs dans le même Chrome (`cdpeval.py` à travers le tunnel : `rtxbench.js`,
@@ -2164,8 +2164,7 @@ légère), les oracles donnent le plafond :
 Le déblocage côté client reste une piste mesurable avec ce même labo, avec ou sans le découpage et le QP des blocs
 venus de l'hôte. Il est proposé à Bruno.
 
-La page de comparaison (artefact privé de Bruno) montre recadrages, cartes d'erreur, courbes par image et coûts :
-https://claude.ai/artifact/U4rU6NYjEa7g91RsUCWJ2i
+La page de comparaison (privée, hors dépôt) montre recadrages, cartes d'erreur, courbes par image et coûts.
 
 **Limites.**
 - OpenH264 n'est pas NVENC : il a placé une image clé toutes les 17 images sur le panoramique rapide du jeu à
@@ -2323,8 +2322,7 @@ L'aide de l'hôte pour le déblocage (découpage et QP des blocs) est écartée 
 +0,10 dB après `mwsr`. De la troisième version imaginée par Bruno restent le drapeau de scène et les vecteurs (P7.0,
 §14.5), à sa décision.
 
-La page de comparaison (artefact privé de Bruno) montre recadrages, cartes d'erreur, courbes par image et tableaux :
-https://claude.ai/artifact/9xph62X9iSGa8PBK2PzKEQ
+La page de comparaison (privée, hors dépôt) montre recadrages, cartes d'erreur, courbes par image et tableaux.
 
 **Pour rejouer.**
 - Hors ligne, dans `scripts/bench/scaler-lab/p8/` : `python p8_offline.py prep`, puis `python p8_offline.py encode`,
