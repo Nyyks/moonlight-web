@@ -100,6 +100,12 @@ export class PlayerJoinView {
         try {
             this.info = await BackendClient.playerInfo(this.token);
         } catch (err) {
+            // A live link whose PIN another browser already spent: most often
+            // this same guest in a private tab, so say where the invitation is.
+            if (err?.responseBody?.error === 'bound_elsewhere') {
+                this._renderBoundElsewhere();
+                return;
+            }
             // 404 = the link is dead or was never real. Anything else (offline,
             // 500) is shown the same way: from here they are equally unusable,
             // and the page is not the place to debug a server.
@@ -185,6 +191,18 @@ export class PlayerJoinView {
             <h1>${escapeHtml(t('player.deadTitle'))}</h1>
             <p>${escapeHtml(t('player.deadBody'))}</p>
             <p class="player-muted">${escapeHtml(t('player.deadHint'))}</p>
+        `,
+            'void',
+        );
+    }
+
+    /** The invitation is alive, but tied to the browser that entered its PIN. */
+    _renderBoundElsewhere() {
+        this._shell(
+            `
+            <h1>${escapeHtml(t('player.boundTitle'))}</h1>
+            <p>${escapeHtml(t('player.boundBody'))}</p>
+            <p class="player-muted">${escapeHtml(t('player.boundHint'))}</p>
         `,
             'void',
         );
