@@ -146,4 +146,19 @@ void run_link_freeze_log_tests()
         CHECK_EQ(log.takeClosed(1500, true).size(), size_t(1));
         CHECK(log.takeClosed(1500, true).empty());
     }
+
+    SECTION("LinkFreezeLog — a report gap the page made itself is not the link's");
+    {
+        // The idle desktop of 25/10/2026: the browser held the page at one
+        // timer a second, so every report came 1 s after the last one and
+        // said it left 500 ms late. Nothing was wrong on the wire.
+        CHECK_EQ(LinkFreezeLog::reportsGapOnLink(1001, 500), int64_t(501));
+        CHECK(LinkFreezeLog::reportsGapOnLink(1001, 500) < 1000);
+        // On time, held up on the way: all of it is the link's.
+        CHECK_EQ(LinkFreezeLog::reportsGapOnLink(1800, 0), int64_t(1800));
+        // Both: the page's part comes out, the link keeps the rest.
+        CHECK_EQ(LinkFreezeLog::reportsGapOnLink(2500, 400), int64_t(2100));
+        // A page that does not say (before `late`) is counted as before.
+        CHECK_EQ(LinkFreezeLog::reportsGapOnLink(1200, -1), int64_t(1200));
+    }
 }

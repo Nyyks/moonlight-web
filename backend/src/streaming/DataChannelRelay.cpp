@@ -2127,13 +2127,17 @@ void DataChannelRelay::onInputMessage(const std::string& message, int64_t recvUs
             // the input watchdog only sees a silence while something is held.
             // The one report the browser itself delayed says so (`resumed`).
             // How late the page's timer sent this one (`late`, absent from a
-            // page before it) goes with the freeze to its log line: a gap the
-            // page made itself is not the link's.
+            // page before it) is taken out of the gap: a gap the page made
+            // itself is not the link's, and what is left starts after it. The
+            // figure still goes with a freeze to its log line.
             const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            const qint64 pageLateMs = msg["late"].toInt(-1);
             if (m_LastLinkstatsMs > 0 && !fb.resumed &&
-                nowMs - m_LastLinkstatsMs >= kLinkstatsSilentMs) {
-                m_Freezes.note(m_LastLinkstatsMs + kLinkstatsPeriodMs, nowMs,
-                               LinkFreezeLog::Reports, msg["late"].toInt(-1));
+                LinkFreezeLog::reportsGapOnLink(nowMs - m_LastLinkstatsMs, pageLateMs) >=
+                    kLinkstatsSilentMs) {
+                m_Freezes.note(m_LastLinkstatsMs + kLinkstatsPeriodMs +
+                                   std::max<qint64>(0, pageLateMs),
+                               nowMs, LinkFreezeLog::Reports, pageLateMs);
             }
             m_LastLinkstatsMs = nowMs;
             if (!m_LinkReportsSeen) {

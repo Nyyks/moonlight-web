@@ -50,7 +50,8 @@
 // could have counted them, and nothing in the log said so. Each episode is now
 // handed out once it can no longer stretch (takeClosed), with what saw it and,
 // for a gap in the reports, how late the page itself said it sent the report
-// that ended it: a page whose timer ran late is not a link frozen upstream.
+// that ended it: a page whose timer ran late is not a link frozen upstream, so
+// that delay comes out of the gap before it counts (reportsGapOnLink).
 //
 // Fed from the capture thread and the input thread, read by the stats tick.
 class LinkFreezeLog
@@ -92,6 +93,17 @@ public:
         /// into it.
         bool stretched = false;
     };
+
+    /// What a gap of @p gapMs between two of the receiver's reports leaves to
+    /// the link once the page's own delay is taken out: the report that ended
+    /// it left @p pageLateMs after its time (-1 or 0: on time, or a page that
+    /// does not say). A page the browser holds at one timer a second makes a
+    /// 1 s gap every second with nothing wrong on the wire (25/10/2026: 1,406
+    /// of 1,684 logged freezes were the page's 500 ms, on an idle desktop).
+    static int64_t reportsGapOnLink(int64_t gapMs, int64_t pageLateMs)
+    {
+        return gapMs - (pageLateMs > 0 ? pageLateMs : 0);
+    }
 
     /// The link carried nothing from @p startMs to @p endMs (one clock for
     /// every caller), as @p source saw it. @p pageLateMs: for Reports, how
