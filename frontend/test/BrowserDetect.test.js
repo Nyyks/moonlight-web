@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     decoderRidesOutGaps,
     decoderTakesReferenceRepairs,
+    decodesThroughGaps,
     detectPlatform,
     detectTv,
     isLowMemory,
@@ -241,6 +242,40 @@ describe('BrowserDetect.decoderTakesReferenceRepairs', () => {
         vi.stubGlobal('navigator', { userAgent: MAC_CHROME });
         expect(decoderTakesReferenceRepairs()).toBe(false);
         vi.unstubAllGlobals();
+    });
+});
+
+// The host's answer and this device's verdict, both: an NVENC host told that
+// a Mac takes no repairs still said it heals by invalidation, and the M3
+// decoded on into 32 "Decoding error" (25/10/2026).
+describe('BrowserDetect.decodesThroughGaps', () => {
+    const MAC_CHROME =
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+    const IPHONE_SAFARI =
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
+    const WIN_CHROME =
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+    afterEach(() => localStorage.removeItem('mw_ref_repairs'));
+
+    it('decodes on where the host heals and the device takes it', () => {
+        expect(decodesThroughGaps(true, WIN_CHROME, null)).toBe(true);
+    });
+
+    it('never where the host does not heal', () => {
+        expect(decodesThroughGaps(false, WIN_CHROME, null)).toBe(false);
+        expect(decodesThroughGaps(undefined, WIN_CHROME, null)).toBe(false);
+        // Only a real true: a truthy string from a stray answer is not one.
+        expect(decodesThroughGaps('true', WIN_CHROME, null)).toBe(false);
+    });
+
+    it('never on an Apple device, whatever the host says', () => {
+        expect(decodesThroughGaps(true, MAC_CHROME, null)).toBe(false);
+        expect(decodesThroughGaps(true, IPHONE_SAFARI, null)).toBe(false);
+    });
+
+    it('never on a device that kept the verdict against the repairs', () => {
+        noteDecoderRefusesReferenceRepairs();
+        expect(decodesThroughGaps(true, WIN_CHROME)).toBe(false);
     });
 });
 

@@ -319,6 +319,25 @@ export function decoderTakesReferenceRepairs(
     }
 }
 
+/**
+ * Whether this view decodes on through a gap, naming the lost frames to the
+ * host: only when the host says its encoder heals them with a delta
+ * (`ref_invalidation` in /start's answer) AND this device takes such repairs.
+ * The host's answer alone was not enough: told that a Mac takes none, an NVENC
+ * host still kept its invalidation (one reference instead of several) and
+ * said so, and the Mac decoded on. VideoToolbox then rejected the deltas
+ * already on their way: 32 "Decoding error" in eight minutes on the M3
+ * (25/10/2026), each a new decoder and a keyframe anyway. Where the device
+ * takes none, a gap drops the deltas until a keyframe, asked for at once.
+ * @param {boolean} hostHeals
+ * @param {string} [ua]
+ * @param {Storage|null} [store]
+ * @returns {boolean}
+ */
+export function decodesThroughGaps(hostHeals, ua, store) {
+    return hostHeals === true && decoderTakesReferenceRepairs(ua, store);
+}
+
 /** @param {Storage|null} [store] */
 export function noteDecoderRefusesReferenceRepairs(store = rideOutStore()) {
     try {

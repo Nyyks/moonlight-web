@@ -78,6 +78,7 @@ import {
     IS_WEBKIT,
     SUPPORTS_CANVAS_TEARING,
     decoderRidesOutGaps,
+    decodesThroughGaps,
     mwsrGazeWanted,
     noteDecoderCannotRideOut,
     noteDecoderRefusesReferenceRepairs,
@@ -1176,8 +1177,9 @@ export class StreamView {
         // The host heals a lost frame with a delta (NVENC reference
         // invalidation, /start says so): after a gap this view names the
         // frames it missed and keeps decoding, instead of discarding deltas
-        // until a keyframe — see handleVideoFrame.
-        this._refInvalidation = opts.refInvalidation === true;
+        // until a keyframe — see handleVideoFrame. Not on a device that takes
+        // no such repairs (an Apple one), whatever the host says.
+        this._refInvalidation = decodesThroughGaps(opts.refInvalidation);
         // The size the native host streams, then each `displayformat`'s: a
         // decoded AV1 frame padded past it is cut back to it at the decoder's
         // output (stream/FrameCrop.js). Null for every other host.
