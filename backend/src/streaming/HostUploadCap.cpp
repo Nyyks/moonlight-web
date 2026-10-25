@@ -70,9 +70,11 @@ std::string onScript(unsigned long pid, const std::string& exePath, unsigned mbp
          ") { if (Get-NetQosPolicy -PolicyStore "
          "ActiveStore | Where-Object Name -eq $n) { Remove-NetQosPolicy -Name $n -PolicyStore "
          "ActiveStore -Confirm:$false } }\n";
+    // The highest precedence: at the default 127, the cap wins over it (S1 bis).
     s += "New-NetQosPolicy -Name " + stream +
          " -PolicyStore ActiveStore -AppPathNameMatchCondition " + psQuote(exePath) +
-         " -IPProtocolMatchCondition Both -DSCPAction " + std::to_string(dscp) + " | Out-Null\n";
+         " -IPProtocolMatchCondition Both -DSCPAction " + std::to_string(dscp) +
+         " -Precedence 255 | Out-Null\n";
     s += "New-NetQosPolicy -Name " + cap +
          " -PolicyStore ActiveStore -IPProtocolMatchCondition Both "
          "-ThrottleRateActionBitsPerSecond " +

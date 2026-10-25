@@ -38,16 +38,18 @@
 // Two Windows QoS policies, in the ActiveStore only (gone at the next reboot,
 // never in the registry), named after the worker's process id:
 //  - "MoonlightWeb stream <pid>": this executable's own traffic, its DSCP
-//    (PacketMarking's video value), no cap;
+//    (PacketMarking's video value), no cap, precedence 255;
 //  - "MoonlightWeb host cap <pid>": all TCP and UDP, capped at the rate.
 // Microsoft's precedence rules ("Manage QoS Policy") say a policy that names
 // an application's path beats one that names none, so the stream would keep
-// its rate. Measured on 25/10/2026, it does not: the stream was capped with
-// everything else, by its path, by its name alone, and against a -Default
-// cap too. Until that is understood, this key caps the stream as well: a
-// bench key only. The QoS Packet Scheduler applies the cap on the adapters
-// it is bound to (vEthernet (LAN) on DualRTX); a Hyper-V VM leaves by the
-// physical adapter and is not capped.
+// its rate. Measured on 25/10/2026, it does not: at the same precedence (127,
+// the default) the cap wins, the stream was capped with everything else, by
+// its path, by its name alone, and against a -Default cap too. With
+// -Precedence 255 on the application's policy, a stand-in executable kept 3 ms
+// while every other flow queued 250-370 ms behind the cap (S1 bis). A bench
+// key until a real stream has shown it too. The QoS Packet Scheduler applies
+// the cap on the adapters it is bound to (vEthernet (LAN) on DualRTX); a
+// Hyper-V VM leaves by the physical adapter and is not capped.
 //
 // Setting a policy takes an administrator: the native host's worker, which
 // the launcher service starts as SYSTEM, has the rights; the server, and a

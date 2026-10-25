@@ -67,16 +67,22 @@ void run_host_upload_cap_tests()
         // Leftovers of workers no longer running.
         CHECK(has(s, "'^MoonlightWeb (host cap|stream) (\\d+)$'"));
         CHECK(has(s, "Get-Process -Id ([int]$Matches[2])"));
-        // The exemption: this executable, its own DSCP, no cap.
+        // The exemption: this executable, its own DSCP, no cap, and the highest
+        // precedence, or the cap wins over it.
         const size_t stream = s.find("New-NetQosPolicy -Name 'MoonlightWeb stream 4242'");
         CHECK(stream != std::string::npos);
         CHECK(has(
             s, "-AppPathNameMatchCondition 'C:\\Program Files\\MoonlightWeb\\MoonlightWeb.exe'"));
         CHECK(has(s, "-DSCPAction 34 "));
+        const size_t streamEnd = s.find('\n', stream);
+        const std::string streamLine = s.substr(stream, streamEnd - stream);
+        CHECK(has(streamLine, " -Precedence 255 "));
+        CHECK(!has(streamLine, "-ThrottleRateActionBitsPerSecond"));
         // The cap: everything, 20 Mbit/s in bits per second, ActiveStore only.
         const size_t cap = s.find("New-NetQosPolicy -Name 'MoonlightWeb host cap 4242'");
         CHECK(cap != std::string::npos);
         CHECK(stream < cap);
+        CHECK(!has(s.substr(cap, s.find('\n', cap) - cap), "-Precedence"));
         CHECK(has(s, "-ThrottleRateActionBitsPerSecond 20000000 "));
         CHECK(!has(s, "PolicyStore localhost"));
         size_t at = 0;
