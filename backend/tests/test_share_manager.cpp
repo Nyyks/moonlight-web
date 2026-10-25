@@ -668,6 +668,32 @@ void test_guests_picture_height()
     delete restarted;
 }
 
+void test_link_address_is_per_host_and_kept()
+{
+    SECTION("share: each host's link address is the owner's pick, kept");
+    ShareManager* mgr = freshManager();
+    CHECK_EQ(mgr->linkAddress(QStringLiteral("host-A")), QStringLiteral("auto")); // the default
+    // Only the forms the board offers, and only for a named host.
+    CHECK(!mgr->setLinkAddress(QStringLiteral("host-A"), QStringLiteral("192.168.1.66")));
+    CHECK(!mgr->setLinkAddress(QString(), QStringLiteral("lan")));
+    CHECK(mgr->setLinkAddress(QStringLiteral("host-A"), QStringLiteral("tailscale")));
+    CHECK(mgr->setLinkAddress(QStringLiteral("host-B"), QStringLiteral("iface:wg0")));
+    CHECK_EQ(mgr->linkAddress(QStringLiteral("host-A")), QStringLiteral("tailscale"));
+    CHECK_EQ(mgr->linkAddress(QStringLiteral("host-B")), QStringLiteral("iface:wg0"));
+    CHECK_EQ(mgr->linkAddress(QStringLiteral("host-C")), QStringLiteral("auto"));
+    delete mgr;
+
+    // Picks outlive a restart; Automatic forgets the host's entry.
+    auto* restarted = new ShareManager();
+    CHECK_EQ(restarted->linkAddress(QStringLiteral("host-A")), QStringLiteral("tailscale"));
+    CHECK(restarted->setLinkAddress(QStringLiteral("host-B"), QStringLiteral("auto")));
+    delete restarted;
+    auto* again = new ShareManager();
+    CHECK_EQ(again->linkAddress(QStringLiteral("host-B")), QStringLiteral("auto"));
+    CHECK_EQ(again->linkAddress(QStringLiteral("host-A")), QStringLiteral("tailscale"));
+    delete again;
+}
+
 } // namespace
 
 void run_share_manager_tests()
@@ -689,4 +715,5 @@ void run_share_manager_tests()
     test_clear_secrets_are_memory_only();
     test_share_is_bound_to_its_host();
     test_guests_picture_height();
+    test_link_address_is_per_host_and_kept();
 }

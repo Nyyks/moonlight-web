@@ -18,6 +18,7 @@
 #include "server/ShareManager.h"
 
 #include "common/Logger.h"
+#include "network/LinkAddresses.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -384,6 +385,23 @@ bool ShareManager::setFeedHeight(int height)
     return true;
 }
 
+QString ShareManager::linkAddress(const QString& hostUuid) const
+{
+    return m_LinkAddress.value(hostUuid, QStringLiteral("auto"));
+}
+
+bool ShareManager::setLinkAddress(const QString& hostUuid, const QString& id)
+{
+    if (hostUuid.isEmpty() || !LinkAddresses::isValidId(id)) return false;
+    if (linkAddress(hostUuid) == id) return true;
+    if (id == QLatin1String("auto"))
+        m_LinkAddress.remove(hostUuid);
+    else
+        m_LinkAddress.insert(hostUuid, id);
+    save();
+    return true;
+}
+
 QString ShareManager::name(int slot)
 {
     Slot* s = slotFor(slot);
@@ -725,6 +743,10 @@ void ShareManager::save()
     QJsonObject root;
     root[QStringLiteral("slots")] = slotArray;
     root[QStringLiteral("feedHeight")] = m_FeedHeight;
+    QJsonObject linkAddress;
+    for (auto it = m_LinkAddress.cbegin(); it != m_LinkAddress.cend(); ++it)
+        linkAddress[it.key()] = it.value();
+    root[QStringLiteral("linkAddress")] = linkAddress;
 
     QFile file(sharePath());
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -747,6 +769,12 @@ void ShareManager::load()
     const QJsonObject root = doc.object();
     const int feedHeight = root.value(QStringLiteral("feedHeight")).toInt(kFeedHeight);
     m_FeedHeight = isValidFeedHeight(feedHeight) ? feedHeight : kFeedHeight;
+    const QJsonObject linkAddress = root.value(QStringLiteral("linkAddress")).toObject();
+    for (auto it = linkAddress.begin(); it != linkAddress.end(); ++it) {
+        const QString id = it.value().toString();
+        if (!it.key().isEmpty() && id != QLatin1String("auto") && LinkAddresses::isValidId(id))
+            m_LinkAddress.insert(it.key(), id);
+    }
     const QJsonArray slotArray = root.value(QStringLiteral("slots")).toArray();
     for (const QJsonValue& v : slotArray) {
         const QJsonObject obj = v.toObject();

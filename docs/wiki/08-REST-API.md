@@ -78,10 +78,11 @@ Owner routes need a normal session (any authenticated user — deliberately not 
 
 | Method & path | Access | Description |
 |---|---|---|
-| `GET /api/share/status` | 🔑 | The three player rows: `{slot, state ∈ off\|shared\|binded, name, permissions, access_level ∈ viewer\|gamer\|desktop\|full, streaming, ttl_secs, expires_at, devices[], last_refused?}` + `streaming` count + `remote_reachable`. `expires_at` is **null** on an unlimited invitation, never 0. `remote_reachable` is whether the rendezvous line is up **at this instant** — it never changes a link, it only lets the board say the machine is not answering right now. `?host=` names the host the board is about (the running stream's when absent), for three more fields: `feed_height` ∈ 720\|1080\|1440, the guests' picture the owner picked; `owner_height`, true when that host's guests watch it (the native host) rather than choosing their own; `shared_feed`, true when they watch one shared feed (the switch on, Windows). |
+| `GET /api/share/status` | 🔑 | The three player rows: `{slot, state ∈ off\|shared\|binded, name, permissions, access_level ∈ viewer\|gamer\|desktop\|full, streaming, ttl_secs, expires_at, devices[], last_refused?}` + `streaming` count + `remote_reachable`. `expires_at` is **null** on an unlimited invitation, never 0. `remote_reachable` is whether the rendezvous line is up **at this instant** — it never changes a link, it only lets the board say the machine is not answering right now. `?host=` names the host the board is about (the running stream's when absent), for three more fields: `feed_height` ∈ 720\|1080\|1440, the guests' picture the owner picked; `owner_height`, true when that host's guests watch it (the native host) rather than choosing their own; `shared_feed`, true when they watch one shared feed (the switch on, Windows). And the address menu: `link_addresses[]` (`{id: auto}`, then `{id, kind ∈ lan\|tailscale\|other, address, adapter}`), `link_address`, that host's pick (`auto` by default), and `link_address_missing`, true when the pick names a network this PC no longer has. |
 | `POST /api/share/feed` | 🔑 | `{height ∈ 720\|1080\|1440}` — the guests' picture on a native host, one for every row, kept in `share.json` (1080 by default). A feed with guests on it is rebuilt at the new height under them; they follow within a second or two. **400** for any other height. |
-| `POST /api/share/slots/:n/activate` | 🔑 | Mint a link + PIN, revoking the slot's previous pair. Body `{ttl_secs}`, plus `{host_uuid, app_id}` when no stream is running (the board opened cold from a host's ⋯ menu) — **400** for an unlisted lifetime or a missing host, **404** for an unknown host/app. With a stream up, the running host and app win and the body's are ignored. Returns `{url, pin, local_only, …}`. |
-| `POST /api/share/slots/:n/credentials` | 🔑 | The same `{url, pin, local_only}` again, for an owner reopening the row on a live share. `{available:false}` when the process restarted since — only the digests are persisted. POST, not GET: it hands out a credential, so it goes through the CSRF/origin gate. |
+| `POST /api/share/link-address` | 🔑 | `{host_uuid, link_address}` — the address that host's guest links carry: `auto`, `lan`, `tailscale` or `iface:<adapter>`, kept per host in `share.json`. A live share keeps its token and PIN; the board fetches its credentials again for the new link. **400** for no host, or an id the menu does not offer right now. |
+| `POST /api/share/slots/:n/activate` | 🔑 | Mint a link + PIN, revoking the slot's previous pair. Body `{ttl_secs}`, plus `{host_uuid, app_id}` when no stream is running (the board opened cold from a host's ⋯ menu) — **400** for an unlisted lifetime or a missing host, **404** for an unknown host/app. With a stream up, the running host and app win and the body's are ignored. Returns `{url, pin, reach, local_only, …}`. |
+| `POST /api/share/slots/:n/credentials` | 🔑 | The same `{url, pin, reach, local_only}` again, for an owner reopening the row on a live share. `{available:false}` when the process restarted since — only the digests are persisted. POST, not GET: it hands out a credential, so it goes through the CSRF/origin gate. |
 | `POST /api/share/slots/:n/permissions` | 🔑 | `{gamepad, keyboardMouse, hid}`, accepted **at any time**, mid-stream included — the new policy is pushed down to the live worker. `hid` (wheels and radios sent as themselves) only counts with `gamepad`; granting or taking it mid-stream plugs the guest's devices in or pulls them out. **409** only when the slot has no activation. |
 | `POST /api/share/slots/:n/ttl` | 🔑 | `{ttl_secs}` ∈ 3600 / 14400 / 28800 / 86400 / 172800 / 0 (unlimited). **400** otherwise. Shortening below the time already served expires the invitation on the spot. |
 | `POST /api/share/slots/:n/name` | 🔑 | `{name}` — the row's label, 32 chars, empty restores "Player N". Player slots only: **404** for an owner slot. |
@@ -106,7 +107,16 @@ address changed hands out the current form without being revoked.
 - Otherwise: `https://{the host's default-route LAN IPv4}[:port]/p/{token}`, and `local_only` is **true**.
   Self-signed, same network only. Never loopback — the guest is on another PC.
 
-Only those two forms are ever minted. A share link lives for weeks in somebody
+That is Automatic. The owner can pin a host's links to one network on its board
+(`POST /api/share/link-address`): `https://{that address}[:port]/p/{token}`, the
+LAN even with a line up, Tailscale's 100.x, or another card's address. The
+networks that exist only inside the PC (Hyper-V's Default Switch, WSL,
+VirtualBox, VMware, Docker, libvirt) are never offered. `reach` says where the
+link opens from: `public`, `lan`, `tailscale` or `other`. A pinned network that
+is gone (Tailscale disconnected) gives the Automatic link with
+`link_address_missing: true`, and the pick is kept.
+
+Only those forms are ever minted. A share link lives for weeks in somebody
 else's chat window, so it is deliberately **not** gated on the line being up at
 the moment it is created: an invitation is opened tonight or tomorrow, and
 refusing to mint one over a thirty-second blip would be absurd. `remote_reachable`

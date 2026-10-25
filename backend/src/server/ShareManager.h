@@ -223,6 +223,13 @@ public:
     /// feedHeightChanged() rebuilds their feed at the new size. False for a
     /// height not offered.
     bool setFeedHeight(int height);
+
+    /// The address a guest link of @p hostUuid carries, as the owner picked it
+    /// on that host's board: "auto" until they do (LinkAddresses for the forms).
+    QString linkAddress(const QString& hostUuid) const;
+    /// Remember it for that host. False for an empty host or an id of no known
+    /// form; "auto" forgets the host's entry.
+    bool setLinkAddress(const QString& hostUuid, const QString& id);
     QString name(int slot);
 
     /// Revoke the activation: token, PIN and cookies die, and any live stream
@@ -410,6 +417,7 @@ private:
 
     QHash<int, Slot> m_Slots;
     int m_FeedHeight = kFeedHeight;
+    QHash<QString, QString> m_LinkAddress; ///< host uuid → LinkAddresses id
     QHash<QString, RateEntry> m_RateLimits;
     QTimer* m_SweepTimer = nullptr;
 

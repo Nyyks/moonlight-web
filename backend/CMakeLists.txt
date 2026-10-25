@@ -317,6 +317,7 @@ add_executable(mw-server
     src/network/RendezvousClient.cpp
     src/network/AddressRace.cpp
     src/network/UPNPClient.cpp
+    src/network/LinkAddresses.cpp
     src/network/RouterPortCore.cpp
     src/network/RouterPortAllocator.cpp
     src/network/StunClient.cpp

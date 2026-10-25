@@ -80,6 +80,7 @@ add_executable(run_tests
     test_relay_frame_log.cpp
     test_ice_priority.cpp
     test_net_classify.cpp
+    test_link_addresses.cpp
     test_audio_path_log.cpp
     test_packet_marking.cpp
     test_send_pacer.cpp
