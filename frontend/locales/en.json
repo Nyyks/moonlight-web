@@ -794,6 +794,7 @@
         "statLegNet": "Network",
         "statLegLinkQueue": "Link queue",
         "statLegJitter": "Jitter buffer",
+        "statLegSum": "Sum of the stages",
         "statLegMeasured": "Measured (host → drawn)",
         "statLegAudio": "Audio buffer",
         "statLegAudioDetail": "Audio floor / min · jitter · made up",

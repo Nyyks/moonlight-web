@@ -794,6 +794,7 @@
         "statLegNet": "网络",
         "statLegLinkQueue": "链路排队",
         "statLegJitter": "抖动缓冲",
+        "statLegSum": "各阶段之和",
         "statLegMeasured": "实测（主机 → 绘制）",
         "statLegAudio": "音频缓冲",
         "statLegAudioDetail": "音频下限 / 最小 · 抖动 · 补偿",

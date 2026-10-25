@@ -125,6 +125,7 @@ import {
 import { drawCapFor } from '../stream/RenderPacing.js';
 import { ContentAgeProbe } from '../stream/ContentAgeProbe.js';
 import { FrameLog } from '../stream/FrameLog.js';
+import { latencyHeadline } from '../stream/LatencyHeadline.js';
 import {
     AudioStatsSampler,
     findAudioPlayout,
@@ -1098,6 +1099,11 @@ export class StreamView {
         // of legs, and the per-frame log a bench fetches (`mwFrameLog.csv()`).
         this._frameLog = new FrameLog();
         this._e2eMeasuredStats = new SlidingStats(2000);
+        // The last draw and that frame's age, and the last frame in: what the
+        // card's headline reads a freeze from (stream/LatencyHeadline.js).
+        this._lastDrawnAt = 0;
+        this._lastDrawnE2e = NaN;
+        this._lastFrameInAt = 0;
         if (!this._standby) window.mwFrameLog = this._frameLog;
         // This screen's refresh grid, for a native host that aims each frame at
         // one refresh (cadence=deadline, plan framerate-hote §13) — see
@@ -4987,6 +4993,8 @@ export class StreamView {
                     key: frameLog ? frameLog.key : false,
                 });
                 if (e2e === e2e) this._e2eMeasuredStats.addSample(e2e);
+                this._lastDrawnAt = drawStart + renderMs;
+                this._lastDrawnE2e = e2e;
                 if (renderMs >= 0 && renderMs < 5000) this._clientRenderStats.addSample(renderMs);
                 // …and how that time splits between our work and waiting on the
                 // GPU/compositor, which is what tells back-pressure from cost.
@@ -6860,8 +6868,16 @@ export class StreamView {
             // The same way measured whole, frame by frame (stream/FrameLog.js):
             // shown, not added — it is what the sum above should read, and the
             // gap between the two is a leg nobody times. Main-thread path only.
+            // The headline takes it when it has one (stream/LatencyHeadline.js),
+            // so the sum gets its own row, just above.
             if (!isMedia && !this._useWorker) {
                 const m = this._e2eMeasuredStats;
+                rows.push(
+                    legRow(
+                        escapeHtml(t('stream.statLegSum')),
+                        haveLatency ? latency.toFixed(1) + 'ms' : '–',
+                    ),
+                );
                 rows.push(
                     legRow(
                         escapeHtml(t('stream.statLegMeasured')),
@@ -6898,11 +6914,30 @@ export class StreamView {
                     );
                 }
             }
-            if (haveLatency) {
-                avgLatency = latency.toFixed(1) + 'ms';
-                latencyDetail = rows.join('');
-                latencyTotalMs = latency;
-                latencyP99Ms = latencyP99;
+            if (haveLatency) latencyDetail = rows.join('');
+            // The headline: the frame log's measure where there is one, the
+            // picture's age while it is frozen, the sum otherwise (25/10/2026:
+            // the sum said 78 ms while the frames came 4 s late).
+            const measuredHere = !isMedia && !this._useWorker;
+            const ages = this._e2eMeasuredStats;
+            const head = latencyHeadline({
+                sumMs: haveLatency ? latency : NaN,
+                sumP99Ms: haveLatency ? latencyP99 : NaN,
+                measured:
+                    measuredHere && ages.count > 0
+                        ? { count: ages.count, avg: ages.avg, p99: ages.percentile(0.99) }
+                        : null,
+                lastE2eMs: measuredHere ? this._lastDrawnE2e : NaN,
+                sinceDrawMs: now - this._lastDrawnAt,
+                sinceRxMs: now - this._lastRxAt,
+                silentAfterMs: LINK_STALL_MS,
+                framesSinceDraw: this._lastFrameInAt > this._lastDrawnAt,
+                hidden: typeof document !== 'undefined' && document.hidden === true,
+            });
+            if (head.source !== 'none') {
+                avgLatency = head.ms.toFixed(1) + 'ms';
+                latencyTotalMs = head.ms;
+                latencyP99Ms = head.p99Ms;
             }
         }
         const showDetail = this._latencyDetail && latencyDetail !== '';
@@ -7663,6 +7698,7 @@ export class StreamView {
         // which has its own time origin, can measure the hop to decode().
         const arrivalAbs = performance.timeOrigin + performance.now();
         this._lastRxAt = arrivalAbs - performance.timeOrigin;
+        this._lastFrameInAt = this._lastRxAt;
         // Stop processing frames once quit() has started.  The DC may still
         // deliver queued messages during the async HTTP /quit call.
         if (this._quitting) return;

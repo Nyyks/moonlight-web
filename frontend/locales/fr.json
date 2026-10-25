@@ -794,6 +794,7 @@
         "statLegNet": "Réseau",
         "statLegLinkQueue": "File d'attente du lien",
         "statLegJitter": "Tampon",
+        "statLegSum": "Somme des étapes",
         "statLegMeasured": "Mesurée (hôte → dessin)",
         "statLegAudio": "Tampon audio",
         "statLegAudioDetail": "Plancher audio / min · gigue · inventé",
