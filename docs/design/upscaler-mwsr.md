@@ -1461,6 +1461,7 @@ upscalers spatiaux.
 - [ ] ~~P7.1 (si go) noyau `mwsr` avec histoire adaptative au mouvement, cran `mwsr-t` des deux renderers, campagne allégée, A/B de Bruno à faible débit~~ : sans objet, la porte de P7.0 est restée fermée
 - [x] **P8.0, faite le 25/10 (journal J43, §14.6) : la porte reste fermée.** Déblocage côté client avant `mwsr`, un seuillage DCT sur des grilles 8×8 décalées : +0,33 dB sur le flux seul (x264), mais après `mwsr`, sur le clip CoD en 1440p, +0,02 à +0,09 dB en 720p à 4 Mbit/s (la porte demandait +0,1) ; pas de passe dans le produit
 - [ ] L'aide de l'hôte (drapeau de scène, vecteurs) : à la décision de Bruno ; le déblocage guidé par le découpage et le QP des blocs est écarté par P8.0 [`high`]
+- [x] **Les versions 2 et 3 dans le menu de débogage, faites le 25/10 à la demande de Bruno (§14.7, journal J44).** Le noyau précédé du déblocage de P8.0 : seuil fixe 8 borné à 2 (version 2), ou force réglée sur le QP de chaque image, lu dans l'en-tête de sa tranche (version 3). WebGPU seul, builds de débogage seuls, jamais en auto. Vérifiées sur SwiftShader ; reste l'œil de Bruno
 
 **Dépendances à demander tôt** : un téléphone Android de prêt (Snapdragon 8 Gen 1 ou plus, et
 un Mali si possible) ; les créneaux Mac et iPhone pour P0 et P5 ; `malioc` installé sur DualRTX.
@@ -1760,6 +1761,41 @@ l'hôte pour le déblocage (découpage et QP des blocs) ne vaut pas son coût : 
 +0,10 dB après `mwsr`. Le filtre coûterait environ 500 multiplications par pixel du flux sur 16 grilles, la moitié
 en damier ; il n'a pas été chronométré sur GPU. La page de comparaison faite pour Bruno montre recadrages, cartes
 d'erreur, courbes par image et tableaux.
+
+### 14.7 Les versions 2 et 3, dans le menu de débogage (25/10/2026)
+
+Bruno garde `mwsr` tel quel pour la production : c'est la version 1. Il a demandé les deux autres dans la liste
+déroulante, pour les juger lui-même. Elles n'existent que dans les builds de débogage, sur WebGPU ; « auto » et les
+builds de production ne les prennent jamais.
+
+- **MoonlightWeb 2** : le filtre de P8.0 avant le noyau, à force fixe : seuil 8, changement de luma borné à 2. Des
+  réglages mesurés au labo, c'est le seul qui ne perd dans aucun des huit cas (+0,03 à +0,16 dB). Le seuil 12 borné
+  à 4 gagne un peu plus en moyenne (+0,10 contre +0,08), mais perd 0,14 dB sur l'explosion en 720p à 10 Mbit/s.
+- **MoonlightWeb 3** : la même passe, avec une force réglée sur le QP de chaque image. Le seuil vaut 0,4 fois le pas
+  de quantification 2^((QP − 4)/6), plafonné à 12. Le changement de luma est borné au tiers du seuil, 2 au moins.
+  - QP 34 et plus : seuil 12 borné à 4 ;
+  - QP 28 : environ seuil 6 borné à 2 ;
+  - QP 22 : seuil 3 ;
+  - sous QP 20 : aucune passe.
+  Le facteur vient du balayage hors ligne, où 0,25 à 0,3 était le mieux pour le flux seul. Il est relevé parce
+  qu'au labo, après `mwsr`, les réglages plus forts gagnaient. Ce choix n'est pas mesuré tel quel : les QP des
+  encodages du labo n'ont été qu'estimés, d'après leur PSNR.
+- **Le QP vient de l'hôte sans rien lui demander.** Son encodeur l'écrit dans l'en-tête de chaque tranche :
+  26 + `init_qp_minus26` du PPS + `slice_qp_delta`. Le client le lit avant le décodage (`SliceQp.js`, H.264 et
+  HEVC). Cela marche donc avec Sunshine, Apollo, Wolf ou l'hôte natif, sans message en plus. En AV1, ou quand un
+  en-tête ne se lit pas, la version 3 prend la force de la version 2.
+- **Le coût** : un dispatch de calcul pour les 16 grilles, avec des sommes en virgule fixe par atomiques, puis une
+  passe de rendu, à la taille du flux. Quand ni l'une ni l'autre n'est choisie, rien n'est construit et aucun
+  en-tête n'est lu (`wantsFrameQp`). Le coût n'est pas chronométré sur GPU : une image 720p demande environ 1 s sur
+  SwiftShader.
+- **Vérifié** (journal J44) :
+  - le lecteur de QP contre l'analyseur d'en-têtes de ffmpeg, sur six flux x264 et x265 (P seules, B, prédiction
+    pondérée, 4:4:4, deux tranches) ;
+  - les passes du produit contre numpy, sur SwiftShader : au plus un niveau d'écart, 0,001 en moyenne ;
+  - le vrai `WebGpuRenderer` dans les trois modes : sans erreur, et l'image de QP 18 laissée telle quelle
+    (`deblock_check.py`).
+
+Reste l'œil de Bruno, sur l'instance de développement.
 
 ## 15. Deux idées de Bruno du 23/10/2026 : les aplats, et les zones du regard
 

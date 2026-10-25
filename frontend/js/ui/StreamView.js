@@ -58,6 +58,7 @@ import {
     isHevcHdrProfile,
     isChroma444Profile,
 } from '../util/Mp4Muxer.js';
+import { SliceQpReader } from '../util/SliceQp.js';
 import {
     findSequenceHeader,
     buildAv1DecoderConfigs,
@@ -717,6 +718,11 @@ export class StreamView {
         // 'video' is the <video> sink, in SDR too.
         let forceCanvas2d = false;
         let forceVideo = false;
+        // The debug menu's mwsr 2 and 3 ('mwsr-db', 'mwsr-dbq'): mwsr on
+        // WebGPU with the deblocking of DeblockShader.js before it, at a fixed
+        // strength or one per frame from its QP. Never 'auto', never a release
+        // build (SettingsView keeps the menu to debug builds).
+        let mwsrDeblock = null;
         if (videoEnhancement === 'on') {
             let sel = videoEnhancementAlgo || 'auto';
             if (sel === 'canvas2d') {
@@ -725,6 +731,9 @@ export class StreamView {
             } else if (sel === 'video') {
                 forceVideo = true;
                 sel = 'off';
+            } else if (sel === 'mwsr-db' || sel === 'mwsr-dbq') {
+                mwsrDeblock = sel === 'mwsr-db' ? 'fixed' : 'qp';
+                sel = 'mwsr';
             }
             if (sel === 'auto') {
                 // MWSR in the flavour this device class runs best, none on an
@@ -915,6 +924,8 @@ export class StreamView {
             );
         }
         this._videoEnhancementAlgo = algo;
+        // What the WebGPU renderer is told for mwsr 2 / 3 (null: plain mwsr or none).
+        this._mwsrDeblock = algo === 'mwsr' ? mwsrDeblock : null;
         // Firefox: the plain picture on WebGL2, its 2D canvas copies each
         // frame on the main thread (geckoPresentsOnPlainWebGl). iOS: the same,
         // its 2D canvas blurs under the pinch zoom (iosPresentsOnPlainWebGl).
@@ -1301,6 +1312,7 @@ export class StreamView {
         this.decoderConfigured = false;
         this.decoderConfiguring = false;
         this.nalParser = new NalParser();
+        this._sliceQp = null; // mwsr 3's QP reader (SliceQp.js), made on its first frame
         this.frameQueue = [];
         this.pendingFrames = []; // frames buffered before decoder config
         this.frameCount = 0;
@@ -2657,6 +2669,8 @@ export class StreamView {
                     frameSize: this._frameSize,
                     // mwsr's gaze zone (a lab key, phones and tablets only).
                     gazeZone: mwsrGazeWanted(),
+                    // mwsr 2 / 3's deblocking (the debug menu's), null otherwise.
+                    deblock: this._mwsrDeblock,
                 },
                 [offscreen],
             );
@@ -2678,6 +2692,7 @@ export class StreamView {
                 ceiling: this._enhancerCeiling,
                 yuv444: this._yuv444,
                 gazeZone: mwsrGazeWanted(),
+                deblock: this._mwsrDeblock,
                 plainWebGl: this._plainWebGl,
                 hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                 hdrTonemap: this._hdrTonemap,
@@ -3827,6 +3842,9 @@ export class StreamView {
             });
             // The frame's size: the picture's motion, for the gaze zone of mwsr.
             if (this._renderer) this._renderer.noteEncodedFrame(avccData.length, isKeyframe);
+            // mwsr 3: the frame's QP, from its first slice header (nothing read otherwise).
+            if (this._renderer && this._renderer.wantsFrameQp)
+                this._renderer.noteFrameQp(timestamp, this._frameQp(data));
             this._trackChunkSubmit(timestamp, backendTs, {
                 arrived: arrivalAbs > 0 ? arrivalAbs - performance.timeOrigin : 0,
                 bytes: avccData.length,
@@ -3852,6 +3870,20 @@ export class StreamView {
             this.stats.dropped++;
             this._handleDecoderError(err);
         }
+    }
+
+    /**
+     * The QP of a frame for mwsr 3 (SliceQp.js), from its Annex B access unit;
+     * the reader made on first use, per codec.
+     * @param {Uint8Array} annexB
+     * @returns {number|null}
+     */
+    _frameQp(annexB) {
+        const codec = this.nalParser.codec;
+        if (!this._sliceQp || this._sliceQp.codec !== codec) {
+            this._sliceQp = new SliceQpReader(codec);
+        }
+        return this._sliceQp.read(annexB);
     }
 
     /**
@@ -5391,6 +5423,8 @@ export class StreamView {
                         yuv444: this._yuv444,
                         // mwsr's gaze zone (a lab key, phones and tablets only).
                         gazeZone: mwsrGazeWanted(),
+                        // mwsr 2 / 3's deblocking (the debug menu's), null otherwise.
+                        deblock: this._mwsrDeblock,
                         plainWebGl: this._plainWebGl,
                         hdr: (this._useVideoSink && this._hdrEnabled) || this._hdrLinear,
                         hdrTonemap: this._hdrTonemap,
@@ -6580,6 +6614,20 @@ export class StreamView {
                   : { fsr1: 'FSR1', nis: 'NIS', sgsr: 'SGSR', mwsr: 'MWSR' }[
                         this._videoEnhancementAlgo
                     ] || 'SGSR';
+            if (this._videoEnhancementAlgo === 'mwsr' && this._mwsrDeblock && !passIdle) {
+                enhancerName = this._mwsrDeblock === 'qp' ? 'MWSR 3' : 'MWSR 2';
+                // mwsr 3: the last frame's QP and the threshold it gave (the
+                // main-thread renderer; the worker's stays out of reach).
+                const last = this._renderer && this._renderer.deblockLast;
+                if (this._mwsrDeblock === 'qp' && last) {
+                    enhancerName +=
+                        ' (QP ' +
+                        (last.qp === null ? '?' : last.qp) +
+                        ', ' +
+                        (last.thr ? 't' + last.thr.toFixed(1) : 'off') +
+                        ')';
+                }
+            }
             // Stepped down by the governor: say so, otherwise the card reads as
             // if the user's setting silently changed.
             if (this._enhancerDegraded && !passIdle) enhancerName += ' (auto)';

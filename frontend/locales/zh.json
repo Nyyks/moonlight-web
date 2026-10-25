@@ -493,6 +493,8 @@
         "algoQualGpu": "画质（FSR1 WebGPU）",
         "algoMwsrGl": "MoonlightWeb（mwsr WebGL2）",
         "algoMwsrGpu": "MoonlightWeb（mwsr WebGPU）",
+        "algoMwsrDbGpu": "MoonlightWeb 2（mwsr + 去块 WebGPU）",
+        "algoMwsrDbqGpu": "MoonlightWeb 3（mwsr + 按 QP 去块 WebGPU）",
         "language": "语言",
         "languageDesc": "界面语言。更改后页面将重新加载。",
         "controllers": "手柄",

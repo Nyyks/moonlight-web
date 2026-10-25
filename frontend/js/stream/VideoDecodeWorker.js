@@ -55,6 +55,7 @@ import {
     CODEC_AV1,
 } from '../util/Av1Utils.js';
 import { createVideoRenderer } from './renderers/createRenderer.js';
+import { SliceQpReader } from '../util/SliceQp.js';
 import { PipelineDiag } from './PipelineDiag.js';
 import { shouldFlushAtKeyframe } from './DecodeQueuePolicy.js';
 import { EnhancerGovernor, ladderRung, rendererAlgo } from './EnhancerGovernor.js';
@@ -78,6 +79,8 @@ const S = {
     decoderConfigured: false,
     decoderConfiguring: false,
     nalParser: null,
+    /** mwsr 3's QP reader (SliceQp.js), made on its first frame: null otherwise. */
+    sliceQp: null,
 
     pendingFrames: [],
     frameQueue: [],
@@ -768,6 +771,8 @@ function decodeFrame(data, isKeyframe, backendTs, arrivalAbs) {
         const chunk = new EncodedVideoChunk({ type, timestamp, duration: 16667, data: avccData });
         // The frame's size: the picture's motion, for the gaze zone of mwsr.
         if (S.renderer) S.renderer.noteEncodedFrame(avccData.length, isKeyframe);
+        // mwsr 3: the frame's QP, from its first slice header (nothing read otherwise).
+        if (S.renderer && S.renderer.wantsFrameQp) S.renderer.noteFrameQp(timestamp, frameQp(data));
         trackChunkSubmit(timestamp, backendTs);
         if (arrivalAbs > 0) addStageSample(S._arriveSamples, nowAbs() - arrivalAbs);
         S.decoder.decode(chunk);
@@ -781,6 +786,13 @@ function decodeFrame(data, isKeyframe, backendTs, arrivalAbs) {
         S.stats.dropped++;
         handleDecoderError(err);
     }
+}
+
+/** The QP of a frame for mwsr 3 (SliceQp.js); the reader made on first use, per codec. */
+function frameQp(annexB) {
+    const codec = S.nalParser.codec;
+    if (!S.sliceQp || S.sliceQp.codec !== codec) S.sliceQp = new SliceQpReader(codec);
+    return S.sliceQp.read(annexB);
 }
 
 // ── AV1 pipeline ─────────────────────────────────────────────────────────────
@@ -1086,6 +1098,8 @@ self.onmessage = (e) => {
                 hdr: !!m.hdr,
                 // The mwsr kernel's gaze zone (BrowserDetect.mwsrGazeWanted, on main).
                 gazeZone: !!m.gazeZone,
+                // mwsr 2 / 3's deblocking (the debug menu's), null otherwise.
+                deblock: m.deblock || null,
             }).then((r) => {
                 S.renderer = r;
                 // The setting is the ceiling: the governor only steps below

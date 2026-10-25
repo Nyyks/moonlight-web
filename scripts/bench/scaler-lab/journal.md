@@ -2339,3 +2339,61 @@ https://claude.ai/artifact/9xph62X9iSGa8PBK2PzKEQ
 - Un quart de l'écran.
 - Des forces choisies d'avance.
 - Des mesures (PSNR, FLIP), sans comparaison à l'œil en aveugle.
+
+## 2026-10-25 — J44, les versions 2 et 3 de MoonlightWeb dans le menu de débogage
+
+**La demande.** P8.0 fermé, Bruno garde `mwsr` tel quel pour la production. Il demande les deux autres versions
+dans la liste déroulante des builds de débogage, avec les réglages qui me semblent les meilleurs. La version 3 doit
+s'appuyer sur ce que l'hôte sait. Le plan les décrit au §14.7.
+
+**Les réglages.**
+- **Version 2 : seuil 8 borné à 2.** Sur les huit cas du labo de J43 (deux fenêtres du clip, deux tailles, deux
+  débits), c'est le seul réglage qui ne perd nulle part : +0,03 à +0,16 dB, +0,08 en moyenne. Le seuil 12 borné à 4
+  fait +0,10 en moyenne, mais −0,14 dB et FLIP +0,0024 sur l'explosion en 720p à 10 Mbit/s.
+- **Version 3 : seuil = 0,4 × 2^((QP − 4)/6), plafonné à 12, borné au tiers (2 au moins), aucune passe sous QP 20.**
+  - Hors ligne, sur le flux seul, le meilleur seuil suivait le QP avec un facteur de 0,25 à 0,3 (sweep2.json : QP
+    34 à 37 → seuils 6 à 12, QP 28 à 31 → 4 à 12, QP 22 à 25 → 3 à 8).
+  - Au labo, après `mwsr`, les forces plus grandes gagnaient, d'où 0,4.
+  - Les QP des encodages du labo (l'encodeur de Chrome) ne sont pas connus. Leur PSNR, rapproché des encodages x264
+    hors ligne, les place vers 28 à 29 à haut débit et vers 31 à 39 à bas débit : le facteur donne alors des seuils
+    de 6 à 7, et de 9 au plafond de 12. C'est une estimation, pas une mesure de ce réglage.
+- **Le QP de l'hôte.** Il est dans l'en-tête de chaque tranche, écrit par l'encodeur de l'hôte. `SliceQp.js` le lit
+  avant le décodage, en H.264 et en HEVC, jusqu'à `slice_qp_delta`. Le reste de l'en-tête est lu au passage : jeux
+  d'images de référence (prédits ou non), images de long terme, modification des listes, prédiction pondérée,
+  marquage des références. La lecture s'arrête à la première tranche. En AV1, ou sur un en-tête illisible, la
+  version 3 prend la force de la version 2.
+
+**Le produit.**
+- Les valeurs du menu `mwsr-db` et `mwsr-dbq` deviennent `mwsr` plus l'option `deblock` 'fixed' ou 'qp' du
+  `WebGpuRenderer`, dans les deux chemins (fil principal et worker). L'échelle de l'enhancer voit `mwsr`.
+- `DeblockShader.js` fait d'abord un dispatch de calcul : un groupe par bloc 8×8 et par grille (z = la grille,
+  16), les sommes ajoutées par atomiques en virgule fixe (1/256 de niveau). Une passe de rendu écrit ensuite
+  l'image que le noyau lit.
+- Le labo faisait un dispatch par grille, avec des additions simples : ce sont les mêmes sommes, à l'arrondi près.
+- SDR seulement : sur les intermédiaires HDR, la passe se coupe d'elle-même.
+- Le QP de chaque image suit son horodatage jusqu'au dessin. L'image de QP 18 saute les deux passes.
+- Coût nul quand rien n'est choisi : `wantsFrameQp` vaut faux, aucun en-tête n'est lu et aucune ressource n'est
+  construite. `test/DeblockShader.test.js` le vérifie sur un faux GPU.
+- Le panneau de statistiques affiche « MWSR 2 », ou « MWSR 3 (QP n, tx) » quand le rendu tourne sur le fil
+  principal.
+
+**Les contrôles.**
+- `test/SliceQp.test.js` : six flux x264 et x265 de huit images (P seules à tampon d'une image, B en pyramide avec
+  prédiction pondérée et deux tranches, Baseline en CAVLC, HEVC P seules, HEVC B pondérées en deux tranches, HEVC
+  4:4:4 avec listes de quantification et GOP ouvert). Chaque QP est égal à celui que lit l'analyseur d'en-têtes de
+  ffmpeg (`trace_headers`). S'ajoutent les cas d'un jeu de paramètres manquant, d'un en-tête coupé, de l'AV1 et
+  d'un corps de tranche brouillé.
+- `deblock_check.py` sur SwiftShader, une image 720p du clip des nuages à 4 Mbit/s (x264) :
+  - les passes seules contre numpy (`p8_filters.dct_shrink`) : au plus un niveau d'écart, 0,0009 à 0,0012 en
+    moyenne, aux forces t8c2, t12c4 et t3,2c2, environ 1 s chacune ;
+  - le `WebGpuRenderer` avec `mwsr` : sans erreur WebGPU ; son image déblocée est identique aux passes seules ;
+    l'image 1440p s'écarte de `mwsr` seul à 51,5 dB (version 2) et à 48,0 dB (version 3, QP 36) ; l'image de QP 18
+    est identique à celle de `mwsr` seul. chrome left: 0.
+- `npm run check` et vitest verts.
+
+**Limites.** Rien n'est chronométré sur GPU. Le facteur 0,4 de la version 3 n'est pas mesuré tel quel. Le gain
+mesuré par P8.0 reste petit (au mieux +0,1 à +0,3 dB) : ces versions servent à ce que Bruno juge à l'œil.
+
+**Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/deblock_check.py`, puis `npx vitest run
+test/SliceQp.test.js test/DeblockShader.test.js` dans `frontend/`. Les flux de test viennent d'un script
+(ffmpeg, `trace_headers`) gardé hors du dépôt ; leur contenu est dans `test/fixtures/slice-qp.json`.

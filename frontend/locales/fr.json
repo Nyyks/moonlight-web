@@ -493,6 +493,8 @@
         "algoQualGpu": "Qualité (FSR1 WebGPU)",
         "algoMwsrGl": "MoonlightWeb (mwsr WebGL2)",
         "algoMwsrGpu": "MoonlightWeb (mwsr WebGPU)",
+        "algoMwsrDbGpu": "MoonlightWeb 2 (mwsr + déblocage WebGPU)",
+        "algoMwsrDbqGpu": "MoonlightWeb 3 (mwsr + déblocage selon le QP WebGPU)",
         "language": "Langue",
         "languageDesc": "Langue de l'interface. La page se recharge lors du changement.",
         "controllers": "Manettes",

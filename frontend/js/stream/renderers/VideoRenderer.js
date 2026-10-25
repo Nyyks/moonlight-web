@@ -105,6 +105,25 @@ export class VideoRenderer {
     noteEncodedFrame(bytes, key) {}
 
     /**
+     * Whether this renderer wants each frame's QP (noteFrameQp): mwsr 3, the
+     * debug menu's (DeblockShader.js), and nothing else. The decode paths read
+     * no slice header while it is false, which is always here.
+     * @returns {boolean}
+     */
+    get wantsFrameQp() {
+        return false;
+    }
+
+    /**
+     * The QP of an encoded frame, by the timestamp its chunk goes to the
+     * decoder with (SliceQp.js; null when its header could not be read).
+     * Called only while wantsFrameQp says so.
+     * @param {number} timestamp
+     * @param {number|null} qp
+     */
+    noteFrameQp(timestamp, qp) {}
+
+    /**
      * Click-to-photon probe support (see stream/LatencyProbe.js). A canvas that
      * presents through a desynchronized swap chain (WebGL2 here) cannot be
      * read back with drawImage once it is on screen — the drawing buffer is

@@ -134,6 +134,12 @@ const ENHANCER_CHOICES = [
     // since v0.4.1 (BrowserDetect.pickAutoEnhancer).
     { value: 'gl-mwsr', key: 'settings.algoMwsrGl', gpu: false },
     { value: 'mwsr', key: 'settings.algoMwsrGpu', gpu: true },
+    // Its versions 2 and 3, Bruno's of 25/10/2026 (upscaler-mwsr.md §14.7):
+    // the same kernel after P8.0's deblocking, at a fixed strength or one set
+    // per frame from the QP in its header. WebGPU only; like every entry here
+    // they exist in debug builds only, and 'auto' never picks them.
+    { value: 'mwsr-db', key: 'settings.algoMwsrDbGpu', gpu: true },
+    { value: 'mwsr-dbq', key: 'settings.algoMwsrDbqGpu', gpu: true },
 ];
 
 export class SettingsView {

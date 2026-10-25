@@ -47,6 +47,14 @@
  *   where the adapter has shader-f16 and is not NVIDIA's: 9-10 % off the
  *   kernel on the 780M for the same pixels, nothing on the RTX (P2.3).
  *
+ * mwsr 2 and 3 (opts.deblock 'fixed' or 'qp': the debug menu's « MoonlightWeb
+ *   2 » and « 3 », never 'auto'): the same kernel after a deblocking of the
+ *   frame (DeblockShader.js) — a compute pass over inputTex into a fixed-point
+ *   buffer, then a pass into dbTex, which the kernel reads instead. 'qp' sets
+ *   the strength of each frame from the QP its header carried (noteFrameQp),
+ *   and skips both passes on a frame fine enough. SDR only (rgba8unorm).
+ *   Without opts.deblock nothing of it is built, and no QP is asked for.
+ *
  * SGSRv1 (algo 'sgsr'): 2 passes — Pass 0 blit, Pass 1 SGSR inputTex → canvas.
  *   Port (Qualcomm, BSD-3-Clause) from sgsr1.h, mode 1, luma = GREEN, EdgeThreshold
  *   6/255, EdgeSharpness 1.5.
@@ -92,6 +100,13 @@ import {
     mwsrUniforms,
     mwsrWgsl,
 } from './MwsrShader.js';
+import {
+    DEBLOCK_DCT_WGSL,
+    DEBLOCK_FIN_WGSL,
+    deblockDispatch,
+    deblockStrength,
+    deblockUniforms,
+} from './DeblockShader.js';
 import { GazeZone } from '../GazeZone.js';
 import { IS_HANDHELD } from '../../util/BrowserDetect.js';
 
@@ -969,6 +984,13 @@ export class WebGpuRenderer extends VideoRenderer {
         this._mwsrGazePinned = null;
         /** @type {GazeZone|null} that motion, fed by noteEncodedFrame. */
         this._gaze = null;
+        /** mwsr 2 / 3 (DeblockShader.js): 'fixed', 'qp', or null — no pass, nothing built. */
+        this._deblock = null;
+        /** 'qp': each frame's QP by its timestamp (noteFrameQp), and the last one drawn. */
+        this._qpByTs = new Map();
+        this._lastQp = null;
+        /** The last mwsr draw's deblocking, for the overlay: {qp, thr}, thr 0 when skipped. */
+        this.deblockLast = null;
         /** NIS sharpness (0..1, 0.5 neutral) and its re-read throttle. */
         this._nisSharpness = 0.5;
         this._nisKnobsMs = 0;
@@ -1008,6 +1030,8 @@ export class WebGpuRenderer extends VideoRenderer {
                 ? opts.algo
                 : 'sgsr';
         r._yuv444 = opts.yuv444 === true;
+        // mwsr 2 / 3: the deblocking before the kernel (the debug menu's).
+        r._deblock = opts.deblock === 'fixed' || opts.deblock === 'qp' ? opts.deblock : null;
         // The gaze zone the caller wants (BrowserDetect.mwsrGazeWanted): the
         // kernel's pipelines take it, its weight follows the stream's motion.
         if (opts.gazeZone) r.setMwsrZone({});
@@ -1100,7 +1124,9 @@ export class WebGpuRenderer extends VideoRenderer {
                 ' srgbViews=' +
                 r._srgbViews +
                 ' yuv444=' +
-                r._yuv444,
+                r._yuv444 +
+                ' deblock=' +
+                r._deblock,
         );
         return r;
     }
@@ -1143,7 +1169,9 @@ export class WebGpuRenderer extends VideoRenderer {
     get algoName() {
         if (this._algo === 'fsr1') return 'FSR1';
         if (this._algo === 'nis') return 'NIS';
-        if (this._algo === 'mwsr') return 'MWSR';
+        if (this._algo === 'mwsr') {
+            return this._deblock === 'qp' ? 'MWSR 3' : this._deblock ? 'MWSR 2' : 'MWSR';
+        }
         if (this._algo === 'off') return 'Off';
         return 'SGSR';
     }
@@ -1375,6 +1403,14 @@ export class WebGpuRenderer extends VideoRenderer {
         } else if (this._algo !== 'off') {
             this._buildSgsrResources();
         }
+        // mwsr 2 / 3: on the SDR intermediates only, its thresholds being code
+        // values of an 8-bit picture; built with the kernel's pipelines.
+        this._dbPipelines = null;
+        if (this._deblock && this._interFormat !== 'rgba8unorm') {
+            console.log('[WebGpuRenderer] deblocking off: HDR intermediates');
+            this._deblock = null;
+        }
+        if (this._deblock && this._algo === 'mwsr') this._buildDeblockResources();
 
         // Size-dependent resources (lazily (re)created in draw()).
         this._inputTex = null;
@@ -1390,6 +1426,103 @@ export class WebGpuRenderer extends VideoRenderer {
         this._inputTexViewSrgb = null; // inputTex through its `-srgb` view (mwsr's reduction)
         this._mwsrBindGroup = null; // mwsr: the plain view (the kernel)
         this._mwsrBindGroupSrgb = null; // mwsr: the sRGB view (the reduction)
+        this._dbTex = null; // mwsr 2 / 3: the deblocked frame, and the sums' buffer
+        this._dbAcc = null;
+    }
+
+    // mwsr 2 / 3 (DeblockShader.js): the two layouts and pipelines and the
+    // uniform block; dbTex and the sums' buffer come with inputTex.
+    _buildDeblockResources() {
+        const device = this._device;
+        const layout = (visibility, type) =>
+            device.createBindGroupLayout({
+                entries: [
+                    { binding: 0, visibility, texture: { sampleType: 'float' } },
+                    { binding: 1, visibility, buffer: { type } },
+                    { binding: 2, visibility, buffer: { type: 'uniform' } },
+                ],
+            });
+        const dctLayout = layout(GPUShaderStage.COMPUTE, 'storage');
+        const finLayout = layout(GPUShaderStage.FRAGMENT, 'read-only-storage');
+        const dct = device.createShaderModule({ code: DEBLOCK_DCT_WGSL });
+        const fin = device.createShaderModule({ code: DEBLOCK_FIN_WGSL });
+        this._dbPipelines = {
+            dctLayout,
+            finLayout,
+            dct: device.createComputePipeline({
+                layout: device.createPipelineLayout({ bindGroupLayouts: [dctLayout] }),
+                compute: { module: dct, entryPoint: 'cs' },
+            }),
+            fin: device.createRenderPipeline({
+                layout: device.createPipelineLayout({ bindGroupLayouts: [finLayout] }),
+                vertex: { module: fin, entryPoint: 'vs' },
+                fragment: {
+                    module: fin,
+                    entryPoint: 'fs',
+                    targets: [{ format: this._interFormat }],
+                },
+                primitive: { topology: 'triangle-list' },
+            }),
+        };
+        this._dbUniform = device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        this._dbUniKey = '';
+    }
+
+    // mwsr 2 / 3, with inputTex: dbTex (the same format and views), the sums'
+    // buffer, their bind groups, and the kernel's two bind groups on dbTex.
+    _ensureDeblockTex(inW, inH) {
+        const device = this._device;
+        if (!this._dbPipelines) this._buildDeblockResources();
+        this._dbTex = device.createTexture({
+            size: { width: inW, height: inH },
+            format: this._interFormat,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+            viewFormats: this._srgbViews ? [this._interFormat + '-srgb'] : [],
+        });
+        this._dbTexView = this._dbTex.createView();
+        this._dbAcc = device.createBuffer({
+            size: inW * inH * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        const entries = [
+            { binding: 0, resource: this._inputTexView },
+            { binding: 1, resource: { buffer: this._dbAcc } },
+            { binding: 2, resource: { buffer: this._dbUniform } },
+        ];
+        this._dbDctBindGroup = device.createBindGroup({
+            layout: this._dbPipelines.dctLayout,
+            entries,
+        });
+        this._dbFinBindGroup = device.createBindGroup({
+            layout: this._dbPipelines.finLayout,
+            entries,
+        });
+        const mk = (view) =>
+            device.createBindGroup({
+                layout: this._mwsrLayout,
+                entries: [
+                    { binding: 0, resource: this._sampler },
+                    { binding: 1, resource: view },
+                    { binding: 2, resource: { buffer: this._mwsrUniform } },
+                ],
+            });
+        this._mwsrBindGroupDb = mk(this._dbTexView);
+        this._mwsrBindGroupDbSrgb = this._srgbViews
+            ? mk(this._dbTex.createView({ format: this._interFormat + '-srgb' }))
+            : this._mwsrBindGroupDb;
+        this._dbUniKey = '';
+    }
+
+    _destroyDeblockTex() {
+        try {
+            if (this._dbTex) this._dbTex.destroy();
+            if (this._dbAcc) this._dbAcc.destroy();
+        } catch (e) {}
+        this._dbTex = null;
+        this._dbAcc = null;
     }
 
     // mwsr (MwsrShader.js): the uniform block, the layout both modes share
@@ -1887,6 +2020,7 @@ export class WebGpuRenderer extends VideoRenderer {
                 this._inputTex.destroy();
             } catch (e) {}
         }
+        this._destroyDeblockTex();
         this._inputTex = this._device.createTexture({
             size: { width: inW, height: inH },
             format: this._interFormat,
@@ -1948,6 +2082,7 @@ export class WebGpuRenderer extends VideoRenderer {
             this._mwsrBindGroupSrgb = this._inputTexViewSrgb
                 ? mk(this._inputTexViewSrgb)
                 : this._mwsrBindGroup;
+            if (this._deblock) this._ensureDeblockTex(inW, inH);
         } else {
             this._enhanceBindGroup = this._device.createBindGroup({
                 layout: this._enhanceLayout,
@@ -2127,6 +2262,41 @@ export class WebGpuRenderer extends VideoRenderer {
     /** @override The picture's motion, for the gaze zone; nothing without one. */
     noteEncodedFrame(bytes, key) {
         if (this._gaze) this._gaze.note(bytes, key, performance.now());
+    }
+
+    /** See VideoRenderer.wantsFrameQp: mwsr 3 only, while its pass is the one running. */
+    get wantsFrameQp() {
+        return this._deblock === 'qp' && this._algo === 'mwsr';
+    }
+
+    /** See VideoRenderer.noteFrameQp: kept by timestamp until its frame is drawn. */
+    noteFrameQp(timestamp, qp) {
+        if (!this.wantsFrameQp) return;
+        this._qpByTs.set(timestamp, qp);
+        if (this._qpByTs.size > 64) this._qpByTs.delete(this._qpByTs.keys().next().value);
+    }
+
+    /**
+     * The deblocking of the frame drawn at `ts` (deblockStrength), or null to
+     * leave it out; mwsr 3 takes that frame's QP, or the last one known.
+     * @param {number} ts
+     * @returns {{thr: number, cmax: number}|null}
+     */
+    _deblockFor(ts) {
+        if (this._deblock === 'qp') {
+            const qp = this._qpByTs.get(ts);
+            if (qp !== undefined) {
+                this._lastQp = qp;
+                // The frames drawn, and any the decoder dropped before them.
+                for (const t of this._qpByTs.keys()) {
+                    if (t > ts) break;
+                    this._qpByTs.delete(t);
+                }
+            }
+        }
+        const s = deblockStrength(this._deblock, this._lastQp);
+        this.deblockLast = { qp: this._lastQp, thr: s ? s.thr : 0 };
+        return s;
     }
 
     /** The zone's weight for a draw of a frame of `area` pixels: 0 without a zone. */
@@ -2680,7 +2850,41 @@ export class WebGpuRenderer extends VideoRenderer {
                         }),
                     );
                 }
-                // Pass 1: mwsr inputTex → canvas.
+                // mwsr 2 / 3: the frame deblocked into dbTex, which the kernel
+                // then reads; a frame mwsr 3 finds fine enough skips both passes.
+                const db = this._deblock && this._dbTex ? this._deblockFor(frame.timestamp) : null;
+                if (db) {
+                    const dbKey = inW + 'x' + inH + ':' + db.thr + ':' + db.cmax;
+                    if (this._dbUniKey !== dbKey) {
+                        this._dbUniKey = dbKey;
+                        this._device.queue.writeBuffer(
+                            this._dbUniform,
+                            0,
+                            deblockUniforms(inW, inH, db),
+                        );
+                    }
+                    encoder.clearBuffer(this._dbAcc);
+                    const pc = encoder.beginComputePass();
+                    pc.setPipeline(this._dbPipelines.dct);
+                    pc.setBindGroup(0, this._dbDctBindGroup);
+                    pc.dispatchWorkgroups(...deblockDispatch(inW, inH));
+                    pc.end();
+                    const pd = encoder.beginRenderPass({
+                        colorAttachments: [
+                            {
+                                view: this._dbTexView,
+                                loadOp: 'clear',
+                                storeOp: 'store',
+                                clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                            },
+                        ],
+                    });
+                    pd.setPipeline(this._dbPipelines.fin);
+                    pd.setBindGroup(0, this._dbFinBindGroup);
+                    pd.draw(3);
+                    pd.end();
+                }
+                // Pass 1: mwsr inputTex (or dbTex) → canvas.
                 const p1 = encoder.beginRenderPass({
                     colorAttachments: [
                         {
@@ -2694,7 +2898,11 @@ export class WebGpuRenderer extends VideoRenderer {
                     ],
                 });
                 p1.setPipeline(this._mwsrPipeline(reg));
-                p1.setBindGroup(0, srgb ? this._mwsrBindGroupSrgb : this._mwsrBindGroup);
+                if (db) {
+                    p1.setBindGroup(0, srgb ? this._mwsrBindGroupDbSrgb : this._mwsrBindGroupDb);
+                } else {
+                    p1.setBindGroup(0, srgb ? this._mwsrBindGroupSrgb : this._mwsrBindGroup);
+                }
                 p1.draw(3);
                 p1.end();
             } else {
@@ -2776,6 +2984,7 @@ export class WebGpuRenderer extends VideoRenderer {
         try {
             if (this._intermTex) this._intermTex.destroy();
         } catch (e) {}
+        this._destroyDeblockTex();
         try {
             if (this._readbackTex) this._readbackTex.destroy();
         } catch (e) {}
