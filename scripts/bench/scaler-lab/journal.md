@@ -2399,3 +2399,113 @@ test/SliceQp.test.js test/DeblockShader.test.js` dans `frontend/`. Les flux de t
 **Le verdict de Bruno (25/10, au soir).** Il garde la version 1 pour l'auto : « J'adore le résultat, plus rapide et
 plus propre que FSR1, c'est une réussite. » Les versions 2 et 3 restent dans le menu de débogage. Le plan le
 consigne au §14.7, avec ses questions sur l'historique, l'aide de l'hôte et la fusion dans le noyau.
+
+## 2026-10-26 — J45, le HDR dans le chemin du produit : agrandissement et réduction
+
+**La demande.** Bruno, le 25/10 au soir : MWSR n'avait pas été essayé en HDR dans le produit. J11 avait mesuré le
+noyau seul sur le feed HDR du labo (720p → 1440p, 21/10), avant les défauts d'aujourd'hui (`DERING 2`, CR5 et Q3,
+netteté 1,85 et sa loi). Il demande un test avec une image HDR, en agrandissement et en réduction.
+
+**L'instrument (`hdr_check.py`, `hdr-check.html`, `hdr-check.js`).**
+- **Les images.** Les mires HDR du labo (`hdr_mires.py` : rampe PQ jusqu'à 10 000 nits, texte sur 1000 nits),
+  la capture 4K de 0 A.D. (`C:\Test\01_4K.png`) aux hautes lumières montées à 1000 nits, et des rayures
+  verticales de 1000 et 0,5 nit, larges d'un et de trois pixels.
+- **Le format.** Chaque image est faite en numpy dans le format que le décodeur donne au renderer : PQ, BT.2020,
+  Y'CbCr limité sur 10 bits. Le I420P10 sert partout, le I444P10 pour un cas.
+- **Le rendu.** Le vrai `WebGpuRenderer` dessine chaque image sur ses deux chemins HDR :
+  - `linear` (écran HDR) : canvas `rgba16float` en `extended`, MWSR sur des intermédiaires flottants ;
+  - `tonemap` (écran SDR) : ACES en passe 0, puis MWSR sur 8 bits.
+- **Les variantes.** `off` (la copie du produit) et `mwsr`, en 720p et 1080p → 1440p, 2160p → 1440p, 1440p → 720p,
+  plus une image à 1:1. En réduction sur `linear` s'ajoute un diagnostic : la réduction en sRGB exact
+  (`LINEAR_LIGHT 2`) au lieu du carré du produit.
+- **La lecture.** La texture du canvas est remplacée par une texture de son format, relue entière : demi-flottants
+  sur `linear`. SwiftShader seul, la page refuse tout autre adaptateur. Le module f16 n'y est pas accordé :
+  J14 l'avait comparé au f32 sur le RTX.
+
+**Ce qui va.**
+- À 1:1, l'image est celle de la passe 0 refaite en numpy (YUV → PQ → P3), à 0,002 près.
+- Aucune valeur infinie ni négative.
+- Les hautes lumières sont gardées : la part des pixels au-dessus de 600 nits vaut 0,92 à 1,05 de celle de la
+  vérité (la rampe en 2160p → 1440p mise à part, voir (a)), et 10 000 nits restent 10 000.
+- Le noyau tient ses bornes dans son propre espace : 0 % de pixels hors des 4×4 texels voisins, en agrandissement
+  et à ×0,5.
+- Sur le chemin `tonemap`, la réduction passe par les vues sRGB et elle est juste : les rayures gardent 1,001 et
+  0,987 de leur lumière.
+
+**Le mode « off » en HDR était au plus proche voisin, corrigé (1d6f92f5).** La passe 0 YUV lit ses plans texel par
+texel. Dessinée à la taille du canvas, elle mettait l'image à l'échelle au plus proche voisin : pixellisée à
+l'agrandissement, crénelée à la réduction. À ×0,5, les rayures ne gardaient qu'un tiers de leur lumière, et sur le
+chemin `tonemap` la réduction faisait 4,5 dB de PSNR, contre 40,5 pour MWSR.
+
+Au « corrige-le » de Bruno, une image mise à l'échelle passe maintenant d'abord par la passe 0 à sa taille, puis par
+la copie bilinéaire des images SDR. Chaque cas « off » est la copie bilinéaire de son entrée, à 0,004 près.
+
+Au passage, `_ensureInputTex` construisait pour « off » le groupe de liaison de SGSR, dont la disposition n'existe
+pas. Dans un navigateur, cet appel lève une exception : après un import refusé, la copie par ImageBitmap retombait
+donc toujours sur la relecture.
+
+**(a) La réduction HDR assombrit le contraste fin.** Part de la lumière des rayures gardée :
+
+| réduction | `off` (bilinéaire) | `mwsr` (`LINEAR_LIGHT 1`, le produit) | `LINEAR_LIGHT 2` | `tonemap`, `mwsr` |
+|---|---|---|---|---|
+| 1440p → 720p (×0,5) | 0,605 | 0,918 | 0,988 | 0,987 |
+| 2160p → 1440p (×0,667) | 0,786 | **0,724** | 0,742 | 1,001 |
+
+- **Deux causes.** À ×0,5, les prises tombent sur les centres des texels : seule la lumière de la moyenne compte,
+  et le carré (gamma 2) assombrit un mélange de 1000 et 0,5 nit de 8 %. Ailleurs, chaque prise bilinéaire mélange
+  déjà deux texels sur les valeurs encodées, avant tout décodage : le sRGB exact n'y change presque rien.
+- **La même cause** fait tomber à 0,853 la part des pixels au-dessus de 600 nits sur la rampe en 2160p → 1440p, à
+  cause de sa bande de rayures.
+- **Sur des images réelles, l'écart est petit**, et MWSR reste devant la copie (ΔE ITP du jeu en 2160p → 1440p :
+  8,82 contre 9,33).
+- **Le remède proposé**, exact à tout rapport et sans coût en plus : sur un feed flottant, la passe 0 écrirait de la
+  lumière linéaire quand on réduit. L'échantillonneur mélangerait alors en lumière linéaire, comme les vues sRGB le
+  font en SDR, et le noyau n'encoderait qu'à la sortie.
+- **Le coût de `LINEAR_LIGHT 2`**, déjà mesuré par J14 (feed SDR, même arithmétique) : 780M 0,54 → 1,59 ms à ×0,75
+  et 0,25 → 0,71 ms à ×0,5 ; RTX 0,022 → 0,048 ms. Il ne règle que le cas ×0,5.
+- À la décision de Bruno.
+
+**(b) L'agrandissement HDR a régressé depuis J11.** ΔE ITP moyen contre la vérité, chemin `linear` :
+
+| cas | `off` (bilinéaire) | `mwsr` |
+|---|---|---|
+| texte 720p → 1440p | 16,49 | **20,86** |
+| texte 720p → 1440p, 4:4:4 | 15,99 | **20,07** |
+| jeu 720p → 1440p | 20,87 | 21,80 |
+| jeu 1080p → 1440p | 15,44 | 15,99 |
+| rampe 720p → 1440p | 34,36 | 29,63 |
+| rampe 1080p → 1440p | 22,69 | 14,47 |
+
+- **La comparaison avec J11.** J11 avait, sur la même mire de texte, 15,76 pour le bilinéaire et 15,38 pour
+  `mwsr`. MWSR y était 2 % devant ; il est aujourd'hui 27 % derrière. Le bilinéaire, lui, n'a presque pas bougé
+  (16,0 en 4:4:4 contre 15,8).
+- **Ce qui a changé depuis** : le bornage par les quatre texels (`DERING 2`, J37), le chemin plat en Catmull-Rom à
+  cinq prises (7264afd4), la netteté 1,85 et sa loi d'échelle (J40). Tous ont été choisis à l'œil sur du SDR.
+- **Sur le chemin `tonemap`**, le PSNR de `mwsr` est aussi sous celui du bilinéaire sur le texte (16,60 contre
+  17,13). Le labo SDR le voit aussi sur `code` (26,20 contre 27,27, CI de 248aae8e) : le PSNR pénalise l'affûtage,
+  et l'œil tranche.
+- **Ce qu'il faut maintenant** : une étude réglage par réglage au labo, puis l'œil de Bruno sur un écran HDR.
+
+**(c) Sur du texte HDR en 4:2:0, MWSR fait des hautes lumières.** Le pic monte à 1489 nits, contre 1295 pour
+l'entrée (× 1,15). Le noyau borne chaque canal séparément, et les franges de chrominance du 4:2:0 lui permettent de
+réunir le rouge d'un texel et le vert d'un autre. En 4:4:4, le pic reste à 0,979.
+
+**Les seuils, corrigés entre les passes.** Quatre passes : à 23:50 (17 contrôles hors limites), à 00:16 (15), à
+00:20 (11), puis à 00:24 (9, tous réels : (a) quatre fois, (b) quatre fois, (c) une fois).
+- **Le pic des réductions.** Je l'ai d'abord comparé à celui de l'entrée, puis à celui de la vérité. Or le Lanczos
+  de la vérité sonne au-delà de l'entrée : 10 991 nits sur une rampe qui s'arrête à 10 000, et plus de 1100 nits au
+  bord du texte. Ce contrôle compte maintenant la part des pixels au-dessus de 600 nits.
+- **Les dépassements.** La mesure de J11 (BT.2020 linéaire, 2×2) prend le bilinéaire lui-même en défaut : 0,05 %,
+  car on interpole en P3 encodé. Les bornes se jugent maintenant dans l'espace du noyau, et l'ancienne mesure reste
+  affichée.
+- **Le PSNR du chemin `tonemap`** est affiché seulement.
+
+**Limites.**
+- SwiftShader, dont les pixels sont ceux du RTX d'après J11. Aucun temps n'est mesuré.
+- Le f16 n'est pas comparé ici, faute de `shader-f16` sur SwiftShader.
+- Chrome seulement : le chemin `tonemap-ext` de WebKit n'est pas couvert.
+- Le 4:2:0 est synthétique (chrominance moyennée 2×2 en PQ).
+
+**Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/hdr_check.py`, avec `--only` (des cas par leur nom) ou
+`--keep` (garder les relectures). Il faut `C:\Test\01_4K.png` pour le jeu ; sans elle, ces cas sont sautés. Environ
+trois minutes ; la sortie va dans `bench-out/scaler-lab/hdr/`.
