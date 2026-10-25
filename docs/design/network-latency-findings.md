@@ -2588,6 +2588,78 @@ The load was TeraBox at ~100 Mbit/s, then 50 under the cap; the box stayed at
 - Not tried yet: `-Precedence 255` without the high throttle, and a real
   stream through `hostcap=` once fixed.
 
+### 25/10/2026 — `hostcap=` spares the stream; the M3's freezes are the repeater's radio going silent (same plan, S3)
+
+**Setup.** `1fd17e89` gives the stream's policy `-Precedence 255`. The load was
+TeraBox at 85-117 Mbit/s from DualRTX. Bruno typed each elevated line through
+the production instance.
+- Step 2, no stream (10:46-10:50): `s3b.ps1` set the two policies exactly as
+  `onScript()` builds them, with python.exe in the stream's place. 120 s with
+  both, then 60 s with the cap alone.
+- Step 3 (11:06-11:09): a real stream to the M3, on the repeater's Wi-Fi,
+  through the installed DEV edition (SYSTEM worker), with `hostcap=50`.
+- A/B (11:42-11:50): `s3ab.ps1` meant to switch the same two policies on and
+  off every 60 s under one stream. It stopped after the first "on": a click in
+  its console window paused it at its next write. The cap was on from 11:42:56
+  to ~11:43:58 and off from then on.
+
+**Step 2.** Median / p95:
+
+| Phase | python | NIC up |
+|---|---|---|
+| no policy | 14-63 / 250-700 ms | ~85 |
+| both policies | 3 / 9-17 ms | flat at 50 |
+| the cap alone | 270-380 / 640-1720 ms | 50 |
+
+The exemption also reached sockets opened before the policies. Windows reads
+`Both` back as `IPProtocolMatchCondition None`.
+
+**Step 3.**
+- The worker set the cap 0.9 s after the pair and removed it at the quit.
+- The NIC sent 57-62 Mbit/s, with `[HostUpload]` at "~49 besides the stream":
+  the stream passed over the cap. The box's ping went from a 65-82 ms median
+  without the cap to 5 ms.
+- Still, there were 6 freezes, 31.5 s in 166 s. One (0.4 s) was the queue from
+  before the cap draining. The other five, 2-11.5 s, were radio stalls.
+- **Radio stall.** For 2-50 s, the box and the M3 both stop answering pings,
+  while the repeater, by cable, stays at 0-14 ms. The NIC's upload falls to
+  2-20 Mbit/s: TeraBox cannot send either. ICMP is not capped, and the
+  repeater answers through the same adapter and pacer, so the host holds
+  nothing.
+
+**A/B** (freezes in s; * = radio stall):
+
+| Phase | Freezes | Total | box ping, median / p95, lost | NIC up, median |
+|---|---|---|---|---|
+| cap on, 62 s | 8.1* 12.2* 0.3 8.5* | 29 s | 8 / 390 ms, 21 | 18 |
+| cap off, next 122 s | 0.4 1.7 16.4* 0.5 22.9* 2.0* 12.2* | 56 s | 6 / 366 ms, 43 | 13 |
+| cap off, next 120 s | 0.8 9.4* 15.3* 26.7* 0.3 4.6* 11.6* 6.6* | 75 s | 20 / 519 ms, 64 | 5 |
+| cap off, last 142 s | 8.0* 49.7* 50.7* 12.9* 1.8 | 123 s | 157 / 848 ms, 110 | 2 |
+| no stream, no cap, 86 s | — | — | 45 / 429 ms, 15 | 66 |
+
+A stream started earlier, with no policy at all, died in a 13 s stall
+(11:41:14-27).
+
+**The page (Chrome on the M3).** The stalls also broke Chrome's HEVC decoder:
+13 "VideoDecoder error: Decoding error", each followed by a wait for a
+keyframe. 636 frames were thrown away, and recovering took 0.8-9.5 s. On the
+M3, a freeze therefore outlasts the stall.
+
+**The stats panel.** Bruno saw "78 ms" while the picture felt 2 s late. The
+headline adds up per-stage means: host, half a ping, the link-queue estimate,
+then decode, queue and render. All of these come from the frames that arrive
+and the pings that come back. The diagnostics line's "e2e measured" (host
+stamp → end of draw) read 2-7 s during the A/B. Line 645 of the page's log
+reads "arrival 77.7/736.5ms … e2e measured 3961.1/4124.3ms".
+
+**Verdict.** `hostcap=` now does what it was built for: the stream is exempt,
+the rest is capped, and the queue is gone. On this path it does not stop the
+freezes. The repeater's radio stops carrying for seconds, with or without the
+cap, and worse as the minutes went on. Open points, none started:
+- why the radio goes silent (below, §6);
+- Chrome's HEVC decoder on macOS breaking after a stall;
+- the panel's headline under-reading the delay.
+
 ## 4. The model so far (04/10/2026)
 
 What the measurements support, in order of the path:
@@ -2708,10 +2780,25 @@ What the measurements support, in order of the path:
     (S1 bis);
   - the M3 freezes on a direct pair too, on the repeater's Wi-Fi: not the
     hairpin.
+  - `hostcap=` with `-Precedence 255` (`1fd17e89`) exempts a real stream on the
+    M3, and the box's queue goes from 65-82 ms to 5 ms (S3).
   Still open:
-  - the stream through `hostcap=` with `-Precedence 255`, on the M3;
   - what rate a product default could take without a link speed to read: a
-    fixed one, or one that follows `[HostUpload]` and the freezes.
+    fixed one, or one that follows `[HostUpload]` and the freezes;
+  - the repeater's radio stalls (S3). For 2-50 s, nothing goes through it,
+    neither the backhaul to the box nor the M3; its cable side stays at 0 ms.
+    They come with or without the cap. They cluster while the M3 streams: the
+    box loses a few pings when it is idle. A hypothesis, not tested: one radio
+    carries both the backhaul and the M3. When the M3 leaves the channel (a
+    corporate Mac's scans, power save) with ~30 Mbit/s queued for it, the
+    repeater's retries take the airtime from the backhaul too. A test: the
+    same stream to another client on that repeater, or the M3 on the box's
+    own Wi-Fi;
+  - Chrome's HEVC decoder on macOS breaks after a stall instead of resuming
+    (13 errors, recoveries of 0.8-9.5 s, S3);
+  - the stats panel's headline is a sum of per-stage means and under-reads a
+    backlog: 78 ms shown while "e2e measured" said 4 s (S3). An idea, not
+    decided: show "e2e measured" when the host stamps its frames.
 
 ## 7. Knobs (bench keys, off by default unless said)
 
@@ -2738,7 +2825,7 @@ Link keys go in `MW_NATIVE_TUNING` / `--tuning` of `local_matrix.py`
 | `audioframe=5\|10\|20` | the native host's Opus frame in ms (5 the product): half or a quarter of the packets, 5 or 15 ms more before each | `ced222aa` |
 | `aroadpace=<x>`, `aroadwin=<KiB>` | the audio road's pacing and send window (both off by default) | `aea2a192`, `89adcb0f` |
 | `aroadbudget=<%>` | the audio road's resend budget, share of what it sent over 100 ms (default 20) | `210318fd` |
-| `hostcap=<Mbit/s>` | during a native stream, every other upload of the host PC capped (two ActiveStore QoS policies; Windows, a worker with administrator rights). 25/10: the cap works, but the stream is capped too, the executable's policy notwithstanding: do not use as it is. S1 bis: its policy needs `-Precedence 255` | `0a92009a` |
+| `hostcap=<Mbit/s>` | during a native stream, every other upload of the host PC capped (two ActiveStore QoS policies; Windows, a worker with administrator rights). 25/10: the cap works, but the stream was capped too. S1 bis: its policy needs `-Precedence 255`, set since `1fd17e89`. S3: the stream is exempt, the queue is gone, the repeater's radio stalls remain | `0a92009a`, `1fd17e89` |
 
 Environment: `MW_SCTP_RTO_MIN_MS`, `MW_SCTP_SACK_DELAY_MS`;
 `MW_LATENCY_FLAG_SOUND=click|tick` (the server's latency flag also beeps,

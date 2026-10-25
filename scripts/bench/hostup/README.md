@@ -82,8 +82,9 @@ session ends. Only a worker with administrator rights can set them: the one
 the launcher service starts as SYSTEM (the DEV edition installed), not a
 `--dev` on the user's plain token. Its log lines start with `[HostCap]`
 (25/10: set 0.75 s after the channels open, removed ~1 s after the quit; a
-`--dev` worker says « no administrator rights … nothing capped »). It caps
-the stream too, like the hand-made cap above. To
+`--dev` worker says « no administrator rights … nothing capped »). Since
+`1fd17e89` the stream's policy has `-Precedence 255`, and the stream is
+exempt: S3 on 25/10, the M3 over the cap, the box's queue at 5 ms. To
 check by hand that nothing is left, use `hostup_cap.ps1 -Show` (elevated):
 the next worker would sweep anything left behind.
 
