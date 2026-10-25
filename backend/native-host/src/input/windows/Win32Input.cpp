@@ -1203,8 +1203,8 @@ void Win32Input::injectChar(const InputEvent& event, bool down)
     std::vector<WinKeyEvent> plan;
     if (!down) {
         // The key its press went down on. None: it was typed whole on the
-        // press (a dead key and its base, or Unicode), or a desktop switch
-        // forgot it — either way there is nothing to let go of.
+        // press (an AltGr symbol, a dead key and its base, or Unicode), or a
+        // desktop switch forgot it — either way there is nothing to let go of.
         std::lock_guard<std::mutex> lock(m_HeldMutex);
         auto it = m_CharKeys.find(ch);
         if (it == m_CharKeys.end()) return;
@@ -1242,12 +1242,14 @@ void Win32Input::injectChar(const InputEvent& event, bool down)
         } else if (recipe.kind == WinRecipe::Kind::Key) {
             // Held like the key it is. Nothing pressed here is ever recorded
             // as the viewer's own modifier: m_HeldKeys gets the character's
-            // key, never the levels around it, which go back at once.
-            m_CharKeys[ch] = recipe.key;
-            m_HeldKeys.insert(recipe.key.vk);
-            m_HeldScan[recipe.key.vk] =
-                static_cast<uint16_t>(recipe.key.scan | (recipe.key.extended ? 0xE000 : 0));
-            planKeyEdge(recipe.key, true, held, plan);
+            // key, never the levels around it, which go back at once. An
+            // AltGr symbol is typed whole, and nothing of it is held.
+            if (planKeyEdge(recipe.key, true, held, plan)) {
+                m_CharKeys[ch] = recipe.key;
+                m_HeldKeys.insert(recipe.key.vk);
+                m_HeldScan[recipe.key.vk] =
+                    static_cast<uint16_t>(recipe.key.scan | (recipe.key.extended ? 0xE000 : 0));
+            }
         } else if (layout && !layout->ime()) {
             // A dead key and its base, or no key at all: typed whole now.
             planText(*layout, text, caps, held, plan);

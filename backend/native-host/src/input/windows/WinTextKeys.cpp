@@ -605,17 +605,28 @@ WinTextCounts planText(const WinKeyLayout& layout, const std::u32string& text, b
     return counts;
 }
 
-void planKeyEdge(const WinStroke& key, bool down, WinHeldMods held, std::vector<WinKeyEvent>& out)
+bool planKeyEdge(const WinStroke& key, bool down, WinHeldMods held, std::vector<WinKeyEvent>& out)
 {
-    if (!down) {
-        pushKey(out, key.vk, key.scan, key.extended, true);
-        return;
-    }
     const Mods rest{held.shift, held.ctrl, held.alt};
     Mods now = rest;
-    transition(now, wantFor(key.mods, held), out);
+    const Mods want = wantFor(key.mods, held);
+    if (!down) {
+        // An AltGr symbol went up with its press.
+        if (!want.altGr) pushKey(out, key.vk, key.scan, key.extended, true);
+        return false;
+    }
+    transition(now, want, out);
     pushKey(out, key.vk, key.scan, key.extended, false);
+    if (want.altGr) {
+        // The key back up before the right Alt, as a keyboard lets them go,
+        // and the mask between: whatever reads the right Alt's release has a
+        // key after its press. With the key let go after the right Alt, an @
+        // typed from a US Mac turned Notepad's KeyTips on (25/10/2026).
+        pushKey(out, key.vk, key.scan, key.extended, true);
+        mask(out);
+    }
     transition(now, rest, out);
+    return !want.altGr;
 }
 
 void planChordEdge(const WinStroke& key, bool down, std::vector<WinKeyEvent>& out)

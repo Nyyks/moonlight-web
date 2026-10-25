@@ -289,29 +289,59 @@ void frenchLegacy(const WinKeyLayout& fr)
 
     // A Mac's Option for { on the French host: AltGr+4 there. Its left Alt is
     // let go (masked, it is alone) for the right Alt of an AltGr, over the
-    // left Ctrl, and comes back after (masked again).
+    // left Ctrl, and comes back after (masked again). The 4 goes down and up
+    // under the right Alt, masked before the right Alt goes up; its release
+    // sends nothing.
     {
         WinHeldMods option;
         option.alt = true;
         option.altLevel = true;
         std::vector<WinKeyEvent> down;
-        planKeyEdge(fr.recipe(U'{', false).key, true, option, down);
-        CHECK(down.size() == 11);
-        if (down.size() == 11) {
+        CHECK(!planKeyEdge(fr.recipe(U'{', false).key, true, option, down));
+        CHECK(down.size() == 14);
+        if (down.size() == 14) {
             CHECK(down[0].vk == kWinMaskVk && down[1].vk == kWinMaskVk && down[1].up);
             CHECK(down[2].vk == VK_MENU && down[2].up && !down[2].extended);
             CHECK(down[3].vk == VK_CONTROL && !down[3].up);
             CHECK(down[4].vk == VK_MENU && !down[4].up && down[4].extended);
             CHECK(down[5].vk == '4' && !down[5].up);
-            CHECK(down[6].vk == VK_MENU && down[6].up && down[6].extended);
-            CHECK(down[7].vk == VK_CONTROL && down[7].up);
-            CHECK(down[8].vk == VK_MENU && !down[8].up && !down[8].extended);
-            CHECK(down[9].vk == kWinMaskVk && down[10].vk == kWinMaskVk && down[10].up);
+            CHECK(down[6].vk == '4' && down[6].up);
+            CHECK(down[7].vk == kWinMaskVk && down[8].vk == kWinMaskVk && down[8].up);
+            CHECK(down[9].vk == VK_MENU && down[9].up && down[9].extended);
+            CHECK(down[10].vk == VK_CONTROL && down[10].up);
+            CHECK(down[11].vk == VK_MENU && !down[11].up && !down[11].extended);
+            CHECK(down[12].vk == kWinMaskVk && down[13].vk == kWinMaskVk && down[13].up);
         }
-        std::vector<WinKeyEvent> both = down;
-        planKeyEdge(fr.recipe(U'{', false).key, false, option, both);
-        CHECK(typeOut(fr, both, false, option) == U"{");
-        CHECK(balanced(both, option));
+        std::vector<WinKeyEvent> up;
+        CHECK(!planKeyEdge(fr.recipe(U'{', false).key, false, option, up));
+        CHECK(up.empty());
+        CHECK(typeOut(fr, down, false, option) == U"{");
+        CHECK(balanced(down, option));
+    }
+
+    // A US Mac's @, Shift+2 there, on the French host: AltGr+0, its Shift let
+    // go for it and put back after. Its 0 was let go after the right Alt, on
+    // the release, and Notepad turned its KeyTips on (25/10/2026); it goes up
+    // before the right Alt now, as a keyboard has it, with the mask between.
+    {
+        WinHeldMods shift;
+        shift.shift = true;
+        std::vector<WinKeyEvent> plan;
+        CHECK(!planKeyEdge(fr.recipe(U'@', false).key, true, shift, plan));
+        CHECK(plan.size() == 10);
+        if (plan.size() == 10) {
+            CHECK(plan[0].vk == VK_SHIFT && plan[0].up);
+            CHECK(plan[1].vk == VK_CONTROL && !plan[1].up);
+            CHECK(plan[2].vk == VK_MENU && !plan[2].up && plan[2].extended);
+            CHECK(plan[3].vk == '0' && !plan[3].up);
+            CHECK(plan[4].vk == '0' && plan[4].up);
+            CHECK(plan[5].vk == kWinMaskVk && plan[6].vk == kWinMaskVk && plan[6].up);
+            CHECK(plan[7].vk == VK_MENU && plan[7].up && plan[7].extended);
+            CHECK(plan[8].vk == VK_CONTROL && plan[8].up);
+            CHECK(plan[9].vk == VK_SHIFT && !plan[9].up);
+        }
+        CHECK(typeOut(fr, plan, false, shift) == U"@");
+        CHECK(balanced(plan, shift));
     }
 
     // A French AltGr held for "|", the same layout on both sides: its left Alt
@@ -322,14 +352,16 @@ void frenchLegacy(const WinKeyLayout& fr)
         altGr.ctrl = altGr.alt = altGr.altLevel = true;
         std::vector<WinKeyEvent> plan;
         planKeyEdge(fr.recipe(U'|', false).key, true, altGr, plan);
-        CHECK(plan.size() == 6);
-        if (plan.size() == 6) {
+        CHECK(plan.size() == 9);
+        if (plan.size() == 9) {
             CHECK(plan[0].vk == VK_MENU && plan[0].up && !plan[0].extended);
             CHECK(plan[1].vk == VK_MENU && !plan[1].up && plan[1].extended);
             CHECK(plan[2].vk == '6' && !plan[2].up);
-            CHECK(plan[3].vk == VK_MENU && plan[3].up && plan[3].extended);
-            CHECK(plan[4].vk == VK_CONTROL && !plan[4].up);
-            CHECK(plan[5].vk == VK_MENU && !plan[5].up && !plan[5].extended);
+            CHECK(plan[3].vk == '6' && plan[3].up);
+            CHECK(plan[4].vk == kWinMaskVk && plan[5].vk == kWinMaskVk && plan[5].up);
+            CHECK(plan[6].vk == VK_MENU && plan[6].up && plan[6].extended);
+            CHECK(plan[7].vk == VK_CONTROL && !plan[7].up);
+            CHECK(plan[8].vk == VK_MENU && !plan[8].up && !plan[8].extended);
         }
         planKeyEdge(fr.recipe(U'|', false).key, false, altGr, plan);
         CHECK(typeOut(fr, plan, false, altGr) == U"|");
@@ -341,8 +373,8 @@ void frenchLegacy(const WinKeyLayout& fr)
     // press, so the a is no capital — it was, while the 1's Shift stayed down.
     {
         std::vector<WinKeyEvent> plan;
-        planKeyEdge(fr.recipe(U'1', false).key, true, WinHeldMods{}, plan);
-        planKeyEdge(fr.recipe(U'a', false).key, true, WinHeldMods{}, plan);
+        CHECK(planKeyEdge(fr.recipe(U'1', false).key, true, WinHeldMods{}, plan));
+        CHECK(planKeyEdge(fr.recipe(U'a', false).key, true, WinHeldMods{}, plan));
         planKeyEdge(fr.recipe(U'1', false).key, false, WinHeldMods{}, plan);
         planKeyEdge(fr.recipe(U'a', false).key, false, WinHeldMods{}, plan);
         CHECK(typeOut(fr, plan, false, WinHeldMods{}) == U"1a");

@@ -240,7 +240,13 @@ WinTextCounts planUnicode(const std::u32string& text, std::vector<WinKeyEvent>& 
 /// come as presses — so no level has to stay down with the key, and one that
 /// did was under the next key typed while this one was still down: "1a"
 /// rolled on a US keyboard came out "1A" on an AZERTY host.
-void planKeyEdge(const WinStroke& key, bool down, WinHeldMods held, std::vector<WinKeyEvent>& out);
+/// A character at the AltGr level is typed whole on the press instead: its key
+/// goes down and up under the right Alt, a mask (kWinMaskVk) comes before the
+/// right Alt goes up, and the release sends nothing. Its key let go after the
+/// right Alt, an @ typed from a US Mac turned Notepad's KeyTips on (Windows 11,
+/// 25/10/2026). Returns whether the key stays down for its release: never for
+/// a release, nor for a press typed whole.
+bool planKeyEdge(const WinStroke& key, bool down, WinHeldMods held, std::vector<WinKeyEvent>& out);
 
 /// One edge of a chord's key (Ctrl+z from the touch keyboard's bar): the key
 /// alone, every modifier left exactly as the viewer holds it — Ctrl+Shift+T
