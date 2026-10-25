@@ -1138,6 +1138,29 @@ Les évictions (§9.10.2) et l'image jetée au calage posent la même question a
 moteur et suivent. Le client fait le même ET de son côté (`decodesThroughGaps`,
 `5baa0f42`).
 
+Bancs du 25/10 avec `mw_drop_test`, chacun en deux bras : R, un client qui
+refuse (`mw_ref_repairs=off`), et C, le témoin.
+
+| Encodeur, hôte | R : trous → keyframes | C : trous réparés par delta | Erreurs |
+|---|---|---|---|
+| NVENC, DualRTX | 12 → 12 | 13 | 0 |
+| AMF, DualRTX (`gpu=2`) | 14 → 14 | 13 | 0 |
+| VA-API H.264, UM790Pro | 2 → 2 | 2 | 0 |
+| NVENC, lien bridé par `netem` à 4 Mbit/s | 123 → 123 | 63 | 0 |
+| oneVPL, N95 | 2 → 2 | 2 | 0 |
+
+- Dans chaque bras R, `/start` répond `false`, et aucune réparation n'est
+  tentée. Sans ce correctif, NVENC et VA-API répondaient `true`.
+- Sur un vrai Mac, le M3 (HEVC 1080p60 HDR, NVENC) : 15 trous donnent 15
+  demandes de keyframe « frame gap », 0 « Decoding error », 0 reconstruction du
+  décodeur, et moins de 3 deltas retenus par trou.
+- Ce matin-là, le même M3 faisait 13 à 32 « Decoding error ».
+- Seul effet du crochet de debug : le régulateur lit chaque trou provoqué comme
+  une perte, et baisse le débit pendant 3 à 4 s.
+- Les « decoder error » qui restent sur un appareil Apple suivent un gel du lien
+  sans trou d'image : c'est une autre affaire, le décodeur HEVC d'Apple après un
+  arrêt, encore ouverte.
+
 ### 9.10.1 AMF : la même réparation par références long terme (06/09/2026)
 
 ⚠️ **plan corrigé** : le plan disait « pas d'équivalent AMF (AMF n'a pas
