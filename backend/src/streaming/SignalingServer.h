@@ -272,8 +272,8 @@ private:
     /// router forwards to, and the relay rewrites host candidates to the
     /// public address.
     static rtc::Configuration buildIceConfig(bool isInternet, bool mapped, uint16_t mediaPort,
-                                             const QString& stunServerUrl,
-                                             bool forceIceTcp = false, bool iceTcpPassive = false);
+                                             const QString& stunServerUrl, bool forceIceTcp = false,
+                                             bool iceTcpPassive = false);
 
     // ── MW-BIND-v1 state ───────────────────────────────────────────────────
     /// Sign the pending SDP offer and hand it to the browser. Called once the

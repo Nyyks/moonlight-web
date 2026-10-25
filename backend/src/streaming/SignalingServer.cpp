@@ -388,9 +388,9 @@ void SignalingServer::onNewWsConnection()
     // m_ForceIceTcp controls whether ICE-TCP candidates are generated
     // (true = UDP + TCP, false = UDP only).
     const bool mapped = !m_UpnpPublicIP.isEmpty() && m_UpnpExternalPort > 0;
-    rtc::Configuration config = buildIceConfig(
-        isInternet, mapped, m_MediaPort, lanOnly ? QString() : m_StunServerUrl, m_ForceIceTcp,
-        m_IceTcpPassive);
+    rtc::Configuration config =
+        buildIceConfig(isInternet, mapped, m_MediaPort, lanOnly ? QString() : m_StunServerUrl,
+                       m_ForceIceTcp, m_IceTcpPassive);
 
     // With a router hole, tell the relay to rewrite host candidates with the
     // public IP and EXTERNAL port so the browser sees a "host" candidate at
