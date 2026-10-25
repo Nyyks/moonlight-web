@@ -2083,7 +2083,9 @@ export class WebGpuRenderer extends VideoRenderer {
                 ? mk(this._inputTexViewSrgb)
                 : this._mwsrBindGroup;
             if (this._deblock) this._ensureDeblockTex(inW, inH);
-        } else {
+        } else if (this._algo !== 'off') {
+            // SGSR. 'off' has no pass of its own: the copy's bind group above
+            // serves it, and SGSR's layout does not exist there.
             this._enhanceBindGroup = this._device.createBindGroup({
                 layout: this._enhanceLayout,
                 entries: [
@@ -2643,8 +2645,30 @@ export class WebGpuRenderer extends VideoRenderer {
 
             // Straight to the canvas, one pass: 'off' (linear scale, no
             // upscaler), and every pass at 1:1 — the plain external copy, or
-            // the HDR pass 0 in its canvas-format flavour.
+            // the HDR pass 0 in its canvas-format flavour. The HDR pass 0 reads
+            // its planes texel by texel: drawn at another size than the frame's
+            // it would scale by the nearest texel, so a scaled 'off' frame takes
+            // it at the frame's size into inputTex first, and the bilinear copy
+            // the SDR frames get (hdr_check.py, journal J45).
             if (direct) {
+                const yuvScaled = useYuv && !identity;
+                if (yuvScaled) {
+                    this._ensureInputTex(inW, inH);
+                    const p0 = encoder.beginRenderPass({
+                        colorAttachments: [
+                            {
+                                view: this._inputTexView,
+                                loadOp: 'clear',
+                                storeOp: 'store',
+                                clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                            },
+                        ],
+                    });
+                    p0.setPipeline(this._yuvPipeline);
+                    p0.setBindGroup(0, this._yuvBindGroup);
+                    p0.draw(3);
+                    p0.end();
+                }
                 const pass = encoder.beginRenderPass({
                     colorAttachments: [
                         {
@@ -2655,7 +2679,10 @@ export class WebGpuRenderer extends VideoRenderer {
                         },
                     ],
                 });
-                if (useYuv) {
+                if (yuvScaled) {
+                    pass.setPipeline(this._texBlitPipeline);
+                    pass.setBindGroup(0, this._texBlitBindGroup);
+                } else if (useYuv) {
                     pass.setPipeline(this._yuvCanvasPipeline);
                     pass.setBindGroup(0, this._yuvBindGroup);
                 } else if (copied) {

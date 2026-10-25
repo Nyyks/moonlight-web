@@ -51,7 +51,12 @@ function fakeGpu({ importThrows = false, bitmapThrows = false } = {}) {
             createShaderModule: () => ({ getCompilationInfo: async () => ({ messages: [] }) }),
             createRenderPipeline: vi.fn(() => ({})),
             createComputePipeline: () => ({}),
-            createBindGroup: vi.fn(() => ({})),
+            // A missing layout throws, as in a browser ('off' has none of SGSR's).
+            createBindGroup: vi.fn((desc) => {
+                if (!desc || !desc.layout)
+                    throw new TypeError('required member layout is undefined');
+                return {};
+            }),
             createBuffer: () => ({
                 destroy() {},
                 mapAsync: async () => {},
