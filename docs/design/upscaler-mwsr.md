@@ -1461,7 +1461,7 @@ upscalers spatiaux.
 - [ ] ~~P7.1 (si go) noyau `mwsr` avec histoire adaptative au mouvement, cran `mwsr-t` des deux renderers, campagne allégée, A/B de Bruno à faible débit~~ : sans objet, la porte de P7.0 est restée fermée
 - [x] **P8.0, faite le 25/10 (journal J43, §14.6) : la porte reste fermée.** Déblocage côté client avant `mwsr`, un seuillage DCT sur des grilles 8×8 décalées : +0,33 dB sur le flux seul (x264), mais après `mwsr`, sur le clip CoD en 1440p, +0,02 à +0,09 dB en 720p à 4 Mbit/s (la porte demandait +0,1) ; pas de passe dans le produit
 - [ ] L'aide de l'hôte (drapeau de scène, vecteurs) : à la décision de Bruno ; le déblocage guidé par le découpage et le QP des blocs est écarté par P8.0 [`high`]
-- [x] **Les versions 2 et 3 dans le menu de débogage, faites le 25/10 à la demande de Bruno (§14.7, journal J44).** Le noyau précédé du déblocage de P8.0 : seuil fixe 8 borné à 2 (version 2), ou force réglée sur le QP de chaque image, lu dans l'en-tête de sa tranche (version 3). WebGPU seul, builds de débogage seuls, jamais en auto. Vérifiées sur SwiftShader ; reste l'œil de Bruno
+- [x] **Les versions 2 et 3 dans le menu de débogage, faites le 25/10 à la demande de Bruno (§14.7, journal J44).** Le noyau précédé du déblocage de P8.0 : seuil fixe 8 borné à 2 (version 2), ou force réglée sur le QP de chaque image, lu dans l'en-tête de sa tranche (version 3). WebGPU seul, builds de débogage seuls, jamais en auto. Vérifiées sur SwiftShader. Verdict de Bruno le 25/10 au soir : la version 1 reste celle de l'auto ; les versions 2 et 3 restent dans le menu de débogage
 
 **Dépendances à demander tôt** : un téléphone Android de prêt (Snapdragon 8 Gen 1 ou plus, et
 un Mali si possible) ; les créneaux Mac et iPhone pour P0 et P5 ; `malioc` installé sur DualRTX.
@@ -1795,7 +1795,15 @@ builds de production ne les prennent jamais.
   - le vrai `WebGpuRenderer` dans les trois modes : sans erreur, et l'image de QP 18 laissée telle quelle
     (`deblock_check.py`).
 
-Reste l'œil de Bruno, sur l'instance de développement.
+**Le verdict de Bruno (25/10/2026, au soir, sur l'instance de développement) :** il garde la version 1 pour l'auto.
+« J'adore le résultat, plus rapide et plus propre que FSR1, c'est une réussite. » Les versions 2 et 3 restent dans
+le menu de débogage, où elles ne coûtent rien tant qu'on ne les choisit pas. Avant ce verdict, Bruno a demandé si
+un historique, un drapeau de scène, la taille des blocs ou une image annexe de contours auraient aidé, et si tout
+pouvait se fondre dans le noyau. Aucune de ces combinaisons n'a été mesurée telle quelle ; leurs plafonds le sont
+par P7.0 (§14.4) et P8.0 (§14.6). Les options du noyau sont déjà des constantes `override`, retirées du code
+compilé quand elles sont coupées. Fondre le déblocage dans la passe du noyau referait le calcul des 16 grilles
+pour chaque pixel de sortie : seule une passe de calcul par tuile y gagnerait, une réécriture qui n'aurait de sens
+que si la version 2 ou 3 se voyait mieux.
 
 ## 15. Deux idées de Bruno du 23/10/2026 : les aplats, et les zones du regard
 

@@ -2395,3 +2395,7 @@ mesuré par P8.0 reste petit (au mieux +0,1 à +0,3 dB) : ces versions servent �
 **Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/deblock_check.py`, puis `npx vitest run
 test/SliceQp.test.js test/DeblockShader.test.js` dans `frontend/`. Les flux de test viennent d'un script
 (ffmpeg, `trace_headers`) gardé hors du dépôt ; leur contenu est dans `test/fixtures/slice-qp.json`.
+
+**Le verdict de Bruno (25/10, au soir).** Il garde la version 1 pour l'auto : « J'adore le résultat, plus rapide et
+plus propre que FSR1, c'est une réussite. » Les versions 2 et 3 restent dans le menu de débogage. Le plan le
+consigne au §14.7, avec ses questions sur l'historique, l'aide de l'hôte et la fusion dans le noyau.
