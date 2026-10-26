@@ -60,7 +60,7 @@ celui de libdatachannel ; `mux` et `thread` l'ignorent) :
 |---|---|---|
 | Port TCP de la session (média ou tunnel) | mappé par UPnP sur le routeur, **personne derrière** : le SYN est refusé, ou jeté par le pare-feu de l'hôte | une écoute derrière, pendant la vérification ICE de cette session seulement |
 | Code exposé avant authentification | sur le port UDP : `stun_read` + HMAC (MESSAGE-INTEGRITY) pour tout paquet | sur le port TCP : `accept`, la lecture d'**une** trame RFC 4571 de 1 Kio au plus, puis **le même** `stun_read` + HMAC. Aucun nouveau parseur |
-| Ressources qu'un inconnu peut tenir | aucune côté TCP | au plus 4 connexions en attente par agent, 2 s chacune |
+| Ressources qu'un inconnu peut tenir | aucune côté TCP | au plus 4 connexions en attente par agent, 2 par adresse, 2 s chacune |
 | Après authentification | DTLS (empreinte liée par MW-BIND-v1), puis SCTP/SRTP | identique : la connexion TCP n'est qu'un autre tuyau pour les mêmes octets |
 
 ### 3.2 La porte, avant toute allocation
@@ -86,8 +86,12 @@ paquet UDP. Elle y crée alors le candidat prflx et la paire, et l'agent répond
 
 - **Première trame en 2 s** après l'`accept`, sinon fermeture (slowloris). Un navigateur l'envoie
   dans le même aller-retour que la poignée de main.
-- **4 connexions en attente** au plus par agent. Au-delà, la nouvelle est acceptée puis fermée
-  aussitôt, pour vider la file du noyau : elle ne prend pas la place d'une autre.
+- **4 connexions en attente** au plus par agent, et **2 par adresse source** : la 3ᵉ d'une même
+  adresse prend la place de sa plus ancienne. Liste pleine, la nouvelle prend la place de la plus
+  ancienne connexion **muette**, celle qui n'a pas encore envoyé un octet. S'il n'y en a pas, la
+  nouvelle est acceptée puis fermée aussitôt, pour vider la file du noyau. Un navigateur envoie sa
+  trame dans l'aller-retour de la poignée de main : qui remplit les places ne le tient plus dehors
+  (revue de sécurité du 26/10, T2).
 - Trames suivantes, une fois rattachée : le cadrage de libjuice tel qu'il est pour le TCP actif,
   soit 2 048 octets gardés au plus par trame et le reste jeté.
 - **Une seule connexion rattachée par agent.** La première authentifiée gagne. Dès qu'elle l'est,
@@ -101,6 +105,7 @@ L'écoute naît avec l'agent (début de la collecte des candidats) et se ferme a
 - ICE aboutit (`COMPLETED`), quel que soit le chemin : si l'UDP passe, l'écoute disparaît en
   quelques centaines de millisecondes ;
 - ICE échoue (`FAILED`, au plus tard au bout des 39,5 s de `ICE_PAC_TIMEOUT`) ;
+- la connexion de l'agent est finie (erreur de socket), même si l'agent vit encore (26/10, T4) ;
 - l'agent est détruit (fin de session ou rung suivant).
 
 Hors d'une session en cours de vérification, **aucun port TCP n'écoute**. C'est plus strict que
@@ -120,9 +125,10 @@ tient déjà le canal de signalisation.
 
 **Il reste une augmentation de la surface d'attaque, petite mais réelle.** Pendant la vérification
 ICE, une écoute TCP joignable depuis Internet par le trou déjà mappé. Avant authentification, elle
-expose une lecture de 1 Kio et un parseur STUN déjà exposé en UDP. On ajoute aussi un déni possible
-du seul repli TCP : il suffit d'occuper les 4 places d'attente, ce qui demande de connaître le port
-de la session et de soutenir 2 connexions par seconde.
+expose une lecture de 1 Kio et un parseur STUN déjà exposé en UDP. Le port n'est pas un secret : il
+vient de petites plages publiées (§4). Occuper les 4 places d'attente pour tenir le navigateur
+dehors ne marche plus depuis le 26/10 (§3.3) : il faudrait plusieurs adresses, et des connexions
+qui parlent sans jamais finir leur trame, renouvelées toutes les 2 s.
 
 La règle de Bruno s'applique donc : **`ice_tcp_passive`** dans `settings.json`, **désactivé par
 défaut**, sans interface (son accord avant toute UI). Le passer à vrai par défaut se décidera après
@@ -150,6 +156,11 @@ jamais servi chez nous. Une fois rendu vivant, ASan et UBSan l'ont pris en défa
   la fin de la trame attendait le prochain réveil.
 - **Une connexion ouverte pendant le tour de poll** (TCP actif) faisait lire une case au-delà du
   tableau de `poll()`. Le traitement suit maintenant ce que la préparation a mis dans le tableau.
+- **Un candidat « tcptype active » annoncé dans la description** (26/10, revue de sécurité, T1)
+  faisait une paire TCP que personne n'appelle, et prenait l'unique place TCP de l'agent : la
+  connexion qui arrivait ensuite n'avait plus de paire, et le minuteur d'échec de 39,5 s ne
+  tournait plus. Seul un actif **peer-reflexive**, né de la requête reçue sur la connexion, fait
+  maintenant une paire.
 - **Socket plein, datagrammes jetés** (24/10) : libjuice gardait un datagramme de côté quand le
   socket TCP bloquait, et jetait les suivants jusqu'à ce qu'il parte. Sur un long aller-retour,
   SCTP perdait un datagramme à chaque remplissage et attendait sa retransmission. Ils attendent

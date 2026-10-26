@@ -43,11 +43,19 @@ static int failures = 0;
 
 // ── Raw TCP client ──────────────────────────────────────────────────────────
 
-static socket_t dial(int port) {
+// From 127.0.0.<from> (another source address on the same loopback; 1 by default).
+static socket_t dial_from(int from, int port) {
 	socket_t sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	struct sockaddr_in sin;
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
+	if (from != 1) {
+		sin.sin_addr.s_addr = htonl(0x7F000000 | (uint32_t)from);
+		if (bind(sock, (struct sockaddr *)&sin, sizeof(sin)) != 0) {
+			closesocket(sock);
+			return INVALID_SOCKET;
+		}
+	}
 	sin.sin_port = htons((uint16_t)port);
 	sin.sin_addr.s_addr = htonl(0x7F000001);
 	if (connect(sock, (struct sockaddr *)&sin, sizeof(sin)) != 0) {
@@ -56,6 +64,8 @@ static socket_t dial(int port) {
 	}
 	return sock;
 }
+
+static socket_t dial(int port) { return dial_from(1, port); }
 
 static void set_timeout(socket_t sock, int ms) {
 #ifdef _WIN32
@@ -314,6 +324,39 @@ static void host_credentials(side_t *h, char ufrag[64], char pwd[64]) {
 	read_attr(local_sdp, "a=ice-pwd:", pwd, 64);
 }
 
+// A raw peer, connected to the host's listener, sends its nominating check, then answers the
+// host's own checks until the host connects. True if it did within 5 s.
+static bool peer_connects(side_t *h, socket_t peer, const char *peer_pwd) {
+	char ufrag[64], pwd[64], user[160];
+	host_credentials(h, ufrag, pwd);
+	snprintf(user, sizeof(user), "%s:peer", ufrag);
+
+	char buf[2048];
+	int len = binding_request(buf, sizeof(buf), user, pwd);
+	send_frame(peer, buf, (uint16_t)len, (size_t)len);
+	for (int t = 0; t < 5000 && juice_get_state(h->agent) != JUICE_STATE_CONNECTED &&
+	                juice_get_state(h->agent) != JUICE_STATE_COMPLETED;
+	     t += 50) {
+		len = read_frame(peer, buf, sizeof(buf), 50);
+		stun_message_t in;
+		memset(&in, 0, sizeof(in));
+		if (len <= 0 || stun_read(buf, (size_t)len, &in) < 0 ||
+		    in.msg_class != STUN_CLASS_REQUEST || in.msg_method != STUN_METHOD_BINDING)
+			continue;
+		stun_message_t resp;
+		memset(&resp, 0, sizeof(resp));
+		resp.msg_class = STUN_CLASS_RESP_SUCCESS;
+		resp.msg_method = STUN_METHOD_BINDING;
+		memcpy(resp.transaction_id, in.transaction_id, STUN_TRANSACTION_ID_SIZE);
+		resp.mapped.len = sizeof(resp.mapped.addr);
+		getpeername(peer, (struct sockaddr *)&resp.mapped.addr, &resp.mapped.len);
+		len = stun_write(buf, sizeof(buf), &resp, peer_pwd);
+		send_frame(peer, buf, (uint16_t)len, (size_t)len);
+	}
+	juice_state_t state = juice_get_state(h->agent);
+	return state == JUICE_STATE_CONNECTED || state == JUICE_STATE_COMPLETED;
+}
+
 #define BURST_SIZE 1200 // an SCTP packet over libdatachannel
 #define BURST_MAX 8000  // 9.6 MB: past what the sockets and the queue hold
 #define QUEUE_AT_LEAST (128 * 1024) // half the patch's TCP_SEND_QUEUE_MAX: socket sizes vary
@@ -367,9 +410,6 @@ static void test_burst_over_tcp(void) {
 	side_t h = {0};
 	listening_host(&h, peer_pwd);
 	CHECK(h.passive_port > 0);
-	char ufrag[64], pwd[64], user[160];
-	host_credentials(&h, ufrag, pwd);
-	snprintf(user, sizeof(user), "%s:peer", ufrag);
 
 	socket_t peer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	const int rcvbuf = 4096; // before connect, so the window it offers stays small
@@ -380,32 +420,9 @@ static void test_burst_over_tcp(void) {
 	sin.sin_port = htons((uint16_t)h.passive_port);
 	sin.sin_addr.s_addr = htonl(0x7F000001);
 	CHECK(connect(peer, (struct sockaddr *)&sin, sizeof(sin)) == 0);
-
-	// The peer's check, nominating, then answers to the host's own checks until it connects.
+	CHECK(peer_connects(&h, peer, peer_pwd));
 	char buf[2048];
-	int len = binding_request(buf, sizeof(buf), user, pwd);
-	send_frame(peer, buf, (uint16_t)len, (size_t)len);
-	for (int t = 0; t < 5000 && juice_get_state(h.agent) != JUICE_STATE_CONNECTED &&
-	                juice_get_state(h.agent) != JUICE_STATE_COMPLETED;
-	     t += 50) {
-		len = read_frame(peer, buf, sizeof(buf), 50);
-		stun_message_t in;
-		memset(&in, 0, sizeof(in));
-		if (len <= 0 || stun_read(buf, (size_t)len, &in) < 0 ||
-		    in.msg_class != STUN_CLASS_REQUEST || in.msg_method != STUN_METHOD_BINDING)
-			continue;
-		stun_message_t resp;
-		memset(&resp, 0, sizeof(resp));
-		resp.msg_class = STUN_CLASS_RESP_SUCCESS;
-		resp.msg_method = STUN_METHOD_BINDING;
-		memcpy(resp.transaction_id, in.transaction_id, STUN_TRANSACTION_ID_SIZE);
-		resp.mapped.len = sizeof(resp.mapped.addr);
-		getpeername(peer, (struct sockaddr *)&resp.mapped.addr, &resp.mapped.len);
-		len = stun_write(buf, sizeof(buf), &resp, peer_pwd);
-		send_frame(peer, buf, (uint16_t)len, (size_t)len);
-	}
-	juice_state_t state = juice_get_state(h.agent);
-	CHECK(state == JUICE_STATE_CONNECTED || state == JUICE_STATE_COMPLETED);
+	int len;
 
 	// Nothing reads now: the burst goes on until the host refuses one.
 	size_t capacity = socket_capacity();
@@ -500,22 +517,64 @@ static void test_gate(void) {
 	CHECK(closed_within(wrong_ufrag, 1000));
 	closesocket(wrong_ufrag);
 
-	// Four may wait; a fifth is closed at once, and takes no one's place.
-	socket_t waiting[4];
-	for (int i = 0; i < 4; ++i)
-		waiting[i] = dial(h.passive_port);
-	sleep_ms(200);
-	socket_t fifth = dial(h.passive_port);
-	CHECK(fifth == INVALID_SOCKET || closed_within(fifth, 500));
-	if (fifth != INVALID_SOCKET)
-		closesocket(fifth);
-	bool all_open = true;
-	for (int i = 0; i < 4; ++i)
-		all_open = all_open && !closed_within(waiting[i], 100);
-	CHECK(all_open);
-	for (int i = 0; i < 4; ++i)
-		closesocket(waiting[i]);
+	// One address keeps two places: its third connection takes its first one's.
+	socket_t mine[3];
+	for (int i = 0; i < 3; ++i) {
+		mine[i] = dial(h.passive_port);
+		sleep_ms(100);
+	}
+	CHECK(closed_within(mine[0], 500));
+	CHECK(!closed_within(mine[1], 100) && !closed_within(mine[2], 100));
+	for (int i = 0; i < 3; ++i)
+		closesocket(mine[i]);
 	sleep_ms(300);
+
+	// Four places in all, from four addresses (127.0.0.2 to .5)
+	socket_t probe = dial_from(2, h.passive_port);
+	if (probe == INVALID_SOCKET) {
+		printf("  no other loopback address here: the four-address cases are skipped\n");
+	} else {
+		closesocket(probe);
+		sleep_ms(300);
+
+		// Full of silent connections: a fifth address takes the oldest one's place.
+		socket_t waiting[4];
+		for (int i = 0; i < 4; ++i) {
+			waiting[i] = dial_from(2 + i, h.passive_port);
+			sleep_ms(100);
+		}
+		socket_t fifth = dial_from(6, h.passive_port);
+		CHECK(fifth != INVALID_SOCKET && !closed_within(fifth, 300));
+		CHECK(closed_within(waiting[0], 500));
+		bool others_open = true;
+		for (int i = 1; i < 4; ++i)
+			others_open = others_open && !closed_within(waiting[i], 100);
+		CHECK(others_open);
+		for (int i = 0; i < 4; ++i)
+			closesocket(waiting[i]);
+		if (fifth != INVALID_SOCKET)
+			closesocket(fifth);
+		sleep_ms(300);
+
+		// Full of connections that have started their first frame: a fifth is closed at once,
+		// and takes no one's place.
+		for (int i = 0; i < 4; ++i) {
+			waiting[i] = dial_from(2 + i, h.passive_port);
+			send(waiting[i], "\0", 1, 0); // half of a frame header
+			sleep_ms(100);
+		}
+		fifth = dial_from(6, h.passive_port);
+		CHECK(fifth == INVALID_SOCKET || closed_within(fifth, 500));
+		if (fifth != INVALID_SOCKET)
+			closesocket(fifth);
+		bool all_open = true;
+		for (int i = 0; i < 4; ++i)
+			all_open = all_open && !closed_within(waiting[i], 100);
+		CHECK(all_open);
+		for (int i = 0; i < 4; ++i)
+			closesocket(waiting[i]);
+		sleep_ms(300);
+	}
 
 	// The real thing: admitted, and answered on the same connection.
 	len = binding_request(buf, sizeof(buf), good_user, pwd);
@@ -544,6 +603,34 @@ static void test_gate(void) {
 	juice_destroy(h.agent);
 }
 
+static void test_announced_active_takes_no_place(void) {
+	printf("An active candidate the peer announces takes no place from the one that dials\n");
+	// Before, an announced "tcptype active" made a TCP pair nobody dials, which took the single
+	// TCP place: the connection that did come in then had no pair, and the host never connected.
+	const char *peer_pwd = "pw01234567890123456789";
+	side_t h = {0};
+	listening_host(&h, peer_pwd);
+	CHECK(h.passive_port > 0);
+	CHECK(juice_add_remote_candidate(
+	          h.agent, "a=candidate:1 1 TCP 1518280447 127.0.0.1 9 typ host tcptype active") == 0);
+
+	socket_t peer = dial(h.passive_port);
+	CHECK(peer != INVALID_SOCKET);
+	CHECK(peer != INVALID_SOCKET && peer_connects(&h, peer, peer_pwd));
+
+	char local[JUICE_MAX_CANDIDATE_SDP_STRING_LEN], remote[JUICE_MAX_CANDIDATE_SDP_STRING_LEN];
+	if (juice_get_selected_candidates(h.agent, local, sizeof(local), remote, sizeof(remote)) == 0) {
+		printf("  host selected: %s -> %s\n", local, remote);
+		CHECK(strstr(remote, "prflx") != NULL);
+	} else {
+		CHECK(!"selected candidates");
+	}
+
+	if (peer != INVALID_SOCKET)
+		closesocket(peer);
+	juice_destroy(h.agent);
+}
+
 static void test_active_only_does_not_listen(void) {
 	printf("ACTIVE alone listens on nothing and offers no passive candidate\n");
 	side_t s = {0};
@@ -565,6 +652,7 @@ int main(void) {
 	test_selected_local_is_the_address_reached();
 	test_burst_over_tcp();
 	test_gate();
+	test_announced_active_takes_no_place();
 	test_active_only_does_not_listen();
 	printf(failures ? "\n%d FAILURE(S)\n" : "\nall passed\n", failures);
 	return failures ? 1 : 0;
