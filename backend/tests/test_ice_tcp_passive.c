@@ -537,7 +537,7 @@ static void test_gate(void) {
 		closesocket(probe);
 		sleep_ms(300);
 
-		// Full of silent connections: a fifth address takes the oldest one's place.
+		// Full of silent connections: a fifth source takes the oldest one's place.
 		socket_t waiting[4];
 		for (int i = 0; i < 4; ++i) {
 			waiting[i] = dial_from(2 + i, h.passive_port);
@@ -556,23 +556,23 @@ static void test_gate(void) {
 			closesocket(fifth);
 		sleep_ms(300);
 
-		// Full of connections that have started their first frame: a fifth is closed at once,
-		// and takes no one's place.
+		// Full of connections that have each sent a byte: the same, a byte buys no place.
 		for (int i = 0; i < 4; ++i) {
 			waiting[i] = dial_from(2 + i, h.passive_port);
 			send(waiting[i], "\0", 1, 0); // half of a frame header
 			sleep_ms(100);
 		}
 		fifth = dial_from(6, h.passive_port);
-		CHECK(fifth == INVALID_SOCKET || closed_within(fifth, 500));
-		if (fifth != INVALID_SOCKET)
-			closesocket(fifth);
-		bool all_open = true;
-		for (int i = 0; i < 4; ++i)
-			all_open = all_open && !closed_within(waiting[i], 100);
-		CHECK(all_open);
+		CHECK(fifth != INVALID_SOCKET && !closed_within(fifth, 300));
+		CHECK(closed_within(waiting[0], 500));
+		others_open = true;
+		for (int i = 1; i < 4; ++i)
+			others_open = others_open && !closed_within(waiting[i], 100);
+		CHECK(others_open);
 		for (int i = 0; i < 4; ++i)
 			closesocket(waiting[i]);
+		if (fifth != INVALID_SOCKET)
+			closesocket(fifth);
 		sleep_ms(300);
 	}
 
@@ -600,6 +600,37 @@ static void test_gate(void) {
 		closesocket(after);
 	closesocket(good);
 
+	juice_destroy(h.agent);
+}
+
+static void test_half_frames_do_not_keep_the_peer_out(void) {
+	printf("Four connections holding half a frame header do not keep the peer out\n");
+	const char *peer_pwd = "pw01234567890123456789";
+	side_t h = {0};
+	listening_host(&h, peer_pwd);
+	CHECK(h.passive_port > 0);
+	socket_t probe = dial_from(2, h.passive_port);
+	if (probe == INVALID_SOCKET) {
+		printf("  no other loopback address here: skipped\n");
+		juice_destroy(h.agent);
+		return;
+	}
+	closesocket(probe);
+	sleep_ms(300);
+
+	socket_t squat[4];
+	for (int i = 0; i < 4; ++i) {
+		squat[i] = dial_from(2 + i, h.passive_port);
+		send(squat[i], "\0", 1, 0);
+		sleep_ms(50);
+	}
+	socket_t peer = dial(h.passive_port);
+	CHECK(peer != INVALID_SOCKET && peer_connects(&h, peer, peer_pwd));
+
+	for (int i = 0; i < 4; ++i)
+		closesocket(squat[i]);
+	if (peer != INVALID_SOCKET)
+		closesocket(peer);
 	juice_destroy(h.agent);
 }
 
@@ -652,6 +683,7 @@ int main(void) {
 	test_selected_local_is_the_address_reached();
 	test_burst_over_tcp();
 	test_gate();
+	test_half_frames_do_not_keep_the_peer_out();
 	test_announced_active_takes_no_place();
 	test_active_only_does_not_listen();
 	printf(failures ? "\n%d FAILURE(S)\n" : "\nall passed\n", failures);

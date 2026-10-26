@@ -60,7 +60,7 @@ celui de libdatachannel ; `mux` et `thread` l'ignorent) :
 |---|---|---|
 | Port TCP de la session (média ou tunnel) | mappé par UPnP sur le routeur, **personne derrière** : le SYN est refusé, ou jeté par le pare-feu de l'hôte | une écoute derrière, pendant la vérification ICE de cette session seulement |
 | Code exposé avant authentification | sur le port UDP : `stun_read` + HMAC (MESSAGE-INTEGRITY) pour tout paquet | sur le port TCP : `accept`, la lecture d'**une** trame RFC 4571 de 1 Kio au plus, puis **le même** `stun_read` + HMAC. Aucun nouveau parseur |
-| Ressources qu'un inconnu peut tenir | aucune côté TCP | au plus 4 connexions en attente par agent, 2 par adresse, 2 s chacune |
+| Ressources qu'un inconnu peut tenir | aucune côté TCP | au plus 4 connexions en attente par agent, 2 par source, 2 s chacune, la plus ancienne cédant sa place |
 | Après authentification | DTLS (empreinte liée par MW-BIND-v1), puis SCTP/SRTP | identique : la connexion TCP n'est qu'un autre tuyau pour les mêmes octets |
 
 ### 3.2 La porte, avant toute allocation
@@ -86,12 +86,13 @@ paquet UDP. Elle y crée alors le candidat prflx et la paire, et l'agent répond
 
 - **Première trame en 2 s** après l'`accept`, sinon fermeture (slowloris). Un navigateur l'envoie
   dans le même aller-retour que la poignée de main.
-- **4 connexions en attente** au plus par agent, et **2 par adresse source** : la 3ᵉ d'une même
-  adresse prend la place de sa plus ancienne. Liste pleine, la nouvelle prend la place de la plus
-  ancienne connexion **muette**, celle qui n'a pas encore envoyé un octet. S'il n'y en a pas, la
-  nouvelle est acceptée puis fermée aussitôt, pour vider la file du noyau. Un navigateur envoie sa
-  trame dans l'aller-retour de la poignée de main : qui remplit les places ne le tient plus dehors
-  (revue de sécurité du 26/10, T2).
+- **4 connexions en attente** au plus par agent, et **2 par source** (une adresse IPv4, un /64
+  IPv6, le bloc qu'un abonné reçoit entier) : la 3ᵉ d'une même source prend la place de sa plus
+  ancienne. Liste pleine, la nouvelle prend la place de la **plus ancienne**, quoi qu'elle ait
+  envoyé : aucune n'est authentifiée, et un navigateur envoie toute sa trame dans l'aller-retour de
+  la poignée de main. Qui remplit les places, même d'un octet chacune, ne le tient plus dehors
+  (revue de sécurité du 26/10, T2 ; d'abord seules les connexions muettes cédaient leur place, et
+  deux adresses qui envoyaient un octet tenaient les quatre).
 - Trames suivantes, une fois rattachée : le cadrage de libjuice tel qu'il est pour le TCP actif,
   soit 2 048 octets gardés au plus par trame et le reste jeté.
 - **Une seule connexion rattachée par agent.** La première authentifiée gagne. Dès qu'elle l'est,
@@ -127,8 +128,9 @@ tient déjà le canal de signalisation.
 ICE, une écoute TCP joignable depuis Internet par le trou déjà mappé. Avant authentification, elle
 expose une lecture de 1 Kio et un parseur STUN déjà exposé en UDP. Le port n'est pas un secret : il
 vient de petites plages publiées (§4). Occuper les 4 places d'attente pour tenir le navigateur
-dehors ne marche plus depuis le 26/10 (§3.3) : il faudrait plusieurs adresses, et des connexions
-qui parlent sans jamais finir leur trame, renouvelées toutes les 2 s.
+dehors ne marche plus depuis le 26/10 (§3.3) : chaque nouvelle connexion chasse la plus ancienne,
+si bien qu'il faudrait arriver entre la poignée de main du navigateur et sa trame, un aller-retour,
+et recommencer à chaque essai.
 
 La règle de Bruno s'appliquait donc : **`ice_tcp_passive`** dans `settings.json`, désactivé par
 défaut et sans interface, jusqu'à une mesure sur un vrai réseau. **Activé par défaut depuis la

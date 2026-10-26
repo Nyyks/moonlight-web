@@ -27,7 +27,7 @@ The two WebRTC families differ only in the **video** path: `-dc` fragments acces
 - **Video Enhancement OFF**: `webrtc-dc-udp` → `webrtc-dc-tcp` → `webrtc-media-udp` → `webrtc-media-tcp` → `wss`
 - **Video Enhancement ON** (canvas required for WebGPU): `webrtc-dc-udp` → `webrtc-dc-tcp` → `wss` → `webrtc-media-udp` → `webrtc-media-tcp` (media kept only as a last resort, streaming *without* enhancement)
 
-`wss` is dropped from the chain for any browser that arrived through the rendezvous (`req.viaTunnel`) — there is no page-serving TLS connection to carry it. Since that is how every user reaches the app, the rung is effectively LAN-IP-only, and the admin selector omits it outside debug builds (`available_transports`). Selecting it by name is still honoured, and still reported: the `/start` response carries `transport_dropped` and the browser shows which transport actually runs. The `-tcp` rungs do **not** cover the UDP-blocked case that `wss` used to: see [Networks that let no UDP out](#networks-that-let-no-udp-out).
+`wss` is dropped from the chain for any browser that arrived through the rendezvous (`req.viaTunnel`) — there is no page-serving TLS connection to carry it. Since that is how every user reaches the app, the rung is effectively LAN-IP-only, and the admin selector omits it outside debug builds (`available_transports`). Selecting it by name is still honoured, and still reported: the `/start` response carries `transport_dropped` and the browser shows which transport actually runs. Since 0.4.1 the `-tcp` rungs cover most of the UDP-blocked case that `wss` used to, through passive ICE-TCP: see [Networks that let no UDP out](#networks-that-let-no-udp-out).
 
 Rules applied when building the chain (`main.cpp`):
 

@@ -302,7 +302,7 @@ index d86b672..0870428 100644
  
  #endif
 diff --git a/src/conn_poll.c b/src/conn_poll.c
-index 7d6ed7b..2fb28d2 100644
+index 7d6ed7b..beeeee7 100644
 --- a/src/conn_poll.c
 +++ b/src/conn_poll.c
 @@ -31,6 +31,33 @@ typedef struct registry_impl {
@@ -355,7 +355,7 @@ index 7d6ed7b..2fb28d2 100644
  } conn_impl_t;
  
  typedef struct pfds_record {
-@@ -58,6 +94,15 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd);
+@@ -58,6 +94,16 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd);
  void conn_poll_change_tcp_fail(juice_agent_t *agent);
  void conn_poll_change_tcp_state(juice_agent_t *agent, tcp_state_t state);
  int conn_poll_run(conn_registry_t *registry);
@@ -366,12 +366,13 @@ index 7d6ed7b..2fb28d2 100644
 +static void tcp_passive_trim(juice_agent_t *agent, timestamp_t now);
 +static void tcp_passive_close(conn_impl_t *conn_impl);
 +static void tcp_passive_drop(conn_impl_t *conn_impl, int k);
++static bool tcp_passive_same_source(const addr_record_t *a, const addr_record_t *b);
 +static int tcp_passive_oldest(const conn_impl_t *conn_impl, const addr_record_t *src);
 +static nfds_t tcp_passive_process(juice_agent_t *agent, pfds_record_t *pfds, nfds_t i);
  
  static thread_return_t THREAD_CALL conn_thread_entry(void *arg) {
  	thread_set_name_self("juice poll");
-@@ -148,15 +193,23 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
+@@ -148,15 +194,23 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
  		}
  
  		conn_impl_t *conn_impl = agent->conn_impl;
@@ -397,7 +398,7 @@ index 7d6ed7b..2fb28d2 100644
  	}
  
  	if (pfds->size != size) {
-@@ -203,6 +256,7 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
+@@ -203,6 +257,7 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
  		udp_pfd->events = POLLIN;
  		i++;
  
@@ -405,7 +406,7 @@ index 7d6ed7b..2fb28d2 100644
  		if (conn_impl->tcp_sock != INVALID_SOCKET) {
  			struct pollfd *tcp_pfd = pfds->pfds + i;
  			tcp_pfd->fd = conn_impl->tcp_sock;
-@@ -210,12 +264,33 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
+@@ -210,12 +265,33 @@ int conn_poll_prepare(conn_registry_t *registry, pfds_record_t *pfds, timestamp_
  				tcp_pfd->events = POLLOUT;
  			} else {
  				tcp_pfd->events = POLLIN;
@@ -440,7 +441,7 @@ index 7d6ed7b..2fb28d2 100644
  	}
  
  	mutex_unlock(&registry->mutex);
-@@ -338,17 +413,30 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
+@@ -338,17 +414,30 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
  
  			conn_poll_change_tcp_state(agent, TCP_STATE_CONNECTED);
  		} else {
@@ -479,7 +480,7 @@ index 7d6ed7b..2fb28d2 100644
  		}
  	}
  
-@@ -400,12 +488,15 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
+@@ -400,12 +489,15 @@ void conn_poll_process_tcp(juice_agent_t *agent, struct pollfd *pfd) {
  
  void conn_poll_change_tcp_fail(juice_agent_t *agent) {
  	conn_impl_t *conn_impl = agent->conn_impl;
@@ -495,7 +496,7 @@ index 7d6ed7b..2fb28d2 100644
  	conn_poll_change_tcp_state(agent, TCP_STATE_FAILED);
  }
  
-@@ -478,15 +569,19 @@ int conn_poll_process(conn_registry_t *registry, pfds_record_t *pfds) {
+@@ -478,15 +570,19 @@ int conn_poll_process(conn_registry_t *registry, pfds_record_t *pfds) {
  		conn_poll_process_udp(agent, udp_pfd);
  		i++;
  
@@ -522,7 +523,7 @@ index 7d6ed7b..2fb28d2 100644
  	}
  
  	mutex_unlock(&registry->mutex);
-@@ -551,6 +646,10 @@ int conn_poll_init(juice_agent_t *agent, conn_registry_t *registry, udp_socket_c
+@@ -551,6 +647,10 @@ int conn_poll_init(juice_agent_t *agent, conn_registry_t *registry, udp_socket_c
  	memset(&conn_impl->tcp_ice_write_context, 0, sizeof(tcp_ice_write_context_t));
  	memset(&conn_impl->tcp_ice_read_context, 0, sizeof(tcp_ice_read_context_t));
  
@@ -533,7 +534,7 @@ index 7d6ed7b..2fb28d2 100644
  	agent->conn_impl = conn_impl;
  	return 0;
  }
-@@ -562,7 +661,16 @@ void conn_poll_cleanup(juice_agent_t *agent) {
+@@ -562,7 +662,16 @@ void conn_poll_cleanup(juice_agent_t *agent) {
  
  	mutex_destroy(&conn_impl->send_mutex);
  	closesocket(conn_impl->udp_sock);
@@ -550,7 +551,7 @@ index 7d6ed7b..2fb28d2 100644
  	free(agent->conn_impl);
  	agent->conn_impl = NULL;
  }
-@@ -616,14 +724,28 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
+@@ -616,14 +725,28 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
  	JLOG_VERBOSE("Sending datagram, size=%d", size);
  
  	int ret;
@@ -583,7 +584,7 @@ index 7d6ed7b..2fb28d2 100644
  			ret = -SEAGAIN;
  		}
  	} else {
-@@ -650,6 +772,8 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
+@@ -650,6 +773,8 @@ int conn_poll_send(juice_agent_t *agent, const addr_record_t *dst, const char *d
  	}
  
  	mutex_unlock(&conn_impl->send_mutex);
@@ -592,7 +593,7 @@ index 7d6ed7b..2fb28d2 100644
  	return ret;
  }
  
-@@ -672,6 +796,360 @@ void conn_poll_tcp_connect(juice_agent_t *agent, const addr_record_t *dst) {
+@@ -672,6 +797,365 @@ void conn_poll_tcp_connect(juice_agent_t *agent, const addr_record_t *dst) {
  	mutex_unlock(&conn_impl->registry->mutex);
  }
  
@@ -715,16 +716,28 @@ index 7d6ed7b..2fb28d2 100644
 +		conn_impl->pending[k] = conn_impl->pending[conn_impl->pending_count];
 +}
 +
-+// The oldest waiting connection from `src` (any port), or, with NULL, the oldest one that has not
-+// sent a byte; -1 if there is none. The oldest has the earliest deadline.
++// Whether two connections come from the same source: the same IPv4 address, or the same IPv6
++// /64, the block one subscriber gets whole.
++static bool tcp_passive_same_source(const addr_record_t *a, const addr_record_t *b) {
++	const struct sockaddr *sa = (const struct sockaddr *)&a->addr;
++	const struct sockaddr *sb = (const struct sockaddr *)&b->addr;
++	if (sa->sa_family != sb->sa_family)
++		return false;
++	if (sa->sa_family == AF_INET6)
++		return memcmp(&((const struct sockaddr_in6 *)sa)->sin6_addr,
++		              &((const struct sockaddr_in6 *)sb)->sin6_addr, 8) == 0;
++	return addr_is_equal(sa, sb, false);
++}
++
++// The oldest waiting connection from the source of `src`, or, with NULL, the oldest of all; -1 if
++// there is none. The oldest has the earliest deadline.
 +static int tcp_passive_oldest(const conn_impl_t *conn_impl, const addr_record_t *src) {
 +	int oldest = -1;
 +	for (int k = 0; k < conn_impl->pending_count; ++k) {
 +		const tcp_passive_pending_t *pending = conn_impl->pending + k;
-+		bool match = src ? addr_is_equal((const struct sockaddr *)&pending->src.addr,
-+		                                 (const struct sockaddr *)&src->addr, false)
-+		                 : pending->received == 0;
-+		if (match && (oldest < 0 || pending->deadline < conn_impl->pending[oldest].deadline))
++		if (src && !tcp_passive_same_source(&pending->src, src))
++			continue;
++		if (oldest < 0 || pending->deadline < conn_impl->pending[oldest].deadline)
 +			oldest = k;
 +	}
 +	return oldest;
@@ -765,29 +778,22 @@ index 7d6ed7b..2fb28d2 100644
 +		addr_unmap_inet6_v4mapped((struct sockaddr *)&src.addr, &src.len);
 +		src.socktype = SOCK_STREAM;
 +
-+		// One address keeps at most TCP_PASSIVE_PER_ADDRESS_MAX places, its newest connection
-+		// taking its oldest one's; a full list makes room by closing its oldest silent connection,
-+		// one that has not sent a byte. A peer dials and sends its check at once, so whoever fills
-+		// the places can no longer keep it out.
++		// One source (an IPv4 address, an IPv6 /64) keeps at most TCP_PASSIVE_PER_ADDRESS_MAX
++		// places, its newest connection taking its oldest one's; a full list makes room by closing
++		// its oldest connection, whatever it has sent: none has authenticated, and a peer sends its
++		// whole check within the round trip of its handshake. Whoever fills the places can no
++		// longer keep it out.
 +		int same = 0;
 +		for (int k = 0; k < conn_impl->pending_count; ++k)
-+			if (addr_is_equal((const struct sockaddr *)&conn_impl->pending[k].src.addr,
-+			                  (const struct sockaddr *)&src.addr, false))
++			if (tcp_passive_same_source(&conn_impl->pending[k].src, &src))
 +				++same;
 +		if (same >= TCP_PASSIVE_PER_ADDRESS_MAX) {
-+			JLOG_INFO("Passive ICE-TCP: too many connections waiting from one address, closing its "
++			JLOG_INFO("Passive ICE-TCP: too many connections waiting from one source, closing its "
 +			          "oldest");
 +			tcp_passive_drop(conn_impl, tcp_passive_oldest(conn_impl, &src));
 +		} else if (conn_impl->pending_count >= TCP_PASSIVE_PENDING_MAX) {
-+			int silent = tcp_passive_oldest(conn_impl, NULL);
-+			if (silent < 0) {
-+				// Accepted only to leave the kernel's queue: it takes no place a peer is using
-+				JLOG_INFO("Passive ICE-TCP: too many connections waiting, closing a new one");
-+				closesocket(sock);
-+				continue;
-+			}
-+			JLOG_INFO("Passive ICE-TCP: too many connections waiting, closing the oldest silent one");
-+			tcp_passive_drop(conn_impl, silent);
++			JLOG_INFO("Passive ICE-TCP: too many connections waiting, closing the oldest");
++			tcp_passive_drop(conn_impl, tcp_passive_oldest(conn_impl, NULL));
 +		}
 +
 +		ctl_t nbio = 1;
