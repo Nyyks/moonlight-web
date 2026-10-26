@@ -5,6 +5,7 @@
 #include "native_test_framework.h"
 
 #if defined(_WIN32)
+#include "input/windows/UsScanCode.h"
 #include "input/windows/WinTextKeys.h"
 
 #include <windows.h>
@@ -610,6 +611,30 @@ void unitedStates(const WinKeyLayout& us)
     {
         WinStroke letter;
         CHECK(us.letterKey(U'a', letter) && letter.vk == 'A' && letter.scan == 0x1E);
+    }
+
+    // A key sent by its US scancode, with the 0xE0 prefix the injector gives
+    // it (the table's, or isExtendedKey's), is the key Windows reads back.
+    // NumLock went as 0xE0 0x45, which Windows reads as no key at all: the
+    // host's NumLock never followed the client's (25/10/2026).
+    {
+        const HKL hkl = reinterpret_cast<HKL>(us.hkl());
+        int checked = 0;
+        for (int vk = 1; vk <= 0xFE; ++vk) {
+            const uint16_t sc = usScanCode(vk);
+            const bool extended = (sc >> 8) == 0xE0 || isExtendedKey(vk);
+            if (!extended && vk != VK_NUMLOCK) continue;
+            const UINT scan = (sc & 0xFFu) | (extended ? 0xE000u : 0u);
+            const unsigned read = ::MapVirtualKeyExW(scan, MAPVK_VSC_TO_VK_EX, hkl);
+            if (read != static_cast<unsigned>(vk))
+                std::fprintf(stderr, "  vk 0x%02X sent as 0x%04X reads as 0x%02X\n", vk, scan,
+                             read);
+            CHECK_EQ(read, static_cast<unsigned>(vk));
+            ++checked;
+        }
+        CHECK(checked >= 18);
+        CHECK(!isExtendedKey(VK_NUMLOCK));
+        CHECK_EQ(::MapVirtualKeyExW(0xE045, MAPVK_VSC_TO_VK_EX, hkl), 0u);
     }
     roundTripTable(us, "US");
 }

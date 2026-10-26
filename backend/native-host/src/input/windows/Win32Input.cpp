@@ -50,35 +50,6 @@ namespace {
 /// protocol itself changing.
 constexpr uint8_t kFlagNonNormalized = 0x01;
 
-/// Keys whose scancode needs the 0xE0 prefix. MAPVK_VK_TO_VSC_EX reports the
-/// prefix for most of them, but not consistently across layouts and Windows
-/// versions — NumLock in particular comes back as a bare 0x45, which without
-/// the extended flag is Pause instead. Naming them is cheap insurance.
-bool isExtendedKey(int vk)
-{
-    switch (vk) {
-    case VK_RCONTROL:
-    case VK_RMENU:
-    case VK_INSERT:
-    case VK_DELETE:
-    case VK_HOME:
-    case VK_END:
-    case VK_PRIOR:
-    case VK_NEXT:
-    case VK_LEFT:
-    case VK_RIGHT:
-    case VK_UP:
-    case VK_DOWN:
-    case VK_NUMLOCK:
-    case VK_DIVIDE:
-    case VK_LWIN:
-    case VK_RWIN:
-    case VK_APPS:
-    case VK_SNAPSHOT: return true;
-    default: return false;
-    }
-}
-
 /// Send one batch, reporting the first refusal and then staying quiet.
 ///
 /// The failure that matters — UIPI, see foregroundBlocksInput — is NOT one
