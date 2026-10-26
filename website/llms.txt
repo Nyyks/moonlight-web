@@ -14,8 +14,8 @@
   Quick Sync, VA-API, VideoToolbox, with a software fallback stage).
 - Up to 4K HDR at up to 240 fps, with H264, HEVC and AV1 codecs (hardware-decoded
   via WebCodecs).
-- Under 20 ms latency over Wi-Fi using a WebRTC UDP transport with automatic
-  fallback (UDP → TCP).
+- Under 20 ms latency over Wi-Fi using a direct WebRTC UDP transport, with an
+  automatic TCP fallback where UDP is blocked, never through a relay.
 - GPU Video Enhancement in the browser (WebGL2 or WebGPU running MoonlightWeb's own upscaler): stream at
   720p, display near-1440p quality.
 - Full input support: keyboard, pointer-lock mouse, multi-touch trackpad, virtual
