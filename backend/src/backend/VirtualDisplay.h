@@ -434,6 +434,21 @@ bool savesLayout(LayoutStep step, bool othersOff);
 /// before it and whether it went through (@p ok).
 bool othersOffAfter(LayoutStep step, bool othersOff, bool ok);
 
+/// The guard an exclusive stream leaves beside the server
+/// (VirtualDisplayApply::guard): what it does on each look.
+enum class GuardStep
+{
+    Wait,    ///< the server runs and the other displays are off
+    Leave,   ///< they are not off, or that cannot be read: nothing to touch
+    Restore, ///< the server is gone with them off: bring them back
+};
+GuardStep guardStep(bool serverAlive, bool othersOff);
+
+inline QString guardArgument()
+{
+    return QStringLiteral("--vdisplay-guard");
+}
+
 struct Result
 {
     bool ok = false;

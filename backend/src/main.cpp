@@ -1563,6 +1563,7 @@ int main(int argc, char* argv[])
                                                    "--worker-service-remove",
                                                    "--native-probe",
                                                    "--vdisplay-apply",
+                                                   "--vdisplay-guard",
                                                    "--vhid-apply",
                                                    "--update-apply",
                                                    "--open-on-desktop",
@@ -1621,7 +1622,8 @@ int main(int argc, char* argv[])
                 probe = true;
             else if (qstrcmp(argv[i], "--stream-worker") == 0)
                 worker = true;
-            else if (qstrcmp(argv[i], "--vdisplay-apply") == 0)
+            else if (qstrcmp(argv[i], "--vdisplay-apply") == 0 ||
+                     qstrcmp(argv[i], "--vdisplay-guard") == 0)
                 vdisplay = true;
             else if (qstrcmp(argv[i], "--vhid-apply") == 0 ||
                      qstrncmp(argv[i], "--vhid-apply=", 13) == 0)
@@ -1856,6 +1858,12 @@ int main(int argc, char* argv[])
     QCommandLineOption vdisplayDirOption("vdisplay-dir",
                                          "With --vdisplay-apply: the staging directory", "dir");
     parser.addOption(vdisplayDirOption);
+    // Left behind by a server whose stream turned the other displays off:
+    // brings them back if that server dies (VirtualDisplayApply::guard).
+    QCommandLineOption vdisplayGuardOption(
+        "vdisplay-guard", "Watch a server whose stream turned the other displays off (internal).",
+        "server");
+    parser.addOption(vdisplayGuardOption);
 
     // "MoonlightWeb Virtual HID", the HID passthrough's Windows driver: the
     // installer's elevated half (VirtualHidApply.h).
@@ -1970,6 +1978,8 @@ int main(int argc, char* argv[])
     if (parser.isSet(vdisplayApplyOption))
         return VirtualDisplayApply::run(parser.value(vdisplayStageOption),
                                         parser.value(vdisplayDirOption));
+    if (parser.isSet(vdisplayGuardOption))
+        return VirtualDisplayApply::guard(parser.value(vdisplayGuardOption));
     if (parser.isSet(vhidApplyOption))
         return VirtualHidApply::run(parser.value(vhidApplyOption), parser.value(vhidDirOption));
     if (parser.isSet(updateApplyOption)) return UpdateApply::run();

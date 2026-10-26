@@ -728,4 +728,14 @@ void run_virtual_display_tests()
         CHECK(othersOffAfter(LayoutStep::Restore, true, false));
         CHECK(othersOffAfter(LayoutStep::Mode, true, true));
     }
+
+    SECTION("VirtualDisplay — the guard restores only a dead server's displays left off");
+    // Off and the server running: it waits. The server gone with them off:
+    // it brings them back. Not off — or a marker it cannot read — whatever
+    // the server does: it leaves, touching nothing.
+    CHECK(guardStep(true, true) == GuardStep::Wait);
+    CHECK(guardStep(false, true) == GuardStep::Restore);
+    CHECK(guardStep(true, false) == GuardStep::Leave);
+    CHECK(guardStep(false, false) == GuardStep::Leave);
+    CHECK_EQ(guardArgument(), QStringLiteral("--vdisplay-guard"));
 }

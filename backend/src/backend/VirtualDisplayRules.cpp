@@ -143,6 +143,12 @@ bool savesLayout(LayoutStep step, bool othersOff)
     return false;
 }
 
+GuardStep guardStep(bool serverAlive, bool othersOff)
+{
+    if (!othersOff) return GuardStep::Leave;
+    return serverAlive ? GuardStep::Wait : GuardStep::Restore;
+}
+
 bool othersOffAfter(LayoutStep step, bool othersOff, bool ok)
 {
     if (!ok) return othersOff;

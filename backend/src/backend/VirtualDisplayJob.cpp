@@ -28,6 +28,15 @@
 #include <QFile>
 #include <QProcess>
 
+#ifdef Q_OS_WIN
+#include "common/DetachedProcess.h"
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
 
 constexpr int kHelperTimeoutMs = 2 * 60 * 1000;
@@ -405,6 +414,7 @@ void VirtualDisplayJob::succeed(const VirtualDisplay::Result& res)
         m_ActiveHeight = asked.height;
         m_ActiveRefresh = asked.refreshMilliHz;
         m_ActiveHdr = asked.hdr;
+        if (m_Request.exclusive) startGuard();
     } else if (m_Request.action == Action::Deactivate) {
         settings.clearVirtualDisplay();
         m_ActiveWidth = m_ActiveHeight = m_ActiveRefresh = 0;
@@ -412,6 +422,22 @@ void VirtualDisplayJob::succeed(const VirtualDisplay::Result& res)
     }
     setState(State::Done);
     settle(true, QString());
+}
+
+void VirtualDisplayJob::startGuard()
+{
+#ifdef Q_OS_WIN
+    // A service has no desktop to put a layout back on, and its supervisor
+    // restarts it; a server in the user's session may simply die.
+    if (!qEnvironmentVariableIsEmpty("MW_SERVICE")) return;
+    FILETIME c{}, e{}, k{}, u{};
+    if (!GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)) return;
+    const quint64 created = (quint64(c.dwHighDateTime) << 32) | quint64(c.dwLowDateTime);
+    const QString server = QStringLiteral("%1:%2").arg(GetCurrentProcessId()).arg(created);
+    if (!mw::startDetached(QCoreApplication::applicationFilePath(),
+                           {VirtualDisplay::guardArgument(), server}))
+        Logger::warning(QStringLiteral("[vdisplay] the guard of the other displays did not start"));
+#endif
 }
 
 // ── Reaching the helper ─────────────────────────────────────────────────────

@@ -148,6 +148,9 @@ private:
     void setState(State s);
     void fail(const QString& error);
     void succeed(const VirtualDisplay::Result& res);
+    /// Windows: the guard that brings the other displays back if this
+    /// process dies during an exclusive stream (VirtualDisplayApply::guard).
+    void startGuard();
     void settle(bool ok, const QString& error);
 
     void dispatch();

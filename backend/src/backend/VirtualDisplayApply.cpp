@@ -1637,4 +1637,82 @@ int run(const QString& stageArg, const QString& dirArg)
 #endif
 }
 
+int guard(const QString& server)
+{
+#ifdef Q_OS_WIN
+    const QStringList parts = server.split(QLatin1Char(':'));
+    bool okPid = false, okTime = false;
+    const DWORD pid = parts.size() == 2 ? parts[0].toULong(&okPid) : 0;
+    const quint64 created = parts.size() == 2 ? parts[1].toULongLong(&okTime) : 0;
+    if (!okPid || !okTime || pid == 0) {
+        Logger::warning(QStringLiteral("[vdisplay-guard] not a server: %1").arg(server));
+        return kExitFailed;
+    }
+    // One guard per edition and session: an exclusive stream that takes a
+    // new mode activates again, and the first guard is still on watch.
+    const std::wstring mutexName =
+        (QStringLiteral("Local\\") + VirtualDisplay::displayName() + QStringLiteral(" guard"))
+            .toStdWString();
+    HANDLE single = CreateMutexW(nullptr, FALSE, mutexName.c_str());
+    if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(single);
+        return kExitOk;
+    }
+    // The handle, not the number, and only when it is the server's: a pid
+    // the server left behind may name another process by now.
+    HANDLE proc = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (proc) {
+        FILETIME c{}, e{}, k{}, u{};
+        const quint64 have = GetProcessTimes(proc, &c, &e, &k, &u)
+                                 ? (quint64(c.dwHighDateTime) << 32) | quint64(c.dwLowDateTime)
+                                 : 0;
+        if (have != created) {
+            CloseHandle(proc);
+            proc = nullptr;
+        }
+    }
+    Context ctx;
+    ctx.dir = VirtualDisplay::stagingDir();
+    // Off means a marker that is there AND can be read: anything less and
+    // nothing is touched.
+    const auto othersOffReadable = [&ctx] {
+        QFile f(othersOffPath(ctx));
+        return f.exists() && f.open(QIODevice::ReadOnly);
+    };
+    Logger::info(QStringLiteral("[vdisplay-guard] watching the server (pid %1)%2")
+                     .arg(pid)
+                     .arg(proc ? QString() : QStringLiteral(" — already gone")));
+    int rc = kExitOk;
+    for (;;) {
+        const bool alive = proc && WaitForSingleObject(proc, 1000) == WAIT_TIMEOUT;
+        const VirtualDisplay::GuardStep step =
+            VirtualDisplay::guardStep(alive, othersOffReadable());
+        if (step == VirtualDisplay::GuardStep::Wait) continue;
+        if (step == VirtualDisplay::GuardStep::Restore) {
+            Logger::warning(QStringLiteral("[vdisplay-guard] the server is gone with the other "
+                                           "displays off — bringing them back"));
+            VirtualDisplay::Request req;
+            req.action = VirtualDisplay::Request::Action::Deactivate;
+            QFile f(VirtualDisplay::requestPath());
+            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                f.write(VirtualDisplay::toJson(req));
+                f.close();
+                rc = run(QStringLiteral("mode"), QString());
+            } else {
+                Logger::warning(
+                    QStringLiteral("[vdisplay-guard] cannot write %1").arg(f.fileName()));
+                rc = kExitFailed;
+            }
+        }
+        break;
+    }
+    if (proc) CloseHandle(proc);
+    if (single) CloseHandle(single);
+    return rc;
+#else
+    Q_UNUSED(server);
+    return kExitOk;
+#endif
+}
+
 } // namespace VirtualDisplayApply
