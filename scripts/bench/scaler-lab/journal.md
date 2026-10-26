@@ -2764,3 +2764,28 @@ cas de `--dering` seul : ni la passe par défaut ni `--ablate` ne les prennent. 
 mesure qualité et dumps, gardés pour l'œil, et `--time N --dering`, qui chronomètre dans un Chrome épinglé (`--cdp`).
 `--dry` fait tourner ce code sur SwiftShader, figures sans valeur. La page bascule `DERING` par blocs sur un seul
 renderer (`ab=dering`). `metrics_hdr.measure` rend aussi le PSNR PQ du tiers central.
+
+## 2026-10-26 — J50, le verdict de Bruno : `DERING 2` partout
+
+**La décision** (Bruno, 26/10 au soir, par 59) : « Je confirme, je veux Dering 2 partout ». Le chemin HDR `linear`
+garde donc `DERING 2`, comme le SDR et `tonemap`. C'est le défaut du produit depuis J37 (ecac6ae2) : rien ne change
+dans le code. La question que J48 laissait ouverte est close.
+
+**L'A/B qui l'a tranchée.** La page `hdr-compare.html` de J48 : le vrai `WebGpuRenderer` sur la voie `linear`, les
+cinq agrandissements de `hdr_check.py` (texte à 1000 nits, jeu, rampe aux rayures d'un pixel, depuis 720p et 1080p),
+A et B tirés au sort.
+- **L'écran** : elle a été préparée pour le MacBook Pro M1 Pro de Léo, dont l'écran Liquid Retina XDR est en HDR
+  (EDR) sans réglage. Navigateur : Chrome 155 sous macOS 15.6.1. Le Safari 18.6 de ce Mac n'a pas WebGPU.
+- **Le service** : une page privée, hors dépôt. Ni le réseau local ni un tunnel n'étaient ouverts depuis DualRTX.
+- **L'essai préalable** : sur SwiftShader sans tête, la page donnait un canvas `rgba16float` et le chemin
+  `mwsr+yuv`.
+
+**Ce que le choix garde, et ce qu'il accepte.** Les mesures de J48 et J49 restent vraies.
+- **Gardé** : les traits d'un pixel gardent leur noir (rampe 1080p, ΔE ITP 14,47 contre 19,93), et la passe du noyau
+  reste 3 à 4 % plus rapide (J49).
+- **Accepté** : en HDR, `DERING 1` est plus près de la vérité Lanczos sur le texte (ΔE ITP 16,24 contre 20,86), et
+  il n'a pas le pic du texte 4:2:0 (×1,15 de l'entrée). Ce pic devient une propriété connue du défaut.
+
+**Vérifié dans le code.** Aucun chemin du produit ne pose `DERING` : `MwsrShader.js` le déclare à 2, et
+`setMwsrOverrides` n'est appelé que par les pages du labo. `DERING 1` ne vit plus qu'en option de labo : les cellules
+`mwsr:dering=1`, `hdr-compare.html`, `hdr_check.py --ablate` et `--dering`.
