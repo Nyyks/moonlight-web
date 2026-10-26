@@ -108,13 +108,15 @@ public:
     void setPacketMarking(bool enabled);
 
     // ── Passive ICE-TCP ───────────────────────────────────────────────────────
-    // Stored as JSON bool "ice_tcp_passive", DEFAULT false, file-only. With it,
-    // the TCP rungs of a stream and the entry link's tunnel also listen on their
-    // TCP port while their ICE checks run, so that a browser on a network that
-    // lets no UDP out has a pair to form: a browser only ever dials
-    // (docs/design/ice-tcp-passive.md). Off by default because it is a port that
-    // listens to the internet, however briefly and behind whatever gate. Read
-    // when each connection is built.
+    // Stored as JSON bool "ice_tcp_passive", DEFAULT true (since 0.4.1), file-only
+    // and seeded. With it, the TCP rungs of a stream and the entry link's tunnel
+    // also listen on their TCP port while their ICE checks run, so that a
+    // browser on a network that lets no UDP out has a pair to form: a browser
+    // only ever dials (docs/design/ice-tcp-passive.md). The listener lives only
+    // while the checks run, keeps nothing that has not authenticated with the
+    // session's ICE credentials, and bounds what an unknown peer can hold. On by
+    // default once a test from an office network streamed over it (26/10/2026);
+    // false keeps every TCP port closed. Read when each connection is built.
     bool iceTcpPassive() const;
     // A DEBUG switch for a bench, never for a user: JSON bool "debug_ice_drop_udp",
     // DEFAULT false, typed into the file by hand. Nothing writes it, not even its

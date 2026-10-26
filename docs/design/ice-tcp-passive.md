@@ -130,9 +130,12 @@ vient de petites plages publiées (§4). Occuper les 4 places d'attente pour ten
 dehors ne marche plus depuis le 26/10 (§3.3) : il faudrait plusieurs adresses, et des connexions
 qui parlent sans jamais finir leur trame, renouvelées toutes les 2 s.
 
-La règle de Bruno s'applique donc : **`ice_tcp_passive`** dans `settings.json`, **désactivé par
-défaut**, sans interface (son accord avant toute UI). Le passer à vrai par défaut se décidera après
-la mesure de l'étape 2 (§5).
+La règle de Bruno s'appliquait donc : **`ice_tcp_passive`** dans `settings.json`, désactivé par
+défaut et sans interface, jusqu'à une mesure sur un vrai réseau. **Activé par défaut depuis la
+v0.4.1**, décision de Bruno du 26/10 après le test depuis son bureau (§5, étape 6) et les
+correctifs de la revue de sécurité (T1 à T4, §3.3, §3.4, §3.7, §4). Aucune version publiée
+avant la v0.4.1 n'écrivait la clé : un `false` dans le fichier est donc un choix, et il garde
+tous les ports TCP fermés.
 
 Pour un banc depuis un réseau qui laisse sortir l'UDP, une clé de débogage, **`debug_ice_drop_udp`**,
 tapée à la main dans `settings.json` : désactivée par défaut, jamais écrite par le serveur, sans API
@@ -179,8 +182,9 @@ Reste, en amont et hors du patch :
   passe sans autre règle. Une `--dev` est couverte par `scripts/dev-firewall-allow.ps1`, qui ouvre
   48550-48573 en TCP et en UDP.
 - **Linux** : les paquets n'ouvrent que `48550:48573/udp` dans ufw et firewalld. Il faudra
-  `48550:48573/tcp`, plus le pool du tunnel, pour qu'un hôte Linux au pare-feu actif accepte
-  l'appel. C'est une modification d'empaquetage, à faire avec le passage du défaut à vrai.
+  `48550:48573/tcp`, plus les ports du tunnel, pour qu'un hôte Linux au pare-feu actif accepte
+  l'appel. C'est une modification d'empaquetage, pas encore faite au passage du défaut à vrai
+  (26/10) : d'ici là, un tel hôte refuse la connexion TCP, comme avant.
 - **macOS** : le pare-feu applicatif porte sur le programme.
 - **Le trou TCP du routeur** suit maintenant la règle du trou UDP (26/10, revue de sécurité, T3).
   On ne l'écrit, ne le renouvelle et ne le retire que s'il est libre ou à nous. Avant, une
@@ -235,3 +239,9 @@ Reste, en amont et hors du patch :
      compresse chaque réponse, `boot.js` la décompresse (`DecompressionStream`). Il faut un
      drapeau dans le manifeste, pour qu'un `boot.js` récent sache traiter un hôte ancien et
      l'inverse.
+6. ✅ **Depuis un vrai réseau** (26/10, 09:41-09:43) : Bruno, au bureau, sur un Mac d'entreprise
+   sans droits d'administration. Le réseau laisse sortir l'UDP : la `--dev` de 59 portait la clé de
+   banc `debug_ice_drop_udp` (§3.6). Le tunnel passe en TCP sur 46064 et le flux en
+   `webrtc-dc-tcp`, sur la paire `host 192.168.1.66:48550/TCP ↔ prflx <IP du bureau>/TCP`. Deux
+   minutes à 52-60 i/s, sans trou ni gel ni perte, 24,7 ms de bout en bout. Bruno : « Très
+   stable ». Défaut passé à vrai pour la v0.4.1, après les correctifs T1 à T4.

@@ -412,8 +412,9 @@ void AppSettings::seedDocumentedDefaults()
         changed = true;
     }
     // Written out so that the switch can be found in the file; nothing sets it.
+    // No release before 0.4.1 wrote it, so a false in the file is someone's own.
     if (!obj.contains("ice_tcp_passive")) {
-        obj["ice_tcp_passive"] = false;
+        obj["ice_tcp_passive"] = true;
         changed = true;
     }
     // The admin's codec of a native session (8f8d9307, never released): PyroWave
@@ -676,7 +677,7 @@ void AppSettings::setPacketMarking(bool enabled)
 bool AppSettings::iceTcpPassive() const
 {
     QJsonObject obj = readAll();
-    return obj.value("ice_tcp_passive").toBool(false);
+    return obj.value("ice_tcp_passive").toBool(true);
 }
 
 bool AppSettings::debugIceDropUdp() const

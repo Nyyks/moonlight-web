@@ -59,6 +59,8 @@ void run_app_settings_tests()
     CHECK_EQ(s.packetMarking(), true); // marked unless the admin unticks it
     s.setPacketMarking(false);
     CHECK_EQ(s.packetMarking(), false);
+    CHECK_EQ(s.iceTcpPassive(), true);    // listens while the checks run, since 0.4.1
+    CHECK_EQ(s.debugIceDropUdp(), false); // a bench switch, never on by itself
     s.setHdrEnabled(true);
     CHECK_EQ(s.hdrEnabled(), true);
     s.setChroma444Enabled(true);
