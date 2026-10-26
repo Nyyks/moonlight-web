@@ -707,7 +707,11 @@ quint16 HttpServer::authorizeTunnelWebSocket(const HttpRequest& req, QString* ou
     }
 
     // No local exemption on this path, ever — see Arrival. A session is the only
-    // thing that opens it.
+    // thing that opens it, and only on the key it was paired with.
+    if (tunnelKeyRefused(req)) {
+        m_ConnGuard.reportAuthFailure(req.clientAddress);
+        return refuse(QStringLiteral("this session belongs to another browser"));
+    }
     if (m_AuthManager && !m_AuthManager->validateSession(sessionTokenFromRequest(req))) {
         m_ConnGuard.reportAuthFailure(req.clientAddress);
         return refuse(QStringLiteral("authentication required"));
@@ -840,6 +844,16 @@ int HttpServer::slotFromWsPath(const QString& path, bool* outIsRelay)
     bool ok = false;
     const int slot = rest.toInt(&ok);
     return (ok && slot > 0) ? slot : -1;
+}
+
+bool HttpServer::tunnelKeyRefused(const HttpRequest& req) const
+{
+    if (!req.viaTunnel && req.tunnelKey.isEmpty()) return false;
+    if (!m_AuthManager) return false;
+    const QString token = sessionTokenFromRequest(req);
+    if (token.isEmpty()) return false;
+    const QByteArray bound = m_AuthManager->sessionPairingKey(token);
+    return !bound.isEmpty() && bound != req.tunnelKey;
 }
 
 bool HttpServer::isAuthenticated(const HttpRequest& req) const
@@ -1176,6 +1190,20 @@ void HttpServer::serveRequest(HttpRequest req, Arrival arrival, ResponseCallback
         return;
     }
 
+    // A session cookie on another browser's tunnel is refused whole, before
+    // any route or privilege reads it: see tunnelKeyRefused. 401, which sends
+    // the page to its PIN screen, the one way to a session of its own.
+    if (viaTunnel && tunnelKeyRefused(req)) {
+        Logger::warning(QString("[HttpServer] Session refused on a tunnel whose browser key is not "
+                                "the session's: %1 %2 from %3")
+                            .arg(req.method, req.path, req.clientAddress));
+        m_ConnGuard.reportAuthFailure(req.clientAddress);
+        QJsonObject obj;
+        obj["error"] = "session_key_mismatch";
+        respond(HttpResponse::json(obj, 401));
+        return;
+    }
+
     const bool peerLocal = !viaTunnel && isLocalRequest(req.clientAddress);
     const QString sessionToken = sessionTokenFromRequest(req);
 
@@ -1275,10 +1303,45 @@ void HttpServer::serveRequest(HttpRequest req, Arrival arrival, ResponseCallback
         // `files` as a list of strings, and one of now still meets older hosts
         // that send no sizes.
         QJsonArray sizes;
+        // And what each one hashes to (sha256, hex), as this very request would
+        // be served it — the shell rewritten for the tunnel included. The
+        // bootstrap checks its cached copy against these on every start: every
+        // machine's interface shares one origin, so a page of another machine
+        // could have rewritten that cache, and this list, fetched from THIS
+        // machine over a channel its key signed, is what tells (R1, 26/10/2026).
+        // Empty where the copy legitimately differs: the web manifest, which
+        // carries a key of its own and which the signed-in page writes over.
+        QJsonArray hashes;
         const QStringList paths = m_StaticFiles->listFiles();
+        if (m_ShellHashesTag != m_StaticFiles->contentTag()) {
+            m_ShellHashes.clear();
+            m_ShellHashesTag = m_StaticFiles->contentTag();
+        }
         for (const QString& p : paths) {
             files.append(p);
             sizes.append(m_StaticFiles->servedSize(p));
+            const bool rewritten =
+                viaTunnel && m_HomeScreenIdentity && p == QLatin1String("/index.html");
+            if (p == QLatin1String("/manifest.webmanifest")) {
+                hashes.append(QString());
+                continue;
+            }
+            if (!rewritten) {
+                auto known = m_ShellHashes.constFind(p);
+                if (known != m_ShellHashes.constEnd()) {
+                    hashes.append(*known);
+                    continue;
+                }
+            }
+            HttpResponse file = m_StaticFiles->serveFile(p);
+            if (rewritten && file.statusCode == 200) personaliseForHomeScreen(req, file, QString());
+            const QString digest =
+                file.statusCode == 200
+                    ? QString::fromLatin1(
+                          QCryptographicHash::hash(file.body, QCryptographicHash::Sha256).toHex())
+                    : QString();
+            if (!rewritten) m_ShellHashes.insert(p, digest);
+            hashes.append(digest);
         }
 
         // App version + a fingerprint of the served bytes. The bootstrap uses
@@ -1309,7 +1372,8 @@ void HttpServer::serveRequest(HttpRequest req, Arrival arrival, ResponseCallback
         }
         HttpResponse manifest = HttpResponse::json(QJsonObject{{QStringLiteral("version"), version},
                                                                {QStringLiteral("files"), files},
-                                                               {QStringLiteral("sizes"), sizes}});
+                                                               {QStringLiteral("sizes"), sizes},
+                                                               {QStringLiteral("sha256"), hashes}});
         manifest.headers["Cache-Control"] = "no-store";
         respond(manifest);
         return;

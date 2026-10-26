@@ -55,6 +55,10 @@ struct HttpRequest
                                 // exemption is refused on (§4.3), and it also tells a
                                 // handler that this browser has no HTTP route here —
                                 // which rules out the transports that need one.
+    QByteArray tunnelKey;       // On the tunnel: the P-256 key (SPKI DER) its hello
+                                // presented and its offer was signed over. A session
+                                // bound to another key is refused on it
+                                // (HttpServer::tunnelKeyRefused). Empty off the tunnel.
     bool malformed = false;     // The request line/headers could not be trusted —
                                 // currently set when the percent-decoded path
                                 // carries control characters (CR/LF smuggled in

@@ -209,6 +209,12 @@ public:
     /// Check whether the request carries a valid session cookie.
     /// Returns true if no AuthManager is set (auth disabled).
     bool isAuthenticated(const HttpRequest& req) const;
+    /// A session cookie carried over a tunnel whose browser key is not the one
+    /// the session was paired with. The key cannot leave the browser it was
+    /// made in (non-extractable), so the cookie was: copied out of the jar it
+    /// lives in, and replayed from somewhere else. A session with no key bound
+    /// (one older than key binding) is let through as before.
+    bool tunnelKeyRefused(const HttpRequest& req) const;
 
     /// Extract the raw mw_session cookie token from a request ("" if absent).
     static QString sessionTokenFromRequest(const HttpRequest& req);
@@ -240,6 +246,12 @@ private slots:
     void onDisconnected();
 
 private:
+    /// The sha256 of each static file as served, for /api/app/manifest, kept
+    /// while the files' contentTag stays the same. The shell rewritten for the
+    /// tunnel is hashed per request instead.
+    QHash<QString, QString> m_ShellHashes;
+    QString m_ShellHashesTag;
+
     /// Create (and listen on) an SslServer for @p port using the shared cert
     /// configs and socket-registration wiring. Returns nullptr if the bind
     /// fails. Used by both the primary start() path and the secondary listener.

@@ -975,6 +975,7 @@ void ControlTunnel::handleRequestFrame(Peer& p, quint32 id, const QByteArray& pa
     req.method = head.value(QStringLiteral("m")).toString().toUpper();
     req.body = body;
     req.clientAddress = peerAddress(p);
+    req.tunnelKey = p.browserSpki;
 
     // Split the target the way HttpParser does for a socket request, so a route
     // sees the same shape whichever way the request arrived.
@@ -1063,6 +1064,7 @@ void ControlTunnel::handleWsOpen(Peer& p, quint32 id, const QByteArray& payload)
     asRequest.method = QStringLiteral("GET");
     asRequest.path = head.value(QStringLiteral("p")).toString();
     asRequest.clientAddress = peerAddress(p);
+    asRequest.tunnelKey = p.browserSpki;
     const QJsonObject headers = head.value(QStringLiteral("h")).toObject();
     for (auto it = headers.begin(); it != headers.end(); ++it)
         asRequest.headers.insert(it.key().toLower(), it.value().toString());
