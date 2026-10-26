@@ -16,7 +16,7 @@
   via WebCodecs).
 - Under 20 ms latency over Wi-Fi using a WebRTC UDP transport with automatic
   fallback (UDP → TCP).
-- GPU Video Enhancement in the browser (WebGL2 or WebGPU running SGSRv1 + FSR1): stream at
+- GPU Video Enhancement in the browser (WebGL2 or WebGPU running MoonlightWeb's own upscaler): stream at
   720p, display near-1440p quality.
 - Full input support: keyboard, pointer-lock mouse, multi-touch trackpad, virtual
   keyboard, Xbox and PlayStation controllers with rumble. Racing wheels, flight
@@ -42,7 +42,7 @@ client is 100% web: WebCodecs for decoding, WebGL2 or WebGPU for rendering, the 
 
 ## Platforms (server)
 
-- Windows x64 / arm64 (guided .exe installer)
+- Windows x64 (guided .exe installer; an arm64 build pairs with other hosts)
 - macOS Apple Silicon (.pkg installer, or `brew install --cask linckosz/tap/moonlightweb`)
 - Linux x64 (.deb, .rpm, portable AppImage, or the signed apt/dnf repositories
   and the AUR package `moonlightweb-bin`)
