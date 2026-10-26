@@ -1363,17 +1363,25 @@ static bool streamClientSameNetwork(const HttpRequest& req, NetClassify::Kind ki
 // Dropped — but only for a browser planned for the internet. On a LAN, STUN can
 // fail for want of an internet while the host is one UDP hop away, and the
 // verdict is the browser's word, so it is only ever allowed to shorten a chain
-// that already had to go the long way. Never down to nothing.
+// that already had to go the long way. Never down to nothing. The bench switch
+// debug_ice_drop_udp drops them too, for every browser: with no UDP candidate
+// crossing, a UDP rung could only run to its deadline.
 static void dropUdpRungsWhenBlocked(QStringList& chain, const QJsonObject& body,
                                     NetClassify::Kind clientKind, bool viaTunnel)
 {
-    if (!body.value(QStringLiteral("udp_blocked")).toBool(false)) return;
-    if (!viaTunnel && clientKind != NetClassify::Kind::Public) return;
+    const bool debugDrop = AppSettings().debugIceDropUdp();
+    if (!debugDrop) {
+        if (!body.value(QStringLiteral("udp_blocked")).toBool(false)) return;
+        if (!viaTunnel && clientKind != NetClassify::Kind::Public) return;
+    }
     QStringList kept;
     for (const QString& m : chain)
         if (!m.endsWith(QStringLiteral("-udp"))) kept.append(m);
     if (kept.isEmpty() || kept.size() == chain.size()) return;
-    qInfo() << "[Session] The browser's STUN probe got no answer — UDP rungs skipped:" << kept;
+    if (debugDrop)
+        qWarning() << "[Session] DEBUG debug_ice_drop_udp is ON — UDP rungs skipped:" << kept;
+    else
+        qInfo() << "[Session] The browser's STUN probe got no answer — UDP rungs skipped:" << kept;
     chain = kept;
 }
 
@@ -3743,6 +3751,7 @@ int main(int argc, char* argv[])
             s->setTransportMode(transportMode); // Full mode for response
             s->setEnableIceTcp(iceTcp);
             s->setIceTcpPassive(AppSettings().iceTcpPassive());
+            s->setDebugIceDropUdp(AppSettings().debugIceDropUdp());
             s->setLowAudio(reqLowAudio);
             s->setMuteHostAudio(reqMuteHost);
             s->setClientUniqueId(reqClientUniqueId);

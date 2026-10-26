@@ -679,6 +679,12 @@ bool AppSettings::iceTcpPassive() const
     return obj.value("ice_tcp_passive").toBool(false);
 }
 
+bool AppSettings::debugIceDropUdp() const
+{
+    QJsonObject obj = readAll();
+    return obj.value("debug_ice_drop_udp").toBool(false);
+}
+
 bool AppSettings::sharedFeedEnabled() const
 {
     QJsonObject obj = readAll();

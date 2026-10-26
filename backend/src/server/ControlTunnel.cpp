@@ -29,6 +29,7 @@
 #include "server/AuthManager.h"
 #include "server/HttpServer.h"
 #include "server/TunnelPeerPolicy.h"
+#include "streaming/IceUdpDrop.h"
 #include "streaming/SdpFingerprint.h"
 
 #include <QCryptographicHash>
@@ -426,6 +427,12 @@ void ControlTunnel::buildPeerConnection(Peer& p)
     // switch, it also listens on its port's TCP side while the checks run
     // (docs/design/ice-tcp-passive.md).
     config.enableIceTcpPassive = m_Settings->iceTcpPassive();
+    p.dropUdp = m_Settings->debugIceDropUdp();
+    if (p.dropUdp)
+        Logger::warning(
+            QStringLiteral("[Tunnel] Session %1: DEBUG debug_ice_drop_udp is ON — every "
+                           "UDP candidate is dropped, only passive ICE-TCP can bind")
+                .arg(sessionId.left(8)));
 
     // Bind to a port the router forwards, when there is one.
     //
@@ -458,9 +465,11 @@ void ControlTunnel::buildPeerConnection(Peer& p)
     // program held the hole's port — the service beside a --dev instance, on
     // one machine.
     const int attempt = ++p.attempt;
+    const bool dropUdp = p.dropUdp;
 
-    p.pc->onLocalDescription([this, id, attempt](const rtc::Description& sdp) {
-        const std::string text(sdp);
+    p.pc->onLocalDescription([this, id, attempt, dropUdp](const rtc::Description& sdp) {
+        const std::string text =
+            dropUdp ? mw::ice::stripUdpCandidates(std::string(sdp)) : std::string(sdp);
         QMetaObject::invokeMethod(
             this,
             [this, id, attempt, text]() {
@@ -483,10 +492,11 @@ void ControlTunnel::buildPeerConnection(Peer& p)
 
     const std::string publicIP = m_PublicIP;
     const uint16_t mappedPort = p.port;
-    p.pc->onLocalCandidate([this, id, attempt, publicIP,
-                            mappedPort](const rtc::Candidate& candidate) {
+    p.pc->onLocalCandidate([this, id, attempt, publicIP, mappedPort,
+                            dropUdp](const rtc::Candidate& candidate) {
         const std::string cand = candidate.candidate();
         const std::string mid = candidate.mid();
+        if (dropUdp && mw::ice::isUdpCandidate(cand)) return;
 
         // The same socket, as the rest of the world sees it.
         //
@@ -868,7 +878,9 @@ void ControlTunnel::handleAnswer(Peer& p, const QJsonObject& msg)
 
     p.answerVerified = true;
     try {
-        p.pc->setRemoteDescription(rtc::Description(sdp.toStdString()));
+        const std::string answer =
+            p.dropUdp ? mw::ice::stripUdpCandidates(sdp.toStdString()) : sdp.toStdString();
+        p.pc->setRemoteDescription(rtc::Description(answer));
     } catch (const std::exception& e) {
         abort(p, QStringLiteral("the answer was not usable: %1").arg(QString::fromUtf8(e.what())));
         return;
@@ -883,10 +895,11 @@ void ControlTunnel::handleIce(Peer& p, const QJsonObject& msg)
     // is no remote description to attach them to, and doing the work anyway
     // would be work done on behalf of a peer that has not proved anything.
     if (!p.answerVerified) return;
+    const std::string candidate = msg.value(QStringLiteral("candidate")).toString().toStdString();
+    if (p.dropUdp && mw::ice::isUdpCandidate(candidate)) return;
     try {
         p.pc->addRemoteCandidate(
-            rtc::Candidate(msg.value(QStringLiteral("candidate")).toString().toStdString(),
-                           msg.value(QStringLiteral("mid")).toString().toStdString()));
+            rtc::Candidate(candidate, msg.value(QStringLiteral("mid")).toString().toStdString()));
     } catch (const std::exception&) {
         // A candidate we cannot parse is one path out of several, not a failure.
     }

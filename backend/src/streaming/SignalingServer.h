@@ -97,6 +97,9 @@ public:
     /// With ICE-TCP, also listen on the media port's TCP side while the checks
     /// run: a browser never offers a TCP candidate to dial, it only dials one.
     void setIceTcpPassive(bool enable) { m_IceTcpPassive = enable; }
+    /// The bench switch "debug_ice_drop_udp" (AppSettings::debugIceDropUdp): no UDP
+    /// candidate crosses either way, so passive ICE-TCP carries the stream.
+    void setDebugIceDropUdp(bool enable) { m_DebugIceDropUdp = enable; }
 
     /// Control whether WS fallback is allowed on ICE timeout.
     /// In auto mode (allow=false): iceTimedOut → sessionEnded() so the
@@ -199,6 +202,8 @@ private:
     bool m_ForceIceTcp = false;
     /// Listen for a browser's TCP connection too (docs/design/ice-tcp-passive.md).
     bool m_IceTcpPassive = false;
+    /// Drop every UDP candidate, ours and the browser's (debug_ice_drop_udp).
+    bool m_DebugIceDropUdp = false;
 
     // ── The router hole this stream is reached through ──────────────────────
     //

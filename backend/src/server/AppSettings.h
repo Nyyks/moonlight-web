@@ -116,6 +116,14 @@ public:
     // listens to the internet, however briefly and behind whatever gate. Read
     // when each connection is built.
     bool iceTcpPassive() const;
+    // A DEBUG switch for a bench, never for a user: JSON bool "debug_ice_drop_udp",
+    // DEFAULT false, typed into the file by hand. Nothing writes it, not even its
+    // default, and no API reads or sets it. With it, no UDP candidate crosses in
+    // either direction, on a stream or on the entry link's tunnel, and the UDP
+    // rungs leave every chain: passive ICE-TCP then carries everything from a
+    // network that lets UDP out (mw::ice::stripUdpCandidates). Read when each
+    // connection is built.
+    bool debugIceDropUdp() const;
 
     // ── The guests' shared feed ───────────────────────────────────────────────
     //

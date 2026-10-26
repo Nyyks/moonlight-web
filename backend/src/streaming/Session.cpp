@@ -864,6 +864,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         signaling->setStunServer(m_StunServer);
         signaling->setEnableIceTcp(m_EnableIceTcp);
         signaling->setIceTcpPassive(m_IceTcpPassive);
+        signaling->setDebugIceDropUdp(m_DebugIceDropUdp);
         signaling->setAllowWsFallback(!m_AutoMode);
         signaling->setClientKind(m_ClientKind);
         signaling->setClientSameNetwork(m_ClientSameNetwork);
@@ -972,6 +973,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         signaling->setStunServer(m_StunServer);
         signaling->setEnableIceTcp(m_EnableIceTcp);
         signaling->setIceTcpPassive(m_IceTcpPassive);
+        signaling->setDebugIceDropUdp(m_DebugIceDropUdp);
         signaling->setAllowWsFallback(!m_AutoMode);
         signaling->setClientKind(m_ClientKind);
         signaling->setClientSameNetwork(m_ClientSameNetwork);

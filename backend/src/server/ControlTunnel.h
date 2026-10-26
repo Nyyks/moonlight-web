@@ -163,6 +163,9 @@ private:
         /// eight identical candidates to check in turn.
         bool publicCandidateSent = false;
         bool publicTcpCandidateSent = false; // the passive listener's, ice_tcp_passive
+        /// The bench switch debug_ice_drop_udp, read when the connection was
+        /// built: no UDP candidate crosses either way (mw::ice::isUdpCandidate).
+        bool dropUdp = false;
 
         // ── MW-BIND-v1, per connection ──────────────────────────────────────
         bool helloSeen = false;

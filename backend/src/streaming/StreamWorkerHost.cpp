@@ -80,6 +80,7 @@ void StreamWorkerHost::prepare(const QJsonObject& config, QStringList& args,
         // MW_DSCP, which a worker the service starts does not inherit.
         withSettings[QStringLiteral("packetMarking")] = settings.packetMarking();
         withSettings[QStringLiteral("iceTcpPassive")] = settings.iceTcpPassive();
+        if (settings.debugIceDropUdp()) withSettings[QStringLiteral("debugIceDropUdp")] = true;
         const QString dscp = qEnvironmentVariable("MW_DSCP");
         if (!dscp.isEmpty()) withSettings[QStringLiteral("dscp")] = dscp;
     }

@@ -24,6 +24,7 @@ extern "C" {
 #include "Limelight.h"
 }
 #include "IMediaEngine.h"
+#include "IceUdpDrop.h"
 #include "InputMessageCodec.h"
 #include "SdpFingerprint.h"
 #include "SignalingWait.h"
@@ -391,6 +392,9 @@ void SignalingServer::onNewWsConnection()
     rtc::Configuration config =
         buildIceConfig(isInternet, mapped, m_MediaPort, lanOnly ? QString() : m_StunServerUrl,
                        m_ForceIceTcp, m_IceTcpPassive);
+    if (m_DebugIceDropUdp)
+        qWarning() << "[SignalingServer] DEBUG debug_ice_drop_udp is ON: every UDP candidate is"
+                   << "dropped, ours and the browser's — only passive ICE-TCP can connect";
 
     // With a router hole, tell the relay to rewrite host candidates with the
     // public IP and EXTERNAL port so the browser sees a "host" candidate at
@@ -518,7 +522,9 @@ void SignalingServer::onWsTextMessage(const QString& message)
         }
 
         // Feed the answer into libdatachannel PeerConnection
-        if (!m_Relay->setRemoteDescription(sdp.toStdString())) {
+        const std::string answer =
+            m_DebugIceDropUdp ? mw::ice::stripUdpCandidates(sdp.toStdString()) : sdp.toStdString();
+        if (!m_Relay->setRemoteDescription(answer)) {
             qWarning() << "[SignalingServer] Failed to set remote SDP description";
         } else {
             m_SignalingComplete = true;
@@ -534,6 +540,10 @@ void SignalingServer::onWsTextMessage(const QString& message)
         // that the host's own candidate list never can.
         qInfo() << "[SignalingServer] Received ICE candidate, mid=" << mid << ":"
                 << candidate.left(120);
+        if (m_DebugIceDropUdp && mw::ice::isUdpCandidate(candidate.toStdString())) {
+            qInfo() << "[SignalingServer] DEBUG remote UDP candidate dropped";
+            return;
+        }
 
         m_Relay->addRemoteCandidate(candidate.toStdString(), mid.toStdString());
     } else if (type == "fallback-ws-request") {
@@ -1028,7 +1038,7 @@ void SignalingServer::sendSignedOffer()
 
 void SignalingServer::onLocalSdp(const std::string& sdp)
 {
-    m_PendingOffer = sdp;
+    m_PendingOffer = m_DebugIceDropUdp ? mw::ice::stripUdpCandidates(sdp) : sdp;
 
     // Extract our own fingerprint from the offer we are about to make. Both
     // signatures cover it, so an SDP we cannot read a single sha-256 fingerprint
@@ -1064,6 +1074,11 @@ void SignalingServer::onLocalSdp(const std::string& sdp)
 void SignalingServer::onLocalIceCandidate(const std::string& candidate, const std::string& mid)
 {
     if (!m_WsClient || !m_WsClient->isValid()) return;
+    if (m_DebugIceDropUdp && mw::ice::isUdpCandidate(candidate)) {
+        qInfo() << "[SignalingServer] DEBUG local UDP candidate dropped:"
+                << QString::fromStdString(candidate);
+        return;
+    }
 
     // Logged like the browser's: when ICE fails, the port on each side is what
     // tells a host firewall from an unreachable address.

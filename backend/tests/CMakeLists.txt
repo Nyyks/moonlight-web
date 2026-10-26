@@ -79,6 +79,7 @@ add_executable(run_tests
     test_send_backlog.cpp
     test_relay_frame_log.cpp
     test_ice_priority.cpp
+    test_ice_udp_drop.cpp
     test_net_classify.cpp
     test_link_addresses.cpp
     test_audio_path_log.cpp

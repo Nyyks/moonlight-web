@@ -73,6 +73,8 @@ public:
     void setEnableIceTcp(bool enable) { m_EnableIceTcp = enable; }
     /// With ICE-TCP, also listen for a browser that dials (AppSettings::iceTcpPassive).
     void setIceTcpPassive(bool enable) { m_IceTcpPassive = enable; }
+    /// Bench only: no UDP candidate crosses (AppSettings::debugIceDropUdp).
+    void setDebugIceDropUdp(bool enable) { m_DebugIceDropUdp = enable; }
 
     /// Request lower-bandwidth audio (10ms Opus frames) for mobile clients.
     void setLowAudio(bool enable) { m_LowAudio = enable; }
@@ -449,6 +451,7 @@ private:
     /// Enable ICE-TCP candidates (true for *-tcp modes, false for *-udp modes).
     bool m_EnableIceTcp = false;
     bool m_IceTcpPassive = false;
+    bool m_DebugIceDropUdp = false;
     bool m_LowAudio = false;
     /// True when session is part of the auto fallback chain (main.cpp auto mode).
     /// Disables internal WS fallback so ICE timeout → sessionEnded → tryNext().

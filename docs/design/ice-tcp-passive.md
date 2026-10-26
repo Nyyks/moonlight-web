@@ -128,6 +128,13 @@ La règle de Bruno s'applique donc : **`ice_tcp_passive`** dans `settings.json`,
 défaut**, sans interface (son accord avant toute UI). Le passer à vrai par défaut se décidera après
 la mesure de l'étape 2 (§5).
 
+Pour un banc depuis un réseau qui laisse sortir l'UDP, une clé de débogage, **`debug_ice_drop_udp`**,
+tapée à la main dans `settings.json` : désactivée par défaut, jamais écrite par le serveur, sans API
+ni interface. Avec elle, aucun candidat UDP ne passe, ni les nôtres vers le navigateur ni les siens
+vers notre agent, sur le flux comme sur le tunnel du lien d'entrée, et les barreaux UDP quittent
+la chaîne. Il ne reste que la paire où le navigateur appelle notre candidat passif
+(`streaming/IceUdpDrop.h`). Elle prouve le chemin de l'hôte, pas la sonde STUN du navigateur.
+
 ### 3.7 Défauts du chemin TCP de libjuice, corrigés dans le même patch
 
 Notre ICE-TCP ne se connectait jamais à un navigateur, donc le chemin TCP de libjuice n'avait
