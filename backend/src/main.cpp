@@ -5264,6 +5264,9 @@ int main(int argc, char* argv[])
     // previous rung failed, and reuses it — the app session that rung left
     // behind is /resumed, not launched a second time over itself.
     QHash<int, QString> g_PlayerUids;
+    // Who that latest join was (ShareManager::joinIdentity): the uid goes only
+    // to the same invitation on the same device.
+    QHash<int, QString> g_PlayerJoiners;
     // An invited player's router hole lasts as long as the guest does, not as
     // long as the process (an owner's slot keeps its hole until exit). Taken
     // off the router once the slot has had no worker for the same grace a
@@ -5377,7 +5380,7 @@ int main(int argc, char* argv[])
                                    &detachWorkerSlot, &reapCoopSession, &slotSignalingPort,
                                    &slotWsPath, &server, &appSettings, &sessionMetrics,
                                    signalingPort, stunServer, &g_HostAspect, &routerPorts,
-                                   &g_PlayerUids, &cancelGuestHostSessionSoon,
+                                   &g_PlayerUids, &g_PlayerJoiners, &cancelGuestHostSessionSoon,
                                    &dropPendingHostCancel, &releaseGuestHoleSoon, &keepGuestHole,
                                    &g_PlayerRetiring, &g_StreamEnds,
                                    &sharedFeed](int slot, int height, QString aspect,
@@ -5508,14 +5511,23 @@ int main(int argc, char* argv[])
         // with, and gets back the app session it left: its /cancel is held
         // (see the ended handler) and dropped here.
         // So does a guest back after its worker crashed (the join route
-        // checked that it did).
+        // checked that it did). All three are the guest's own word, so the uid
+        // is kept for the same invitation on the same device only: a new
+        // guest on a row the owner closed and reopened, or another device of
+        // the invitation, joining within the grace, would otherwise call off
+        // the last guest's /cancel and pick up their app.
         const bool reconnect =
             !QJsonDocument::fromJson(req.body).object().value("reconnect_of").toString().isEmpty();
-        QString uid =
-            transportIndex > 0 || h264 || reconnect ? g_PlayerUids.value(slot) : QString();
+        const QString joiner = shareManager.joinIdentity(
+            slot, HttpServer::cookieFromRequest(req, QLatin1String(ShareManager::kPlayerCookie)));
+        const bool sameJoiner = !joiner.isEmpty() && g_PlayerJoiners.value(slot) == joiner;
+        QString uid = (transportIndex > 0 || h264 || reconnect) && sameJoiner
+                          ? g_PlayerUids.value(slot)
+                          : QString();
         const bool chainRelaunch = !uid.isEmpty();
         if (!chainRelaunch) uid = QUuid::createUuid().toString(QUuid::Id128);
         g_PlayerUids.insert(slot, uid);
+        g_PlayerJoiners.insert(slot, joiner);
         if (chainRelaunch && dropPendingHostCancel(uid, hostUuid))
             qInfo() << "[Session] Player relaunch within the grace window — keeping the host "
                        "session (no /cancel)";

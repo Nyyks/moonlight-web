@@ -310,6 +310,15 @@ public:
     QString hostForSlot(int slot);
     /// The app id captured when the slot was shared, -1 when Off.
     int appForSlot(int slot);
+    /// Who a join on @p slot is: this activation, and the device whose raw
+    /// mw_player @p cookie it carries. A guest's Sunshine identity is reused by
+    /// the same one only (startPlayerStream): the row closed and reopened, or
+    /// another device of the invitation, starts a session of its own instead
+    /// of picking up the last guest's app. Empty when the slot is Off.
+    QString joinIdentity(int slot, const QString& cookie);
+
+    /// The cookie a player's browser keeps once it has entered the PIN.
+    static constexpr const char* kPlayerCookie = "mw_player";
 
 signals:
     /// A slot's observable state changed — the owner's board should refresh.

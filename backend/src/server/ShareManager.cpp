@@ -625,6 +625,14 @@ QString ShareManager::hostForSlot(int slot)
     return s->activation.hostUuid;
 }
 
+QString ShareManager::joinIdentity(int slot, const QString& cookie)
+{
+    pruneExpired();
+    Slot* s = slotFor(slot);
+    if (!s || !s->activation.live() || cookie.isEmpty()) return {};
+    return s->activation.id + QLatin1Char('/') + hash(cookie);
+}
+
 int ShareManager::appForSlot(int slot)
 {
     pruneExpired();

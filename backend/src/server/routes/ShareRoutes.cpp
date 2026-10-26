@@ -34,7 +34,7 @@ namespace {
 /// The cookie a player's browser keeps once it has entered the PIN. Separate
 /// from mw_session on purpose: it never authenticates a MoonlightWeb *user*, it
 /// only opens this player's own slot.
-const char* const kPlayerCookie = "mw_player";
+const char* const kPlayerCookie = ShareManager::kPlayerCookie;
 
 QString stateName(ShareManager::State s)
 {

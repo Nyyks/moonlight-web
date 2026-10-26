@@ -103,10 +103,20 @@ void test_pin_is_required_and_bound_to_the_link()
     CHECK(!ok.cookie.isEmpty());
     CHECK_EQ(mgr->slotForCookie(ok.cookie), kSlot);
 
-    // A cookie is worthless once the owner re-shares.
+    // Who joins: this activation on this device. Another cookie is someone else.
+    const QString joiner = mgr->joinIdentity(kSlot, ok.cookie);
+    CHECK(!joiner.isEmpty());
+    CHECK_EQ(mgr->joinIdentity(kSlot, ok.cookie), joiner);
+    CHECK(mgr->joinIdentity(kSlot, QStringLiteral("another-device")) != joiner);
+    CHECK(mgr->joinIdentity(kSlot, QString()).isEmpty());
+
+    // A cookie is worthless once the owner re-shares, and the new activation
+    // is a new joiner even for the same cookie: the last guest's Sunshine
+    // session is never handed on (startPlayerStream).
     QString token2, pin2;
     mgr->activate(kSlot, kHost, kApp, kTtl, token2, pin2, st);
     CHECK_EQ(mgr->slotForCookie(ok.cookie), -1);
+    CHECK(mgr->joinIdentity(kSlot, ok.cookie) != joiner);
 
     delete mgr;
 }
