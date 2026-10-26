@@ -764,10 +764,16 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	// Every phase bounded: nothing here holds a connection open on purpose
+	// (unlike mw-rendezvous's lines), so a client that stalls a body or never
+	// reads its answer must not keep a goroutine and a socket for ever.
 	srv := &http.Server{
 		Addr:              cfg.listen,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	// Which side of the retirement this box is on. Said at startup because it
 	// is invisible from outside until someone tries to register — and the day it
