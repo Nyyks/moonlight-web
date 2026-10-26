@@ -2686,3 +2686,13 @@ l'œil de Bruno a tranché pour `DERING 2` (J37).
 
 **Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/hdr_check.py --ablate`, environ trois minutes sur
 SwiftShader. La sortie va dans `bench-out/scaler-lab/hdr/hdr-ablate.json`.
+
+**L'A/B pour l'œil (`hdr-compare.html`, 26/10, à la demande de Bruno).**
+- **Ce qu'elle montre** : le vrai renderer sur le chemin `linear` (canvas flottant). D'un côté `DERING 2`, de l'autre
+  `DERING 1`, tirés au sort derrière A et B ; un bouton révèle la clé. Les images sont celles de `hdr_check.py` :
+  texte, jeu, rampe aux rayures d'un pixel.
+- **La vue** : deux volets qui défilent ensemble, à un pixel de canvas par pixel d'écran, ou un seul volet en
+  plein écran, que la barre d'espace bascule.
+- **Pour la servir** : `scaler_lab.py --serve 127.0.0.1:PORT --no-tls --dir bench-out/scaler-lab/hdr`.
+- **Les deux M27Q** étaient en SDR à 07:1x (dxdiag : `ADVANCED_COLOR_MODE_SDR`). C'est à Bruno d'activer leur HDR.
+  Elles annoncent 315 nits au plus : un texte à 1000 nits y est comprimé par l'écran.
