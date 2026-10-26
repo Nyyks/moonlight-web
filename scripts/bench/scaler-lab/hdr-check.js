@@ -21,6 +21,13 @@
 // the renderer stamped (timestamp-query) so that pass 0 and the kernel are
 // timed apart. The page then refuses SwiftShader and any adapter whose name
 // lacks WORD.
+//
+// &ab=dering (hdr_check.py --dering, 26/10/2026): the edge path's bound
+// instead, today's DERING 2 against DERING 1, on 'linear' and, for a case
+// with an SDR picture beside its planes (c.sdr: 8-bit RGBA), on an SDR
+// renderer fed that picture as a VideoFrame, the product's SDR path on
+// WebGPU. With ?time=N, timed as above; without, each drawn once with 'off'
+// beside them, for the driver to measure.
 import { mwsrRegime } from "../../../frontend/js/stream/renderers/MwsrShader.js";
 import { WebGpuRenderer } from "../../../frontend/js/stream/renderers/WebGpuRenderer.js";
 
@@ -29,6 +36,11 @@ const B = GPUBufferUsage;
 const PARAMS = new URLSearchParams(location.search);
 const TIME = Math.max(0, parseInt(PARAMS.get("time") || "0", 10) || 0);
 const ABLATE = PARAMS.get("ablate") === "1";
+const DERING_AB = PARAMS.get("ab") === "dering";
+const DERING_SETS = [
+  ["dering2", { overrides: {}, sharp: null }],
+  ["dering1", { overrides: { DERING: 1 }, sharp: null }],
+];
 
 // ?ablate=1 (hdr_check.py --ablate, journal J48): the upscale's defaults one
 // at a time, between those of J11 (21/10/2026: DERING 1, the bilinear flat
@@ -96,7 +108,8 @@ async function makeRenderer(c, mode, variant) {
     hdr: mode === "linear",
     hdrLinear: mode === "linear",
     hdrTonemap: mode === "tonemap",
-    yuv444: c.chroma === "444",
+    // the SDR picture stands for an ordinary (4:2:0) stream: the vote on the luma
+    yuv444: mode !== "sdr" && c.chroma === "444",
     videoCodec: "hevc",
   });
   const errors = [];
@@ -137,8 +150,17 @@ async function makeRenderer(c, mode, variant) {
   return { r, canvas, cfg, errors, out };
 }
 
-/** Case c's frame as a software decoder hands it. */
-function hdrFrame(c, planes, timestamp) {
+/** Case c's frame as a software decoder hands it; on 'sdr', its SDR picture
+ *  (8-bit RGBA, sRGB). */
+function hdrFrame(c, planes, timestamp, mode = "linear") {
+  if (mode === "sdr")
+    return new VideoFrame(planes, {
+      format: "RGBA",
+      codedWidth: c.in[0],
+      codedHeight: c.in[1],
+      timestamp,
+      colorSpace: { primaries: "bt709", transfer: "iec61966-2-1", matrix: "rgb", fullRange: true },
+    });
   return new VideoFrame(planes, {
     format: c.chroma === "444" ? "I444P10" : "I420P10",
     codedWidth: c.in[0],
@@ -156,7 +178,7 @@ async function drawOnce(c, planes, mode, variant, set = null) {
     r.setMwsrOverrides(set.overrides);
     r.setMwsrTuning(set.sharp === null ? null : { sharp: set.sharp });
   }
-  await r.draw(hdrFrame(c, planes, 1000));
+  await r.draw(hdrFrame(c, planes, 1000, mode));
   const [w, h] = c.in;
   const res = {
     case: c.name,
@@ -248,12 +270,12 @@ function installStamps() {
 }
 
 /** n draws of case c by renderer r; each one's pass times (ms), in order. */
-async function timedDraws(r, c, planes, n, ts) {
+async function timedDraws(r, c, planes, n, ts, mode) {
   const out = [];
   for (let i = 0; i < n; i++) {
     STAMPS.q = 0;
     STAMPS.on = true;
-    await r.draw(hdrFrame(c, planes, ts.next++ * 16667));
+    await r.draw(hdrFrame(c, planes, ts.next++ * 16667, mode));
     STAMPS.on = false;
     const s = STAMPS.per.get(r._device);
     if (!s || !s.n) throw new Error("no pass was stamped (timestamp-query?)");
@@ -274,34 +296,37 @@ function stats(xs) {
   return { p50: at(0.5), p99: at(0.99), mean: s.reduce((a, b) => a + b, 0) / s.length, n: s.length };
 }
 
-/** 'mwsr' and 'mwsr-enc' on case c by one renderer, its reduction of before
- *  switched on and off by blocks (the same device, textures and pipelines
+/** 'mwsr' and 'mwsr-enc' (or, with ab=dering, DERING 2 and 1) on case c by
+ *  one renderer, switched by blocks (the same device, textures and pipelines
  *  for both: two renderers, two devices, put 13 % between two identical
- *  paths, 26/10/2026), n draws each after a warm-up of 100, in four ABBA
+ *  paths, 26/10/2026; DERING's pipelines are rebuilt at each switch, outside
+ *  the stamped passes), n draws each after a warm-up of 100, in four ABBA
  *  rounds (the GPU's clocks, which no one pins at their maximum, move). */
-async function timeCase(c, planes, n, ts) {
-  const { r, canvas, errors, out } = await makeRenderer(c, "linear", "mwsr");
-  const draws = { mwsr: [], "mwsr-enc": [] };
+async function timeCase(c, planes, n, ts, mode = "linear") {
+  const { r, canvas, errors, out } = await makeRenderer(c, mode, "mwsr");
+  const [A, Bv] = DERING_AB ? DERING_SETS.map(([v]) => v) : ["mwsr", "mwsr-enc"];
+  const draws = { [A]: [], [Bv]: [] };
   const regimes = {};
   // every draw's total in order, warm-up included, for the tails (hdr-time.json)
   const seq = [];
   const run = async (v, k) => {
-    r._mwsrLinearDown = v === "mwsr";
-    const d = await timedDraws(r, c, planes, k, ts);
-    for (const p of d) seq.push([v === "mwsr" ? 1 : 0, +p.reduce((a, b) => a + b, 0).toFixed(4)]);
+    if (DERING_AB) r.setMwsrOverrides(DERING_SETS.find(([name]) => name === v)[1].overrides);
+    else r._mwsrLinearDown = v === "mwsr";
+    const d = await timedDraws(r, c, planes, k, ts, mode);
+    for (const p of d) seq.push([v === A ? 1 : 0, +p.reduce((a, b) => a + b, 0).toFixed(4)]);
     regimes[v] = mwsrRegime(c.in[0], c.in[1], canvas.width, canvas.height, {
       srgb: r._srgbViews,
       linear: r._p0Linear,
     });
     return d;
   };
-  await run("mwsr", 50);
-  await run("mwsr-enc", 50);
+  await run(A, 50);
+  await run(Bv, 50);
   const block = Math.max(1, Math.round(n / 8));
-  for (let round = 0; round < 4; round++)
-    for (const v of ["mwsr", "mwsr-enc", "mwsr-enc", "mwsr"]) draws[v].push(...(await run(v, block)));
+  for (let round = 0; round < 4; round++) for (const v of [A, Bv, Bv, A]) draws[v].push(...(await run(v, block)));
   const res = Object.entries(draws).map(([v, d]) => ({
     case: c.name,
+    mode,
     variant: v,
     path: r.lastDraw ? r.lastDraw.path : null,
     regime: regimes[v],
@@ -311,7 +336,7 @@ async function timeCase(c, planes, n, ts) {
     total: stats(d.map((p) => p.reduce((a, b) => a + b, 0))),
     errors,
     failed: r.failed,
-    ...(v === "mwsr" ? { seq } : {}),
+    ...(v === A ? { seq } : {}),
   }));
   if (out.target) out.target.destroy();
   r.dispose();
@@ -325,7 +350,10 @@ async function main() {
   if (!adapter) throw new Error("no adapter");
   const info = adapter.info || {};
   const name = [info.vendor, info.architecture, info.device, info.description].join(" ");
-  if (TIME) {
+  // dry=1: the timing's code on the software adapter, its figures worth nothing
+  if (TIME && PARAMS.get("dry") === "1") {
+    if (!/swiftshader/i.test(name)) throw new Error("dry=1: not the software adapter: " + name);
+  } else if (TIME) {
     const want = (PARAMS.get("vendor") || "").toLowerCase();
     if (/swiftshader/i.test(name)) throw new Error("time=: no speed on the software adapter");
     if (!want || !name.toLowerCase().includes(want)) throw new Error("time=: the adapter is not " + want + ": " + name);
@@ -340,12 +368,30 @@ async function main() {
   for (const c of cases) {
     n++;
     const planes = new Uint8Array(await (await fetch("/__dir/" + c.yuv)).arrayBuffer());
+    // the modes this case is drawn on, each with its input
+    const inputs = [["linear", planes]];
+    if (DERING_AB && c.sdr) inputs.push(["sdr", new Uint8Array(await (await fetch("/__dir/" + c.sdr)).arrayBuffer())]);
     if (TIME) {
-      window.__progress = `case ${n}/${cases.length} ${c.name} timed`;
-      try {
-        results.push(...(await timeCase(c, planes, TIME, ts)));
-      } catch (e) {
-        results.push({ case: c.name, error: String((e && e.stack) || e) });
+      for (const [mode, input] of DERING_AB ? inputs : inputs.slice(0, 1)) {
+        window.__progress = `case ${n}/${cases.length} ${c.name} ${mode} timed`;
+        try {
+          results.push(...(await timeCase(c, input, TIME, ts, mode)));
+        } catch (e) {
+          results.push({ case: c.name, mode, error: String((e && e.stack) || e) });
+        }
+      }
+      continue;
+    }
+    if (DERING_AB) {
+      for (const [mode, input] of inputs) {
+        for (const [variant, set] of [["off", null], ...DERING_SETS]) {
+          window.__progress = `case ${n}/${cases.length} ${c.name} ${mode} ${variant}`;
+          try {
+            results.push(await drawOnce(c, input, mode, variant, set));
+          } catch (e) {
+            results.push({ case: c.name, mode, variant, error: String((e && e.stack) || e) });
+          }
+        }
       }
       continue;
     }

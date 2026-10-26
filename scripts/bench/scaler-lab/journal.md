@@ -2696,3 +2696,71 @@ SwiftShader. La sortie va dans `bench-out/scaler-lab/hdr/hdr-ablate.json`.
 - **Pour la servir** : `scaler_lab.py --serve 127.0.0.1:PORT --no-tls --dir bench-out/scaler-lab/hdr`.
 - **Les deux M27Q** étaient en SDR à 07:1x (dxdiag : `ADVANCED_COLOR_MODE_SDR`). C'est à Bruno d'activer leur HDR.
   Elles annoncent 315 nits au plus : un texte à 1000 nits y est comprimé par l'écran.
+
+## 2026-10-26 — J49, DERING 1 contre 2 : la vitesse sur l'iGPU AMD, l'étalon en SDR et en HDR
+
+**La demande** (Bruno, 26/10, dans la session) : la différence entre les deux bornes, des zooms en SDR et en HDR, la
+plus rapide sur le N95 ou l'iGPU du DualRTX, la différence de qualité en SDR, et les dB de l'étalon
+`C:\Test\00_Background.png` agrandi depuis 720p et 1080p, en SDR et en HDR. Étude de labo : rien ne change dans le
+produit, et la décision HDR de Bruno reste ouverte (J48).
+
+**Ce qui les sépare.** Les deux bornent par les quatre texels voisins. `DERING 1` borne d'abord par les cinq
+échantillons du mélange : sur un trait d'un texel, l'échantillon central est déjà l'extrême, et le pixel reste à son
+mélange bilinéaire. Un trait noir sur blanc agrandi ×2 donne alors 25 % de gris avec `DERING 1` et du noir avec
+`DERING 2`, à netteté 1,23. `DERING 2` fait donc moins de calcul : il n'a ni les min et max des cinq, ni leur clamp.
+
+**La vitesse : `DERING 2` est plus rapide**, sur l'iGPU AMD du DualRTX (Radeon Graphics RDNA 2, LUID 0x15e5b). Le
+créneau de 59 a duré de 08:47 à 08:49. Chrome sans tête était épinglé par `--use-adapter-luid`, ce que la croissance
+des compteurs WDDM sur ce seul adaptateur a vérifié. C'est le `WebGpuRenderer` du produit, sur l'étalon :
+horodatages GPU, 400 images par variante en tours ABBA, deux passes. Les médianes bougent de 0,02 ms au plus d'une
+passe à l'autre, et le p99 reste à 0,03 ms du p50.
+
+| passe du noyau, p50 (ms) | `DERING 2` | `DERING 1` | écart |
+|---|---|---|---|
+| SDR 720p → 1440p | 3,016 | 3,117-3,139 | −3,2 à −3,9 % |
+| SDR 1080p → 1440p | 3,024 | 3,145 | −3,8 % |
+| HDR `linear` 720p → 1440p | 3,004 | 3,136 | −4,2 % |
+| HDR `linear` 1080p → 1440p | 3,042 | 3,175 | −4,2 % |
+
+Sur l'image entière, passe 0 comprise, l'écart va de −2,8 à −3,5 %, soit 0,12 à 0,13 ms. Le N95 garde la passe
+unique de J36 (16,5 ms contre 17,2), dans son bruit ; 59 n'en a pas demandé d'autre.
+
+**La qualité sur l'étalon** (SwiftShader, `hdr_check.py --dering`). Vérité : l'étalon à 1440p. Entrée : sa réduction
+Lanczos-3 en lumière linéaire. Le SDR est dessiné comme un flux ordinaire, image RGBA et vote sur la luma. Le HDR est
+l'étalon aux hautes lumières poussées à 1000 nits, comme le cas `game`, en PQ BT.2020 10 bits 4:2:0. Les PSNR sont
+en dB, image entière puis tiers central ; ceux du HDR sont en PQ.
+
+| | `DERING 2` | `DERING 1` | bilinéaire |
+|---|---|---|---|
+| SDR ×2 (720p) | 20,57 / 31,09, SSIM 0,8730, FLIP 0,0558 | **20,71 / 31,68**, 0,8742, 0,0521 | 20,78 / 31,56 |
+| SDR ×1,33 (1080p) | **24,21** / 33,97, SSIM 0,9413, FLIP 0,0417 | 23,82 / **34,89**, 0,9390, 0,0417 | 23,72 / 36,36 |
+| HDR ×2 (720p) | 21,33 / 33,01, ΔE ITP 25,97, pic ×1,149 | **21,58 / 34,78**, 25,28, ×0,955 | 21,46 / 35,24 |
+| HDR ×1,33 (1080p) | **23,90** / 35,86, ΔE ITP 17,92, pic ×1,099 | 23,62 / **37,33**, 18,75, ×0,912 | 23,40 / 38,69 |
+
+- **En SDR**, l'écart est faible et son sens dépend de la zone. À ×1,33, `DERING 2` gagne l'image entière (+0,39 dB)
+  et perd le centre (−0,92 dB). Son gain vient donc d'ailleurs que du centre : bureau, panneau de texte, autres
+  fenêtres. À ×2, `DERING 1` gagne de peu, sur toutes les mesures.
+- **En HDR**, `DERING 1` gagne tout à ×2. À ×1,33, `DERING 2` gagne l'image entière et le ΔE ITP, et perd 1,5 dB
+  au centre.
+- **Le pic au-dessus de l'entrée** n'existe qu'avec `DERING 2` en 4:2:0 : ×1,149 et ×1,099, le (c) de J48. En
+  4:4:4, il tient à ×1,000.
+- **En 4:4:4, le sens est le même.** À ×2 : 21,38 / 32,99 contre 21,64 / 35,65. À ×1,33 : 24,12 / 36,01 contre
+  23,79 / 38,53.
+- **Les mires de J48 sont reproduites au chiffre.** Texte 4:4:4 : ΔE ITP 20,07 contre 15,60. Rampe à 1080p : 14,47
+  contre 19,93.
+
+**Les zooms** (×5, régions de l'étalon et des deux mires, référence et bilinéaire à côté) sont réunis avec les
+tableaux dans une page privée, hors dépôt. Les vues HDR y passent par une courbe fixe sur un écran SDR, 1000 nits
+servant de blanc. On y voit le trait sombre de 2 px de la rampe, noir avec `DERING 2` et gris avec `DERING 1`, et
+les rayures de 2 px, contrastées avec l'un et grisées avec l'autre.
+
+**Faux pas de banc, corrigé avant les chiffres.** La première version passait `yuv444` au renderer SDR du cas
+étalon 4:4:4. Elle activait ainsi `CHROMA444`, le vote par canal des flux 4:4:4. Le SDR bougeait de 0,02 à 0,13 dB
+et le bilinéaire pas du tout : ce n'était pas un indéterminisme. L'image SDR est dessinée comme un flux ordinaire ;
+revérifié, elle redonne les chiffres de la première passe au centième.
+
+**L'outillage.** `hdr_check.py` gagne les cas `up720-etalon`, `up1080-etalon` et leurs jumeaux 4:4:4. Ce sont des
+cas de `--dering` seul : ni la passe par défaut ni `--ablate` ne les prennent. Il gagne aussi `--dering`, qui
+mesure qualité et dumps, gardés pour l'œil, et `--time N --dering`, qui chronomètre dans un Chrome épinglé (`--cdp`).
+`--dry` fait tourner ce code sur SwiftShader, figures sans valeur. La page bascule `DERING` par blocs sur un seul
+renderer (`ab=dering`). `metrics_hdr.measure` rend aussi le PSNR PQ du tiers central.

@@ -88,11 +88,13 @@ def measure(gt_enc, in_enc, out_enc):
     h, w = gt.shape[:2]
     cy0, cy1, cx0, cx1 = h // 3, 2 * h // 3, w // 3, 2 * w // 3
     de_c = de[cy0:cy1, cx0:cx1]
+    mse_c = float(np.mean((pq_gt[cy0:cy1, cx0:cx1] - pq_out[cy0:cy1, cx0:cx1]) ** 2))
     return {
         "dEitp": float(de.mean()),
         "dEitpP99": float(np.percentile(de, 99)),
         "dEitpMax": float(de.max()),
-        "centre": {"dEitp": float(de_c.mean()), "dEitpP99": float(np.percentile(de_c, 99))},
+        "centre": {"dEitp": float(de_c.mean()), "dEitpP99": float(np.percentile(de_c, 99)),
+                   "psnrPQ": float(10 * np.log10(1.0 / mse_c)) if mse_c > 0 else 99.0},
         "psnrPQ": float(10 * np.log10(1.0 / mse)) if mse > 0 else 99.0,
         "ssimPQ": float(structural_similarity(luminance(pq_gt), luminance(pq_out), data_range=1.0,
                                               gaussian_weights=True, sigma=1.5, use_sample_covariance=False)),
