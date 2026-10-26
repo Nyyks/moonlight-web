@@ -83,6 +83,11 @@ void ControlChannel::onNewConnection()
 {
     if (!m_Server) return;
     while (QWebSocket* client = m_Server->nextPendingConnection()) {
+        // Bounded: Qt takes a message of up to 2 GB by default, and buffers all of
+        // it before anyone sees a byte. 16 MiB is far past anything this socket
+        // legitimately carries.
+        client->setMaxAllowedIncomingMessageSize(16 * 1024 * 1024);
+        client->setMaxAllowedIncomingFrameSize(16 * 1024 * 1024);
         connect(client, &QWebSocket::disconnected, this, &ControlChannel::onDisconnected);
         m_Clients.insert(client);
     }

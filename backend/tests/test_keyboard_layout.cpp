@@ -65,6 +65,18 @@ void run_keyboard_layout_tests()
         CHECK_EQ(plan.flags, static_cast<char>(0));
     }
 
+    // A `char` no key produces — a string — is dropped, the key going by its
+    // position: typing a string is Utf8Text's, with its own bounds.
+    {
+        const KeyPlan one =
+            resolveKey(key(kVkQ, "KeyQ", "a", true), KeyboardMode::Native, LayoutFidelity::Always);
+        CHECK(one.isText());
+        const KeyPlan many = resolveKey(key(kVkQ, "KeyQ", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true),
+                                        KeyboardMode::Native, LayoutFidelity::Always);
+        CHECK(!many.isText());
+        CHECK_EQ(many.keyCode, static_cast<short>(kVkQ));
+    }
+
     // Opting out in the settings file lands in the same place: the character is
     // ignored and the position goes out, exactly as it did before any of this.
     {

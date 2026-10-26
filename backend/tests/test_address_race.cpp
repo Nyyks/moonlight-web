@@ -268,4 +268,15 @@ void run_address_race_tests()
         CHECK(!h2.toBool());
         CHECK_EQ(req.transferTimeout(), 5000);
     }
+
+    SECTION("GeoIpService — only a global address is ever looked up");
+    {
+        CHECK(GeoIpService::worthLocating(QStringLiteral("8.8.8.8")));
+        CHECK(GeoIpService::worthLocating(QStringLiteral("2a01:e0a:1:2::5")));
+        CHECK(GeoIpService::worthLocating(QStringLiteral("::ffff:8.8.8.8")));
+        for (const char* local : {"", "garbage", "127.0.0.1", "::1", "10.1.2.3", "172.20.0.1",
+                                  "192.168.1.10", "169.254.3.4", "100.101.102.103",
+                                  "fd12:3456:789a::1", "fe80::1", "::ffff:192.168.1.10"})
+            CHECK(!GeoIpService::worthLocating(QString::fromLatin1(local)));
+    }
 }

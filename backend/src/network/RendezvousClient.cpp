@@ -161,6 +161,11 @@ RendezvousClient::RendezvousClient(AppSettings* settings, QObject* parent)
     connect(m_Race, &AddressRace::won, this, &RendezvousClient::onRaceWon);
     connect(m_Race, &AddressRace::lost, this, &RendezvousClient::onRaceLost);
 
+    // Bounded: Qt takes a message of up to 2 GB by default, and buffers all of
+    // it before anyone sees a byte. 16 MiB is far past anything this socket
+    // legitimately carries: the rendezvous server relays 64 KiB at most.
+    m_Socket.setMaxAllowedIncomingMessageSize(16 * 1024 * 1024);
+    m_Socket.setMaxAllowedIncomingFrameSize(16 * 1024 * 1024);
     connect(&m_Socket, &QWebSocket::connected, this, &RendezvousClient::onConnected);
     connect(&m_Socket, &QWebSocket::disconnected, this, &RendezvousClient::onDisconnected);
     connect(&m_Socket, &QWebSocket::textMessageReceived, this, &RendezvousClient::onTextMessage);

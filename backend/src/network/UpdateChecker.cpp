@@ -293,6 +293,14 @@ bool UpdateChecker::applyResult(const QJsonObject& release, bool viaRelay)
                 .arg(downloadUrl));
         return false;
     }
+    // The release page too: the board turns it into a link, and a relay that
+    // could name any scheme there could put a javascript: one under a click.
+    if (viaRelay && !releaseUrl.isEmpty() && !isGitHubUrl(releaseUrl)) {
+        Logger::warning(
+            QStringLiteral("[Update] relay pointed the release page off GitHub (%1) — ignoring it")
+                .arg(releaseUrl));
+        return false;
+    }
 
     QJsonObject obj;
     obj["current"] = m_current;

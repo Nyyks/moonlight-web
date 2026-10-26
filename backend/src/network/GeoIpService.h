@@ -75,6 +75,11 @@ public:
      */
     static QNetworkRequest lookupRequest(const QString& ip);
 
+    /// Whether @p ip is a global address, the only kind a lookup sends out:
+    /// not private, loopback, link-local, unique-local (fc00::/7) or
+    /// carrier-grade NAT (100.64/10). Public for the tests.
+    static bool worthLocating(const QString& ip);
+
 private:
     AppSettings* m_settings;
     QNetworkAccessManager* m_nam;

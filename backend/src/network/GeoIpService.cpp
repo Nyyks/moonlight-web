@@ -21,6 +21,7 @@
 #include "server/AppSettings.h"
 #include "common/Logger.h"
 
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QUrl>
@@ -52,18 +53,29 @@ QNetworkRequest GeoIpService::lookupRequest(const QString& ip)
     return req;
 }
 
+bool GeoIpService::worthLocating(const QString& ip)
+{
+    QHostAddress address(ip.trimmed());
+    if (address.isNull()) return false;
+    bool mapped = false;
+    const quint32 v4 = address.toIPv4Address(&mapped);
+    if (mapped) address = QHostAddress(v4);
+    if (!address.isGlobal() || address.isPrivateUse() || address.isUniqueLocalUnicast())
+        return false;
+    return !address.isInSubnet(QHostAddress(QStringLiteral("100.64.0.0")), 10);
+}
+
 void GeoIpService::lookupIp(const QString& ip, const GeoCallback& callback)
 {
     if (!callback) return;
 
-    // Skip local/private IPs — no geolocation possible
-    if (ip.isEmpty() || ip == "127.0.0.1" || ip == "::1" || ip.startsWith("192.168.") ||
-        ip.startsWith("10.") || ip.startsWith("172.16.") || ip.startsWith("172.17.") ||
-        ip.startsWith("172.18.") || ip.startsWith("172.19.") || ip.startsWith("172.20.") ||
-        ip.startsWith("172.21.") || ip.startsWith("172.22.") || ip.startsWith("172.23.") ||
-        ip.startsWith("172.24.") || ip.startsWith("172.25.") || ip.startsWith("172.26.") ||
-        ip.startsWith("172.27.") || ip.startsWith("172.28.") || ip.startsWith("172.29.") ||
-        ip.startsWith("172.30.") || ip.startsWith("172.31.") || ip.startsWith("169.254.")) {
+    // Only a global address is worth asking about, and only one may leave this
+    // machine: a private, link-local or loopback one locates nothing, and an
+    // IPv6 unique-local one (fc00::/7) or a carrier-grade NAT one (100.64/10,
+    // Tailscale's) names a network of the viewer's to a third party. Parsed,
+    // so an IPv4 address that arrives mapped (::ffff:a.b.c.d) is judged as the
+    // IPv4 address it is.
+    if (!worthLocating(ip)) {
         callback(QString(), QString());
         return;
     }

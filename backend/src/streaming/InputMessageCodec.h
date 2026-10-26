@@ -172,6 +172,17 @@ inline bool byPosition(const QJsonObject& msg, KeyboardMode mode, LayoutFidelity
            (fidelity == LayoutFidelity::Auto && msg["gaming"].toBool(false));
 }
 
+/// A key message's `char`: what one key produces, a character or a short
+/// grapheme (an emoji, a letter and its accent). Anything longer is no key's,
+/// and is dropped here, the key going by its position: Utf8Text is the one way
+/// to type a string, with its own bounds.
+inline QString keyChar(const QJsonObject& msg)
+{
+    constexpr qsizetype kMaxKeyChar = 8; // UTF-16 units
+    const QString ch = msg["char"].toString();
+    return ch.size() <= kMaxKeyChar ? ch : QString();
+}
+
 /// Resolve one keyboard message to what the host should actually receive.
 ///
 /// `code` still carries the physical key, because two international keys have
@@ -209,7 +220,7 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
         // key's. A Mac's ISO keyboard reports its top-left key as IntlBackslash:
         // the @ and # of a French Mac went as that position, and a French host
         // typed "<" and ">" for them (24/10/2026).
-        const QString ch = msg["char"].toString();
+        const QString ch = keyChar(msg);
         if (mode == KeyboardMode::Native && !ch.isEmpty() && !msg["dead"].toBool(false) &&
             !byPosition(msg, mode, fidelity))
             plan.text = ch;
@@ -224,7 +235,7 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
     // on a French host — which Alt+0233 codes and Blender's views never see.
     if (code.startsWith(QLatin1String("Numpad"))) return plan;
 
-    const QString ch = msg["char"].toString();
+    const QString ch = keyChar(msg);
     if (msg["chord"].toBool(false) && !ch.isEmpty()) {
         switch (mode) {
         case KeyboardMode::Native:
@@ -469,7 +480,7 @@ struct KeyDiag
 inline KeyDiag describeKey(const QJsonObject& msg, KeyboardMode mode, const KeyPlan& plan)
 {
     KeyDiag diag;
-    const QString ch = msg["char"].toString();
+    const QString ch = keyChar(msg);
     if (ch.isEmpty()) return diag;
 
     const bool nonUs = msg["nonUs"].toBool(false);

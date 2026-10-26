@@ -552,6 +552,11 @@ void StreamRelay::onNewWsConnection()
         qWarning() << "[StreamRelay] nextPendingConnection returned null";
         return;
     }
+    // Bounded: Qt takes a message of up to 2 GB by default, and buffers all of
+    // it before anyone sees a byte. 16 MiB is far past anything this socket
+    // legitimately carries.
+    m_WsClient->setMaxAllowedIncomingMessageSize(16 * 1024 * 1024);
+    m_WsClient->setMaxAllowedIncomingFrameSize(16 * 1024 * 1024);
 
     qInfo() << "[StreamRelay] WS client created, connecting signals...";
 
