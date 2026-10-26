@@ -300,7 +300,7 @@ def drive(a, cdp, port):
             if msg.get("id") == mid:
                 return msg.get("result", msg)
 
-    query = "?time=%d&vendor=%s" % (a.time, a.vendor) if a.time else ""
+    query = "?time=%d&vendor=%s" % (a.time, a.vendor) if a.time else "?ablate=1" if a.ablate else ""
     call("Page.navigate", url="http://127.0.0.1:%d/scripts/bench/scaler-lab/hdr-check.html%s" % (port, query))
     deadline = time.time() + a.timeout
     shown = None
@@ -489,6 +489,63 @@ def time_report(a, res):
     sys.exit(1 if fails else 0)
 
 
+def ablate_report(a, data, res):
+    """--ablate: each upscale case, on 'linear' its colour error to the truth
+    (dE ITP, PSNR in PQ), its peak against the input's and the J11 overshoot,
+    on 'tonemap' the SDR lab's measures (PSNR, SSIM, FLIP, overshoot), per
+    set of defaults, with the change against today's; hdr-ablate.json. No
+    check: a study (journal J48). Exit 1 on an error."""
+    import metrics  # the SDR lab's (scikit-image, FLIP)
+    fails, rows = [], []
+    for r in res["results"]:
+        if r.get("error") or r["errors"] or r["failed"]:
+            fails.append("%s %s %s: %s" % (r["case"], r["mode"], r["variant"],
+                                           (r.get("error") or str(r["errors"][:3]) or "failed")[:300]))
+            continue
+        d = data[r["case"]]
+        ow, oh = d["out"]
+        path = os.path.join(a.dir, r["dump"] + ".f16")
+        out = load_dump(path, ow, oh)
+        row = {"case": r["case"], "mode": r["mode"], "variant": r["variant"]}
+        if r["mode"] == "linear":
+            m = metrics_hdr.measure(d["gt"], d["feed"], out)
+            row.update({k: m[k] for k in ("dEitp", "dEitpP99", "psnrPQ", "ssimPQ", "maxRatio", "overshoot")})
+            row["dEitpCentre"] = m["centre"]["dEitp"]
+            row["bounds"] = beyond_texels(out, d["feed"], 0.002, 0.004)
+        else:
+            sdr_in = d["sdr_feed"].astype(np.float32) / 255.0
+            m = metrics.measure(d["sdr_gt"], sdr_in, out)
+            row.update({k: m.get(k) for k in ("psnr", "ssim", "flip", "overshoot")})
+            row["bounds"] = beyond_texels(out, sdr_in, 1.5 / 255.0, 0.0)
+        rows.append(row)
+        if not a.keep:
+            os.remove(path)
+    today = {(x["case"], x["mode"]): x for x in rows if x["variant"] == "today"}
+
+    def rel(x, key):
+        t = today.get((x["case"], x["mode"]))
+        if not t or t.get(key) in (None, 0) or x.get(key) is None:
+            return "-"
+        return "%+.1f %%" % (100 * (x[key] / t[key] - 1))
+    print("%-16s %-14s %8s %9s %8s %7s %8s %8s | %-14s %7s %7s %7s %9s" % (
+        "case", "variant", "dE ITP", "vs today", "PSNR PQ", "x in", "over %", "bounds", "tonemap", "PSNR", "SSIM",
+        "FLIP", "FLIP vs"))
+    for case in dict.fromkeys(x["case"] for x in rows):
+        lin = {x["variant"]: x for x in rows if x["case"] == case and x["mode"] == "linear"}
+        sdr = {x["variant"]: x for x in rows if x["case"] == case and x["mode"] == "tonemap"}
+        for v in lin:
+            x, y = lin[v], sdr.get(v, {})
+            print("%-16s %-14s %8.3f %9s %8.2f %7.3f %8.3f %8.4f | %-14s %7s %7s %7s %9s" % (
+                case, v, x["dEitp"], rel(x, "dEitp"), x["psnrPQ"], x["maxRatio"], 100 * x["overshoot"],
+                100 * x["bounds"], v, fmt(y.get("psnr"), "%.2f"), fmt(y.get("ssim"), "%.4f"),
+                fmt(y.get("flip"), "%.4f"), rel(y, "flip") if y else "-"))
+        print()
+    with open(os.path.join(a.dir, "hdr-ablate.json"), "w") as f:
+        json.dump({"adapter": res["adapter"], "rows": rows, "fails": fails}, f, indent=1)
+    print("FAIL:\n  " + "\n  ".join(fails) if fails else "ablation done, no error")
+    sys.exit(1 if fails else 0)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab", "hdr"))
@@ -500,8 +557,12 @@ def main():
     ap.add_argument("--cdp", type=int, default=0,
                     help="the DevTools port of a Chrome the caller launched, pinned on a GPU and checked")
     ap.add_argument("--vendor", default="nvidia", help="--time: a word the adapter's name must hold")
+    ap.add_argument("--ablate", action="store_true",
+                    help="the upscale's defaults one at a time between J11's and today's (SwiftShader; a study)")
     a = ap.parse_args()
     a.only = [s for s in a.only.split(",") if s]
+    if a.ablate and not a.only:
+        a.only = [name for name, _, size_in, size_out, _ in CASES if size_out[0] > size_in[0]]
     if a.time and not a.cdp:
         raise SystemExit("--time measures a GPU: give it the Chrome pinned and checked on one (--cdp)")
     os.makedirs(a.dir, exist_ok=True)
@@ -523,6 +584,8 @@ def main():
     print("adapter: %s, shader-f16 %s" % (res["adapter"], res["f16"]))
     if a.time:
         time_report(a, res)
+    if a.ablate:
+        ablate_report(a, data, res)
     rows, fails = judge(a, data, res)
     print("%-16s %-7s %-9s %-9s %-14s %7s %7s %8s %6s %6s %7s %8s %7s %7s %8s %8s" % (
         "case", "mode", "variant", "path", "regime", "dE ITP", "PSNR", "peak", "x in", "kept", "over %", "bounds %",

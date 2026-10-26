@@ -2628,3 +2628,61 @@ régression en SDR (perf et couleur) ». Le 1 est le constat (a) : la réduction
 **Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/hdr_check.py` pour la couleur (SwiftShader). Pour la
 vitesse : `hdr_check.py --time N --cdp PORT --only …` dans un Chrome qu'on a soi-même épinglé et vérifié sur le GPU.
 Le script n'en lance aucun ; la page refuse SwiftShader, et tout adaptateur dont le nom ne contient pas `--vendor`.
+
+## 2026-10-26 — J48, l'agrandissement HDR réglage par réglage
+
+**La demande.** Le 2 de Bruno (26/10, par 59) : trouver quel défaut a fait régresser l'agrandissement HDR depuis J11.
+J45 l'avait mesuré : ΔE ITP du texte 27 % au-dessus du bilinéaire, là où J11 le mettait 2 % en dessous. C'est une
+étude de labo : rien ne change dans le produit.
+
+**Les réglages.** Quatre défauts ont changé entre J11 (21/10) et aujourd'hui :
+- `DERING` 1 → 2 (J37) ;
+- le chemin plat, bilinéaire → Catmull-Rom à cinq prises (`FLAT_TAPS 5`) ;
+- `W_MIN` −0,3 → −0,5 ;
+- la netteté, 1 à toute échelle → 1,85 avec sa loi par l'échelle (J40), soit 1,23 à ×2 et 1,85 à ×1,33.
+
+`hdr_check.py --ablate` les passe un par un :
+- chacun seul sur les réglages de J11 (`j11_…`) ;
+- chacun retiré seul de ceux d'aujourd'hui (`today-…`).
+
+C'est le vrai renderer, sur les six agrandissements de J45, chemins `linear` et `tonemap`, SwiftShader.
+
+**J11 est reproduit.** Ses réglages font 16,22 sur le texte, contre 16,49 pour le bilinéaire (−1,6 % ; −2,4 % en J11).
+
+**Le coupable : `DERING 2`.** ΔE ITP sur `linear` :
+
+| cas | bilinéaire | aujourd'hui | J11 | J11 + `DERING 2` | aujourd'hui avec `DERING 1` |
+|---|---|---|---|---|---|
+| texte 720p → 1440p | 16,49 | 20,86 | 16,22 | 19,97 | **16,24** |
+| texte 4:4:4 | 15,99 | 20,07 | 15,60 | 19,24 | **15,60** |
+| jeu 720p → 1440p | 20,87 | 21,80 | 20,75 | 21,56 | **20,72** |
+| jeu 1080p → 1440p | 15,44 | 15,99 | 15,05 | 15,12 | **15,27** |
+| rampe 720p → 1440p | 34,36 | 29,63 | 31,44 | 31,50 | 29,57 |
+| rampe 1080p → 1440p | 22,69 | **14,47** | 20,04 | 17,56 | 19,93 |
+
+- **Les autres réglages pèsent peu.** Retirés un par un d'aujourd'hui, sur le texte :
+  - le chemin plat : 0 % ;
+  - `W_MIN` : −1,8 % ;
+  - la netteté à 1 : −4,3 %. Elle amplifie le même effet : à ×2, la loi vaut 1,23.
+- **Pourquoi `DERING 2` coûte en HDR.** Il laisse un pixel de contour dépasser son mélange bilinéaire jusqu'au texel
+  voisin : c'est ainsi qu'un trait d'un texel garde sa profondeur (J35). Or en HDR, les valeurs encodées vont de 0 à
+  2,0 autour d'un texte à 1000 nits : un bord poussé jusqu'au texel est un grand écart en ITP.
+- **C'est aussi lui qui fait (c).** Le pic du texte 4:2:0 vaut 1,150 de l'entrée aujourd'hui, 1,015 avec
+  `DERING 1`. En 4:4:4 : 0,979 contre 0,888.
+- **La contrepartie** : la rampe en 1080p → 1440p, dont la bande de rayures d'un pixel est le cas pour lequel
+  `DERING 2` a été choisi. Elle perd 38 % sans lui (19,93 contre 14,47).
+
+**Sur le chemin `tonemap`** (le noyau SDR sur une image SDR), le sens est le même mais en petit. FLIP du texte : 0,1067
+aujourd'hui, 0,1053 avec `DERING 1`, 0,1025 avec les réglages de J11. Le PSNR et FLIP pénalisent l'affûtage ; en SDR,
+l'œil de Bruno a tranché pour `DERING 2` (J37).
+
+**Ce que cela propose, à la décision de Bruno.**
+- **`DERING 1` sur le seul chemin `linear`** (écran HDR, canvas flottant ; le SDR et `tonemap` gardent `DERING 2`).
+  - Pour : le texte et le jeu redeviennent plus fidèles que le bilinéaire, et le pic de (c) disparaît.
+  - Contre : les traits d'un pixel perdent leur profondeur en HDR, comme en SDR avant J37.
+- **Ou garder les défauts** : la mesure dit l'écart à une vérité Lanczos, pas ce que l'œil préfère.
+- **Dans les deux cas** : l'œil de Bruno sur un écran HDR, sur du texte, un jeu et des traits fins. Le comparateur
+  ne sait pas encore afficher le HDR ; c'est à faire si Bruno veut l'A/B.
+
+**Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/hdr_check.py --ablate`, environ trois minutes sur
+SwiftShader. La sortie va dans `bench-out/scaler-lab/hdr/hdr-ablate.json`.

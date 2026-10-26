@@ -28,6 +28,28 @@ const T = GPUTextureUsage;
 const B = GPUBufferUsage;
 const PARAMS = new URLSearchParams(location.search);
 const TIME = Math.max(0, parseInt(PARAMS.get("time") || "0", 10) || 0);
+const ABLATE = PARAMS.get("ablate") === "1";
+
+// ?ablate=1 (hdr_check.py --ablate, journal J48): the upscale's defaults one
+// at a time, between those of J11 (21/10/2026: DERING 1, the bilinear flat
+// path, W_MIN -0.3, sharpness 1 at every scale) and today's (DERING 2, the
+// Catmull-Rom of five taps, W_MIN -0.5, the sharpness law from 1.85): each
+// one alone on J11's, and each one alone taken back from today's. `tuning`
+// null is the law (mwsrSharpness); a number pins the sharpness.
+const J11 = { overrides: { DERING: 1, FLAT_TAPS: 1, W_MIN: -0.3 }, sharp: 1.0 };
+const TODAY = { overrides: {}, sharp: null };
+const ABLATIONS = [
+  ["today", TODAY],
+  ["j11", J11],
+  ["j11_dering2", { ...J11, overrides: { ...J11.overrides, DERING: 2 } }],
+  ["j11_cr5", { ...J11, overrides: { ...J11.overrides, FLAT_TAPS: 5 } }],
+  ["j11_wmin", { ...J11, overrides: { ...J11.overrides, W_MIN: -0.5 } }],
+  ["j11_law", { ...J11, sharp: null }],
+  ["today-dering1", { ...TODAY, overrides: { DERING: 1 } }],
+  ["today-bilin", { ...TODAY, overrides: { FLAT_TAPS: 1 } }],
+  ["today-wmin", { ...TODAY, overrides: { W_MIN: -0.3 } }],
+  ["today-sharp1", { ...TODAY, sharp: 1.0 }],
+];
 
 /** The texture's pixels as RGBA half floats (rows packed), 8-bit ones in [0, 1]. */
 async function readTarget(device, tex) {
@@ -126,9 +148,14 @@ function hdrFrame(c, planes, timestamp) {
   });
 }
 
-/** One frame of case c drawn by a renderer made for mode and variant. */
-async function drawOnce(c, planes, mode, variant) {
-  const { r, canvas, cfg, errors, out } = await makeRenderer(c, mode, variant);
+/** One frame of case c drawn by a renderer made for mode and variant; `set`,
+ *  an ablation's constants and sharpness over the product's. */
+async function drawOnce(c, planes, mode, variant, set = null) {
+  const { r, canvas, cfg, errors, out } = await makeRenderer(c, mode, set ? "mwsr" : variant);
+  if (set) {
+    r.setMwsrOverrides(set.overrides);
+    r.setMwsrTuning(set.sharp === null ? null : { sharp: set.sharp });
+  }
   await r.draw(hdrFrame(c, planes, 1000));
   const [w, h] = c.in;
   const res = {
@@ -323,6 +350,19 @@ async function main() {
       continue;
     }
     const down = c.out[0] < c.in[0];
+    if (ABLATE) {
+      for (const mode of ["linear", "tonemap"]) {
+        for (const [variant, set] of [["off", null], ...ABLATIONS]) {
+          window.__progress = `case ${n}/${cases.length} ${c.name} ${mode} ${variant}`;
+          try {
+            results.push(await drawOnce(c, planes, mode, variant, set));
+          } catch (e) {
+            results.push({ case: c.name, mode, variant, error: String((e && e.stack) || e) });
+          }
+        }
+      }
+      continue;
+    }
     for (const mode of ["linear", "tonemap"]) {
       const variants = ["off", "mwsr"];
       if (mode === "linear" && down) variants.push("mwsr-enc");
