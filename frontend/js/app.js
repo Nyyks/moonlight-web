@@ -77,6 +77,7 @@ import {
     IS_TV,
     resolveTearing,
     hdrClientCapability,
+    hdrLaunchCodec,
     chroma444ClientCapability,
     chroma444Codec,
 } from './util/BrowserDetect.js';
@@ -2180,6 +2181,16 @@ export const MoonlightApp = {
                 );
                 streamingSettings.hdr_enabled = false;
             }
+        }
+        // AV1 HDR in a browser that hands those frames opaque and breaks them
+        // on import (WebKit): HEVC HDR from the start (hdrLaunchCodec).
+        const hdrCodec = hdrLaunchCodec(
+            streamingSettings.video_codec,
+            streamingSettings.hdr_enabled === true,
+        );
+        if (!codecOverride && hdrCodec !== streamingSettings.video_codec) {
+            console.log('[MW] AV1 HDR: this browser hands its frames opaque — asking HEVC HDR');
+            streamingSettings.video_codec = hdrCodec;
         }
 
         // 4:4:4 is asked of the host only in a codec this browser decodes it in
@@ -4772,7 +4783,10 @@ export const MoonlightApp = {
             console.warn(
                 sameCodecAgain
                     ? `[MW] Relaunch on keyframes: the decoder went silent (attempt ${this._fallbackAttemptCount})`
-                    : `[MW] Codec fallback → ${fallbackTarget.codec}` +
+                    : (fallbackTarget.reason === 'opaque-hdr-frames'
+                          ? '[MW] Relaunch without the HDR readback (opaque frames)'
+                          : '[MW] Codec fallback') +
+                          ` → ${fallbackTarget.codec}` +
                           `${fallbackTarget.hdr ? ' HDR' : ' SDR'} (attempt ${this._fallbackAttemptCount})`,
             );
 

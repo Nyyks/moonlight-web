@@ -347,6 +347,76 @@ export function noteDecoderRefusesReferenceRepairs(store = rideOutStore()) {
     }
 }
 
+/** The browsers seen handing their HDR frames opaque: user agent → when (ms). */
+const OPAQUE_HDR_KEY = 'mw_hdr_opaque';
+
+/** How long such a verdict holds. Past it, the next launch looks again. */
+export const OPAQUE_HDR_DAYS = 30;
+const OPAQUE_HDR_MS = OPAQUE_HDR_DAYS * 24 * 3600 * 1000;
+
+/** @param {Storage|null} store @returns {Object<string, number>} */
+function opaqueHdrVerdicts(store) {
+    try {
+        const kept = store && JSON.parse(store.getItem(OPAQUE_HDR_KEY) || '{}');
+        return kept && typeof kept === 'object' ? kept : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+/**
+ * Whether this browser was seen handing its AV1 HDR frames opaque: decoded
+ * in hardware whatever the decoder was asked (`prefer-software`), with no
+ * format and no copyTo. The HDR readback (the linear HDR canvas, the ACES
+ * tone-map) then has nothing to read, and each frame goes through the
+ * browser's own import instead: washed out in Chrome 126, its chroma broken
+ * in Safari 27, both on the same MacBook Air M3 (26/10/2026). Safari's was
+ * reproduced on a page with no MoonlightWeb in it: its 2D canvas and its
+ * <video> draw the same frame right, its WebGPU import does not.
+ *
+ * Nothing tells it before a frame is decoded: the stream finds out on its
+ * first one and the browser keeps the verdict, under its user agent (a new
+ * version is asked again) and for OPAQUE_HDR_DAYS at most.
+ * @param {string} [ua]
+ * @param {Storage|null} [store]
+ * @param {number} [now] ms since the epoch
+ * @returns {boolean}
+ */
+export function hdrFramesOpaque(
+    ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '',
+    store = rideOutStore(),
+    now = Date.now(),
+) {
+    const seen = opaqueHdrVerdicts(store)[ua];
+    // A date ahead of the clock (the clock set back) holds no longer either.
+    return typeof seen === 'number' && now >= seen && now - seen < OPAQUE_HDR_MS;
+}
+
+/**
+ * Remember it (hdrFramesOpaque), dropping the verdicts past their time.
+ * @param {string} [ua]
+ * @param {Storage|null} [store]
+ * @param {number} [now]
+ */
+export function noteHdrFramesOpaque(
+    ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '',
+    store = rideOutStore(),
+    now = Date.now(),
+) {
+    if (!store) return;
+    try {
+        const kept = {};
+        for (const [k, seen] of Object.entries(opaqueHdrVerdicts(store))) {
+            if (typeof seen === 'number' && now >= seen && now - seen < OPAQUE_HDR_MS)
+                kept[k] = seen;
+        }
+        kept[ua] = now;
+        store.setItem(OPAQUE_HDR_KEY, JSON.stringify(kept));
+    } catch (e) {
+        // Not kept: the next launch finds out again, a relaunch later.
+    }
+}
+
 /**
  * True on the WebKit engine: Safari on macOS, and every browser on iOS/iPadOS
  * (they all wrap WebKit, whatever their name). Chromium and Gecko on a Mac are
@@ -362,6 +432,36 @@ export const IS_WEBKIT = (() => {
     if (IS_IOS) return true;
     return /safari/i.test(ua) && !/chrome|chromium|crios|android|firefox|fxios|edg/i.test(ua);
 })();
+
+/**
+ * Whether an HDR stream without a readback takes the external-texture
+ * tone-map ('tonemap-ext' in StreamView's HDR routing): on WebKit, for the
+ * reason above. Dev: mw_hdr_ext_tonemap '1' / '0' forces it on or off.
+ * @returns {boolean}
+ */
+export function hdrExtTonemapRoute() {
+    let ext = !!navigator.gpu && IS_WEBKIT;
+    try {
+        const dev = localStorage.getItem('mw_hdr_ext_tonemap');
+        if (dev === '1') ext = !!navigator.gpu;
+        else if (dev === '0') ext = false;
+    } catch (e) {}
+    return ext;
+}
+
+/**
+ * The codec a launch asks for: HEVC for an AV1 HDR stream in a browser seen
+ * handing those frames opaque (hdrFramesOpaque) where the route left without
+ * a readback imports them for the tone-map (WebKit, which breaks their
+ * chroma and takes HEVC's right). The relaunch of the first time is spared
+ * (StreamView._relaunchWithoutReadback).
+ * @param {string} codec the codec asked for ('av1', 'hevc', 'auto', …)
+ * @param {boolean} hdr
+ * @returns {string}
+ */
+export function hdrLaunchCodec(codec, hdr) {
+    return hdr && codec === 'av1' && hdrExtTonemapRoute() && hdrFramesOpaque() ? 'hevc' : codec;
+}
 
 /**
  * True on the Gecko engine: Firefox on a desktop or on Android. Firefox on iOS

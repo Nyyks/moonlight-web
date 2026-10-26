@@ -76,13 +76,15 @@ import {
     IS_APPLE,
     IS_GECKO,
     IS_IOS,
-    IS_WEBKIT,
     SUPPORTS_CANVAS_TEARING,
     decoderRidesOutGaps,
     decodesThroughGaps,
+    hdrExtTonemapRoute,
+    hdrFramesOpaque,
     mwsrGazeWanted,
     noteDecoderCannotRideOut,
     noteDecoderRefusesReferenceRepairs,
+    noteHdrFramesOpaque,
     pickAutoEnhancer,
     plainPresenterIsWebGpu,
     supportsDisplayHdr,
@@ -845,6 +847,8 @@ export class StreamView {
         //    importExternalTexture instead. Enhancer intact.
         //  - anything else → 'browser': plain blit, the browser's own tone-map
         //    on import. The least good picture, and the only one left.
+        // A browser seen handing its AV1 HDR frames opaque has no readback
+        // (hdrFramesOpaque, found on the first frame: _relaunchWithoutReadback).
         // Dev: mw_hdr_tonemap = '1' forces 'tonemap' on an HDR display (to
         // compare), '0' disables the readback altogether; mw_hdr_ext_tonemap
         // '1'/'0' forces or disables the external-texture tone-map.
@@ -861,12 +865,13 @@ export class StreamView {
                 if (dev === '1') forceTonemap = true;
                 else if (dev === '0') readback = false;
             } catch (e) {}
-            let extTonemap = !!navigator.gpu && IS_WEBKIT;
-            try {
-                const dev = localStorage.getItem('mw_hdr_ext_tonemap');
-                if (dev === '1') extTonemap = !!navigator.gpu;
-                else if (dev === '0') extTonemap = false;
-            } catch (e) {}
+            if (readback && hdrFramesOpaque()) {
+                readback = false;
+                console.log(
+                    '[StreamView] HDR: this browser hands its AV1 HDR frames opaque — no readback',
+                );
+            }
+            const extTonemap = hdrExtTonemapRoute();
             // A sink only earns its keep on an HDR display: on an SDR one it
             // presents the same tone-mapped picture with no enhancer left.
             const sinkHdr = displayHdr && !!videoSinkCtor();
@@ -2836,6 +2841,10 @@ export class StreamView {
                             (frame.format || 'null'),
                     );
                 }
+                if (this._checkOpaqueHdrFrame(frame)) {
+                    frame.close();
+                    return;
+                }
                 // AV1 padded past the picture: cut to the host's size, before
                 // anything reads the frame (stream/FrameCrop.js).
                 if (this.videoCodec === CODEC_AV1) frame = cropToAnnounced(frame, this._frameSize);
@@ -3663,6 +3672,50 @@ export class StreamView {
         this._codecFallback = { codec, hdr: !!this._hdrEnabled, reason: 'silent-decoder' };
         this._codecFallbackRequested = true;
         this.quit();
+    }
+
+    /**
+     * The first frame of an HDR readback route (_hdrYuv), looked at once: an
+     * opaque one (format null) is an HDR frame with nothing to read back, the
+     * decoder having run in hardware whatever it was asked. The 8-bit frame of
+     * a host that kept SDR goes through the import as any SDR frame does, and
+     * is left alone: its transfer is neither PQ nor HLG.
+     * @param {VideoFrame} frame
+     * @returns {boolean} true when the session is on its way back without it
+     */
+    _checkOpaqueHdrFrame(frame) {
+        if (!this._hdrYuv || this._opaqueHdrChecked) return false;
+        this._opaqueHdrChecked = true;
+        const transfer = frame.colorSpace && frame.colorSpace.transfer;
+        if (frame.format || (transfer !== 'pq' && transfer !== 'hlg')) return false;
+        return this._relaunchWithoutReadback();
+    }
+
+    /**
+     * No readback in this browser: the verdict kept (hdrFramesOpaque), and the
+     * session back on a route without one, relaunched as a codec fallback is.
+     * Where that route imports the frame for the tone-map (WebKit), in HEVC:
+     * WebKit breaks the chroma of the AV1 10-bit frame it imports and takes an
+     * HEVC one right (26/10/2026). Elsewhere in AV1 again, on the <video> sink
+     * of an HDR display (true HDR, no enhancer) or the browser's own tone-map.
+     * A guest keeps the verdict and stays: the feed is the owner's.
+     * @returns {boolean} whether the session is relaunched
+     */
+    _relaunchWithoutReadback() {
+        if (this._codecFallbackRequested || this._quitting || this._manualQuitting) return false;
+        noteHdrFramesOpaque();
+        if (this._playerMode) return false;
+        const codec = hdrExtTonemapRoute() ? 'hevc' : 'av1';
+        console.warn(
+            '[StreamView] HDR: the decoder hands opaque frames, nothing to read back — ' +
+                'relaunching in ' +
+                codec +
+                ' HDR without the readback',
+        );
+        this._codecFallback = { codec, hdr: true, reason: 'opaque-hdr-frames' };
+        this._codecFallbackRequested = true;
+        this.quit();
+        return true;
     }
 
     /**

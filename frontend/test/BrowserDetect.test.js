@@ -9,10 +9,15 @@ import {
     decodesThroughGaps,
     detectPlatform,
     detectTv,
+    hdrExtTonemapRoute,
+    hdrFramesOpaque,
+    hdrLaunchCodec,
     isLowMemory,
     isIphone,
     noteDecoderCannotRideOut,
     noteDecoderRefusesReferenceRepairs,
+    noteHdrFramesOpaque,
+    OPAQUE_HDR_DAYS,
     physicalScreenSize,
     pickAutoEnhancer,
     PLATFORM_TYPE,
@@ -197,6 +202,131 @@ describe('BrowserDetect.decoderRidesOutGaps', () => {
         expect(decoderRidesOutGaps(FREEBOX, broken)).toBe(true);
         expect(() => noteDecoderCannotRideOut(broken)).not.toThrow();
         expect(decoderRidesOutGaps(FREEBOX, null)).toBe(true);
+    });
+});
+
+// AV1 HDR frames handed opaque (Chrome 126 and Safari 27 on an M3, 26/10/2026):
+// a verdict per user agent, for 30 days at most, then asked again.
+describe('BrowserDetect.hdrFramesOpaque', () => {
+    const SAFARI_27 =
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15';
+    const SAFARI_28 = SAFARI_27.replace('Version/27.0', 'Version/28.0');
+    const CHROME_126 =
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+    const DAY = 24 * 3600 * 1000;
+    const T0 = Date.UTC(2026, 9, 26);
+
+    function memoryStore() {
+        const m = new Map();
+        return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v) };
+    }
+
+    it('says yes for the browser that kept the verdict, in that version only', () => {
+        const store = memoryStore();
+        expect(hdrFramesOpaque(SAFARI_27, store, T0)).toBe(false);
+        noteHdrFramesOpaque(SAFARI_27, store, T0);
+        expect(hdrFramesOpaque(SAFARI_27, store, T0 + DAY)).toBe(true);
+        expect(hdrFramesOpaque(SAFARI_28, store, T0 + DAY)).toBe(false);
+        expect(hdrFramesOpaque(CHROME_126, store, T0 + DAY)).toBe(false);
+    });
+
+    it(`holds ${OPAQUE_HDR_DAYS} days, then the next launch looks again`, () => {
+        expect(OPAQUE_HDR_DAYS).toBe(30);
+        const store = memoryStore();
+        noteHdrFramesOpaque(CHROME_126, store, T0);
+        expect(hdrFramesOpaque(CHROME_126, store, T0 + 30 * DAY - 1)).toBe(true);
+        expect(hdrFramesOpaque(CHROME_126, store, T0 + 30 * DAY)).toBe(false);
+        // the clock set back: a verdict dated ahead of it holds no longer
+        expect(hdrFramesOpaque(CHROME_126, store, T0 - DAY)).toBe(false);
+    });
+
+    it('drops the verdicts past their time when it keeps a new one', () => {
+        const store = memoryStore();
+        noteHdrFramesOpaque(SAFARI_27, store, T0);
+        noteHdrFramesOpaque(CHROME_126, store, T0 + 20 * DAY);
+        noteHdrFramesOpaque(SAFARI_28, store, T0 + 31 * DAY);
+        expect(Object.keys(JSON.parse(store.getItem('mw_hdr_opaque')))).toEqual([
+            CHROME_126,
+            SAFARI_28,
+        ]);
+    });
+
+    it('keeps the verdict in localStorage by default', () => {
+        localStorage.removeItem('mw_hdr_opaque');
+        expect(hdrFramesOpaque()).toBe(false);
+        noteHdrFramesOpaque();
+        expect(hdrFramesOpaque()).toBe(true);
+        localStorage.removeItem('mw_hdr_opaque');
+    });
+
+    it('says no when the store cannot be read or holds garbage, and keeps quiet when it cannot be written', () => {
+        const broken = {
+            getItem() {
+                throw new Error('denied');
+            },
+            setItem() {
+                throw new Error('denied');
+            },
+        };
+        expect(hdrFramesOpaque(SAFARI_27, broken, T0)).toBe(false);
+        expect(() => noteHdrFramesOpaque(SAFARI_27, broken, T0)).not.toThrow();
+        expect(hdrFramesOpaque(SAFARI_27, null, T0)).toBe(false);
+        expect(() => noteHdrFramesOpaque(SAFARI_27, null, T0)).not.toThrow();
+        const garbage = memoryStore();
+        garbage.setItem('mw_hdr_opaque', 'not json');
+        expect(hdrFramesOpaque(SAFARI_27, garbage, T0)).toBe(false);
+        noteHdrFramesOpaque(SAFARI_27, garbage, T0);
+        expect(hdrFramesOpaque(SAFARI_27, garbage, T0)).toBe(true);
+    });
+});
+
+// The route an HDR stream takes without a readback, on WebKit.
+describe('BrowserDetect.hdrExtTonemapRoute', () => {
+    afterEach(() => {
+        localStorage.removeItem('mw_hdr_ext_tonemap');
+        vi.unstubAllGlobals();
+    });
+
+    it('is off outside WebKit, and follows the dev key where WebGPU is', () => {
+        expect(hdrExtTonemapRoute()).toBe(false);
+        localStorage.setItem('mw_hdr_ext_tonemap', '1');
+        expect(hdrExtTonemapRoute()).toBe(false); // no WebGPU here
+        vi.stubGlobal('navigator', { userAgent: navigator.userAgent, gpu: {} });
+        expect(hdrExtTonemapRoute()).toBe(true);
+        localStorage.setItem('mw_hdr_ext_tonemap', '0');
+        expect(hdrExtTonemapRoute()).toBe(false);
+    });
+});
+
+// Safari's AV1 HDR, opaque and broken on import: HEVC HDR asked from the start.
+describe('BrowserDetect.hdrLaunchCodec', () => {
+    afterEach(() => {
+        localStorage.removeItem('mw_hdr_ext_tonemap');
+        localStorage.removeItem('mw_hdr_opaque');
+        vi.unstubAllGlobals();
+    });
+
+    function webkit() {
+        vi.stubGlobal('navigator', { userAgent: navigator.userAgent, gpu: {} });
+        localStorage.setItem('mw_hdr_ext_tonemap', '1');
+    }
+
+    it('asks HEVC for AV1 HDR where the frames were seen opaque and the import breaks them', () => {
+        webkit();
+        expect(hdrLaunchCodec('av1', true)).toBe('av1');
+        noteHdrFramesOpaque();
+        expect(hdrLaunchCodec('av1', true)).toBe('hevc');
+    });
+
+    it('keeps the codec everywhere else', () => {
+        webkit();
+        noteHdrFramesOpaque();
+        expect(hdrLaunchCodec('av1', false)).toBe('av1');
+        for (const codec of ['hevc', 'auto', 'h264', 'pyrowave', undefined])
+            expect(hdrLaunchCodec(codec, true)).toBe(codec);
+        // Chrome: AV1 stays, on the sink or the browser's own tone-map
+        localStorage.setItem('mw_hdr_ext_tonemap', '0');
+        expect(hdrLaunchCodec('av1', true)).toBe('av1');
     });
 });
 
