@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+    av1HdrSoftwareDecode,
     decoderRidesOutGaps,
     decoderTakesReferenceRepairs,
     decodesThroughGaps,
@@ -327,6 +328,58 @@ describe('BrowserDetect.hdrLaunchCodec', () => {
         // Chrome: AV1 stays, on the sink or the browser's own tone-map
         localStorage.setItem('mw_hdr_ext_tonemap', '0');
         expect(hdrLaunchCodec('av1', true)).toBe('av1');
+    });
+
+    // HEVC frames are read back nowhere: with the enhancer, AV1's readback route.
+    const open = { auto: true, enhanced: true, hostAv1Hdr: true, av1Software: true };
+
+    it("asks AV1 for Auto's HEVC in HDR with the enhancer, where the readback route is open", () => {
+        vi.stubGlobal('navigator', { userAgent: navigator.userAgent, gpu: {} });
+        expect(hdrLaunchCodec('hevc', true, open)).toBe('av1');
+    });
+
+    it('keeps a HEVC chosen in the menu', () => {
+        vi.stubGlobal('navigator', { userAgent: navigator.userAgent, gpu: {} });
+        expect(hdrLaunchCodec('hevc', true, { ...open, auto: false })).toBe('hevc');
+    });
+
+    it('keeps HEVC when any of it is missing', () => {
+        vi.stubGlobal('navigator', { userAgent: navigator.userAgent, gpu: {} });
+        expect(hdrLaunchCodec('hevc', false, open)).toBe('hevc');
+        expect(hdrLaunchCodec('hevc', true, { ...open, enhanced: false })).toBe('hevc');
+        expect(hdrLaunchCodec('hevc', true, { ...open, hostAv1Hdr: false })).toBe('hevc');
+        expect(hdrLaunchCodec('hevc', true, { ...open, av1Software: false })).toBe('hevc');
+        expect(hdrLaunchCodec('hevc', true)).toBe('hevc');
+        for (const codec of ['h264', 'pyrowave', 'auto'])
+            expect(hdrLaunchCodec(codec, true, open)).toBe(codec);
+        // WebKit: its AV1 frames are opaque, HEVC goes to its own tone-map
+        localStorage.setItem('mw_hdr_ext_tonemap', '1');
+        expect(hdrLaunchCodec('hevc', true, open)).toBe('hevc');
+        localStorage.removeItem('mw_hdr_ext_tonemap');
+        // a browser already seen handing its AV1 HDR frames opaque
+        noteHdrFramesOpaque();
+        expect(hdrLaunchCodec('hevc', true, open)).toBe('hevc');
+    });
+
+    it('keeps HEVC without WebGPU', () => {
+        vi.stubGlobal('navigator', { userAgent: navigator.userAgent });
+        expect(hdrLaunchCodec('hevc', true, open)).toBe('hevc');
+    });
+});
+
+describe('BrowserDetect.av1HdrSoftwareDecode', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('asks once whether 10-bit AV1 decodes in software', async () => {
+        const isConfigSupported = vi.fn(async () => ({ supported: true }));
+        vi.stubGlobal('VideoDecoder', { isConfigSupported });
+        expect(await av1HdrSoftwareDecode()).toBe(true);
+        expect(await av1HdrSoftwareDecode()).toBe(true);
+        expect(isConfigSupported).toHaveBeenCalledOnce();
+        expect(isConfigSupported).toHaveBeenCalledWith({
+            codec: 'av01.0.08M.10',
+            hardwareAcceleration: 'prefer-software',
+        });
     });
 });
 

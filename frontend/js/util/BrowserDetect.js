@@ -449,18 +449,73 @@ export function hdrExtTonemapRoute() {
     return ext;
 }
 
+/** A host's codec mode bit for AV1 Main 10 (moonlight-common-c, SCM_AV1_MAIN10). */
+export const SCM_AV1_MAIN10 = 0x20000;
+
+let av1SoftwareProbe = null;
+
 /**
- * The codec a launch asks for: HEVC for an AV1 HDR stream in a browser seen
- * handing those frames opaque (hdrFramesOpaque) where the route left without
- * a readback imports them for the tone-map (WebKit, which breaks their
- * chroma and takes HEVC's right). The relaunch of the first time is spared
- * (StreamView._relaunchWithoutReadback).
- * @param {string} codec the codec asked for ('av1', 'hevc', 'auto', …)
+ * Whether this browser decodes 10-bit AV1 in software (dav1d, in Chromium):
+ * the frames the HDR readback route reads back. Asked once.
+ * @returns {Promise<boolean>}
+ */
+export function av1HdrSoftwareDecode() {
+    if (!av1SoftwareProbe) {
+        av1SoftwareProbe = (async () => {
+            try {
+                if (typeof VideoDecoder === 'undefined' || !VideoDecoder.isConfigSupported)
+                    return false;
+                const r = await VideoDecoder.isConfigSupported({
+                    codec: 'av01.0.08M.10',
+                    hardwareAcceleration: 'prefer-software',
+                });
+                return !!(r && r.supported);
+            } catch (e) {
+                return false;
+            }
+        })();
+    }
+    return av1SoftwareProbe;
+}
+
+/**
+ * The codec an HDR launch asks for, given the routes each one leads to here.
+ * - AV1 in a browser seen handing those frames opaque (hdrFramesOpaque), where
+ *   the route left without a readback imports them for the tone-map (WebKit,
+ *   which breaks their chroma and takes HEVC's right): HEVC. The relaunch of
+ *   the first time is spared (StreamView._relaunchWithoutReadback).
+ * - The HEVC of « Auto » (util/CodecAuto.js) with the enhancer asked for: no
+ *   browser here reads an HEVC frame back (no software HEVC decoder), so the
+ *   stream would end on the <video> sink, its enhancer dropped, or on a pale
+ *   import. AV1 takes the readback route and keeps the enhancer, in HDR, where
+ *   the host encodes AV1 10-bit, this browser decodes it in software and
+ *   WebGPU is there. Not on WebKit, whose AV1 frames are opaque, nor in a
+ *   browser already seen so. A HEVC chosen in the menu stays HEVC. Measured
+ *   on DualRTX (26/10/2026): AV1 with MWSR no slower click to photon than the
+ *   HEVC <video>, for about one CPU core more.
+ * @param {string} codec the codec asked for ('av1', 'hevc', 'h264', …)
  * @param {boolean} hdr
+ * @param {{auto?: boolean, enhanced?: boolean, hostAv1Hdr?: boolean, av1Software?: boolean}} [opts]
+ *        the HEVC is Auto's; the enhancer asked for; the host encodes AV1
+ *        Main 10 (SCM_AV1_MAIN10); av1HdrSoftwareDecode's answer
  * @returns {string}
  */
-export function hdrLaunchCodec(codec, hdr) {
-    return hdr && codec === 'av1' && hdrExtTonemapRoute() && hdrFramesOpaque() ? 'hevc' : codec;
+export function hdrLaunchCodec(codec, hdr, opts = {}) {
+    if (!hdr) return codec;
+    if (codec === 'av1') return hdrExtTonemapRoute() && hdrFramesOpaque() ? 'hevc' : codec;
+    const { auto = false, enhanced = false, hostAv1Hdr = false, av1Software = false } = opts;
+    if (
+        codec === 'hevc' &&
+        auto &&
+        enhanced &&
+        hostAv1Hdr &&
+        av1Software &&
+        !!navigator.gpu &&
+        !hdrExtTonemapRoute() &&
+        !hdrFramesOpaque()
+    )
+        return 'av1';
+    return codec;
 }
 
 /**

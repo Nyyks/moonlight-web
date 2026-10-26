@@ -99,6 +99,7 @@ import {
     anyHostCodesPyrowave,
     pyrowaveBlocker,
 } from '../util/PyrowaveCodec.js';
+import { CODEC_AUTO, codecAfterAutoMigration } from '../util/CodecAuto.js';
 
 const STORAGE_KEY = 'mw-streaming-settings';
 
@@ -147,7 +148,7 @@ export class SettingsView {
         this.container = container;
         this.onClose = onClose || (() => {});
 
-        this._videoCodec = 'hevc';
+        this._videoCodec = CODEC_AUTO;
         this._gamingMode = true;
         this._showPerformanceStats = false;
         this._streamBitrateMbps = 20;
@@ -574,7 +575,9 @@ export class SettingsView {
 
     /** Apply a settings object to internal state (normalises field names). */
     _applySettings(data) {
-        this._videoCodec = data.video_codec || 'hevc';
+        // The server's default is HEVC on a first visit: it moves to Auto
+        // like a stored one (util/CodecAuto.js).
+        this._videoCodec = codecAfterAutoMigration(data.video_codec) || CODEC_AUTO;
         this._mediaTrackOnlyH264 = data.media_track_only_h264 === true;
         this._gamingMode = data.gaming_mode !== false;
         this._showPerformanceStats = data.show_performance_stats === true;
@@ -958,6 +961,7 @@ export class SettingsView {
      */
     _getEffectiveCodec() {
         if (this._mediaTrackOnlyH264) return 'h264';
+        if (this._videoCodec === CODEC_AUTO) return CODEC_AUTO;
         if (this._videoCodec === CODEC_PYROWAVE) {
             return this._pyrowaveBlocker()
                 ? this._effectiveCodecFrom(PYROWAVE_FALLBACK)
@@ -1303,7 +1307,7 @@ export class SettingsView {
 
     /** Reset all streaming preferences to their default values. */
     async _resetDefaults() {
-        this._videoCodec = 'hevc';
+        this._videoCodec = CODEC_AUTO;
         // Default preset leaves mouse gaming mode OFF (opt-in per user request).
         this._gamingMode = false;
         this._showPerformanceStats = false;
@@ -1486,7 +1490,10 @@ export class SettingsView {
         // host here codes it, this browser cannot decode it, HDR is ticked or
         // the transport is the <video> one — the option's title and, chosen,
         // the note under the menu say which (util/PyrowaveCodec.js).
+        // Auto first, the default (util/CodecAuto.js): this browser's decoders
+        // never grey it out, it picks among them at the launch.
         const codecs = [
+            { value: CODEC_AUTO, label: t('settings.codecAuto') },
             { value: 'h264', label: t('settings.codecH264') },
             { value: 'hevc', label: t('settings.codecHevc') },
             { value: 'av1', label: t('settings.codecAv1') },
@@ -1506,9 +1513,9 @@ export class SettingsView {
             `>${this.esc(pyrowaveLabel)}</option>`;
         const codecOptions = codecs
             .map((c) => {
-                const browserDisabled = this._codecSupport && !this._codecSupport[c.value];
-                const mediaTrackDisabled =
-                    this._mediaTrackOnlyH264 && (c.value === 'hevc' || c.value === 'av1');
+                const browserDisabled =
+                    c.value !== CODEC_AUTO && this._codecSupport && !this._codecSupport[c.value];
+                const mediaTrackDisabled = this._mediaTrackOnlyH264 && c.value !== 'h264';
                 // H.264 has no usable HDR path: disable it while HDR is enabled.
                 const hdrDisabledCodec = this._hdrEnabled && c.value === 'h264';
                 const disabled = browserDisabled || mediaTrackDisabled || hdrDisabledCodec;

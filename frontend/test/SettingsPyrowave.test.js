@@ -151,7 +151,7 @@ describe('SettingsView: PyroWave in the codec menu', () => {
     it('is the last codec, under its own name, where a host codes it', () => {
         mount();
         const values = Array.from($('#settings-video-codec').options).map((o) => o.value);
-        expect(values).toEqual(['h264', 'hevc', 'av1', 'pyrowave']);
+        expect(values).toEqual(['auto', 'h264', 'hevc', 'av1', 'pyrowave']);
         expect(option().disabled).toBe(false);
         expect(option().textContent).toBe('text:settings.codecPyrowave');
     });

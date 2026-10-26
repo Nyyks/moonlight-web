@@ -612,6 +612,8 @@ export class StreamView {
         // words. A refused 4:4:4 used to look exactly like a 4:2:0 nobody asked
         // for: same overlay, same codec name, no notice anywhere.
         this._yuv444Declined = opts.chroma444Declined || null;
+        // The codec was « Auto »'s to choose (util/CodecAuto.js): said in the overlay.
+        this._codecAuto = opts.codecAuto === true;
         // HDR mode requested by the user. Actual HDR depends on both the
         // user's preference and Sunshine's negotiated format (HEVC Main10 /
         // AV1 10-bit). _hdrNegotiated is set after codec detection.
@@ -6641,6 +6643,7 @@ export class StreamView {
             else if (this._hdrLinear) codecLabel += this._rendererHdrActive ? ' HDR*' : ' HDR→SDR';
             else codecLabel += this._rendererHdrActive ? ' HDR*' : ' HDR';
         }
+        if (this._codecAuto) codecLabel += ' (Auto)';
         html +=
             '<div class="stats-row">' +
             '<span class="stats-label">' +

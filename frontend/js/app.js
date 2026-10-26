@@ -78,9 +78,12 @@ import {
     resolveTearing,
     hdrClientCapability,
     hdrLaunchCodec,
+    av1HdrSoftwareDecode,
+    SCM_AV1_MAIN10,
     chroma444ClientCapability,
     chroma444Codec,
 } from './util/BrowserDetect.js';
+import { CODEC_AUTO, migrateStoredCodecToAuto } from './util/CodecAuto.js';
 import {
     startRefreshRateMonitor,
     currentRefreshMilliHz,
@@ -241,6 +244,10 @@ export const MoonlightApp = {
 
     async init() {
         console.log('[MW] Initializing MoonlightWeb...');
+
+        // A stored HEVC becomes « Auto » once, before anything reads it
+        // (util/CodecAuto.js).
+        migrateStoredCodecToAuto();
 
         // Measure this screen's refresh rate now, and again whenever the
         // window may have changed screen, so a launch can tell the native
@@ -2044,6 +2051,15 @@ export const MoonlightApp = {
         if (hdrOverride !== undefined) {
             streamingSettings.hdr_enabled = hdrOverride === true;
         }
+        // « Auto » (util/CodecAuto.js): HEVC, the codec the host is asked for,
+        // unless HDR below finds that HEVC cannot do the job (hdrLaunchCodec).
+        // No codec stored at all is still the server's default, as before. A
+        // fallback relaunch keeps the word of the launch it follows: the
+        // overlay still says Auto.
+        if (!codecOverride) {
+            this._codecAuto = streamingSettings.video_codec === CODEC_AUTO;
+            if (this._codecAuto) streamingSettings.video_codec = 'hevc';
+        }
         // « PyroWave (Wired LAN only) »: asked of a host that says it codes it,
         // by a browser that decodes it, with the HDR box off; otherwise this
         // launch is an Auto one, without a word (util/PyrowaveCodec.js). Read
@@ -2102,14 +2118,24 @@ export const MoonlightApp = {
                 streamingSettings.hdr_enabled = false;
             }
         }
-        // AV1 HDR in a browser that hands those frames opaque and breaks them
-        // on import (WebKit): HEVC HDR from the start (hdrLaunchCodec).
-        const hdrCodec = hdrLaunchCodec(
-            streamingSettings.video_codec,
-            streamingSettings.hdr_enabled === true,
-        );
+        // The codec HDR asks for (hdrLaunchCodec): HEVC for an AV1 this
+        // browser hands opaque and breaks on import (WebKit); AV1 for Auto's
+        // HEVC with the enhancer, which only AV1's readback keeps in HDR.
+        const hdrOn = streamingSettings.hdr_enabled === true;
+        const enhanced = streamingSettings.video_enhancement === 'on';
+        const autoAv1 = !codecOverride && this._codecAuto === true && hdrOn && enhanced;
+        const hdrCodec = hdrLaunchCodec(streamingSettings.video_codec, hdrOn, {
+            auto: autoAv1,
+            enhanced,
+            hostAv1Hdr: ((host.serverCodecModeSupport || 0) & SCM_AV1_MAIN10) !== 0,
+            av1Software: autoAv1 ? await av1HdrSoftwareDecode() : false,
+        });
         if (!codecOverride && hdrCodec !== streamingSettings.video_codec) {
-            console.log('[MW] AV1 HDR: this browser hands its frames opaque — asking HEVC HDR');
+            console.log(
+                hdrCodec === 'av1'
+                    ? '[MW] Auto, HDR with the enhancer: HEVC frames cannot be read here — asking AV1 HDR'
+                    : '[MW] AV1 HDR: this browser hands its frames opaque — asking HEVC HDR',
+            );
             streamingSettings.video_codec = hdrCodec;
         }
 
@@ -3426,6 +3452,8 @@ export const MoonlightApp = {
             // plain codec name and the viewer had no way to tell a granted 4:2:0
             // from a refused 4:4:4. The two client-side reasons are recorded at
             // the moment of the drop; what is left is the host's answer.
+            // The codec was Auto's to choose: the overlay says so beside it.
+            codecAuto: viewOpts.playerMode !== true && this._codecAuto === true,
             chroma444Declined:
                 this._chroma444Declined ||
                 (streamingSettings.chroma_444_enabled === true && result.yuv444 !== true
