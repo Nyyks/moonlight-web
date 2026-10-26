@@ -10127,7 +10127,12 @@ export class StreamView {
             e.code === name ? !e.getModifierState(name) : e.getModifierState(name);
         this.webrtc.send({
             type: 'locksync',
-            numLock: state('NumLock'),
+            // An Apple keyboard has no NumLock to read, and its keypad always
+            // types digits: NumLock on, at the PC. Read as off, the PC's keypad
+            // would type arrows from the first key on (26/10/2026). Its Clear
+            // key carries the NumLock code: pressed first, the PC toggles after
+            // the sync, so the sync says off and the PC ends on.
+            numLock: this._appleKeyboard ? e.code !== 'NumLock' : state('NumLock'),
             capsLock: state('CapsLock'),
             scrollLock: state('ScrollLock'),
         });
