@@ -51,10 +51,18 @@ import (
 // ── Configuration (env-driven) ──────────────────────────────────────────────
 
 type config struct {
-	listen      string        // MW_RDV_LISTEN             (default ":8090")
-	storePath   string        // MW_RDV_STORE              (default "/data/rendezvous.json")
-	secret      []byte        // MW_RDV_OWNER_SECRET       (HMAC key for the claim store)
-	maxNewPerHr int           // MW_RDV_MAX_NEW_PER_HOUR   (default 20; 0 = unlimited)
+	listen      string // MW_RDV_LISTEN             (default ":8090")
+	storePath   string // MW_RDV_STORE              (default "/data/rendezvous.json")
+	secret      []byte // MW_RDV_OWNER_SECRET       (HMAC key for the claim store)
+	maxNewPerHr int    // MW_RDV_MAX_NEW_PER_HOUR   (default 20; 0 = unlimited)
+	// The same new claims, charged to the /48 and to the whole server: a free
+	// /48 is 65 536 per-/64 budgets, and the server's own is what bounds a flood
+	// from many of them. Ids already held are never charged (handleClaim).
+	maxNewPer48 int           // MW_RDV_MAX_NEW_PER_48_PER_HOUR (default 60; 0 = unlimited)
+	maxNewAll   int           // MW_RDV_MAX_NEW_GLOBAL_PER_HOUR (default 1000; 0 = unlimited)
+	maxClaims   int           // MW_RDV_MAX_CLAIMS         (default 100000; 0 = unlimited)
+	unusedTTL   time.Duration // MW_RDV_UNUSED_CLAIM_DAYS  (default 7; 0 = never)
+	flushDelay  time.Duration // MW_RDV_FLUSH_DELAY_MS     (default 2000; 0 = every write at once)
 	maxPeerPerM int           // MW_RDV_MAX_PEER_PER_MIN   (default 30; 0 = unlimited)
 	maxSessions int           // MW_RDV_MAX_SESSIONS       (default 4, per host)
 	maxMessage  int           // MW_RDV_MAX_MESSAGE_BYTES  (default 64 KiB)
@@ -98,6 +106,11 @@ func loadConfig() config {
 		secret:    []byte(mustEnv("MW_RDV_OWNER_SECRET")),
 		// 0 is meaningful (unlimited), so the floor is 0 rather than 1.
 		maxNewPerHr: envInt("MW_RDV_MAX_NEW_PER_HOUR", 20, 0, 100000),
+		maxNewPer48: envInt("MW_RDV_MAX_NEW_PER_48_PER_HOUR", 60, 0, 100000),
+		maxNewAll:   envInt("MW_RDV_MAX_NEW_GLOBAL_PER_HOUR", 1000, 0, 1000000),
+		maxClaims:   envInt("MW_RDV_MAX_CLAIMS", 100000, 0, 10000000),
+		unusedTTL:   time.Duration(envInt("MW_RDV_UNUSED_CLAIM_DAYS", 7, 0, 3650)) * 24 * time.Hour,
+		flushDelay:  time.Duration(envInt("MW_RDV_FLUSH_DELAY_MS", 2000, 0, 60000)) * time.Millisecond,
 		maxPeerPerM: envInt("MW_RDV_MAX_PEER_PER_MIN", 30, 0, 100000),
 		maxSessions: envInt("MW_RDV_MAX_SESSIONS", 4, 1, 64),
 		maxMessage:  envInt("MW_RDV_MAX_MESSAGE_BYTES", 64*1024, 1024, 1024*1024),
@@ -123,20 +136,27 @@ func (c config) readIdle() time.Duration { return 2*c.pingEvery + 15*time.Second
 // ── Server ──────────────────────────────────────────────────────────────────
 
 type server struct {
-	cfg        config
-	store      *claimStore
-	hub        *hub
-	claimQuota *quota
-	peerQuota  *quota
+	cfg           config
+	store         *claimStore
+	hub           *hub
+	claimQuota    *quota
+	claimQuota48  *quota
+	claimQuotaAll *quota
+	peerQuota     *quota
 }
 
 func newServer(cfg config, store *claimStore) *server {
+	store.maxClaims = cfg.maxClaims
+	store.unusedTTL = cfg.unusedTTL
+	store.delay = cfg.flushDelay
 	return &server{
-		cfg:        cfg,
-		store:      store,
-		hub:        newHub(cfg.maxSessions),
-		claimQuota: newQuota(cfg.maxNewPerHr, time.Hour),
-		peerQuota:  newQuota(cfg.maxPeerPerM, time.Minute),
+		cfg:           cfg,
+		store:         store,
+		hub:           newHub(cfg.maxSessions),
+		claimQuota:    newQuota(cfg.maxNewPerHr, time.Hour),
+		claimQuota48:  newQuotaBits(cfg.maxNewPer48, time.Hour, 48),
+		claimQuotaAll: newQuota(cfg.maxNewAll, time.Hour),
+		peerQuota:     newQuota(cfg.maxPeerPerM, time.Minute),
 	}
 }
 
@@ -270,9 +290,20 @@ func (s *server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	// Budget only NEW claims. Re-presenting an id already held is what a host
 	// does on every restart, and charging for that would lock out a machine that
 	// reboots often — or a household behind one address.
-	if !s.store.owns(id, token) && !s.claimQuota.allow(clientIP(r)) {
-		writeErr(w, http.StatusTooManyRequests, "too many new claims from this address, retry later")
-		return
+	// Narrowest first, so an address over its own budget does not spend the
+	// /48's or the server's for everybody else.
+	if !s.store.owns(id, token) {
+		ip := clientIP(r)
+		if !s.claimQuota.allow(ip) || !s.claimQuota48.allow(ip) {
+			writeErr(w, http.StatusTooManyRequests, "too many new claims from this address, retry later")
+			return
+		}
+		if !s.claimQuotaAll.allow("all") {
+			log.Printf("[mw-rendezvous] WARN new claims over the server's budget (%d/h) — refused until it frees up",
+				s.cfg.maxNewAll)
+			writeErr(w, http.StatusTooManyRequests, "too many new claims right now, retry later")
+			return
+		}
 	}
 
 	switch s.store.claim(id, token) {
@@ -288,6 +319,9 @@ func (s *server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	case claimHasOther:
 		writeErrCode(w, http.StatusConflict,
 			"this owner already holds an id — release it first", errOwnerHasOther)
+	case claimFull:
+		log.Printf("[mw-rendezvous] WARN claim store full (%d ids) — new claims refused", s.cfg.maxClaims)
+		writeErr(w, http.StatusTooManyRequests, "too many new claims right now, retry later")
 	}
 }
 
@@ -322,6 +356,8 @@ func (s *server) handleHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A line held: the id is in use, and never let go of as unused.
+	s.store.touch(id)
 	line := &hostLine{id: id, conn: conn, proto: proto, sessions: map[string]*session{}}
 	if displaced := s.hub.register(line); displaced != nil {
 		go hangUpLine(displaced, "replaced by a newer connection from the same owner")
