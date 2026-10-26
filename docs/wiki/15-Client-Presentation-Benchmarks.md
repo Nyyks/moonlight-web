@@ -78,16 +78,16 @@ Downscaling quality was checked separately (1440p and 2160p streams into a 2018�
 
 ## 15.4 Decision 3 — one checkbox, "auto" picks the algorithm
 
-In production the Enhancer is a single checkbox; the algorithm is always `auto`. The dropdown (Auto · Canvas2D · Video · Smooth2D · SGSR1 · NIS · FSR1, each in its WebGL2 and WebGPU flavour) exists **only in debug builds or debug mode**; a Release build honours a value planted in `localStorage['mw-streaming-settings'].video_enhancement_algo`, nothing more.
+In production the Enhancer is a single checkbox; the algorithm is always `auto`. The dropdown (Auto · Canvas2D · Video · Smooth2D · SGSR1 · NIS · FSR1 · MWSR, each in its WebGL2 and WebGPU flavour) exists **only in debug builds or debug mode**; a Release build honours a value planted in `localStorage['mw-streaming-settings'].video_enhancement_algo`, nothing more.
 
 `auto` resolves (`pickAutoEnhancer` in `BrowserDetect.js`):
 
 | Client | SDR, Enhancer off | SDR, Enhancer on | HDR, Enhancer off | HDR, Enhancer on |
 |---|---|---|---|---|
-| Desktop | Canvas2D | FSR1 on WebGL2 | WebGPU linear (or `<video>`, see 15.5) | FSR1 on WebGPU |
-| Mobile / tablet | Canvas2D | SGSR1 on WebGL2 | WebGPU linear (or `<video>`) | FSR1 on WebGPU |
+| Desktop | Canvas2D | MWSR on WebGL2 (FSR1 before v0.4.1) | WebGPU linear (or `<video>`, see 15.5) | MWSR on WebGPU (FSR1 before v0.4.1) |
+| Mobile / tablet | Canvas2D | MWSR on WebGL2, WebGPU on iPhone and iPad, none on an entry-level Mali (SGSR1 before v0.4.1) | WebGPU linear (or `<video>`) | MWSR on WebGPU (FSR1 before v0.4.1) |
 
-Why FSR1 on desktop: in the windowed series it was the cheapest of the three WebGL2 upscalers at the median and second at the p90, and its two-pass sharpening gives the most legible text in the side-by-side captures. Why SGSR1 on mobile: one pass, the lightest shader, on GPUs where the difference between one and two passes is not noise. Why never WebGL2 for HDR: Chrome has no HDR surface for WebGL2 or Canvas2D (`drawingBufferStorage` exists, `configureHighDynamicRange` does not; an HDR frame imported into either is tone-mapped by the browser), so with HDR on, each WebGL2 algorithm is mapped to its WebGPU twin and Smooth2D becomes a plain WebGPU blit. The quality ladder degrades `fsr1 → nis → sgsr → off` on resolution steps.
+Why FSR1 on desktop: in the windowed series it was the cheapest of the three WebGL2 upscalers at the median and second at the p90, and its two-pass sharpening gives the most legible text in the side-by-side captures. Why SGSR1 on mobile: one pass, the lightest shader, on GPUs where the difference between one and two passes is not noise. Why never WebGL2 for HDR: Chrome has no HDR surface for WebGL2 or Canvas2D (`drawingBufferStorage` exists, `configureHighDynamicRange` does not; an HDR frame imported into either is tone-mapped by the browser), so with HDR on, each WebGL2 algorithm is mapped to its WebGPU twin and Smooth2D becomes a plain WebGPU blit. The quality ladder degrades `fsr1 → nis → sgsr → mwsr → off` on resolution steps.
 
 ## 15.5 Decision 4 — HDR routing
 
@@ -162,8 +162,8 @@ Decision: **4:4:4 is SDR-only.** HDR stays 4:2:0. Text legibility is the whole p
 | Renderer, SDR, Enhancer off | Canvas2D, main thread (WebGL2 in Firefox, `<video>` on a TV) | 15.2: fastest first impression on Mac and Windows; no WebGPU device created. |
 | Video worker `auto` | off | 15.2: no gain; WebGPU-in-worker is the macOS pathology. |
 | Enhancer | off | 15.2; opt-in, one checkbox in production. |
-| Enhancer `auto`, desktop | FSR1 on WebGL2 | 15.3–15.4: cheapest WebGL2 upscaler at the median, best text. |
-| Enhancer `auto`, mobile/tablet | SGSR1 on WebGL2 | 15.4: one pass. |
+| Enhancer `auto`, desktop | MWSR on WebGL2 (FSR1 before v0.4.1) | 15.3–15.4: cheapest WebGL2 upscaler at the median, best text; since v0.4.1, MoonlightWeb's own upscaler. |
+| Enhancer `auto`, mobile/tablet | MWSR on WebGL2, WebGPU on iPhone and iPad, none on an entry-level Mali (SGSR1 before v0.4.1) | 15.4: one pass. |
 | HDR checkbox | offered only if display + WebGPU + 10-bit decode | 15.5: an HDR stream a client cannot present is worse than SDR. |
 | HDR presenter | WebGPU `linear` (AV1) / `<video>` (HEVC) | 15.5: `<video>` is 35–45 ms slower; kept only where it is the sole HDR route. |
 | HDR on an SDR display | ACES in the shader (AV1) / browser tone-map (HEVC) | 15.5. |
