@@ -186,6 +186,7 @@ Each player row gives **a link and a 6‑digit PIN**. Send them separately: the 
 - **Administrator windows** of a Windows host (an elevated console, a game run as administrator) stay closed to guests unless you open them in `settings.json` ([how, and the risk](docs/wiki/06-Security.md#64c-invited-players-and-administrator-windows)).
 - **One invitation, one machine.** The first device to enter the PIN owns the link; any other attempt is refused and shown on the board.
 - **Regenerate** issues a new link and PIN and disconnects the old one.
+- **The link's address**: Automatic (your entry link, or the LAN when the PC has no internet access), or pinned per host from the board to the LAN, Tailscale or another network.
 - **Lifetime:** 1 h, 4 h, 8 h, 24 h, 48 h or unlimited. A guest can rejoin until you close the row, press Stop, or time runs out.
 - **Your quality stays fixed** while a link is live, so the auto ladder never restarts the stream under your guests.
 - **Stop** asks: **Leave** (the game and players carry on) or **Stop everything**.
@@ -297,7 +298,7 @@ caveats).
 
 | | |
 |---|---|
-| **Tags** | `latest` · `0.4.0` · `0.4` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
+| **Tags** | `latest` · `0.4.1` · `0.4` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
 | **Ports to open** | **443/tcp** (web UI + signalling) and **80/tcp** (HTTP→HTTPS redirect). WebRTC media takes **48550‑48573/udp**, one port per stream slot, with or without UPnP. A GameStream host is reached *outbound* on 47989/47984/47990 tcp, 47998‑48000 udp, 48010 tcp/udp. |
 | **Volume** | `/data` — settings, TLS material, paired hosts and the **client identity**. Losing it un‑pairs every host. |
 | **Env** | `MW_HTTPS_PORT` · `MW_HTTP_PORT` · `MW_UPNP` · `TZ` |
