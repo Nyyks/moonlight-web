@@ -115,7 +115,7 @@ for platforms with no host networking — read the caveats in it first.
 | Tag | What it is |
 |---|---|
 | `latest` | The newest release. What you want. |
-| `0.4.0` | That exact release, forever. |
+| `0.4.1` | That exact release, forever. |
 | `0.4` | The newest `0.4.x` — minor updates, no major jump. |
 | `sha-<commit>` | One commit, pinned forever. |
 
