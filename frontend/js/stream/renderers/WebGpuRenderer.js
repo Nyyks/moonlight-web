@@ -325,6 +325,16 @@ fn fs(in : VSOut) -> @location(0) vec4f {
 // so all that is left is the tail: PQ EOTF → gamut → tone curve → sRGB. Unlike
 // the readback path this needs no software decoder, so it is the only tone-map
 // available for HEVC — and it runs before the enhancer like the other one.
+//
+// Safari 27 on macOS does not quite hand back PQ for HEVC Main 10 (a MacBook
+// Air M3, 26/10/2026): its decoder gives SDR frames already (NV12, BT.709, the
+// sRGB transfer), and pale. Imported as they are, they show pale: grey 50 % at
+// 0.51, red at 0.55/0.34/0.23. Read as PQ and tone-mapped here, they come out
+// as the browser's own <video> shows the stream: grey 0.71/0.68/0.70, red
+// 0.90/0/0, the same to Bruno's eye. The curve makes up for Safari's paleness;
+// converting only the frames that say PQ or HLG would have left the picture
+// pale, so these frames take this pass too. A Safari that hands back true PQ
+// one day is to be measured again.
 const HDR_EXT_TONEMAP_WGSL =
     FULLSCREEN_VS +
     HDR_COMMON_WGSL +
