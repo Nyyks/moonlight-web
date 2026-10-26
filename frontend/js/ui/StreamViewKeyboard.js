@@ -320,7 +320,9 @@ export class StreamViewKeyboard {
         // modifier name for 'mod' entries, so the tuple is deliberately mixed.
         /** @type {Array<[string, 'key', number] | [string, 'mod', string]>} */
         const items = [
-            ['Win', 'key', 0x5b], // momentary tap → Start menu (single press)
+            // Win latches as Shift, Ctrl and Alt do, for Win+L or Win+R from a
+            // phone (Bruno, 26/10/2026); latched and let go alone, it opens Start.
+            ['Win', 'mod', 'meta'],
             ['Esc', 'key', 0x1b],
             ['Tab', 'key', 0x09],
             ['Shift', 'mod', 'shift'],
@@ -481,8 +483,8 @@ export class StreamViewKeyboard {
     }
 
     /** Send a toolbar action key (down+up) with the current latched mods, then
-     *  release the latches (one-shot sticky keys: Shift/Ctrl/Alt apply to the
-     *  next key only and auto-clear once it fires).
+     *  release the latches (one-shot sticky keys: Shift/Ctrl/Alt/Win apply to
+     *  the next key only and auto-clear once it fires).
      *  `ch`, for a letter or a digit typed under a latched modifier, makes it a
      *  chord: `char` and `chord: true` beside the US position, so a host that
      *  can resolves the shortcut by its character (InputMsg::resolveKey).
