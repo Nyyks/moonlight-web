@@ -73,7 +73,8 @@ function fakeGpu() {
         requestDevice: vi.fn(async () => device),
     };
     const ctx = {
-        configure: vi.fn(),
+        // reads its dictionary as a browser does, toneMapping a member it knows
+        configure: vi.fn((cfg) => void cfg.toneMapping),
         unconfigure: vi.fn(),
         getCurrentTexture: () => ({ createView: () => canvasView }),
     };
@@ -215,6 +216,21 @@ describe("WebGpuRenderer — mwsr's HDR reduction in linear light", () => {
         await r.draw(hdrFrame());
         expect(curve(gpu, r)).toBe(2);
         expect(lastPipeline(gpu)).toBe(r._mwsrPipelines.get('down4'));
+    });
+
+    it('takes the tone-map, not the float canvas, where the browser does not know toneMapping', async () => {
+        const gpu = fakeGpu();
+        const ctx = gpu.canvas.getContext('webgpu');
+        // Chrome before 129: the member is never read, and nothing is thrown
+        ctx.configure.mockImplementation(() => {});
+        const r = await renderer(gpu, LINEAR, 320, 180);
+        expect(r.hdrActive).toBe(false);
+        expect(r._hdrLinear).toBe(false);
+        expect(r._hdrTonemap).toBe(true);
+        expect(r._refWhite).toBe(433);
+        const last = ctx.configure.mock.calls[ctx.configure.mock.calls.length - 1][0];
+        expect(last.format).toBe('bgra8unorm');
+        expect(last.colorSpace).toBe('srgb');
     });
 
     it('leaves the tonemap path to its tone curve and its sRGB views', async () => {

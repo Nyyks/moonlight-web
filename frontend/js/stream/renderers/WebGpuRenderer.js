@@ -1313,6 +1313,11 @@ export class WebGpuRenderer extends VideoRenderer {
             this._format = 'rgba16float';
             this._interFormat = 'rgba16float';
             this._importColorSpace = 'display-p3';
+            // A browser older than the option (Chrome before 129) drops
+            // `toneMapping` without a word and clamps the canvas at white,
+            // which would flatten every highlight. Dictionary conversion reads
+            // only the members the browser knows: the getter tells.
+            let toneMappingRead = false;
             try {
                 this.ctx.configure({
                     device: this._device,
@@ -1320,8 +1325,12 @@ export class WebGpuRenderer extends VideoRenderer {
                     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
                     alphaMode: 'opaque',
                     colorSpace: 'display-p3',
-                    toneMapping: { mode: 'extended' },
+                    get toneMapping() {
+                        toneMappingRead = true;
+                        return { mode: 'extended' };
+                    },
                 });
+                if (!toneMappingRead) throw new Error('toneMapping unknown to this browser');
                 // No sRGB view of a float canvas: the reduction averages in
                 // software light there.
                 this._srgbViews = false;

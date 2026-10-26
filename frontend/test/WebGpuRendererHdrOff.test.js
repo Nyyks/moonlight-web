@@ -67,7 +67,8 @@ function fakeGpu() {
         requestDevice: vi.fn(async () => device),
     };
     const ctx = {
-        configure: vi.fn(),
+        // reads its dictionary as a browser does, toneMapping a member it knows
+        configure: vi.fn((cfg) => void cfg.toneMapping),
         unconfigure: vi.fn(),
         getCurrentTexture: () => ({ createView: () => canvasView }),
     };
