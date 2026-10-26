@@ -4115,7 +4115,15 @@ export class StreamView {
         // Closing it mid-render zeroes its NV12 buffer → green screen on Chrome.
         // With a reserve, frames legitimately wait their turn, so the cap has to
         // clear the deepest reserve (25ms = 3 frames @120fps) plus arrival bunching.
-        if (this.frameQueue.length >= (this._framePacer ? 6 : 3)) {
+        const queueCap = this._framePacer ? 6 : 3;
+        // Tearing pumps on decode, nowhere else. Frames decoded before the
+        // renderer was there (an HDR one compiles its pipelines while dav1d
+        // already decodes) fill the queue with no pump to empty it, and every
+        // frame after them was dropped here, before the pump below: a black
+        // screen for good, one AV1 HDR launch in two (26/10/2026). The pump
+        // trims what waits — a queued frame is not being drawn — and draws.
+        if (this.frameQueue.length >= queueCap && this._immediateRender) this._pumpRender();
+        if (this.frameQueue.length >= queueCap) {
             frame.close();
             this.stats.dropped++;
             this._diag.noteDrop('queueFull');
@@ -5510,6 +5518,11 @@ export class StreamView {
                         );
                         this._applyRendererSink(r);
                         this._applyOutputSize();
+                        // Frames decoded while it was being made wait in the
+                        // queue. Tearing pumps on decode only, and a still
+                        // host screen may send no next frame for a while: the
+                        // first picture goes up now.
+                        if (this._immediateRender) this._pumpRender();
                     });
                     this.setupDecoder();
                 }
