@@ -56,6 +56,30 @@ const STALE_NOTE = '/stale-shell-redirect';
 /** One trip back through the link per stale shell per this long. */
 const STALE_RETRY_MS = 60 * 60 * 1000;
 
+/**
+ * When the entry page last checked the cache against its machine, and how long
+ * a navigation may still be answered from it after that.
+ *
+ * Every machine reached through this origin shares it, so any of their pages
+ * can write the cache this worker serves. The entry page is the one thing here
+ * no machine serves — it comes from the introduction server — and it checks the
+ * cache against the hashes the machine itself sends (boot.js,
+ * cacheMatchesManifest). So the cached interface opens only right after one of
+ * those checks; every other navigation, a reload or a home-screen shortcut, goes
+ * through the entry page first (security review R1, 26/10/2026).
+ *
+ * Held in this worker's memory and nowhere else: a note in storage could be
+ * written by any page. A worker stopped in between forgets it, and the
+ * navigation simply goes through the entry page once more. Spent by the
+ * navigation it lets through.
+ */
+const CHECKED_FOR_MS = 15000;
+let checkedAt = 0;
+
+self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'mw-shell-checked') checkedAt = Date.now();
+});
+
 self.addEventListener('install', () => {
     // Take over straight away. The bootstrap registers this worker and then
     // navigates, and waiting a lifecycle would mean that navigation is the one
@@ -229,6 +253,8 @@ self.addEventListener('fetch', (event) => {
             if (request.mode === 'navigate') {
                 const shell = await cache.match('/index.html');
                 if (!shell) return await bootstrapPage();
+                if (Date.now() - checkedAt > CHECKED_FOR_MS) return await bootstrapPage();
+                checkedAt = 0;
                 if (!(await shellChecksItself(cache)) && (await timeForStaleRedirect())) {
                     return backThroughTheLink();
                 }

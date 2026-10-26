@@ -1028,6 +1028,11 @@ export function landingPathFromLocation() {
         }
     }
     if (shareTokenFromLocation()) return '/p';
+    // A start of the application itself — a reload of /admin, a shortcut —
+    // that the service worker sent here so the cache is checked first (R1):
+    // the page it was on.
+    const here = location.pathname;
+    if (here !== '/' && LANDING_SHAPE.test(here) && !ID_SHAPE.test(here.slice(1))) return here;
     return null;
 }
 

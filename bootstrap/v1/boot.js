@@ -467,6 +467,53 @@ function writeStamp(hostId, version) {
     }
 }
 
+/** SHA-256 of @p buffer, in hex, as the host's manifest spells it. */
+async function sha256Hex(buffer) {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
+    let hex = '';
+    for (const byte of digest) hex += byte.toString(16).padStart(2, '0');
+    return hex;
+}
+
+/**
+ * Whether the cache holds exactly what this machine serves, by the hashes its
+ * manifest carries — and nothing it does not serve.
+ *
+ * Every machine reached through here shares this one origin, so the page of any
+ * of them can write this cache: a hostile machine's page could leave its own
+ * code in place of another machine's interface, under that machine's stamp. The
+ * hashes come from THIS machine, over the channel its key signed, so they are
+ * the one thing here no other page can have written (security review R1,
+ * 26/10/2026). An entry the manifest does not name is deleted, so nothing
+ * planted beside the files can be served in their place either.
+ *
+ * A machine of before v0.4.1 sends no hashes, and its cache is taken on trust,
+ * as it always was.
+ */
+async function cacheMatchesManifest(cache, files, hashes) {
+    if (!Array.isArray(hashes) || hashes.length !== files.length) return true;
+    const named = new Set(files);
+    named.add('/');
+    for (const request of await cache.keys()) {
+        const path = new URL(request.url).pathname;
+        if (!named.has(path)) await cache.delete(request);
+    }
+    const results = await Promise.all(
+        files.map(async (path, i) => {
+            const want = hashes[i];
+            // Empty where the copy legitimately differs (the web manifest).
+            if (typeof want !== 'string' || !want) return true;
+            // The navigation is answered from '/', a copy of the main page.
+            for (const name of path === '/index.html' ? ['/index.html', '/'] : [path]) {
+                const hit = await cache.match(name);
+                if (!hit || (await sha256Hex(await hit.arrayBuffer())) !== want) return false;
+            }
+            return true;
+        }),
+    );
+    return results.every(Boolean);
+}
+
 /**
  * Pull the application down and put it where the service worker will find it.
  *
@@ -498,8 +545,13 @@ async function fetchShell(tunnel, hostId) {
         // would hand the service worker an empty shelf.
         const cache = await caches.open(SHELL_CACHE);
         if (await cache.match('/index.html')) {
-            progress(SHELL_AT);
-            return manifest.version;
+            if (await cacheMatchesManifest(cache, files, manifest.sha256)) {
+                progress(SHELL_AT);
+                return manifest.version;
+            }
+            console.warn(
+                '[MW] The cached interface is not what your machine serves — fetching it again',
+            );
         }
     }
 
@@ -537,6 +589,12 @@ async function fetchShell(tunnel, hostId) {
     const index = await fresh.match('/index.html');
     if (!index) throw new Error('your machine did not send its main page');
     await fresh.put('/', index.clone());
+    // Checked like a cached copy: another page of this origin could have
+    // written over it while it came down.
+    if (!(await cacheMatchesManifest(fresh, files, manifest.sha256))) {
+        await caches.delete(SHELL_CACHE);
+        throw new Error('the interface changed while it was being fetched');
+    }
 
     writeStamp(hostId, manifest.version);
     return manifest.version;
@@ -792,6 +850,16 @@ async function main() {
     // Everything real is done. The rest is the bar catching up, its moment at
     // the end, and the floor on how briefly this page may exist.
     await settle();
+
+    // Tell the worker the cache was just checked: it hands the cached
+    // interface only to a navigation that follows one (sw.js, R1). In its
+    // memory, not in storage, which every page of this origin can write.
+    try {
+        const registration = await navigator.serviceWorker.ready;
+        registration.active?.postMessage({ type: 'mw-shell-checked' });
+    } catch {
+        /* the navigation below comes back here, and says so if it loops */
+    }
 
     // Remembered so that stream.{domain} on its own — no identifier — opens the
     // machine this browser last used, rather than an application with nothing
