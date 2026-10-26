@@ -71,9 +71,11 @@ import /etc/caddy/stream.caddy
 api.@MW_DOMAIN@ {
 	@TLS_LINE@
 	import no_index
+	# Per subscriber: an IPv6 /64 is one (subscriber_key, stream.caddy).
+	import subscriber_key
 	rate_limit {
 		zone mw_api {
-			key {remote_host}
+			key {mw_subscriber}
 			events 60
 			window 1m
 		}
@@ -91,9 +93,11 @@ api.@MW_DOMAIN@ {
 dnsapi.@MW_DOMAIN@ {
 	@SITE_TLS_LINE@
 	import no_index
+	# Per subscriber: an IPv6 /64 is one (subscriber_key, stream.caddy).
+	import subscriber_key
 	rate_limit {
 		zone mw_dnsapi {
-			key {remote_host}
+			key {mw_subscriber}
 			events 60
 			window 1m
 		}
@@ -110,9 +114,11 @@ dnsapi.@MW_DOMAIN@ {
 updates.@MW_DOMAIN@ {
 	@SITE_TLS_LINE@
 	import no_index
+	# Per subscriber: an IPv6 /64 is one (subscriber_key, stream.caddy).
+	import subscriber_key
 	rate_limit {
 		zone mw_updates {
-			key {remote_host}
+			key {mw_subscriber}
 			events 60
 			window 1m
 		}
@@ -149,9 +155,11 @@ packages.@MW_DOMAIN@ {
 metrics.@MW_DOMAIN@ {
 	@SITE_TLS_LINE@
 	import no_index
+	# Per subscriber: an IPv6 /64 is one (subscriber_key, stream.caddy).
+	import subscriber_key
 	rate_limit {
 		zone mw_metrics {
-			key {remote_host}
+			key {mw_subscriber}
 			events 60
 			window 1m
 		}
