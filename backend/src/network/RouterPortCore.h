@@ -196,6 +196,11 @@ private:
     QString ownerOf(uint16_t external);
     /// The same, with the lease the entry has left (see IUpnpGateway::owner).
     QString entryOf(uint16_t external, int& leaseLeft);
+    /// Whether the TCP entry of `external` may be written or removed: none, one
+    /// this host holds (or held before a DHCP renumbering), or a router that
+    /// cannot say. A neighbour's TCP forward on the same number is not ours,
+    /// whoever holds the UDP one.
+    bool tcpWritable(uint16_t external);
     /// Whether an entry read back just after a write still counts down the
     /// lease it had before it: the router took the write and kept the entry.
     bool keptOldLease(int leaseLeft) const;

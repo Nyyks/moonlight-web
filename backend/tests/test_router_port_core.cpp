@@ -55,6 +55,12 @@ struct FakeGateway : IUpnpGateway
         table.insert({port, QStringLiteral("UDP")}, {client, port});
     }
 
+    /// A neighbour's TCP forward alone: a web server, a game, someone's own tunnel.
+    void foreignTcp(uint16_t port, const QString& client)
+    {
+        table.insert({port, QStringLiteral("TCP")}, {client, port});
+    }
+
     /// Time passes: leases count down, and an entry whose lease runs out is gone.
     void elapse(uint32_t seconds)
     {
@@ -554,6 +560,56 @@ void run_router_port_core_tests()
         CHECK(!gw.table.contains(qMakePair(uint16_t(48550), QStringLiteral("TCP"))));
         // The neighbour's entry was never ours to remove.
         CHECK(gw.table.contains(qMakePair(uint16_t(5349), QStringLiteral("UDP"))));
+    }
+
+    // ── A neighbour's TCP forward on our UDP number is never touched ──────
+    {
+        using mw::routerports::kLeaseSec;
+        const auto tcp = qMakePair(uint16_t(48550), QStringLiteral("TCP"));
+        const QString neighbour = QStringLiteral("192.168.1.34");
+
+        // At the claim: the UDP hole is ours, the TCP one stays theirs.
+        FakeGateway gw;
+        gw.foreignTcp(48550, neighbour);
+        RouterPortCore core(gw, kAlwaysFree);
+        const auto r = core.claim(mediaRequest(0));
+        CHECK(r.ok);
+        CHECK_EQ(r.claim.external, uint16_t(48550));
+        CHECK(!r.claim.tcp);
+        CHECK_EQ(gw.table[tcp].client, neighbour);
+
+        // Nor at a renewal, nor at the release.
+        gw.elapse(1800);
+        core.renew();
+        CHECK_EQ(gw.table[tcp].client, neighbour);
+        core.releaseAll();
+        CHECK(gw.table.contains(tcp));
+        CHECK_EQ(gw.table[tcp].client, neighbour);
+
+        // A router that keeps its old lease on a write (#37) is re-added by
+        // remove-then-add: never on the neighbour's entry.
+        FakeGateway mini;
+        mini.ignoresRenewal = true;
+        mini.table.insert({48550, QStringLiteral("UDP")}, {mini.lan, 48550, kLeaseSec / 2});
+        mini.foreignTcp(48550, neighbour);
+        RouterPortCore kept(mini, kAlwaysFree);
+        const auto k = kept.claim(mediaRequest(0));
+        CHECK(k.ok);
+        CHECK(!k.claim.tcp);
+        CHECK(mini.table.contains(tcp));
+        CHECK_EQ(mini.table[tcp].client, neighbour);
+
+        // Taken after our claim: our renewal and our release leave it alone.
+        FakeGateway later;
+        RouterPortCore core2(later, kAlwaysFree);
+        const auto c = core2.claim(mediaRequest(0));
+        CHECK(c.ok && c.claim.tcp);
+        later.foreignTcp(48550, neighbour);
+        later.elapse(1800);
+        core2.renew();
+        CHECK_EQ(later.table[tcp].client, neighbour);
+        core2.releaseAll();
+        CHECK_EQ(later.table[tcp].client, neighbour);
     }
 
     // ── The pools stay clear of everything else this project binds ────────

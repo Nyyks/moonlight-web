@@ -98,6 +98,15 @@ QString RouterPortCore::entryOf(uint16_t external, int& leaseLeft)
     return client;
 }
 
+bool RouterPortCore::tcpWritable(uint16_t external)
+{
+    QString client;
+    int leaseLeft = -1;
+    if (!m_Gateway.owner(external, kTcp, client, leaseLeft) || client.isEmpty()) return true;
+    return client == m_Gateway.lanAddress() ||
+           (!m_PreviousLan.isEmpty() && client == m_PreviousLan);
+}
+
 bool RouterPortCore::keptOldLease(int leaseLeft) const
 {
     // 0 is a permanent entry, -1 a router that does not say: nothing to judge.
@@ -231,9 +240,12 @@ bool RouterPortCore::tryOne(uint16_t external, const Request& request, Result& r
     claim.internal = internal;
     // Best effort, and only useful where UDP is blocked outright: the
     // connections enable ICE-TCP, but a browser only ever opens those
-    // outbound, so reaching this machine needs the inbound hole too.
-    claim.tcp = kept ? addAfresh(external, internal, request.description, kTcp)
-                     : addWithLatch(external, internal, request.description, kTcp);
+    // outbound, so reaching this machine needs the inbound hole too. A
+    // neighbour's TCP forward on the same number is left alone, like its UDP
+    // one above: the router would repoint it, or remove it and add ours.
+    claim.tcp = tcpWritable(external) &&
+                (kept ? addAfresh(external, internal, request.description, kTcp)
+                      : addWithLatch(external, internal, request.description, kTcp));
     m_Held.append(claim);
     result.claim = claim;
     return true;
@@ -243,7 +255,9 @@ bool RouterPortCore::rewrite(const Claim& c, QString& owner)
 {
     const QString desc = descriptionOf(c);
     bool ok = addWithLatch(c.external, c.internal, desc, kUdp);
-    if (c.tcp) addWithLatch(c.external, c.internal, desc, kTcp);
+    // A neighbour may have taken the TCP number since: its entry is not rewritten.
+    const bool tcp = c.tcp && tcpWritable(c.external);
+    if (tcp) addWithLatch(c.external, c.internal, desc, kTcp);
     int leaseLeft = -1;
     owner = entryOf(c.external, leaseLeft);
 
@@ -255,7 +269,7 @@ bool RouterPortCore::rewrite(const Claim& c, QString& owner)
     if (ok && owner == m_Gateway.lanAddress() && keptOldLease(leaseLeft)) {
         logKeptLease(c.external, leaseLeft);
         ok = addAfresh(c.external, c.internal, desc, kUdp);
-        if (c.tcp) addAfresh(c.external, c.internal, desc, kTcp);
+        if (tcp) addAfresh(c.external, c.internal, desc, kTcp);
     }
     return ok;
 }
@@ -315,7 +329,7 @@ void RouterPortCore::release(const Claim& claim)
 {
     if (!m_Held.contains(claim)) return;
     m_Gateway.remove(claim.external, kUdp);
-    if (claim.tcp) m_Gateway.remove(claim.external, kTcp);
+    if (claim.tcp && tcpWritable(claim.external)) m_Gateway.remove(claim.external, kTcp);
     m_Held.removeAll(claim);
 }
 

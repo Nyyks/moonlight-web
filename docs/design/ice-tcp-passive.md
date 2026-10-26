@@ -182,6 +182,10 @@ Reste, en amont et hors du patch :
   `48550:48573/tcp`, plus le pool du tunnel, pour qu'un hôte Linux au pare-feu actif accepte
   l'appel. C'est une modification d'empaquetage, à faire avec le passage du défaut à vrai.
 - **macOS** : le pare-feu applicatif porte sur le programme.
+- **Le trou TCP du routeur** suit maintenant la règle du trou UDP (26/10, revue de sécurité, T3).
+  On ne l'écrit, ne le renouvelle et ne le retire que s'il est libre ou à nous. Avant, une
+  redirection TCP d'un voisin sur le même numéro était repointée vers nous, ou retirée puis
+  remplacée par la nôtre sur un routeur qui garde l'ancien bail (`RouterPortCore::tcpWritable`).
 - **Le port 443** : le seul que certaines écoles laissent sortir. Sur un même hôte, il sert déjà le
   HTTPS. Le partager imposerait de trier les connexions dans le listener (ClientHello TLS `0x16`
   contre une longueur RFC 4571 suivie d'un en-tête STUN). Ce sera en dernier, et seulement si les
