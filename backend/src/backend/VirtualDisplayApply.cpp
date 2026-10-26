@@ -937,11 +937,12 @@ bool applyTopology(const Topology& t, QString* error)
     return true;
 }
 
-/// Query the active display configuration, let @p edit change it, apply it.
+/// Query the active display configuration, let @p edit change it, apply it —
+/// and save it to Windows' database when @p save (VirtualDisplay::savesLayout).
 /// The CCD API (what Windows Settings uses), not ChangeDisplaySettingsEx:
 /// on the bench an indirect display just brought up took neither a mode nor
 /// a position through GDI — success returned, nothing changed.
-template <typename Edit> bool applyDisplayConfig(Edit edit, QString* error)
+template <typename Edit> bool applyDisplayConfig(Edit edit, bool save, QString* error)
 {
     UINT32 nPaths = 0, nModes = 0;
     if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPaths, &nModes) != ERROR_SUCCESS) {
@@ -958,9 +959,10 @@ template <typename Edit> bool applyDisplayConfig(Edit edit, QString* error)
     paths.resize(nPaths);
     modes.resize(nModes);
     if (!edit(paths, modes, error)) return false;
-    const LONG rc = SetDisplayConfig(
-        UINT32(paths.size()), paths.data(), UINT32(modes.size()), modes.data(),
-        SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES | SDC_SAVE_TO_DATABASE);
+    const LONG rc =
+        SetDisplayConfig(UINT32(paths.size()), paths.data(), UINT32(modes.size()), modes.data(),
+                         SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES |
+                             (save ? SDC_SAVE_TO_DATABASE : 0));
     if (rc != ERROR_SUCCESS) {
         *error = QStringLiteral("SetDisplayConfig: %1").arg(lastErrorText(DWORD(rc)));
         return false;
@@ -992,7 +994,8 @@ int pathIndexFor(const std::vector<DISPLAYCONFIG_PATH_INFO>& paths, const QStrin
 /// driver's list holds the pair by now (writeSettings()). The rate goes as the
 /// exact fraction the driver lists (rateFraction: 29968/125 for 239.744), the
 /// only one SetDisplayConfig finds.
-bool setMode(const QString& devicePath, int width, int height, int refreshMilliHz, QString* error)
+bool setMode(const QString& devicePath, int width, int height, int refreshMilliHz, bool save,
+             QString* error)
 {
     const VirtualDisplay::RateFraction rate = VirtualDisplay::rateFraction(refreshMilliHz);
     return applyDisplayConfig(
@@ -1018,7 +1021,7 @@ bool setMode(const QString& devicePath, int width, int height, int refreshMilliH
             p.targetInfo.scaling = DISPLAYCONFIG_SCALING_IDENTITY;
             return true;
         },
-        error);
+        save, error);
 }
 
 /// Switch on the attached, inactive display @p attached (a QDC_ALL_PATHS
@@ -1026,7 +1029,7 @@ bool setMode(const QString& devicePath, int width, int height, int refreshMilliH
 /// Windows. Needed when Windows' own answer to the monitor is "off" — its
 /// database remembers the last layout for this set of displays, and that is
 /// what a stream's end leaves.
-bool switchOn(const ActivePath& attached, QString* error)
+bool switchOn(const ActivePath& attached, bool save, QString* error)
 {
     return applyDisplayConfig(
         [&](std::vector<DISPLAYCONFIG_PATH_INFO>& paths,
@@ -1052,13 +1055,13 @@ bool switchOn(const ActivePath& attached, QString* error)
             paths.push_back(p);
             return true;
         },
-        error);
+        save, error);
 }
 
 /// Switch off every active display that is neither in @p t nor ours at
 /// @p devicePath — what Windows lit up on its own when ours appeared.
 /// @return how many went off; -1 on failure.
-int pruneToTopology(const Topology& t, const QString& devicePath, QString* error)
+int pruneToTopology(const Topology& t, const QString& devicePath, bool save, QString* error)
 {
     int pruned = 0;
     const bool ok = applyDisplayConfig(
@@ -1079,7 +1082,7 @@ int pruneToTopology(const Topology& t, const QString& devicePath, QString* error
             paths = keep;
             return true;
         },
-        error);
+        save, error);
     return ok ? pruned : -1;
 }
 
@@ -1197,7 +1200,7 @@ bool imposeTopology(const Topology& t, const QString& devicePath, QString* error
 
 /// Make the display at @p devicePath the primary one: every desktop origin
 /// shifted so that one lands on (0,0), in one configuration change.
-bool makePrimary(const QString& devicePath, QString* error)
+bool makePrimary(const QString& devicePath, bool save, QString* error)
 {
     return applyDisplayConfig(
         [&](std::vector<DISPLAYCONFIG_PATH_INFO>& paths,
@@ -1221,7 +1224,56 @@ bool makePrimary(const QString& devicePath, QString* error)
             }
             return true;
         },
-        error);
+        save, error);
+}
+
+/// Every display but ours at @p devicePath off (Request::exclusive), never
+/// saved (VirtualDisplay::savesLayout): Windows' database keeps them on, and
+/// replays that the moment ours goes, whoever switches it off.
+/// @return how many went off; -1 on failure.
+int keepOnlyOurs(const QString& devicePath, QString* error)
+{
+    int off = 0;
+    const bool ok = applyDisplayConfig(
+        [&](std::vector<DISPLAYCONFIG_PATH_INFO>& paths,
+            std::vector<DISPLAYCONFIG_MODE_INFO>& modes, QString* err) {
+            Q_UNUSED(modes);
+            const int ours = pathIndexFor(paths, devicePath);
+            if (ours < 0) {
+                *err = QStringLiteral("the display is not in the active configuration");
+                return false;
+            }
+            off = int(paths.size()) - 1;
+            paths = {paths[size_t(ours)]};
+            return true;
+        },
+        VirtualDisplay::savesLayout(VirtualDisplay::LayoutStep::Exclusive, true), error);
+    return ok ? off : -1;
+}
+
+/// The other displays are off for an exclusive stream (keepOnlyOurs): a
+/// marker beside the saved layout, so that the next process — a mode change
+/// mid-stream, the stream's end, a server restarted after a crash — knows
+/// that what is active is no layout to save or to remember.
+QString othersOffPath(const Context& ctx)
+{
+    return ctx.dir + QStringLiteral("/others-off");
+}
+
+bool othersOff(const Context& ctx)
+{
+    return QFile::exists(othersOffPath(ctx));
+}
+
+void setOthersOff(const Context& ctx, bool off)
+{
+    if (!off) {
+        QFile::remove(othersOffPath(ctx));
+        return;
+    }
+    QFile f(othersOffPath(ctx));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        Logger::warning(QStringLiteral("[vdisplay-apply] cannot write %1").arg(f.fileName()));
 }
 
 // ── Stage "snapshot": the desktop half that runs before the node goes on ──
@@ -1233,6 +1285,18 @@ int stageSnapshot(Context& ctx)
     ctx.result.stage = QStringLiteral("snapshot");
     if (ctx.request.action != Action::Activate) return kExitOk;
     QString error;
+    if (othersOff(ctx)) {
+        // A new mode for an exclusive stream's display: what is active is ours
+        // alone, and the layout to come back to is the one already saved.
+        if (loadTopology(ctx)) {
+            Logger::info(QStringLiteral("[vdisplay-apply] the other displays are off — the "
+                                        "layout from before is kept"));
+        } else {
+            Logger::warning(QStringLiteral("[vdisplay-apply] the other displays are off and no "
+                                           "layout from before is saved"));
+        }
+        return kExitOk;
+    }
     if (saveTopology(ctx, &error)) {
         Logger::info(QStringLiteral("[vdisplay-apply] display layout saved"));
     } else {
@@ -1251,6 +1315,7 @@ int stageMode(Context& ctx)
     if (ctx.request.action == Action::Deactivate) {
         ctx.result.ok = true;
         ctx.result.stage = stage;
+        const bool wereOff = othersOff(ctx);
         // The layout from before ours, applied while ours still exists: that
         // switches ours off, puts every other display back where it was and
         // gives the primary role back, in one change. The node goes next.
@@ -1263,12 +1328,28 @@ int stageMode(Context& ctx)
             } else if (applyTopology(*saved, &error)) {
                 Logger::info(QStringLiteral("[vdisplay-apply] display layout restored"));
                 QFile::remove(topologyPath(ctx));
+                setOthersOff(ctx, false);
                 return kExitOk; // the driver stage (disable) follows
             } else {
                 Logger::warning(
                     QStringLiteral("[vdisplay-apply] display layout not restored: %1").arg(error));
             }
             QFile::remove(topologyPath(ctx));
+        }
+        if (wereOff) {
+            // An exclusive stream's displays, without the layout to put them
+            // back as they were: Windows' own extended layout for the displays
+            // attached, which never saw them off (savesLayout).
+            const LONG rc =
+                SetDisplayConfig(0, nullptr, 0, nullptr, SDC_APPLY | SDC_TOPOLOGY_EXTEND);
+            if (rc == ERROR_SUCCESS)
+                Logger::info(QStringLiteral("[vdisplay-apply] the other displays back on, "
+                                            "as Windows extends them"));
+            else
+                Logger::warning(
+                    QStringLiteral("[vdisplay-apply] the other displays not back on: %1")
+                        .arg(lastErrorText(DWORD(rc))));
+            setOthersOff(ctx, false);
         }
         // The previous primary back in its role, while ours still exists —
         // Windows would otherwise pick one itself when ours goes.
@@ -1279,7 +1360,10 @@ int stageMode(Context& ctx)
                     continue;
                 found = true;
                 QString error;
-                if (!p.primary && !makePrimary(p.devicePath, &error))
+                if (!p.primary && !makePrimary(p.devicePath,
+                                               VirtualDisplay::savesLayout(
+                                                   VirtualDisplay::LayoutStep::Primary, false),
+                                               &error))
                     Logger::warning(
                         QStringLiteral("[vdisplay-apply] previous primary not restored: %1")
                             .arg(error));
@@ -1299,6 +1383,10 @@ int stageMode(Context& ctx)
     // The monitor appears a moment after the driver starts; ten seconds is
     // generous for a UMDF driver and a single monitor. Whether Windows then
     // switches it on is its database's call — attached and off, we do it.
+    using VirtualDisplay::LayoutStep;
+    using VirtualDisplay::savesLayout;
+    // An exclusive stream's display taking a new mode: the others are off.
+    bool off = othersOff(ctx);
     std::optional<ActivePath> target;
     QElapsedTimer wait;
     wait.start();
@@ -1308,7 +1396,7 @@ int stageMode(Context& ctx)
         if (!switchedOn) {
             if (const auto attached = findOurTarget(QDC_ALL_PATHS)) {
                 switchedOn = true;
-                if (switchOn(*attached, &error))
+                if (switchOn(*attached, savesLayout(LayoutStep::Mode, off), &error))
                     Logger::info(QStringLiteral(
                         "[vdisplay-apply] the virtual display was attached but off: switched on"));
                 else
@@ -1354,9 +1442,15 @@ int stageMode(Context& ctx)
     // on a display the owner keeps disconnected, and brought the others up in
     // the modes its database remembers for this set (imposeTopology). When
     // that layout cannot be imposed, the extra displays go off all the same.
+    // An exclusive stream's display taking a new mode keeps the others off:
+    // imposing the layout from before would light them up for a moment.
+    const bool stayExclusive = off && ctx.request.exclusive;
     bool imposed = false;
-    if (const auto saved = loadTopology(ctx); saved && topologyStillAttached(*saved)) {
+    if (const auto saved = loadTopology(ctx);
+        !stayExclusive && saved && topologyStillAttached(*saved)) {
         imposed = imposeTopology(*saved, target->devicePath, &error);
+        off = VirtualDisplay::othersOffAfter(LayoutStep::Impose, off, imposed);
+        if (!off) setOthersOff(ctx, false);
         if (imposed)
             Logger::info(QStringLiteral("[vdisplay-apply] the other displays as they were, ours "
                                         "on their right — saved as this set's layout"));
@@ -1367,8 +1461,9 @@ int stageMode(Context& ctx)
         error.clear();
         if (auto again = findOurTarget()) target = again;
     }
-    if (const auto saved = loadTopology(ctx); saved && !imposed) {
-        const int pruned = pruneToTopology(*saved, target->devicePath, &error);
+    if (const auto saved = loadTopology(ctx); !stayExclusive && saved && !imposed) {
+        const int pruned = pruneToTopology(*saved, target->devicePath,
+                                           savesLayout(LayoutStep::Prune, off), &error);
         if (pruned < 0)
             Logger::warning(
                 QStringLiteral("[vdisplay-apply] extra displays not switched off: %1").arg(error));
@@ -1391,7 +1486,8 @@ int stageMode(Context& ctx)
     int wantMilli = ctx.request.refreshMilliHz;
     if (!VirtualDisplay::normaliseRate(wantMilli))
         wantMilli = VirtualDisplay::kRefreshHz * VirtualDisplay::kMilliHz;
-    if (setMode(target->devicePath, wantW, wantH, wantMilli, &error)) {
+    const bool saveMode = savesLayout(LayoutStep::Mode, off);
+    if (setMode(target->devicePath, wantW, wantH, wantMilli, saveMode, &error)) {
         Logger::info(QStringLiteral("[vdisplay-apply] %1 set to %2x%3@%4")
                          .arg(target->gdiName)
                          .arg(wantW)
@@ -1419,7 +1515,7 @@ int stageMode(Context& ctx)
         for (const auto& f : fallbacks) {
             if (f.w == wantW && f.h == wantH && f.milli == wantMilli) continue;
             QString again;
-            if (!setMode(target->devicePath, f.w, f.h, f.milli, &again)) continue;
+            if (!setMode(target->devicePath, f.w, f.h, f.milli, saveMode, &again)) continue;
             Logger::info(QStringLiteral("[vdisplay-apply] %1 fell back to %2x%3@%4")
                              .arg(target->gdiName)
                              .arg(f.w)
@@ -1443,8 +1539,30 @@ int stageMode(Context& ctx)
         Logger::warning(
             QStringLiteral("[vdisplay-apply] SDR refused: %1").arg(lastErrorText(DWORD(hr))));
 
-    if (!makePrimary(target->devicePath, &error))
+    if (!makePrimary(target->devicePath, savesLayout(LayoutStep::Primary, off), &error))
         Logger::warning(QStringLiteral("[vdisplay-apply] not made primary: %1").arg(error));
+
+    // Last, and never saved: every change above has been, with the other
+    // displays on — the layout Windows replays whatever ends the stream.
+    if (ctx.request.exclusive && !off) {
+        // The marker first: a crash between the two leaves a marker with the
+        // displays on, which only spares a save.
+        setOthersOff(ctx, true);
+        const int n = keepOnlyOurs(target->devicePath, &error);
+        off = VirtualDisplay::othersOffAfter(LayoutStep::Exclusive, off, n >= 0);
+        if (n >= 0)
+            Logger::info(
+                QStringLiteral("[vdisplay-apply] exclusive: %1 other display(s) off").arg(n));
+        else
+            Logger::warning(
+                QStringLiteral("[vdisplay-apply] exclusive: the others stay on: %1").arg(error));
+        if (!off) setOthersOff(ctx, false);
+    } else if (off) {
+        // The layout from before could not be imposed again: the others stay
+        // off until the stream ends, whatever the option says now.
+        Logger::info(QStringLiteral("[vdisplay-apply] the other displays stay off until the "
+                                    "stream ends"));
+    }
 
     ctx.result.ok = true;
     ctx.result.stage = QStringLiteral("done");

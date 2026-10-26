@@ -769,6 +769,19 @@ void AppSettings::clearVirtualDisplay()
     writeAll(obj);
 }
 
+bool AppSettings::virtualDisplayExclusive() const
+{
+    QJsonObject obj = readAll();
+    return obj.value("virtual_display_exclusive").toBool(false);
+}
+
+void AppSettings::setVirtualDisplayExclusive(bool enabled)
+{
+    QJsonObject obj = readAll();
+    obj["virtual_display_exclusive"] = enabled;
+    writeAll(obj);
+}
+
 // ── The native host's display cards ──────────────────────────────────────────
 
 static const char kDisplayAppIdsKey[] = "display_app_ids";

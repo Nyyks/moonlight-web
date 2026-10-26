@@ -421,6 +421,14 @@ public:
     void setVirtualDisplay(const QJsonObject& record);
     void clearVirtualDisplay();
 
+    // Stored as JSON bool "virtual_display_exclusive", DEFAULT false, set from
+    // the admin page (Windows, the virtual display installed): every other
+    // display goes off while a stream runs on ours, and comes back on at its
+    // end (issue #39, VirtualDisplay::Request::exclusive). Read as each
+    // activation starts.
+    bool virtualDisplayExclusive() const;
+    void setVirtualDisplayExclusive(bool enabled);
+
     // ── The native host's display cards ─────────────────────────────────────
     //
     // A card per display, whose id a grid fetched earlier sends back: it has

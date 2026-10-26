@@ -383,11 +383,15 @@ struct Request
     /// when the viewer asked for HDR. Applied in process, never written to
     /// the request file: Windows' display is SDR, whatever this says.
     bool hdr = false;
+    /// Activate, Windows: every other display goes off while ours streams
+    /// (issue #39), the owner's choice (AppSettings::virtualDisplayExclusive).
+    /// Never saved to Windows' database: see savesLayout().
+    bool exclusive = false;
 };
 
 /// Parse and validate a request. The file is read by an elevated process, so
-/// its contents are a choice among four verbs and one display key, never
-/// free-form input. Returns nullopt with @p error filled on any deviation.
+/// its contents are a choice among four verbs, one display key and a mode,
+/// never free-form input. Returns nullopt with @p error filled on any deviation.
 std::optional<Request> parseRequest(const QByteArray& json, QString* error);
 QByteArray toJson(const Request& req);
 QString toString(Request::Action action);
@@ -404,6 +408,31 @@ QString notAppearedError();
 /// failure is not one a mode explains: a launch at the default mode is
 /// better than no launch, which is what normaliseMode() already promises.
 std::optional<Request> fallbackTowardsDefault(const Request& tried, const QString& error);
+
+/// The display layout changes the Windows helper makes, in the order an
+/// activation takes them (Restore is a deactivation's).
+enum class LayoutStep
+{
+    Impose,    ///< the layout from before, every display as it was, plus ours
+    Prune,     ///< what Windows lit up beside ours, off again
+    Mode,      ///< ours at the client's size and rate
+    Primary,   ///< ours the primary
+    Exclusive, ///< every display but ours off (Request::exclusive)
+    Restore,   ///< the layout from before, ours off
+};
+
+/// Whether @p step goes to Windows' database, the layout Windows replays the
+/// next time this set of displays is attached — after a reboot, an unplug, or
+/// the node going off with no server left to restore anything. @p othersOff:
+/// an exclusive stream has the other displays off right now. A layout with
+/// them off is never saved: kept out of the database, they come back on
+/// whatever ends the stream, a crash included. Impose turns them back on in
+/// the same change, so what it saves has them on.
+bool savesLayout(LayoutStep step, bool othersOff);
+
+/// Whether the other displays are off after @p step, given @p othersOff
+/// before it and whether it went through (@p ok).
+bool othersOffAfter(LayoutStep step, bool othersOff, bool ok);
 
 struct Result
 {

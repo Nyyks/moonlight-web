@@ -1073,6 +1073,14 @@ void registerSystemRoutes(HttpServer& server, AppSettings& appSettings, AuthMana
         obj["stream_notifications"] = appSettings.streamNotifications();
         // Whether the stream's packets ask the Wi-Fi for its video queue.
         obj["packet_marking"] = appSettings.packetMarking();
+        // Whether the other displays go off while a stream runs on the virtual
+        // display — a Windows choice, offered once the display is installed.
+#ifdef Q_OS_WIN
+        obj["virtual_display_exclusive_supported"] = VirtualDisplay::probe().installed;
+#else
+        obj["virtual_display_exclusive_supported"] = false;
+#endif
+        obj["virtual_display_exclusive"] = appSettings.virtualDisplayExclusive();
         // Start at login. Two facts, because the page has two decisions to
         // make: whether to show the box at all (a desktop session with a
         // login-item mechanism — never under a service supervisor), and
@@ -1143,6 +1151,16 @@ void registerSystemRoutes(HttpServer& server, AppSettings& appSettings, AuthMana
             bool enabled = body["packet_marking"].toBool();
             appSettings.setPacketMarking(enabled);
             obj["packet_marking"] = enabled;
+            hadChange = true;
+        }
+
+        // ── Other displays off while streaming the virtual display ──────
+        // Read as the next activation starts (VirtualDisplayJob), so the next
+        // stream follows; one already running keeps its displays as they are.
+        if (body.contains("virtual_display_exclusive")) {
+            const bool enabled = body["virtual_display_exclusive"].toBool();
+            appSettings.setVirtualDisplayExclusive(enabled);
+            obj["virtual_display_exclusive"] = enabled;
             hadChange = true;
         }
 

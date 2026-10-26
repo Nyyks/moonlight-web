@@ -293,6 +293,8 @@ void VirtualDisplayJob::startNext()
     m_Request.height = next.height;
     m_Request.refreshMilliHz = next.refreshMilliHz;
     m_Request.hdr = next.hdr;
+    m_Request.exclusive =
+        next.action == Action::Activate && AppSettings().virtualDisplayExclusive();
     m_Callbacks.clear();
     if (next.cb) m_Callbacks.append(std::move(next.cb));
     m_Error.clear();

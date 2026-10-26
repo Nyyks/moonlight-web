@@ -135,6 +135,10 @@ export class AdminView {
         // Network priority: the stream's packets ask the Wi-Fi for its video
         // queue (AF41). On unless the admin unticks it for the house's sake.
         this._packetMarking = true;
+        // The other screens off while a stream runs on the virtual display
+        // (issue #39). Offered on Windows once the display is installed.
+        this._vdExclusiveSupported = false;
+        this._vdExclusive = false;
         // Start at login. Offered only where the server says it can do it (a
         // desktop session, never a service), and ticked from what the OS
         // actually holds — the installer or the tray may have set it.
@@ -248,6 +252,8 @@ export class AdminView {
             this._certAuthEnabled = admin.cert_auth_enabled || false;
             this._streamNotifications = admin.stream_notifications !== false;
             this._packetMarking = admin.packet_marking !== false;
+            this._vdExclusiveSupported = admin.virtual_display_exclusive_supported === true;
+            this._vdExclusive = admin.virtual_display_exclusive === true;
             this._autostartSupported = admin.autostart_supported === true;
             this._autostartEnabled = admin.autostart_enabled === true;
             // Two values, not one: what was chosen (often nothing) and what the
@@ -1083,6 +1089,21 @@ export class AdminView {
                         <p class="setting-desc">${t('admin.packetMarkingDesc')}</p>
                     </div>
 
+                    ${
+                        this._vdExclusiveSupported
+                            ? `
+                    <div class="settings-field" id="admin-vd-exclusive">
+                        <label class="settings-checkbox-label">
+                            <input type="checkbox" id="chk-vd-exclusive"
+                                   ${this._vdExclusive ? 'checked' : ''} />
+                            <span class="settings-checkbox-text">${t('admin.vdExclusive')}</span>
+                        </label>
+                        <p class="setting-desc">${t('admin.vdExclusiveDesc')}</p>
+                    </div>
+                    `
+                            : ''
+                    }
+
                     <div class="settings-field">
                         <label class="settings-label" for="admin-instance-name">
                             ${t('admin.instanceName')}
@@ -1740,6 +1761,24 @@ export class AdminView {
                     console.error('[Admin] Failed to save network priority:', err);
                     Toast.error(t('admin.saveFailed', { message: err.message }));
                     markingChk.checked = !enabled; // revert
+                }
+            });
+        }
+
+        // ── Other screens off on the virtual display ───────────────────────
+        // Saved on the spot; the next stream's virtual display reads it.
+        const exclusiveChk = this.container.querySelector('#chk-vd-exclusive');
+        if (exclusiveChk) {
+            exclusiveChk.addEventListener('change', async () => {
+                const enabled = exclusiveChk.checked;
+                try {
+                    await BackendClient.saveAdminSettings({ virtual_display_exclusive: enabled });
+                    this._vdExclusive = enabled;
+                    Toast.success(enabled ? t('admin.vdExclusiveOn') : t('admin.vdExclusiveOff'));
+                } catch (err) {
+                    console.error('[Admin] Failed to save the other screens option:', err);
+                    Toast.error(t('admin.saveFailed', { message: err.message }));
+                    exclusiveChk.checked = !enabled; // revert
                 }
             });
         }

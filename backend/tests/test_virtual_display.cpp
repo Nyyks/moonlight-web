@@ -23,6 +23,8 @@
 #include <QRegularExpression>
 #include <QTemporaryDir>
 
+#include <iterator>
+
 // The pure half of "MoonlightWeb Virtual Display": what an elevated helper
 // will act on (the request file), what it answers (the result file), what it
 // writes for the driver, and the names. No driver, no socket, every platform.
@@ -657,4 +659,73 @@ void run_virtual_display_tests()
     CHECK(inf && cat && dll);
     CHECK(isHex(catalogSignerThumbprint(), 40));
     CHECK_EQ(hardwareId(), QStringLiteral("Root\\MttVDD"));
+
+    SECTION("VirtualDisplay — exclusive is a boolean of Activate, written only when asked");
+    {
+        auto req = parseRequest("{\"action\":\"activate\",\"exclusive\":true}", &err);
+        CHECK(req.has_value() && req->exclusive);
+        req = parseRequest("{\"action\":\"activate\"}", &err);
+        CHECK(req.has_value() && !req->exclusive);
+        CHECK(!parseRequest("{\"action\":\"activate\",\"exclusive\":\"yes\"}", &err).has_value());
+        CHECK(!parseRequest("{\"action\":\"activate\",\"exclusive\":1}", &err).has_value());
+        // Another verb never carries it into the helper.
+        req = parseRequest("{\"action\":\"deactivate\",\"exclusive\":true}", &err);
+        CHECK(req.has_value() && !req->exclusive);
+        Request r;
+        r.exclusive = true;
+        req = parseRequest(toJson(r), &err);
+        CHECK(req.has_value() && req->exclusive);
+        r.exclusive = false;
+        CHECK(!toJson(r).contains("exclusive"));
+    }
+
+    SECTION("VirtualDisplay — a layout with the other displays off is never saved");
+    {
+        const LayoutStep all[] = {LayoutStep::Impose,  LayoutStep::Prune,     LayoutStep::Mode,
+                                  LayoutStep::Primary, LayoutStep::Exclusive, LayoutStep::Restore};
+        // Off: only Impose saves, and it turns them back on in the same change.
+        for (const LayoutStep s : all) {
+            if (s == LayoutStep::Impose) continue;
+            CHECK(!savesLayout(s, true));
+        }
+        CHECK(savesLayout(LayoutStep::Impose, true));
+        CHECK(!othersOffAfter(LayoutStep::Impose, true, true));
+        // The exclusive step and the way back never save, the others on or off.
+        CHECK(!savesLayout(LayoutStep::Exclusive, false));
+        CHECK(!savesLayout(LayoutStep::Restore, false));
+        // On: what the helper always did — the layout of a stream is saved.
+        CHECK(savesLayout(LayoutStep::Mode, false) && savesLayout(LayoutStep::Primary, false) &&
+              savesLayout(LayoutStep::Prune, false));
+
+        // Every sequence of up to five steps, each going through or not: once
+        // the exclusive step has gone through, nothing saves until a step
+        // that turns the others back on has.
+        const int n = int(std::size(all));
+        for (int len = 1; len <= 5; ++len) {
+            int combos = 1;
+            for (int i = 0; i < len; ++i)
+                combos *= n * 2;
+            for (int c = 0; c < combos; ++c) {
+                bool off = false;
+                int code = c;
+                for (int i = 0; i < len; ++i) {
+                    const LayoutStep s = all[code % n];
+                    code /= n;
+                    const bool ok = code % 2;
+                    code /= 2;
+                    if (off && savesLayout(s, off)) {
+                        // The only save allowed while off brings them back on.
+                        CHECK(s == LayoutStep::Impose);
+                        if (ok) CHECK(!othersOffAfter(s, off, ok));
+                    }
+                    off = othersOffAfter(s, off, ok);
+                }
+            }
+        }
+        // A failed step changes nothing: off stays off, on stays on.
+        CHECK(othersOffAfter(LayoutStep::Exclusive, false, true));
+        CHECK(!othersOffAfter(LayoutStep::Exclusive, false, false));
+        CHECK(othersOffAfter(LayoutStep::Restore, true, false));
+        CHECK(othersOffAfter(LayoutStep::Mode, true, true));
+    }
 }

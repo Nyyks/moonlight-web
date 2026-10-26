@@ -121,7 +121,37 @@ std::optional<Request> parseRequest(const QByteArray& json, QString* error)
                              ? obj.value(QLatin1String("refresh")).toInt(0) * kMilliHz
                              : milli.toInt(0);
     normaliseRate(req.refreshMilliHz);
+    const QJsonValue exclusive = obj.value(QLatin1String("exclusive"));
+    if (!exclusive.isUndefined() && !exclusive.isBool()) {
+        if (error) *error = QStringLiteral("exclusive must be a boolean");
+        return std::nullopt;
+    }
+    req.exclusive = req.action == Request::Action::Activate && exclusive.toBool(false);
     return req;
+}
+
+bool savesLayout(LayoutStep step, bool othersOff)
+{
+    switch (step) {
+    case LayoutStep::Impose: return true;
+    case LayoutStep::Prune:
+    case LayoutStep::Mode:
+    case LayoutStep::Primary: return !othersOff;
+    case LayoutStep::Exclusive:
+    case LayoutStep::Restore: return false;
+    }
+    return false;
+}
+
+bool othersOffAfter(LayoutStep step, bool othersOff, bool ok)
+{
+    if (!ok) return othersOff;
+    switch (step) {
+    case LayoutStep::Impose:
+    case LayoutStep::Restore: return false;
+    case LayoutStep::Exclusive: return true;
+    default: return othersOff;
+    }
 }
 
 QString notAppearedError()
@@ -155,6 +185,7 @@ QByteArray toJson(const Request& req)
         obj["height"] = req.height;
     }
     if (req.refreshMilliHz > 0) obj["refresh_mhz"] = req.refreshMilliHz;
+    if (req.exclusive) obj["exclusive"] = true;
     return QJsonDocument(obj).toJson(QJsonDocument::Compact);
 }
 
