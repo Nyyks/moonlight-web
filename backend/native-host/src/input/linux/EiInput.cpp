@@ -424,8 +424,12 @@ void EiInput::character(const std::string& utf8, bool down, bool altGraph)
             api->keyboardKey(d->handle, mod, true);
         api->keyboardKey(d->handle, stroke.code, true);
         frame(d);
+        // Held like any key, as uinput's sink does: a disconnection between
+        // the press and its release lets go of it in releaseAll.
+        m_HeldKeys.insert(stroke.code);
     } else {
         api->keyboardKey(d->handle, stroke.code, false);
+        m_HeldKeys.erase(stroke.code);
         for (auto it = mine.rbegin(); it != mine.rend(); ++it)
             api->keyboardKey(d->handle, *it, false);
         for (auto it = lift.rbegin(); it != lift.rend(); ++it)

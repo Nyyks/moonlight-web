@@ -982,6 +982,13 @@ void Win32Input::releaseAll()
         keys.swap(m_HeldKeys);
         buttons.swap(m_HeldButtons);
         scans.swap(m_HeldScan);
+        // A character's key is in m_HeldKeys too; one that is not any more
+        // still goes up, at its own scancode.
+        for (const auto& [ch, key] : m_CharKeys) {
+            (void)ch;
+            if (keys.insert(key.vk).second)
+                scans[key.vk] = static_cast<uint16_t>(key.scan | (key.extended ? 0xE000 : 0));
+        }
         m_CharKeys.clear();
         // What our mouse holds goes up through it, in one report.
         mouseButtons = m_MouseButtons;
@@ -1250,6 +1257,8 @@ void Win32Input::injectKey(const InputEvent& event, bool down)
     const int vk = event.keyCode;
     if (vk <= 0 || vk > 0xFF) return;
 
+    bool charKey = false;
+    uint16_t charScan = 0;
     {
         std::lock_guard<std::mutex> lock(m_HeldMutex);
         // A heartbeat re-press of a key we never let go of would be an extra
@@ -1262,8 +1271,28 @@ void Win32Input::injectKey(const InputEvent& event, bool down)
             m_HeldKeys.insert(vk);
         } else {
             m_HeldKeys.erase(vk);
-            m_HeldScan.erase(vk);
+            // A character's key, released by its position: it went down at
+            // the host layout's scancode, and goes up at that one, as at the
+            // session's end (releaseAll). The US one would leave it down for
+            // whatever reads scancodes, and nothing would let go of it later.
+            auto scan = m_HeldScan.find(vk);
+            if (scan != m_HeldScan.end()) {
+                charKey = true;
+                charScan = scan->second;
+                m_HeldScan.erase(scan);
+            }
+            for (auto it = m_CharKeys.begin(); it != m_CharKeys.end();)
+                it = it->second.vk == vk ? m_CharKeys.erase(it) : std::next(it);
         }
+    }
+    if (charKey) {
+        WinKeyEvent up;
+        up.up = true;
+        up.vk = static_cast<uint8_t>(vk);
+        up.scan = static_cast<uint8_t>(charScan & 0xFF);
+        up.extended = (charScan & 0xFF00) != 0;
+        sendPlan({up});
+        return;
     }
 
     // The modifier mask that rides along is NOT applied. The browser sends a
