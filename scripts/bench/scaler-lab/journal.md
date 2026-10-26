@@ -2541,3 +2541,90 @@ un seul.
 **Ce qui reste.** Seul le runner peut dire si ses réductions passent, au prochain push de Bruno. Le rejeu WSL ne
 reproduisait pas ses chiffres de `text` et de `code`. Sur la zone plate, J32 avait attribué les 36/255 des
 bilinéaires à l'échantillonneur WebGPU de Linux. Si c'était aussi l'entrée, cet écart tombera à 0.
+
+## 2026-10-26 — J47, la réduction HDR en lumière linéaire
+
+**La décision.** Bruno, le 26/10 au matin, par 59, sur les constats de J45 : « 1 puis 2, et vérifie qu'il n'y a pas de
+régression en SDR (perf et couleur) ». Le 1 est le constat (a) : la réduction HDR assombrissait le contraste fin.
+
+**Le changement (`WebGpuRenderer.js`, `MwsrShader.js`).**
+- **Où il s'applique** : sur le chemin `linear` (le canvas flottant d'un écran HDR), quand MWSR réduit l'image.
+- **La passe 0** : elle écrit alors la lumière linéaire, sans l'encodage sRGB (`tonemapPq`, courbe 3).
+- **Le noyau** : il lit cette lumière sur les grilles des vues sRGB du SDR. L'échantillonneur mélange donc de la
+  lumière, comme les vues sRGB le font en SDR, et le noyau encode une seule fois, à la sortie (`LINEAR_LIGHT 3` :
+  `dec` laisse la valeur, `enc` prend le sRGB exact). C'est un échantillon jusqu'à ×0,5, puis 9 et 16 en dessous.
+- **Ce qui ne change pas** :
+  - un agrandissement, le mode « off », une image à 1:1 et le chemin `tonemap` gardent la passe 0 encodée ;
+  - une image que la passe 0 YUV n'a pas prise garde la lumière logicielle (`LINEAR_LIGHT 1`) et ses grilles, qui
+    restent construites à côté ;
+  - le texte GLSL : WebGL2 ne dessine pas de HDR.
+- **Pour le labo** : `_mwsrLinearDown` à `false` rend la réduction d'avant, sous le nom `mwsr-enc` (`hdr-check.js`).
+
+**La couleur (SwiftShader).**
+- **La lumière des rayures de 1000 et 0,5 nit**, MWSR après contre avant (`mwsr-enc`) :
+
+  | réduction | après | avant | `tonemap` (vues sRGB) |
+  |---|---|---|---|
+  | 1440p → 720p (×0,5) | **0,987** | 0,918 | 0,987 |
+  | 2160p → 1440p (×0,667) | **1,004** | 0,724 | 1,001 |
+  | 2160p → 720p (×1/3, 9 échantillons, cas nouveau) | **1,004** | 0,680 | 1,002 |
+
+- **Les hautes lumières** : la rampe en 2160p → 1440p garde 0,999 de sa part de pixels au-dessus de 600 nits
+  (0,853 avant).
+- **Les bornes** : toujours 0 %.
+- **ΔE ITP, après contre avant** :
+  - rampe en 2160p → 1440p : 8,43 contre 12,14 ;
+  - texte en 2160p → 1440p : 8,84 contre 9,20 ;
+  - texte en 1440p → 720p : 13,03 contre 13,15 ;
+  - jeu en 2160p → 1440p : 8,86 contre 8,82, égal ;
+  - rayures à ×1/3 : 0,40 contre 50,0.
+- **Une exception** : les rayures à ×0,667 perdent en ΔE (69,9 contre 48,0). Un seul échantillon y crénèle des
+  rayures d'un pixel, que la grille 2×2 floutait. C'est le choix du SDR depuis J15 (un échantillon à travers les vues
+  jusqu'à ×0,5), et le chemin `tonemap` fait pareil.
+- **Ce qui n'a pas bougé** : les agrandissements HDR et tout le chemin `tonemap` sont au chiffre près ceux de J45.
+  Restent donc (b) et (c).
+
+**La couleur en SDR (SwiftShader).**
+- Le contrôle des dorés est OK, au bit près, chaîne du produit comprise. Le texte WGSL des grilles a changé d'une
+  branche (`LINEAR_LIGHT >= 2u` dans `enc`), morte en SDR.
+- 1811 tests verts, `npm run check` vert.
+
+**La vitesse (RTX 5060 Ti, `rtx0`, créneau de 59 de 06:44 à 06:52).**
+- **Le banc** : un Chrome sans tête épinglé par `--use-adapter-luid`. Son épinglage a été vérifié avant chaque
+  mesure : le moteur 3D de son processus GPU croît sur ce LUID seul. Les temps sont ceux du GPU (horodatages sur chaque
+  passe du renderer), en ms, p50/p99.
+- **HDR** : `hdr_check.py --time`. Un seul renderer par cas, la réduction d'avant allumée et éteinte par blocs,
+  400 tirages par variante en quatre tours ABBA.
+
+  | cas | après | avant | écart |
+  |---|---|---|---|
+  | témoin 720p → 1440p (même chemin) | 0,2178 / 0,349 | 0,2206 / 0,386 | −1,3 % (le bruit) |
+  | 2160p → 1440p (×0,667) | 0,3065 / 2,914 | 0,3456 / 0,356 | **−11,3 %** |
+  | 2160p → 720p (×1/3) | 0,3225 / 0,333 | 0,3482 / 0,354 | **−7,4 %** |
+  | 1440p → 720p (×0,5) | 0,0995 / 0,105 | 0,1121 / 0,114 | **−11,2 %** |
+
+  - La passe 0 gagne 11 à 14 % sur chaque réduction : elle n'encode plus.
+  - Le noyau passe de 4 échantillons à 1 à ×0,667 (−13 %). Il coûte autant à ×1/3 et 0,0008 ms de plus à ×0,5.
+  - Le p99 de 2,9 ms à ×0,667 est une traîne de quelques tirages. Elle est apparue dans 2 des 3 passes, sur
+    « après » seulement, et n'est pas localisée : Bruno a lancé un stream avant la passe ciblée, et le banc s'est
+    arrêté. À revoir au prochain créneau.
+- **Le témoin** : une première passe avec deux renderers (deux devices) l'avait mis à 13 % d'écart. Le chrono les
+  compare donc sur un seul renderer.
+- **SDR** : les cellules `chain-mwsr` de la porte P4, `codec=none`, ni encodeur ni décodeur. Avant = 87286046
+  exporté hors du dépôt, après = l'arbre de travail, deux tours ABBA après une passe de chauffe ; médiane des quatre
+  passes, `gpu` p50/p99.
+
+  | cas | après | avant |
+  |---|---|---|
+  | ×2 texte | 0,1049 / 0,110 | 0,1040 / 0,109 |
+  | ×2 texte, 60 Hz | 0,1049 / 0,132 | 0,1047 / 0,132 |
+  | ×1,33 texte | 0,1156 / 0,120 | 0,1494 / 0,403 (deux passes à une horloge plus basse) |
+  | ×1,33 texte, 60 Hz | 0,1162 / 0,141 | 0,1158 / 0,138 |
+  | ×0,67 texte | 0,1814 / 0,193 | 0,1824 / 0,191 |
+  | ×0,67 texte, 60 Hz | 0,1867 / 0,196 | 0,1866 / 0,208 |
+
+  - L'écart est sous 1 % là où les passes sont stables : pas de régression SDR.
+
+**Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/hdr_check.py` pour la couleur (SwiftShader). Pour la
+vitesse : `hdr_check.py --time N --cdp PORT --only …` dans un Chrome qu'on a soi-même épinglé et vérifié sur le GPU.
+Le script n'en lance aucun ; la page refuse SwiftShader, et tout adaptateur dont le nom ne contient pas `--vendor`.

@@ -126,6 +126,15 @@ describe('the mwsr shader text', () => {
         expect(mwsrRegime(2560, 1440, 1280, 720, srgb)).toEqual({ mode: 'down', taps: 1, rDown: 1, ...hw });
         expect(mwsrRegime(3840, 2160, 1280, 720, srgb)).toEqual({ mode: 'down', taps: 9, rDown: 1.25, ...hw });
         expect(mwsrRegime(3840, 2160, 640, 360, srgb)).toEqual({ mode: 'down', taps: 16, rDown: 1.25, ...hw });
+        // on a linear feed (the HDR pass 0's) the sampler mixes the light: the
+        // same grids, encoded at the output; an upscale keeps the encoded feed
+        const lin = { linear: true };
+        const sw = { linearLight: 3 };
+        expect(mwsrRegime(1280, 720, 2560, 1440, lin)).toEqual({ mode: 'up', taps: 5, rDown: 0, linearLight: 0 });
+        expect(mwsrRegime(2560, 1440, 1920, 1080, lin)).toEqual({ mode: 'down', taps: 1, rDown: 1, ...sw });
+        expect(mwsrRegime(2560, 1440, 1280, 720, lin)).toEqual({ mode: 'down', taps: 1, rDown: 1, ...sw });
+        expect(mwsrRegime(3840, 2160, 1280, 720, lin)).toEqual({ mode: 'down', taps: 9, rDown: 1.25, ...sw });
+        expect(mwsrRegime(3840, 2160, 640, 360, lin)).toEqual({ mode: 'down', taps: 16, rDown: 1.25, ...sw });
         // the smaller axis decides, and a 1.001 × 0.999 box is a reduction
         expect(mwsrRegime(1000, 1000, 1001, 999).mode).toBe('down');
         expect(mwsrRegime(1000, 1000, 1001, 1000).mode).toBe('up');
@@ -148,6 +157,27 @@ describe('the mwsr shader text', () => {
             expect(regs).not.toContainEqual(mwsrRegime(100, 100, 100, 100, { srgb }));
         }
         expect(mwsrRegimes()).toEqual(mwsrRegimes({ srgb: false }));
+        // a linear feed adds its grids beside the software light's, which a
+        // frame the HDR pass 0 did not take keeps
+        const both = mwsrRegimes({ linear: true });
+        expect(both.slice(0, 4)).toEqual(mwsrRegimes());
+        expect(both.slice(4)).toEqual(
+            MWSR_DOWN_TAPS_SRGB.map(([, taps, rDown]) => ({ mode: 'down', taps, rDown, linearLight: 3 })),
+        );
+        for (const s of [0.1, 0.2, 0.3, 0.49, 0.5, 0.75, 0.99, 1.33, 2, 3])
+            expect(both).toContainEqual(mwsrRegime(100, 100, Math.round(100 * s), Math.round(100 * s), { linear: true }));
+        expect(new Set(both.map(mwsrRegimeKey)).size).toBe(both.length);
+        // through sRGB views nothing is added
+        expect(mwsrRegimes({ srgb: true, linear: true })).toEqual(mwsrRegimes({ srgb: true }));
+    });
+
+    it('encodes a linear feed once, at the output (LINEAR_LIGHT 3)', () => {
+        const fs = down.slice(down.indexOf('fn dec('));
+        // dec leaves 3 alone, enc takes the sRGB transfer for 2 and 3
+        expect(fs.slice(0, fs.indexOf('fn enc('))).not.toMatch(/LINEAR_LIGHT == 3u|>= 2u/);
+        expect(fs).toContain('if (LINEAR_LIGHT >= 2u) {\n        return linToSrgb(c);');
+        expect(mwsrRegimeKey({ mode: 'down', taps: 9, linearLight: 3 })).toBe('down9lin');
+        expect(mwsrRegimeKey({ mode: 'down', taps: 9, linearLight: 1 })).toBe('down9');
     });
 
     it('uses no gather, no discard, no loop, no dynamic indexing (plan §3.4)', () => {

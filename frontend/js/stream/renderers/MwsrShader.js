@@ -64,7 +64,11 @@
  *
  * HDR (plan §4.1): the renderer's `linear` feed is sRGB-encoded past 1.0
  * (1.0 = reference white); both modes are per channel, bounded by their own
- * samples and clamp nothing to 1.0, so they run on it unchanged.
+ * samples and clamp nothing to 1.0, so they run on it unchanged. For a
+ * reduction, though, the renderer's HDR pass 0 writes the linear light itself
+ * (LINEAR_LIGHT 3): the sampler then mixes linear light, as through the sRGB
+ * views of SDR, and the grids are those views' (Bruno, 26/10/2026: a filter
+ * mixing the encoded values took fine contrast down by 8 to 28 %, journal J45).
  *
  * Written from scratch (plan §10.2). Ideas taken, and credited: bilinear taps
  * instead of gathers (Atyuwen's mobile EASU, Jimenez, MJP); the early out on
@@ -113,7 +117,7 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     FLAT_ZONE: ['u32', 0],
     /** Reduction: the span of the tap grid, as a fraction of the pixel's footprint in the input (mwsrRegime() sets it by the grid). */
     R_DOWN: ['f32', 1.0],
-    /** Reduction: 0 average the encoded values; 1 in gamma-2 light (square, square root); 2 in sRGB linear light (≤ 0.35 dB better, 15 pow per pixel). */
+    /** Reduction: 0 average the encoded values; 1 in gamma-2 light (square, square root); 2 in sRGB linear light (≤ 0.35 dB better, 15 pow per pixel); 3 the feed is linear light already (the HDR pass 0 wrote it), averaged as it comes and encoded by the sRGB transfer once, at the output. */
     LINEAR_LIGHT: ['u32', 1],
     /** The ×2 law (plan §12, journal J39), for the blur Bruno sees at ×2: the scale from which the
      *  three X2_ constants below weigh in full; they slide in from S_FULL, where the weight is 0,
@@ -261,21 +265,23 @@ export const MWSR_DOWN_TAPS_SRGB = Object.freeze([
  * input through an `-srgb` view and draws into one (SDR: `viewFormats` on the
  * pass-0 texture and on the canvas), so the hardware makes the linear light
  * (linearLight 0, the LINEAR_LIGHT override) and one sample is the filter
- * down to ×0.5; otherwise the light is software's (linearLight 1) and the 2×2
- * grid serves there.
+ * down to ×0.5; `linear`: the feed holds linear light (the renderer's HDR pass
+ * 0 writes it for a reduction), so the sampler mixes linear light too, on the
+ * same grids, and the text encodes at the output (linearLight 3); otherwise
+ * the light is software's (linearLight 1) and the 2×2 grid serves there.
  * @param {number} inW
  * @param {number} inH
  * @param {number} outW
  * @param {number} outH
- * @param {{srgb?: boolean}} [opts]
+ * @param {{srgb?: boolean, linear?: boolean}} [opts]
  * @returns {{mode: 'copy'|'up'|'down', taps: number, rDown: number, linearLight: number}}
  */
-export function mwsrRegime(inW, inH, outW, outH, { srgb = false } = {}) {
+export function mwsrRegime(inW, inH, outW, outH, { srgb = false, linear = false } = {}) {
     if (inW === outW && inH === outH) return { mode: 'copy', taps: 0, rDown: 0, linearLight: 0 };
     const s = Math.min(outW / inW, outH / inH);
     if (s >= 1) return { mode: 'up', taps: 5, rDown: 0, linearLight: 0 };
-    const table = srgb ? MWSR_DOWN_TAPS_SRGB : MWSR_DOWN_TAPS;
-    const linearLight = srgb ? 0 : 1;
+    const table = srgb || linear ? MWSR_DOWN_TAPS_SRGB : MWSR_DOWN_TAPS;
+    const linearLight = srgb ? 0 : linear ? 3 : 1;
     for (const [min, taps, rDown] of table)
         if (s >= min) return { mode: 'down', taps, rDown, linearLight };
     const [, taps, rDown] = table[table.length - 1];
@@ -287,28 +293,38 @@ export function mwsrRegime(inW, inH, outW, outH, { srgb = false } = {}) {
  * each grid of the reduction's table, through sRGB views or not — so that the
  * renderer builds all of its pipelines at creation and compiles nothing while
  * the stream runs (plan §4.3: the pinch zoom and the quality ladder change the
- * scale from one frame to the next).
- * @param {{srgb?: boolean}} [opts]
+ * scale from one frame to the next). `linear`: the grids on a linear feed as
+ * well, beside the software light's, which a frame the HDR pass 0 did not
+ * take keeps.
+ * @param {{srgb?: boolean, linear?: boolean}} [opts]
  * @returns {Array<{mode: 'up'|'down', taps: number, rDown: number, linearLight: number}>}
  */
-export function mwsrRegimes({ srgb = false } = {}) {
+export function mwsrRegimes({ srgb = false, linear = false } = {}) {
     const table = srgb ? MWSR_DOWN_TAPS_SRGB : MWSR_DOWN_TAPS;
     const linearLight = srgb ? 0 : 1;
     return [
         { mode: 'up', taps: 5, rDown: 0, linearLight: 0 },
         ...table.map(([, taps, rDown]) => ({ mode: 'down', taps, rDown, linearLight })),
+        ...(linear && !srgb
+            ? MWSR_DOWN_TAPS_SRGB.map(([, taps, rDown]) => ({
+                  mode: 'down',
+                  taps,
+                  rDown,
+                  linearLight: 3,
+              }))
+            : []),
     ];
 }
 
 /**
  * The name a renderer keeps a regime's pipeline or program under: 'up', or
- * 'down' and the grid's taps (the span and the light follow from the taps
- * and the renderer's views).
- * @param {{mode: 'up'|'down', taps?: number}} reg
+ * 'down' and the grid's taps, 'lin' after them on a linear feed (otherwise
+ * the span and the light follow from the taps and the renderer's views).
+ * @param {{mode: 'up'|'down', taps?: number, linearLight?: number}} reg
  * @returns {string}
  */
 export function mwsrRegimeKey(reg) {
-    return reg.mode === 'up' ? 'up' : 'down' + reg.taps;
+    return reg.mode === 'up' ? 'up' : 'down' + reg.taps + (reg.linearLight === 3 ? 'lin' : '');
 }
 
 /**
@@ -688,8 +704,9 @@ function downFs(taps) {
             `    acc += dec(S(uv + vec2f(${wgslNumber('f32', ox)}, ${wgslNumber('f32', oy)}) * span));`,
     );
     return `
-// The sRGB transfer, both ways, for LINEAR_LIGHT 2; past 1.0 (HDR) the same
-// formula continues, as the renderer's HDR pass 0 encodes it.
+// The sRGB transfer, both ways, for LINEAR_LIGHT 2 (the encode alone for 3);
+// past 1.0 (HDR) the same formula continues, as the renderer's HDR pass 0
+// encodes it.
 fn srgbToLin(c : vec3f) -> vec3f {
     let lo = c / 12.92;
     let hi = pow((max(c, vec3f(0.0)) + 0.055) / 1.055, vec3f(2.4));
@@ -716,7 +733,7 @@ fn enc(c : vec3f) -> vec3f {
     if (LINEAR_LIGHT == 1u) {
         return sqrt(max(c, vec3f(0.0)));
     }
-    if (LINEAR_LIGHT == 2u) {
+    if (LINEAR_LIGHT >= 2u) {
         return linToSrgb(c);
     }
     return c;
@@ -1056,7 +1073,8 @@ mediump float lumah(mediump vec3 c) {
  * mwsrUniforms(). The edge path's colours and weights are mediump: f16 on the
  * GPUs that have it, the twin of the `half` module, and highp on the others.
  * No sRGB views on a WebGL2 drawing buffer: the reduction takes the software
- * light (MWSR_DOWN_TAPS, LINEAR_LIGHT 1).
+ * light (MWSR_DOWN_TAPS, LINEAR_LIGHT 1). LINEAR_LIGHT 3 has no twin here:
+ * WebGL2 draws no HDR feed.
  * @param {{mode?: 'up'|'down', taps?: number, overrides?: Object<string, number>}} [opts]
  * @returns {string}
  */

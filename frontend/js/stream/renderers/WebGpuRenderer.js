@@ -43,7 +43,10 @@
  *   the average is taken in linear light for free (P3, journal J15) — both
  *   textures are created with those view formats, and the reduction falls back
  *   to the software light (LINEAR_LIGHT 1, the 2×2 grid) where the browser
- *   refuses them or the canvas is float (HDR). The f16 module (`half`) runs
+ *   refuses them. On the float canvas (HDR `linear`) the YUV pass 0 writes the
+ *   linear light itself for a reduction, which the views' grids filter and
+ *   encode at the output (LINEAR_LIGHT 3, journal J47); a frame that pass did
+ *   not take keeps the software light. The f16 module (`half`) runs
  *   where the adapter has shader-f16 and is not NVIDIA's: 9-10 % off the
  *   kernel on the 780M for the same pixels, nothing on the RTX (P2.3).
  *
@@ -209,7 +212,8 @@ fn linToSrgb(c : vec3f) -> vec3f {
 }
 
 // Transfer-encoded R'G'B' (PQ, BT.2020) → the render target's own space.
-// params: (refWhite nits, _, exposure, curve 0=soft-clip 1=ACES 2=linear HDR out)
+// params: (refWhite nits, _, exposure, curve 0=soft-clip 1=ACES 2=linear HDR
+// out 3=the same, not encoded)
 fn tonemapPq(rgbE : vec3f, params : vec4f) -> vec4f {
     let linear2020 = pqEotf(rgbE);
     // SDR diffuse white (refWhite nits) maps to 1.0 before tone mapping.
@@ -218,12 +222,17 @@ fn tonemapPq(rgbE : vec3f, params : vec4f) -> vec4f {
         // HDR output: no tone curve. Scene light in the canvas' own Display-P3
         // gamut (BT.2020 → P3, linear, column-major), 1.0 = reference white,
         // highlights above it, encoded with the sRGB transfer the float16
-        // canvas extends past 1.0 (toneMapping 'extended').
+        // canvas extends past 1.0 (toneMapping 'extended') — or left linear
+        // (3) for mwsr's reduction, which encodes once it has filtered.
         let P = mat3x3f(
             1.343578, -0.065298,  0.002822,
            -0.282180,  1.075788, -0.019599,
            -0.061399, -0.010491,  1.016777);
-        return vec4f(linToSrgb(max(P * scaled, vec3f(0.0))), 1.0);
+        let lin = max(P * scaled, vec3f(0.0));
+        if (params.w > 2.5) {
+            return vec4f(lin, 1.0);
+        }
+        return vec4f(linToSrgb(lin), 1.0);
     }
     // BT.2020 → Rec.709 gamut (linear), column-major.
     let M = mat3x3f(
@@ -263,7 +272,7 @@ const HDR_TONEMAP_WGSL =
 @group(0) @binding(1) var texU : texture_2d<u32>;
 @group(0) @binding(2) var texV : texture_2d<u32>;
 @group(0) @binding(3) var<uniform> dims : vec4f;   // (yW, yH, cW, cH)
-@group(0) @binding(4) var<uniform> params : vec4f; // (refWhite nits, codeScale, exposure, curve 0=soft-clip 1=ACES 2=linear HDR out)
+@group(0) @binding(4) var<uniform> params : vec4f; // (refWhite nits, codeScale, exposure, curve 0=soft-clip 1=ACES 2=linear HDR out 3=the same, not encoded)
 @group(0) @binding(5) var<uniform> csp : vec4f;    // frame.colorSpace: (fullRange, bt709 matrix, isPq, _)
 
 @fragment
@@ -978,6 +987,12 @@ export class WebGpuRenderer extends VideoRenderer {
         this._mwsrHalf = false;
         /** SDR: inputTex and the canvas carry `-srgb` view formats (mwsr's reduction). */
         this._srgbViews = false;
+        /** HDR `linear`: mwsr's reduction takes the linear light pass 0 writes for it
+         *  (LINEAR_LIGHT 3, journal J47); false, the encoded feed and the 2×2 grid of
+         *  before (the lab's comparison). */
+        this._mwsrLinearDown = true;
+        /** This draw's pass 0 writes that linear light (set before the upload). */
+        this._p0Linear = false;
         /** mwsr's gaze zone (setMwsrZone): null, none; else its values over MWSR_ZONE's. */
         this._mwsrZone = null;
         /** Its weight pinned by setMwsrGaze (the lab), or null: the stream's motion decides. */
@@ -1550,7 +1565,8 @@ export class WebGpuRenderer extends VideoRenderer {
             bindGroupLayouts: [this._mwsrLayout],
         });
         this._mwsrPipelines = new Map();
-        for (const reg of mwsrRegimes({ srgb: this._srgbViews })) this._mwsrPipeline(reg);
+        for (const reg of mwsrRegimes({ srgb: this._srgbViews, linear: this._hdrLinear }))
+            this._mwsrPipeline(reg);
     }
 
     /**
@@ -1940,7 +1956,7 @@ export class WebGpuRenderer extends VideoRenderer {
                 this._refWhite,
                 codeScale * this._codeScale,
                 this._exposure,
-                this._curve,
+                this._p0Linear ? 3 : this._curve,
             ]),
         );
         const cs = frame.colorSpace || {};
@@ -2574,8 +2590,16 @@ export class WebGpuRenderer extends VideoRenderer {
 
         // HDR readback paths (tone-map or linear): read back the raw 10-bit YUV
         // (importExternalTexture would tone-map the HDR away). On failure, fall
-        // back to the blit below.
+        // back to the blit below. On `linear`, mwsr's reduction has pass 0 write
+        // the linear light, so that the sampler mixes light, not encoded values
+        // (J45: 1000- and 0.5-nit stripes kept 0.72 to 0.92 of their light).
         let useYuv = false;
+        this._p0Linear =
+            this._hdrLinear &&
+            this._mwsrLinearDown &&
+            this._algo === 'mwsr' &&
+            !direct &&
+            mwsrRegime(inW, inH, cw, ch).mode === 'down';
         if (this._hdrYuv) {
             const uploadStart = performance.now();
             try {
@@ -2858,8 +2882,12 @@ export class WebGpuRenderer extends VideoRenderer {
                 // The regime by the frame and canvas sizes — never 'copy', the
                 // 1:1 frame went straight to the canvas above. The reduction
                 // reads and draws through the sRGB views when the canvas has
-                // them; the kernel works in gamma, on the plain views.
-                const reg = mwsrRegime(inW, inH, cw, ch, { srgb: this._srgbViews });
+                // them, or reads the linear light the HDR pass 0 wrote; the
+                // kernel works in gamma, on the plain views.
+                const reg = mwsrRegime(inW, inH, cw, ch, {
+                    srgb: this._srgbViews,
+                    linear: useYuv && this._p0Linear,
+                });
                 const srgb = reg.mode === 'down' && this._srgbViews;
                 // The gaze zone's weight for this draw, 0 without a zone: it
                 // moves in steps of 1/64, so the block is rewritten rarely.

@@ -2,6 +2,7 @@
 adapter: upscaled and downscaled, on the two HDR paths that run it.
 
     python -X utf8 hdr_check.py [--dir DIR] [--keep] [--only NAME,...]
+    python -X utf8 hdr_check.py --time N --cdp PORT [--vendor WORD] [--only NAME,...]
 
 The lab's HDR mires (hdr_mires.py: a PQ ramp up to 10 000 nits with fine
 1000 / 0.5-nit stripes, text on 1000 nits, the 0 A.D. capture of
@@ -15,10 +16,11 @@ the real WebGpuRenderer, on its two HDR readback paths:
     continued past 1.0, Display-P3);
   - 'tonemap' (an SDR display): ACES in pass 0, then mwsr on 8-bit.
 Each with 'off' (the product's plain copy) and 'mwsr', at 720p and 1080p to
-1440p, 2160p to 1440p and 1440p to 720p, plus one frame at 1:1. Diagnostics
-beside them, reported only: the reduction in exact sRGB light (LINEAR_LIGHT
-2 instead of the product's square), and the f32 kernel where SwiftShader
-grants shader-f16.
+1440p, 2160p to 1440p and 1440p to 720p, plus one frame at 1:1. Beside them,
+reported only: the reduction of before 26/10/2026 ('mwsr-enc': pass 0
+encoded, the 2x2 grid in gamma-2 light, where the product's pass 0 now
+writes linear light for a reduction, journal J47), and the f32 kernel where
+SwiftShader grants shader-f16.
 
 The checks, judged here in linear light (metrics_hdr.py):
   - setup: no WebGPU error, the readback path taken (+yuv), the float canvas
@@ -48,6 +50,16 @@ before asking for a device), at BelowNormal on CPUs 16-23, with a profile of
 its own and --mute-audio; its tree is killed at the end ("chrome left: 0").
 The dumps (RGBA half floats) are deleted once measured, unless --keep. Exit 1
 on a failed check.
+
+--time N measures the speed instead, on a GPU, never on the software adapter:
+'mwsr' and 'mwsr-enc' on 'linear', N draws each in ABBA order after a
+warm-up, every render pass of the renderer stamped (timestamp-query), so that
+pass 0 and the kernel are timed apart (p50, p99, ms; hdr-time.json). It
+launches no Chrome: --cdp names one the caller launched pinned on that GPU
+(--use-adapter-luid, its own profile, --mute-audio) and checked, before
+anything is measured, by the growth of the WDDM counters on that adapter
+alone; the page refuses SwiftShader and an adapter whose name lacks
+--vendor.
 """
 import argparse
 import functools
@@ -100,6 +112,7 @@ CASES = [
     ("down2160-text", "text", (3840, 2160), (2560, 1440), "420"),
     ("down2160-game", "game", (3840, 2160), (2560, 1440), "420"),
     ("down2160-stripes", "stripes", (3840, 2160), (2560, 1440), "420"),
+    ("down2160to720-stripes", "stripes", (3840, 2160), (1280, 720), "420"),
     ("down1440-ramp", "ramp", (2560, 1440), (1280, 720), "420"),
     ("down1440-text", "text", (2560, 1440), (1280, 720), "420"),
     ("down1440-stripes", "stripes", (2560, 1440), (1280, 720), "420"),
@@ -263,8 +276,54 @@ def prepare(a):
     return data
 
 
+def drive(a, cdp, port):
+    """hdr-check.html (with ?time= under --time) in the Chrome on DevTools port
+    cdp, followed to its answer."""
+    page = None
+    for _ in range(100):
+        try:
+            targets = json.load(urllib.request.urlopen("http://127.0.0.1:%d/json" % cdp))
+            page = next(t for t in targets if t["type"] == "page")
+            break
+        except Exception:  # noqa: BLE001
+            time.sleep(0.2)
+    if not page:
+        raise SystemExit("no page on the DevTools port %d" % cdp)
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=600, suppress_origin=True)
+    ids = iter(range(1, 1 << 30))
+
+    def call(method, **params):
+        mid = next(ids)
+        ws.send(json.dumps({"id": mid, "method": method, "params": params}))
+        while True:
+            msg = json.loads(ws.recv())
+            if msg.get("id") == mid:
+                return msg.get("result", msg)
+
+    query = "?time=%d&vendor=%s" % (a.time, a.vendor) if a.time else ""
+    call("Page.navigate", url="http://127.0.0.1:%d/scripts/bench/scaler-lab/hdr-check.html%s" % (port, query))
+    deadline = time.time() + a.timeout
+    shown = None
+    res = None
+    while time.time() < deadline:
+        time.sleep(2)
+        r = call("Runtime.evaluate", returnByValue=True,
+                 expression="JSON.stringify([window.__progress || '', window.__done || null])")
+        progress, res = json.loads(r.get("result", {}).get("value") or '["", null]')
+        if progress != shown:
+            shown = progress
+            print("  %s page: %s" % (time.strftime("%H:%M:%S"), progress), flush=True)
+        if res:
+            break
+    ws.close()
+    return res
+
+
 def run_page(a, port):
-    """hdr-check.html in a headless Chrome on SwiftShader; its answer."""
+    """hdr-check.html in a headless Chrome on SwiftShader, or (--cdp) in the
+    Chrome the caller launched, pinned on a GPU and checked; its answer."""
+    if a.cdp:
+        return drive(a, a.cdp, port)
     cdp = free_port()
     profile = tempfile.mkdtemp(prefix="mw-scaler-lab-")
     flags = ["--headless=new", "--remote-debugging-port=%d" % cdp, "--user-data-dir=" + profile,
@@ -279,41 +338,7 @@ def run_page(a, port):
     proc.resume()
     res = None
     try:
-        page = None
-        for _ in range(100):
-            try:
-                targets = json.load(urllib.request.urlopen("http://127.0.0.1:%d/json" % cdp))
-                page = next(t for t in targets if t["type"] == "page")
-                break
-            except Exception:  # noqa: BLE001
-                time.sleep(0.2)
-        if not page:
-            raise SystemExit("no page on the DevTools port %d" % cdp)
-        ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=600, suppress_origin=True)
-        ids = iter(range(1, 1 << 30))
-
-        def call(method, **params):
-            mid = next(ids)
-            ws.send(json.dumps({"id": mid, "method": method, "params": params}))
-            while True:
-                msg = json.loads(ws.recv())
-                if msg.get("id") == mid:
-                    return msg.get("result", msg)
-
-        call("Page.navigate", url="http://127.0.0.1:%d/scripts/bench/scaler-lab/hdr-check.html" % port)
-        deadline = time.time() + a.timeout
-        shown = None
-        while time.time() < deadline:
-            time.sleep(2)
-            r = call("Runtime.evaluate", returnByValue=True,
-                     expression="JSON.stringify([window.__progress || '', window.__done || null])")
-            progress, res = json.loads(r.get("result", {}).get("value") or '["", null]')
-            if progress != shown:
-                shown = progress
-                print("  page: %s" % progress, flush=True)
-            if res:
-                break
-        ws.close()
+        res = drive(a, cdp, port)
     finally:
         tree = [chrome.pid]
         try:
@@ -364,6 +389,8 @@ def judge(a, data, res):
         check(row["finite"] and row["min"] >= -1e-4, "%s: values not finite or negative (min %.4g)" % (tag, row["min"]))
         down = ow < d["in"][0]
         x05 = down and d["in"][0] == 2 * ow
+        # the kernel's checks; the reduction of before is reported beside it only
+        judged = r["variant"] not in ("off", "mwsr-enc")
         if r["variant"] == "off" and d["out"] != d["in"]:
             if r["mode"] == "linear":
                 ref = bilinear(d["feed"], d["out"])
@@ -383,7 +410,7 @@ def judge(a, data, res):
                 row["feedMax"] = float(diff.max())
                 check(bool((diff <= 0.002 + 0.003 * np.abs(d["feed"])).all()),
                       "%s: the 1:1 picture is not numpy's pass 0 (max %.4f)" % (tag, row["feedMax"]))
-            if r["variant"] != "off" and d["mire"] != "stripes":
+            if judged and d["mire"] != "stripes":
                 b_out = float((metrics_hdr.luminance(metrics_hdr.nits_2020(out)) > 600.0).mean())
                 b_gt = float((metrics_hdr.luminance(metrics_hdr.nits_2020(d["gt"])) > 600.0).mean())
                 row["peakKept"] = b_out / b_gt
@@ -391,7 +418,7 @@ def judge(a, data, res):
                     tag, 100 * b_out, row["peakKept"]))
                 check(m["maxRatio"] <= 1.05, "%s: peak %.0f nits, %.3f of the input's: a highlight made" % (
                     tag, m["maxNits"], m["maxRatio"]))
-            if r["variant"] != "off" and (not down or x05):
+            if judged and (not down or x05):
                 row["bounds"] = beyond_texels(out, d["feed"], 0.002, 0.004)
                 check(row["bounds"] <= 0.0001, "%s: %.3f %% of the pixels beyond the 4x4 texels around" % (
                     tag, 100 * row["bounds"]))
@@ -401,7 +428,7 @@ def judge(a, data, res):
             gt = d["sdr_gt"]
             mse = float(np.mean((out - gt) ** 2))
             row["psnr"] = 10 * np.log10(1.0 / mse) if mse > 0 else 99.0
-            if r["variant"] != "off" and (not down or x05):
+            if judged and (not down or x05):
                 row["bounds"] = beyond_texels(out, d["sdr_feed"].astype(np.float32) / 255.0, 1.5 / 255.0, 0.0)
                 check(row["bounds"] <= 0.0001, "%s: %.3f %% of the pixels beyond the 4x4 texels around" % (
                     tag, 100 * row["bounds"]))
@@ -437,14 +464,46 @@ def fmt(x, spec):
     return spec % x if isinstance(x, (int, float)) else "-"
 
 
+def time_report(a, res):
+    """--time: the table of pass 0, the kernel and both, p50 and p99 (ms, the
+    GPU's own stamps); written to hdr-time.json. Exit 1 on an error."""
+    fails = []
+    print("%-22s %-9s %-12s %-12s %6s %17s %17s %17s" % (
+        "case", "variant", "path", "regime", "passes", "pass 0 p50/p99", "kernel p50/p99", "total p50/p99"))
+    for r in res["results"]:
+        if r.get("error"):
+            fails.append("%s: %s" % (r["case"], r["error"][:300]))
+            continue
+        if r["errors"] or r["failed"] or "+yuv" not in (r["path"] or ""):
+            fails.append("%s %s: errors %s, failed %s, path %s" % (
+                r["case"], r["variant"], r["errors"][:3], r["failed"], r["path"]))
+        reg = r["regime"] or {}
+        regime = reg.get("mode", "") + (" t%d ll%d" % (reg["taps"], reg["linearLight"]) if reg.get("mode") == "down" else "")
+        print("%-22s %-9s %-12s %-12s %6d %8.4f/%8.4f %8.4f/%8.4f %8.4f/%8.4f" % (
+            r["case"], r["variant"], r["path"], regime, r["passes"],
+            r["pass0"]["p50"], r["pass0"]["p99"], r["kernel"]["p50"], r["kernel"]["p99"],
+            r["total"]["p50"], r["total"]["p99"]))
+    with open(os.path.join(a.dir, "hdr-time.json"), "w") as f:
+        json.dump({"adapter": res["adapter"], "draws": a.time, "results": res["results"], "fails": fails}, f, indent=1)
+    print("FAIL:\n  " + "\n  ".join(fails) if fails else "timed, no error")
+    sys.exit(1 if fails else 0)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default=os.path.join(REPO, "bench-out", "scaler-lab", "hdr"))
     ap.add_argument("--keep", action="store_true", help="keep the dumps (RGBA half floats)")
     ap.add_argument("--only", default="", help="the cases to run, by name (comma-separated)")
     ap.add_argument("--timeout", type=float, default=3600)
+    ap.add_argument("--time", type=int, default=0,
+                    help="N: the speed of 'mwsr' and 'mwsr-enc' on 'linear' instead, N draws each (needs --cdp)")
+    ap.add_argument("--cdp", type=int, default=0,
+                    help="the DevTools port of a Chrome the caller launched, pinned on a GPU and checked")
+    ap.add_argument("--vendor", default="nvidia", help="--time: a word the adapter's name must hold")
     a = ap.parse_args()
     a.only = [s for s in a.only.split(",") if s]
+    if a.time and not a.cdp:
+        raise SystemExit("--time measures a GPU: give it the Chrome pinned and checked on one (--cdp)")
     os.makedirs(a.dir, exist_ok=True)
     data = prepare(a)
 
@@ -462,6 +521,8 @@ def main():
         raise SystemExit("the page failed: %s" % res.get("error"))
 
     print("adapter: %s, shader-f16 %s" % (res["adapter"], res["f16"]))
+    if a.time:
+        time_report(a, res)
     rows, fails = judge(a, data, res)
     print("%-16s %-7s %-9s %-9s %-14s %7s %7s %8s %6s %6s %7s %8s %7s %7s %8s %8s" % (
         "case", "mode", "variant", "path", "regime", "dE ITP", "PSNR", "peak", "x in", "kept", "over %", "bounds %",
