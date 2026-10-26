@@ -60,7 +60,10 @@ public:
         QString error;
     };
 
+    LogArchive() = default;
     ~LogArchive();
+    LogArchive(const LogArchive&) = delete; // owns its build thread
+    LogArchive& operator=(const LogArchive&) = delete;
 
     /// Start building from @p logDir, plus @p extraFile (the server's own log
     /// when --log put it elsewhere; may be empty), every file and @p about

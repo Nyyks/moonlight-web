@@ -206,11 +206,15 @@ jobs:
 
   quality-cppcheck:
     name: Quality · C++ cppcheck
-    runs-on: ubuntu-latest
+    # Pinned image and package: ubuntu-latest moving to 26.04 brought cppcheck
+    # 2.19 in with no change of ours, and its new checks failed the stage.
+    # Raise both together, on purpose, with the warnings fixed in that commit.
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
-      - run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - run: sudo apt-get update && sudo apt-get install -y cppcheck=2.19.0-3
+      - run: cppcheck --version
       - name: Run cppcheck
         working-directory: backend
         run: |

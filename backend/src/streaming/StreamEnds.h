@@ -21,6 +21,7 @@
 #include <QRandomGenerator>
 #include <QString>
 
+#include <algorithm>
 #include <iterator>
 
 // How each recent stream ended, kept for the page that lost it.
@@ -154,15 +155,13 @@ private:
             it = expired(*it, nowMs) ? m_Entries.erase(it) : std::next(it);
         // Over capacity: the oldest end goes first, a running stream last.
         while (m_Entries.size() > kCapacity) {
-            auto oldest = m_Entries.end();
-            for (auto it = m_Entries.begin(); it != m_Entries.end(); ++it) {
-                if (oldest == m_Entries.end() ||
-                    (it->state != State::Live) > (oldest->state != State::Live) ||
-                    ((it->state != State::Live) == (oldest->state != State::Live) &&
-                     it->atMs < oldest->atMs))
-                    oldest = it;
-            }
-            m_Entries.erase(oldest);
+            m_Entries.erase(std::min_element(m_Entries.begin(), m_Entries.end(),
+                                             [](const Entry& a, const Entry& b) {
+                                                 const bool aEnded = a.state != State::Live;
+                                                 const bool bEnded = b.state != State::Live;
+                                                 if (aEnded != bEnded) return aEnded;
+                                                 return a.atMs < b.atMs;
+                                             }));
         }
     }
 
