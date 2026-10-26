@@ -44,7 +44,7 @@
   "tr2.h": "Jouer sur iPhone ou iPad",
   "tr2.p": "Ouvrez la même URL dans Safari — aucun téléchargement depuis l’App Store nécessaire. Vous obtenez un trackpad multitouch et un clavier virtuel natif avec touches de modification ; un Mac hôte ne reçoit aucune manette (macOS n’autorise aucune manette virtuelle).",
   "tr3.h": "Le stream saccade sur une connexion faible",
-  "tr3.p": "Baissez la résolution streamée et activez le <strong>Video Enhancement</strong> : le stream est upscalé et accentué sur le GPU du client (WebGL2 ou WebGPU avec SGSRv1 + FSR1), si bien qu’un stream 720p paraît proche du 1440p.",
+  "tr3.p": "Baissez la résolution streamée et activez le <strong>Video Enhancement</strong> : le stream est upscalé et accentué sur le GPU du client (WebGL2 ou WebGPU avec l’upscaler de MoonlightWeb), si bien qu’un stream 720p paraît proche du 1440p.",
   "note": "<strong>Réseau restrictif ?</strong> MoonlightWeb bascule automatiquement (UDP → TCP), et continue donc de fonctionner à travers les pare-feu stricts et le Wi-Fi d’hôtel hostile.",
   "read.h": "À lire ensuite",
   "x.faq.t": "FAQ",

@@ -29,7 +29,7 @@
   "q9.s": "Welche Auflösungen, Bildraten und Codecs werden unterstützt?",
   "q9.a": "<p>Bis zu 4K HDR mit bis zu 240 fps, mit H264, HEVC und AV1 — per Hardware im Browser dekodiert über WebCodecs. Codecs, die dein Browser nicht dekodieren kann, werden automatisch ausgegraut. HDR-Displays bekommen echtes HDR.</p>",
   "q10.s": "Was ist Video Enhancement?",
-  "q10.a": "<p>GPU-Upscaling und -Schärfung, die über WebGL2 oder WebGPU im Browser laufen (SGSRv1- + FSR1-Shader). Streame in 720p über 4G oder Hotel-WLAN und genieße fast 1440p-Qualität — ganz ohne Zusatzlast auf dem Gaming-PC, weil alles auf dem Client läuft.</p>",
+  "q10.a": "<p>GPU-Upscaling und -Schärfung, die über WebGL2 oder WebGPU im Browser laufen (MoonlightWebs eigener Upscaler). Streame in 720p über 4G oder Hotel-WLAN und genieße fast 1440p-Qualität — ganz ohne Zusatzlast auf dem Gaming-PC, weil alles auf dem Client läuft.</p>",
   "q11.s": "Was passiert bei strengen Firewalls oder Hotel-WLAN?",
   "q11.a": "<p>Der Transport weicht automatisch aus: zuerst UDP für die geringste Latenz, dann TCP. Der Stream läuft auch durch restriktive Netzwerke weiter — er wählt einfach den besten verfügbaren Weg.</p>",
   "h2.internet": "Spielen übers Internet & Sicherheit",

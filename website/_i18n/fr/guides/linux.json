@@ -43,7 +43,7 @@
   "tr2.h": "HEVC ou AV1 est grisé",
   "tr2.p": "Les codecs que votre navigateur ne peut pas décoder matériellement sont automatiquement désactivés — c’est normal. H264 fonctionne partout ; la disponibilité de HEVC et AV1 dépend du navigateur et du GPU de l’appareil client.",
   "tr3.h": "Le stream saccade sur une connexion faible",
-  "tr3.p": "Baissez la résolution streamée et activez le <strong>Video Enhancement</strong> : le stream est upscalé et accentué sur le GPU du client (WebGL2 ou WebGPU avec SGSRv1 + FSR1), si bien qu’un stream 720p paraît proche du 1440p.",
+  "tr3.p": "Baissez la résolution streamée et activez le <strong>Video Enhancement</strong> : le stream est upscalé et accentué sur le GPU du client (WebGL2 ou WebGPU avec l’upscaler de MoonlightWeb), si bien qu’un stream 720p paraît proche du 1440p.",
   "note": "<strong>Réseau restrictif ?</strong> MoonlightWeb bascule automatiquement (UDP → TCP), et continue donc de fonctionner à travers les pare-feu stricts et le Wi-Fi d’hôtel hostile.",
   "read.h": "À lire ensuite",
   "x.faq.t": "FAQ",
