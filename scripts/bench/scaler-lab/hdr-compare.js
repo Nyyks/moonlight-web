@@ -25,6 +25,7 @@ const swap = Math.random() < 0.5;
 const sides = swap ? [SETS[1], SETS[0]] : [SETS[0], SETS[1]];
 
 const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 const status = (t) => ($("status").textContent = t);
 let renderers = [null, null];
 let ts = 1;
@@ -51,13 +52,20 @@ async function show(c) {
   const planes = new Uint8Array(await res.arrayBuffer());
   for (const [i, r] of renderers.entries()) {
     r.setOutputSize(c.ow, c.oh);
-    const frame = new VideoFrame(planes, {
-      format: "I420P10",
-      codedWidth: c.w,
-      codedHeight: c.h,
-      timestamp: ts++ * 16667,
-      colorSpace: { primaries: "bt2020", transfer: "pq", matrix: "bt2020-ncl", fullRange: false },
-    });
+    let frame;
+    try {
+      frame = new VideoFrame(planes, {
+        format: "I420P10",
+        codedWidth: c.w,
+        codedHeight: c.h,
+        timestamp: ts++ * 16667,
+        colorSpace: { primaries: "bt2020", transfer: "pq", matrix: "bt2020-ncl", fullRange: false },
+      });
+    } catch (e) {
+      throw new Error(
+        "ce navigateur ne construit pas d'image 10 bits (VideoFrame I420P10 : " + e.message + ") : pas d'A/B HDR ici",
+      );
+    }
     await r.draw(frame);
     const cv = [$("cvA"), $("cvB")][i];
     // one canvas pixel per device pixel
@@ -66,10 +74,22 @@ async function show(c) {
   }
   const r = renderers[0];
   const hdrScreen = matchMedia("(dynamic-range: high)").matches;
+  const path = r.lastDraw ? r.lastDraw.path : "?";
   status(
-    `${c.w}×${c.h} → ${c.ow}×${c.oh} | écran HDR : ${hdrScreen ? "oui" : "NON (activer le HDR de Windows)"} | ` +
-      `canvas : ${r._format}${r._hdrLinear ? ", HDR linéaire" : ", pas de HDR"} | chemin : ${r.lastDraw ? r.lastDraw.path : "?"}`,
+    `${c.w}×${c.h} → ${c.ow}×${c.oh} | écran HDR : ${hdrScreen ? "oui" : "non"} | ` +
+      `canvas : ${r._format}${r._hdrLinear ? ", HDR linéaire" : ", pas de HDR"} | chemin : ${path}`,
   );
+  // What the A/B compares holds only on the HDR linear path: say so instead
+  // of showing two pictures that are not the ones in question.
+  const why = [];
+  if (!hdrScreen) why.push("l'écran n'est pas en HDR (Windows : Paramètres > Écran > Utiliser le HDR ; iPhone : écran XDR requis)");
+  if (!r._hdrLinear || r._format !== "rgba16float")
+    why.push(`le navigateur a refusé le canvas HDR flottant (canvas ${r._format}) : le renderer est retombé sur le SDR`);
+  if (!path.includes("+yuv")) why.push(`l'image 10 bits n'a pas pu être relue (chemin ${path})`);
+  if (!path.startsWith("mwsr")) why.push(`le noyau n'a pas tourné (chemin ${path})`);
+  document.body.classList.toggle("degraded", why.length > 0);
+  $("warnText").innerHTML =
+    "<b>Cet A/B ne vaut pas pour la décision HDR sur cet appareil :</b><br>" + why.map((w) => "– " + esc(w)).join("<br>");
 }
 
 function syncScroll() {
@@ -102,16 +122,22 @@ async function main() {
   $("reveal").addEventListener("click", () => {
     $("key").textContent = `A = ${sides[0].key} · B = ${sides[1].key}`;
   });
-  addEventListener("keydown", (e) => {
-    if (e.code !== "Space" || !document.body.classList.contains("flip")) return;
-    e.preventDefault();
+  const flip = () => {
     const aHidden = $("paneA").classList.toggle("hidden");
     $("paneB").classList.toggle("hidden", !aHidden);
     // the same place in the picture on both
     const [from, to] = aHidden ? [$("paneA"), $("paneB")] : [$("paneB"), $("paneA")];
     to.scrollLeft = from.scrollLeft;
     to.scrollTop = from.scrollTop;
+  };
+  addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || !document.body.classList.contains("flip")) return;
+    e.preventDefault();
+    flip();
   });
+  // a phone has no Space bar
+  $("flipBtn").addEventListener("click", flip);
+  $("force").addEventListener("click", () => document.body.classList.add("force"));
   syncScroll();
   renderers = await makeRenderers();
   await show(CASES[0]);
@@ -120,6 +146,8 @@ async function main() {
 
 function fail(e) {
   status("erreur : " + ((e && e.message) || e));
+  document.body.classList.add("degraded");
+  $("warnText").innerHTML = "<b>Pas d'A/B HDR sur cet appareil :</b><br>– " + esc((e && e.message) || e);
   window.__error = String((e && e.stack) || e);
 }
 

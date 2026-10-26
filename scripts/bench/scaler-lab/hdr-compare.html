@@ -79,6 +79,28 @@
       body.flip .pane.hidden {
         display: none;
       }
+      #flipBtn {
+        display: none;
+      }
+      body.flip #flipBtn {
+        display: inline-block;
+      }
+      #warn {
+        display: none;
+        margin: 12px;
+        padding: 12px 16px;
+        border: 2px solid #e55;
+        border-radius: 6px;
+        background: #311;
+        font-size: 16px;
+        line-height: 1.4;
+      }
+      body.degraded #warn {
+        display: block;
+      }
+      body.degraded:not(.force) #panes {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -92,9 +114,14 @@
           <option value="flip">Bascule plein écran (Espace)</option>
         </select>
       </label>
+      <button id="flipBtn">Basculer A ↔ B</button>
       <button id="reveal">Révéler A / B</button>
       <span id="key"></span>
       <span id="status">…</span>
+    </div>
+    <div id="warn">
+      <div id="warnText"></div>
+      <button id="force">Afficher quand même (sans valeur pour la décision HDR)</button>
     </div>
     <div id="panes">
       <div class="pane" id="paneA"><div class="label">A</div><canvas id="cvA"></canvas></div>
