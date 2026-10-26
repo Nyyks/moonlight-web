@@ -120,12 +120,10 @@ import {
     tunnelShareToken,
     pageCameThroughTunnel,
     bootstrapAddress,
-    openSideTunnel,
 } from './net/tunnelBridge.js';
 import {
     unpackHandoffKeys,
     isHomeScreenHandoff,
-    startUrlWithSideKeys,
     isHandoffKeySpent,
     markHandoffKeySpent,
 } from './util/homeScreenKeys.js';
@@ -183,19 +181,10 @@ window.addEventListener('unhandledrejection', (evt) => {
 // The bootstrap's cache of the application's files (bootstrap/sw.js SHELL_CACHE),
 // the one its service worker answers /manifest.webmanifest from.
 const SHELL_CACHE = 'mw-shell';
-/** How many OTHER machines a home-screen shortcut is given keys for. Each is a
- *  connection of its own while the page is signed in; the register holds up
- *  to sixteen, and nobody has that many machines on at once. */
-const SIDE_KEYS_MAX = 8;
-/** How long the other machines' keys are kept for the next manifest, so that
- *  every page load does not open a line to every machine. Well inside the
- *  key's own life (AuthManager::HOME_SCREEN_KEY_TTL_SECS, 24 h), and a key
- *  that dies early is refused at the far end, nothing worse. */
-const SIDE_KEYS_KEEP_MS = 6 * 3600 * 1000;
-/** How long a machine that gave no key — off, an older build, no remembered
- *  session — is left alone before it is asked again. Short: it may be back on
- *  by the time the shortcut is actually made. */
-const SIDE_KEYS_RETRY_MS = 10 * 60 * 1000;
+/** Where the other machines' home-screen keys were kept until v0.4.1, which
+ *  stopped asking for them: each was a live key to a machine that another
+ *  machine's page, on this same origin, could read and spend from anywhere
+ *  (security review R1, 26/10/2026). Emptied at start. */
 const SIDE_KEYS_STORE = 'mw-hs-side-keys';
 /** A screen change seen while a relaunch is on its way is looked at again
  *  this long after (App._onClientScreenChanged), until none is. */
@@ -1423,30 +1412,15 @@ export const MoonlightApp = {
             }
             if (answered) markHandoffKeySpent(own);
         }
-        const pending = others.filter((o) => !isHandoffKeySpent(o.key));
-        if (pending.length) this._redeemSideKeys(pending);
+        // The other machines' keys a shortcut of before v0.4.1 carries are left
+        // unspent: this page no longer opens a line to another machine with
+        // that machine's key (R1). Each asks its PIN the first time the
+        // shortcut opens it, and the keys die on their own within a day.
+        if (others.length)
+            console.log(
+                `[MW] ${others.length} other machine(s) in this shortcut: their PIN is asked there`,
+            );
         return answered;
-    },
-
-    /** The other machines' keys, each over its own line, all at once. */
-    async _redeemSideKeys(pending) {
-        const name = `${LoginView.suggestedMachineName()} (home screen)`;
-        await Promise.all(
-            pending.map(async ({ id, key }) => {
-                let line = null;
-                try {
-                    line = await openSideTunnel(id);
-                    await BackendClient.redeemHomeScreenKeyAt(line.fetch, id, key, name);
-                    markHandoffKeySpent(key);
-                    console.log(`[MW] Home-screen key redeemed on ${id} — no PIN there either`);
-                } catch (err) {
-                    if (err.statusCode) markHandoffKeySpent(key);
-                    console.warn(`[MW] Home-screen key not redeemed on ${id}:`, err.message);
-                } finally {
-                    line?.close();
-                }
-            }),
-        );
     },
 
     /**
@@ -1456,14 +1430,15 @@ export const MoonlightApp = {
      * with has to leave with the one thing Safari gives it: the address in the
      * manifest. The host writes a single-use key into that address for a
      * signed-in session (/api/app/web-manifest), and keeps this browser's list of
-     * machines beside it, handed over when the key is spent. The other machines
-     * this browser knows are each asked for a key of their own, over a line to
-     * each (openSideTunnel), and those go into the same address: the shortcut
-     * then signs in everywhere that was on the line when it was made.
+     * machines beside it, handed over when the key is spent. This machine's key
+     * only: until v0.4.1 the other machines were each asked for one, over a line
+     * opened with their own key and cookie, which every machine's page on this
+     * shared origin could do as well (security review R1). The shortcut asks
+     * their PIN the first time it opens them.
      *
      * All best-effort. The list goes to the host first. Then the manifest with
-     * the key is fetched, the other machines' keys written into it, and the
-     * result written over the copy the service worker holds — the phone reads
+     * the key is fetched and written over the copy the service worker holds —
+     * the phone reads
      * the manifest while its share sheet is up, with this page's scripts
      * paused behind it, so a request the worker would send to this page waits
      * out the worker's timeout and the shortcut is made with nothing; the
@@ -1471,25 +1446,24 @@ export const MoonlightApp = {
      * a fresh URL, because the browser read it when the page loaded — before
      * the PIN, on a first visit — and that copy carries no key.
      *
-     * Not from a shortcut: it has no share sheet, and a line to every other
-     * machine on every launch is the last thing it needs.
+     * Not from a shortcut: it has no share sheet.
      */
     async _offerHomeScreenHandoff() {
+        try {
+            localStorage.removeItem(SIDE_KEYS_STORE);
+        } catch {
+            /* nothing kept, or no storage */
+        }
         const ownId = tunnelHostId();
         if (!ownId || this._runsAsShortcut()) return;
         const instances = listInstances();
         BackendClient.shareInstancesForHomeScreen(instances).catch(() => {});
-        const sideKeys = this._collectSideHandoffKeys(
-            instances.filter((e) => e.id !== ownId).slice(0, SIDE_KEYS_MAX),
-            instances,
-        );
         try {
             const fresh = await fetch(`/api/app/web-manifest?t=${Date.now()}`, {
                 cache: 'no-store',
             });
             if (!fresh.ok) return;
             const manifest = await fresh.json();
-            manifest.start_url = startUrlWithSideKeys(manifest.start_url, await sideKeys);
             // The bootstrap's cache, under the file's own name: what the worker
             // matches a request for /manifest.webmanifest against (sw.js).
             const shell = await caches.open(SHELL_CACHE);
@@ -1512,60 +1486,6 @@ export const MoonlightApp = {
             navigator.standalone === true ||
             (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches)
         );
-    },
-
-    /**
-     * A key from each of @p machines, kept for a while so the next page load
-     * reuses them rather than opening a line to every machine again. A machine
-     * that is off, or that this browser has no remembered session on, gives
-     * none and the shortcut asks its PIN when first opened on it.
-     *
-     * @returns {Promise<{id: string, key: string}[]>}
-     */
-    async _collectSideHandoffKeys(machines, instances) {
-        const now = Date.now();
-        let kept = [];
-        try {
-            kept = JSON.parse(localStorage.getItem(SIDE_KEYS_STORE) || '[]');
-            if (!Array.isArray(kept)) kept = [];
-        } catch {
-            kept = [];
-        }
-        // An answer still worth keeping: a key inside its keep time, or a
-        // refusal inside its retry time.
-        const fresh = new Map(
-            kept
-                .filter((k) => k && typeof k.id === 'string')
-                .filter((k) => {
-                    const age = now - (k.at || 0);
-                    return typeof k.key === 'string'
-                        ? age < SIDE_KEYS_KEEP_MS
-                        : age < SIDE_KEYS_RETRY_MS;
-                })
-                .map((k) => [k.id, k]),
-        );
-        const results = await Promise.all(
-            machines.map(async ({ id }) => {
-                if (fresh.has(id)) return fresh.get(id);
-                let line = null;
-                try {
-                    line = await openSideTunnel(id);
-                    const key = await BackendClient.askHomeScreenKeyAt(line.fetch, instances);
-                    return { id, key, at: now };
-                } catch (err) {
-                    console.log(`[MW] No home-screen key from ${id}: ${err.message}`);
-                    return { id, key: null, at: now };
-                } finally {
-                    line?.close();
-                }
-            }),
-        );
-        try {
-            localStorage.setItem(SIDE_KEYS_STORE, JSON.stringify(results));
-        } catch {
-            /* next load asks again */
-        }
-        return results.filter((k) => k.key).map(({ id, key }) => ({ id, key }));
     },
 
     /**

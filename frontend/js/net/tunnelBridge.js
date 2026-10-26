@@ -44,13 +44,11 @@
  *
  * When that connection drops, lineKeeper.js dials it again under the page.
  */
-import { LineKeeper, hangUp } from './lineKeeper.js';
+import { LineKeeper } from './lineKeeper.js';
 import { showLineNotice } from '../ui/LineNotice.js';
 
 /** The connection, and the next one when it drops; null without a tunnel. */
 let keeper = null;
-/** The bootstrap's transport module, once startTunnel() has loaded it. */
-let transport = null;
 let hostId = null;
 let hostKey = null;
 let shareToken = null;
@@ -163,53 +161,6 @@ export function openSignalingSocket(url) {
     return keeper.line.openSocket(parsed.pathname + parsed.search);
 }
 
-/** How long a side connection waits for the other machine to be on the line.
- *  Shorter than the transport's own deadline: a machine that is off is the
- *  ordinary case here, and nothing on screen waits for the answer. */
-const SIDE_TUNNEL_TIMEOUT_MS = 12000;
-
-/**
- * A connection to ANOTHER machine, for a question this page has for it — the
- * key a home-screen shortcut would open it with — while this page's own
- * connection stays as it is.
- *
- * The far machine gets its own cookie jar and its own pairing identity, both
- * named after it in this browser's storage, exactly as if a tab had been opened
- * on it: a session it remembers is presented, and the answer's cookie is kept
- * under its name. Nothing of the page's own connection is touched, and the
- * service worker never sees this line — a request on it is made here, not
- * through fetch().
- *
- * Resolves to { fetch, close }, or rejects when the machine is not on the line
- * within the deadline. The caller closes it; a connection to a machine one
- * only had a question for has no business staying up.
- *
- * @param {string} otherHostId
- * @param {number} [timeoutMs]
- */
-export async function openSideTunnel(otherHostId, timeoutMs = SIDE_TUNNEL_TIMEOUT_MS) {
-    if (!transport) throw new Error('this page is not on the rendezvous');
-    const side = new transport.Tunnel(otherHostId);
-    const close = () => hangUp(side);
-
-    let timer;
-    const deadline = new Promise((_, reject) => {
-        timer = setTimeout(
-            () => reject(new Error(`${otherHostId} did not answer in time`)),
-            timeoutMs,
-        );
-    });
-    try {
-        await Promise.race([side.connect(), deadline]);
-    } catch (e) {
-        close();
-        throw e;
-    } finally {
-        clearTimeout(timer);
-    }
-    return { fetch: (url, init) => side.fetch(url, init), close };
-}
-
 /**
  * Answer the service worker's requests from the live connection.
  *
@@ -272,8 +223,6 @@ export async function startTunnel(onStage) {
     } catch {
         return false;
     }
-    transport = mod;
-
     hostId = mod.hostIdFromLocation();
     hostKey = mod.hostKeyFromLocation();
     shareToken = mod.shareTokenFromLocation();
