@@ -181,7 +181,7 @@ jobs:
       # when the image moved to MSVC 14.51 (September 2026) the same OpenSSL
       # source came out crashing on every TLS handshake. See
       # docs/design/openssl-windows.md.
-      - uses: jurplel/install-qt-action@v4
+      - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: 6.11.2
           arch: ${{ matrix.qt_arch }}
@@ -330,8 +330,12 @@ jobs:
       - name: Detect signing secrets
         id: signing
         shell: pwsh
+        # Through env:, never into the script's text: a secret written into
+        # the source is one quote away from being code.
+        env:
+          SIGNPATH_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
         run: |
-          $on = -not [string]::IsNullOrWhiteSpace("${{ secrets.SIGNPATH_API_TOKEN }}")
+          $on = -not [string]::IsNullOrWhiteSpace($env:SIGNPATH_TOKEN)
           "enabled=$($on.ToString().ToLower())" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
           if (-not $on) {
             Write-Host "::warning title=Unsigned build::No SignPath token configured - this installer is UNSIGNED and will trip SmartScreen."
@@ -359,7 +363,7 @@ jobs:
         id: sign-payload
         if: steps.signing.outputs.enabled == 'true'
         continue-on-error: true
-        uses: SignPath/github-action-submit-signing-request@v2
+        uses: SignPath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -423,7 +427,7 @@ jobs:
         id: sign-installer
         if: steps.signing.outputs.enabled == 'true'
         continue-on-error: true
-        uses: SignPath/github-action-submit-signing-request@v2
+        uses: SignPath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -464,7 +468,7 @@ jobs:
           path: ${{ needs.setup.outputs.app }}-installer-${{ needs.setup.outputs.version }}-win-${{ matrix.arch }}.exe
 
       # Published to the GitHub Release only on a v* tag push.
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: ${{ needs.setup.outputs.app }}-installer-${{ needs.setup.outputs.version }}-win-${{ matrix.arch }}.exe
@@ -531,7 +535,7 @@ jobs:
           # there before a broken one reaches anyone's software centre.
           sudo gem install --no-document fpm
 
-      - uses: jurplel/install-qt-action@v4
+      - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: 6.11.2
           modules: qtwebsockets
@@ -742,7 +746,7 @@ jobs:
             ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-linux-x64.rpm
             ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.pkg_version }}-x86_64.AppImage
 
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
@@ -768,7 +772,7 @@ jobs:
       - name: Install build dependencies
         run: brew install cmake ninja openssl@3 pkg-config
 
-      - uses: jurplel/install-qt-action@v4
+      - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: 6.11.2
           host: mac
@@ -1011,7 +1015,7 @@ jobs:
           name: ${{ needs.setup.outputs.pkg }}-macos-arm64-${{ needs.setup.outputs.label }}
           path: ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.version }}-macos-arm64.pkg
 
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: ${{ needs.setup.outputs.pkg }}-${{ needs.setup.outputs.version }}-macos-arm64.pkg
@@ -1231,7 +1235,7 @@ jobs:
 
       # A public, unauthenticated URL deploy-packages.sh can just curl from the
       # box — a workflow-run artifact needs a GitHub login to fetch.
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         if: steps.sign.outputs.enabled == 'true'
         with:
           files: moonlightweb-repo-${{ needs.setup.outputs.pkg_version }}.tar.gz

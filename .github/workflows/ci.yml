@@ -132,14 +132,16 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v5
-      - uses: browser-actions/setup-chrome@v2
+      - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
         id: chrome
         with:
           chrome-version: stable
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - run: pip install websocket-client numpy pillow scikit-image
+      # Exact versions: a release of any of them must not change what the lab
+      # measures, or run code nobody looked at, from one run to the next.
+      - run: pip install "websocket-client==1.8.0" "numpy==2.1.3" "pillow==11.0.0" "scikit-image==0.24.0"
       - name: WebGPU side (the kernel cells and the WebGPU chain)
         env:
           MW_CHROME: ${{ steps.chrome.outputs.chrome-path }}
@@ -238,7 +240,7 @@ jobs:
         with:
           submodules: recursive # moonlight-common-c provides Limelight.h
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: 6.11.2
           arch: win64_msvc2022_64

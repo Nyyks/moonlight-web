@@ -130,6 +130,7 @@ jobs:
     # release_tag run it is the tag's, not this run's.
     outputs:
       rev: ${{ steps.rev.outputs.short }}
+      newest: ${{ steps.newest.outputs.newest }}
     steps:
       - name: Check the release tag
         if: ${{ inputs.release_tag != '' }}
@@ -143,6 +144,22 @@ jobs:
           ref: ${{ inputs.release_tag || '' }}
           submodules: recursive # moonlight-common-c, libdatachannel, miniupnpc, qmdnsengine
           fetch-depth: 0 # `git describe` needs the last v* tag
+
+      # `latest` follows a tag only when it is the newest release: a fix pushed
+      # on an older line, or an older one republished, must not move every
+      # `latest` user back to it.
+      - id: newest
+        if: ${{ inputs.release_tag != '' || startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          newest=$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+          if [ "$newest" = "$TAG" ]; then
+            echo "newest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "newest=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$TAG is not the newest release ($newest): \`latest\` stays where it is"
+          fi
 
       # The tag's sources, this run's recipe: the fix the tag missed.
       - name: Take the Dockerfile from this run's commit
@@ -181,9 +198,11 @@ jobs:
       # ghcr.io rejects an upper-case path and a fork's owner may well have one,
       # so ${...@L} lower-cases it rather than hoping.
       - id: img
+        env:
+          TAG: ${{ inputs.release_tag }}
         run: |
           name="${GITHUB_REPOSITORY@L}"
-          if [ "${{ github.event_name }}" = workflow_dispatch ] && [ -z "${{ inputs.release_tag }}" ]; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -z "$TAG" ]; then
             name="$name-dev"
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -267,9 +286,11 @@ jobs:
 
       # Must reach the same verdict as the build job's step of the same name.
       - id: img
+        env:
+          TAG: ${{ inputs.release_tag }}
         run: |
           name="${GITHUB_REPOSITORY@L}"
-          if [ "${{ github.event_name }}" = workflow_dispatch ] && [ -z "${{ inputs.release_tag }}" ]; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -z "$TAG" ]; then
             name="$name-dev"
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -295,7 +316,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ inputs.release_tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.release_tag }}
-            type=raw,value=latest,enable=${{ (startsWith(github.ref, 'refs/tags/v') && github.event_name != 'workflow_dispatch') || inputs.release_tag != '' }}
+            type=raw,value=latest,enable=${{ ((startsWith(github.ref, 'refs/tags/v') && github.event_name != 'workflow_dispatch') || inputs.release_tag != '') && needs.build.outputs.newest == 'true' }}
             type=raw,value=dev,enable=${{ github.event_name == 'workflow_dispatch' && inputs.release_tag == '' }}
             type=raw,value=sha-${{ needs.build.outputs.rev }}
 
