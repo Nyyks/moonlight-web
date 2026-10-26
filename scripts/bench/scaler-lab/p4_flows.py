@@ -23,9 +23,10 @@ as the kernel cells, are held to the kernel in two ways:
 
 On the software adapters the two sides cannot share a Chrome (ANGLE forced on
 SwiftShader switches WebGPU off), so the flow is run once per side: first
-`--swiftshader --conformity` (the WebGPU cells, the ground truths and the
-reduced inputs), then `--webgl-swiftshader --conformity` (the WebGL2 chain on
-those inputs), each run dumping its cells under the same names and comparing
+`--swiftshader --conformity` (the WebGPU cells, every input picture, posted
+as PNG, the ground truths and the reduced inputs), then `--webgl-swiftshader
+--conformity` (the WebGL2 chain on those same pixels), each run dumping its
+cells under the same names and comparing
 every pair whose two dumps are on disk. On a GPU (one Chrome for both) a single
 run does it all. Called from scaler_lab.py with its `run_page`.
 
@@ -158,19 +159,31 @@ def conformity(a, run_page):
     # ── pixels: the golden cases ──
     for content, size_in, size_out in cases():
         down = int(size_out.split("x")[0]) < int(size_in.split("x")[0])
+        base = "conf-%s-%s-%s" % (content, size_in, size_out)
+        key = "%s %s->%s" % (content, size_in, size_out)
+        # The twins on the same pixels: the WebGPU side draws each case's
+        # picture once and posts it, and both sides read that PNG back as their
+        # input. A mire each Chrome drew itself (Canvas2D text) was not the same
+        # picture in the runner's two Chromes, a glyph edge a few /255 apart
+        # before any renderer (J32): the reduction of `code` fell out of the
+        # bilinears' yardstick on it (CI 39912544431, 40233795656).
+        src = base + "-src"
         if gl_side:
+            if not os.path.exists(os.path.join(a.dir, src + "-gt.png")):
+                print(key, "pending: the WebGPU side draws the input (--swiftshader --conformity first)")
+                continue
             cells = list(GL_CELLS) + ([BASE_PAIR[0]] if down else [])
         else:
+            if page("gt=1&content=%s&out=%s&tag=%s" % (content, size_in, src), key + " input") is None:
+                continue
             cells = sorted({c for p in PAIRS for c in (p[0], p[2] if down else p[1])})
             if down:
                 # the two bare bilinears, the reduction's yardstick
                 cells += [BASE_PAIR[1], BASE_PAIR[0]]
             if a.swiftshader:
                 cells = [c for c in cells if not c.startswith("chain-gl-")]
-        base = "conf-%s-%s-%s" % (content, size_in, size_out)
-        key = "%s %s->%s" % (content, size_in, size_out)
-        res = page("in=%s&out=%s&content=%s&codec=none&cells=%s&dump=all%s&nopresent=1&tag=%s" % (
-            size_in, size_out, content, ",".join(cells), p3_flows.QUICK, base), key)
+        res = page("in=%s&out=%s&content=img:/__dir/%s-gt.png&codec=none&cells=%s&dump=all%s&nopresent=1&tag=%s" % (
+            size_in, size_out, src, ",".join(cells), p3_flows.QUICK, base), key)
         if res is None:
             continue
         missing = [c for c in cells if not os.path.exists(dump_path(a, base, c)) and c not in na]

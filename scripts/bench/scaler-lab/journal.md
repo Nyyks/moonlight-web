@@ -2509,3 +2509,35 @@ réunir le rouge d'un texel et le vert d'un autre. En 4:4:4, le pic reste à 0,9
 **Pour rejouer.** `python -X utf8 scripts/bench/scaler-lab/hdr_check.py`, avec `--only` (des cas par leur nom) ou
 `--keep` (garder les relectures). Il faut `C:\Test\01_4K.png` pour le jeu ; sans elle, ces cas sont sautés. Environ
 trois minutes ; la sortie va dans `bench-out/scaler-lab/hdr/`.
+
+## 2026-10-26 — J46, la conformité des jumeaux sur une seule image d'entrée
+
+**Le résidu.** Depuis le 23/10, le job « Upscaler lab » sort rouge au pas WebGL2, sur un seul cas : la réduction
+2560×1440 → 1280×720 de `code`. Le jumeau y diffère du noyau de 4/255 au plus, sur 0,173 % de pixels au-delà de
+2/255, pour une limite de 0,1 %. Les bilinéaires nus, eux, diffèrent de 3/255 sur 0,014 % (CI 39912544431 et
+40233795656, mêmes chiffres). Bruno a dit oui le 26/10, par 59, pour le corriger dans la v0.4.1.
+
+**La cause.** Chaque côté dessinait sa mire lui-même, en Canvas2D. Sur le runner, les deux Chromes ne tracent pas
+les mêmes bords de glyphes. Les bilinéaires nus de `code` y diffèrent sur 7,09 % des pixels, contre 3,80 % dans le
+rejeu WSL de la même plateforme. J32 l'avait vu sur `text` : la différence est dans l'entrée, avant tout renderer.
+Le mètre des bilinéaires la porte, mais mal : un pixel de la grille 2×2 lit quatre points de l'entrée, le bilinéaire
+un seul.
+
+**Le correctif (`p4_flows.py`).**
+- Le côté WebGPU dessine une fois l'image de chaque cas doré, à sa taille d'entrée (la page `gt=1`), et la poste en
+  PNG.
+- Les deux côtés relisent ce PNG comme entrée (`content=img:`), comme la jambe de qualité le faisait déjà avec ses
+  entrées réduites.
+- Le côté WebGL2 attend ce fichier (« pending ») si le côté WebGPU n'a pas tourné.
+- Le mètre, les tolérances et `ci.yml` ne changent pas.
+
+**Vérifié sous Windows** (SwiftShader, les deux côtés, sortie 0 et 0) :
+- Les trois réductions sont exactes, bilinéaires nus et jumeau compris : 0/255. Avant, sur les mires que chaque
+  Chrome dessinait : `code` 1/255, `text` 1/255, zone plate 4/255. Ces écarts venaient donc tous de l'entrée, même
+  sur la zone plate.
+- La chaîne WebGPU reste égale au noyau (0/255) sur les neuf cas.
+- La qualité du jumeau contre le noyau ne change pas : FLIP 0,000, PSNR à 0,047 dB au plus, 0,001 % de dépassements.
+
+**Ce qui reste.** Seul le runner peut dire si ses réductions passent, au prochain push de Bruno. Le rejeu WSL ne
+reproduisait pas ses chiffres de `text` et de `code`. Sur la zone plate, J32 avait attribué les 36/255 des
+bilinéaires à l'échantillonneur WebGPU de Linux. Si c'était aussi l'entrée, cet écart tombera à 0.
