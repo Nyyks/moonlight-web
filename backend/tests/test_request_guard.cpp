@@ -522,4 +522,20 @@ void run_request_guard_tests()
     CHECK(!lockedByNoAdmin("POST", "/api/auth/logout"));
     CHECK(!lockedByNoAdmin("POST", "/api/share/player/join"));
     CHECK(!lockedByNoAdmin("POST", "/api/logs/client"));
+
+    // share_in_booth_mode (issue #40): the share slots and a guest's PIN come
+    // back, and nothing else does.
+    CHECK(lockedByNoAdmin("POST", "/api/share/slots/2/activate", false));
+    CHECK(lockedByNoAdmin("POST", "/api/share/player/pin", false));
+    CHECK(!lockedByNoAdmin("POST", "/api/share/slots/2/activate", true));
+    CHECK(!lockedByNoAdmin("POST", "/api/share/slots/2/permissions", true));
+    CHECK(!lockedByNoAdmin("POST", "/api/share/slots/2/deactivate", true));
+    CHECK(!lockedByNoAdmin("POST", "/api/share/player/pin", true));
+    CHECK(lockedByNoAdmin("POST", "/api/auth/validate", true));
+    CHECK(lockedByNoAdmin("POST", "/api/auth/admin-unlock", true));
+    CHECK(lockedByNoAdmin("POST", "/api/auth/regenerate", true));
+    CHECK(lockedByNoAdmin("POST", "/api/hosts/manual", true));
+    CHECK(lockedByNoAdmin("POST", "/api/hosts/uuid-1/pair", true));
+    CHECK(lockedByNoAdmin("POST", "/api/update/start", true));
+    CHECK(lockedByNoAdmin("POST", "/api/system/restart", true));
 }

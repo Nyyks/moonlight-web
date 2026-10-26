@@ -391,6 +391,10 @@ void AppSettings::seedDocumentedDefaults()
         obj["share_guests_admin_windows"] = false;
         changed = true;
     }
+    if (!obj.contains("share_in_booth_mode")) {
+        obj["share_in_booth_mode"] = false;
+        changed = true;
+    }
     if (!obj.contains("stream_worker_enabled")) {
         obj["stream_worker_enabled"] = true;
         changed = true;
@@ -698,6 +702,12 @@ bool AppSettings::shareGuestsAdminWindows() const
     // Only a real true opens them: a value someone typed as "true" (a string)
     // or 1 is not a decision to make a stranger administrator.
     return obj.value("share_guests_admin_windows").toBool(false);
+}
+
+bool AppSettings::shareInBoothMode() const
+{
+    // Only a real true, as above: letting guests into a booth is a decision.
+    return readAll().value("share_in_booth_mode").toBool(false);
 }
 
 QString AppSettings::keyboardLayoutFidelity() const

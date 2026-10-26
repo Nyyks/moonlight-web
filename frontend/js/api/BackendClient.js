@@ -735,6 +735,8 @@ export class BackendClient {
         if (status.authenticated || status.is_localhost) this._hadSession = true;
         // Booth mode (--noadmin): the views read it here rather than each asking.
         this.adminLocked = status.admin_locked === true;
+        // share_in_booth_mode (issue #40): the booth still offers Share.
+        this.boothShare = this.adminLocked && status.booth_share === true;
         return status;
     }
     /** End this browser's own session and clear its cookie. Works from anywhere

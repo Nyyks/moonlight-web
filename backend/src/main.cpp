@@ -2174,6 +2174,10 @@ int main(int argc, char* argv[])
     if (adminLocked)
         Logger::info("[Auth] Booth mode (--noadmin): administration is off until a restart "
                      "without the flag");
+    const bool boothShare = adminLocked && appSettings.shareInBoothMode();
+    server.setBoothShare(boothShare);
+    if (boothShare)
+        Logger::info("[Auth] Booth mode: sharing during a stream stays on (share_in_booth_mode)");
     server.setHomeScreenIdentity([&appSettings, &authManager](const HttpRequest& req) {
         return HttpServer::HomeScreenIdentity{
             appSettings.rendezvousId(), appSettings.displayName(),

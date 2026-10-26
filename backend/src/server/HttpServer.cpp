@@ -1250,7 +1250,7 @@ void HttpServer::serveRequest(HttpRequest req, Arrival arrival, ResponseCallback
                             .arg(req.headers.value("host"), req.path));
     }
 
-    if (m_AdminLocked && RequestGuard::lockedByNoAdmin(req.method, req.path)) {
+    if (m_AdminLocked && RequestGuard::lockedByNoAdmin(req.method, req.path, m_BoothShare)) {
         QJsonObject obj;
         obj["error"] = "admin_locked";
         respond(HttpResponse::json(obj, 403));
@@ -1259,6 +1259,7 @@ void HttpServer::serveRequest(HttpRequest req, Arrival arrival, ResponseCallback
 
     const bool localPrivilege = decision.localPrivilege;
     req.adminLocked = m_AdminLocked;
+    req.boothShare = m_AdminLocked && m_BoothShare;
     req.isLocal = decision.adminPrivilege;
     req.isHostMachine = decision.hostMachine;
     req.hostTrusted = decision.hostTrusted;

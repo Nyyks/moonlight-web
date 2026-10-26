@@ -45,6 +45,8 @@ struct HttpRequest
     bool adminLocked = false;   // Launched with --noadmin: isLocal is false for
                                 // everyone, and the host machine is trusted to
                                 // stream (isHostMachine) without administering.
+    bool boothShare = false;    // Under --noadmin, share_in_booth_mode lets the
+                                // one streaming invite guests (issue #40).
     bool hostTrusted = false;   // The Host header names this machine (loopback,
                                 // a LAN address, an mDNS name, or our domain) —
                                 // false means we were reached under someone

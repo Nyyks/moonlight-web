@@ -305,7 +305,7 @@ AdminTokenReply adminTokenReply(const Decision& decision, const Context& ctx, bo
     return AdminTokenReply::Deny;
 }
 
-bool lockedByNoAdmin(const QString& method, const QString& path)
+bool lockedByNoAdmin(const QString& method, const QString& path, bool shareAllowed)
 {
     if (method == QLatin1String("GET") || method == QLatin1String("HEAD")) return false;
 
@@ -322,6 +322,7 @@ bool lockedByNoAdmin(const QString& method, const QString& path)
         return seg.size() == 3 && doors.contains(seg[2]);
     }
     if (area == QLatin1String("share")) {
+        if (shareAllowed) return false;
         if (seg.size() >= 3 && seg[2] == QLatin1String("slots")) return true;
         return seg.size() == 4 && seg[2] == QLatin1String("player") &&
                seg[3] == QLatin1String("pin");

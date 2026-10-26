@@ -160,6 +160,19 @@ public:
 
     bool shareGuestsAdminWindows() const;
 
+    // ── Sharing from a booth ──────────────────────────────────────────────────
+    //
+    // Whether booth mode (--noadmin) still lets the one streaming invite guests
+    // (issue #40). Off, the booth lets no new guest in. On, the share slots and
+    // a guest's PIN are let through again, and nothing else: no PIN login for a
+    // new device, no admin, the host list stays frozen.
+    //
+    // File-only setting (no UI, no write route): stored as JSON bool
+    // "share_in_booth_mode", DEFAULT false, seeded so it can be found, read once
+    // at startup. Explained to owners in the wiki, Security §6.2.2.
+
+    bool shareInBoothMode() const;
+
     // ── Keyboard layout fidelity ──────────────────────────────────────────────
     //
     // When the host types the character the CLIENT's keyboard layout produced,

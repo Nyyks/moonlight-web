@@ -490,6 +490,8 @@ void registerAuthRoutes(HttpServer& server, AuthManager& authManager, GeoIpServi
         obj["is_host_machine"] = req.isHostMachine;
         // --noadmin: nobody administers, the browser on the host still streams.
         obj["admin_locked"] = req.adminLocked;
+        // share_in_booth_mode: the booth still offers Share during a stream.
+        if (req.adminLocked) obj["booth_share"] = req.boothShare;
         const bool hostTrusted = isLocal || (req.adminLocked && req.isHostMachine);
 
         if (isLocal) {

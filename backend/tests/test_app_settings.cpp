@@ -538,6 +538,30 @@ void run_app_settings_tests()
         s.seedDocumentedDefaults();
     }
 
+    // A booth lets no guest in unless the owner wrote a real true (issue #40):
+    // seeded as false, absent reads as false, a string or 1 is not a decision.
+    {
+        CHECK(s.readAll().contains("share_in_booth_mode"));
+        CHECK_EQ(s.readAll().value("share_in_booth_mode").toBool(true), false);
+        CHECK(!s.shareInBoothMode());
+        QJsonObject obj = s.readAll();
+        obj["share_in_booth_mode"] = true;
+        s.writeAll(obj);
+        CHECK(s.shareInBoothMode());
+        s.seedDocumentedDefaults();
+        CHECK(s.shareInBoothMode());
+        obj["share_in_booth_mode"] = "true";
+        s.writeAll(obj);
+        CHECK(!s.shareInBoothMode());
+        obj["share_in_booth_mode"] = 1;
+        s.writeAll(obj);
+        CHECK(!s.shareInBoothMode());
+        obj.remove("share_in_booth_mode");
+        s.writeAll(obj);
+        CHECK(!s.shareInBoothMode());
+        s.seedDocumentedDefaults();
+    }
+
     // The native host is offered unless someone says otherwise — and an absent
     // key says nothing, which is the state every install before this setting is
     // in. Only an explicit false hides the card.

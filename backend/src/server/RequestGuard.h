@@ -162,7 +162,9 @@ AdminTokenReply adminTokenReply(const Decision& decision, const Context& ctx, bo
 /// (add, scan, remove, rename, pair, restart its service, set up its backend,
 /// its seats — anything but waking a host and playing on it), the
 /// self-update, letting a new device or guest in (PIN login, share slots, a
-/// guest's PIN), the admin unlock and the system actions.
-bool lockedByNoAdmin(const QString& method, const QString& path);
+/// guest's PIN), the admin unlock and the system actions. shareAllowed
+/// (share_in_booth_mode, issue #40) lets the share slots and a guest's PIN
+/// through, and nothing else.
+bool lockedByNoAdmin(const QString& method, const QString& path, bool shareAllowed = false);
 
 } // namespace RequestGuard
