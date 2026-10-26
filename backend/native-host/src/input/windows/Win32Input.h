@@ -196,8 +196,9 @@ public:
     /// only so the file-local helper can build one.
     struct WindowStanding
     {
-        int level = -1;   ///< integrity RID; -1 = unknown (protected process)
-        std::string name; ///< "title" (exe, pid), filled for elevated windows only
+        int level = -1;    ///< integrity RID; -1 = unknown (no window, a token not ours to read)
+        bool ours = false; ///< a window of this very process: never in the way
+        std::string name;  ///< "title" (exe, pid), filled for elevated and unknown windows only
     };
 
 private:
@@ -211,12 +212,45 @@ private:
 
     const WindowStanding& cachedStanding(void* window, StandingCache& cache);
     /// "uipi", "policy", or "" when a press aimed at `standing` goes through.
+    /// An unknown window is "policy" unless the viewer is let into elevated ones.
     const char* gateReason(const WindowStanding& standing) const;
     /// Tell the log and the listener when the gate's state changed. @p window
     /// is the HWND `standing` describes, kept so releaseBlock knows what to
     /// leave minimised. @p force reports even an unchanged state, which is how
     /// releaseBlock answers a viewer waiting on its own button.
     void reportGate(const WindowStanding& standing, void* window, bool force = false);
+
+    // ── Between the gate and Windows (security review M2, 26/10/2026) ───────
+    //
+    // The gate reads the window a press is aimed at when the press is handed
+    // over; Windows applies it after whatever was sent before it. For a viewer
+    // the policy holds back, two things close that gap: a click or a scroll in
+    // absolute mode goes in WITH the position the gate looked at, in the same
+    // SendInput; and a press that follows what switches windows waits for the
+    // switch to land. While the viewer moves relatively nothing is anchored —
+    // an absolute move would be a jump in a game — and a window that takes the
+    // focus on its own, in the instant between the check and the press, is
+    // not caught either.
+
+    /// What may switch windows, noted after it is sent. Input-thread only.
+    void noteSwitch(const InputEvent& event);
+    /// Wait out a switch noted less than 100 ms ago: any press waits for one
+    /// asked by the keyboard, a keyboard press also for a click's.
+    void settleAfterSwitch(bool keyboard);
+    /// A held-back viewer's press goes where it was last placed.
+    bool anchored() const;
+
+    /// The last placement, in desktop pixels and in SendInput's absolute
+    /// units. Input-thread only, like m_Relative.
+    bool m_Placed = false;
+    int64_t m_PlacedX = 0;
+    int64_t m_PlacedY = 0;
+    int32_t m_PlacedAbsX = 0;
+    int32_t m_PlacedAbsY = 0;
+    /// When a switch was last asked by the keyboard, and by a click; 0: none
+    /// pending. Input-thread only.
+    int64_t m_SwitchUs = 0;
+    int64_t m_ClickUs = 0;
 
     StandingCache m_Focused;     ///< the foreground window — keyboard's target
     StandingCache m_UnderCursor; ///< the window under the pointer — a click's

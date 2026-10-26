@@ -125,18 +125,32 @@ std::string narrow(const wchar_t* wide)
 ///  - Policy: a window at high integrity or above runs as administrator, and
 ///    a viewer without that standing on this machine is not let into it even
 ///    when the OS would allow it (SessionConfig::allowElevatedInput).
+///
+/// A window that cannot be read is UNKNOWN, level -1, and the policy holds it
+/// back like an administrator's (gateReason): no window at all is what a worker
+/// that does not follow the input desktop sees while the secure desktop has it
+/// (a UAC prompt), and a token it may not open is a process of SYSTEM's. Our
+/// own windows are the one exception, and say so.
 Win32Input::WindowStanding standingOf(HWND window)
 {
     Win32Input::WindowStanding standing;
+    standing.name = "(no window MoonlightWeb can read: the secure desktop, or a process "
+                    "of SYSTEM's)";
     if (!window) return standing;
 
     DWORD pid = 0;
     ::GetWindowThreadProcessId(window, &pid);
-    if (pid == 0 || pid == ::GetCurrentProcessId()) return standing;
+    if (pid == 0) return standing;
+    if (pid == ::GetCurrentProcessId()) {
+        standing.ours = true;
+        standing.name.clear();
+        return standing;
+    }
 
     HANDLE process = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!process) return standing;
     standing.level = integrityLevel(process);
+    if (standing.level >= 0) standing.name.clear();
 
     if (standing.level >= SECURITY_MANDATORY_HIGH_RID) {
         wchar_t title[256] = {};
@@ -153,13 +167,71 @@ Win32Input::WindowStanding standingOf(HWND window)
     return standing;
 }
 
-/// The top-level window under the pointer: what a click would land on.
+/// The top-level window at @p p: what a click there would land on.
+HWND windowAt(POINT p)
+{
+    HWND hit = ::WindowFromPoint(p);
+    return hit ? ::GetAncestor(hit, GA_ROOT) : nullptr;
+}
+
+/// The top-level window under the pointer.
 HWND windowUnderCursor()
 {
     POINT p = {};
     if (!::GetCursorPos(&p)) return nullptr;
-    HWND hit = ::WindowFromPoint(p);
-    return hit ? ::GetAncestor(hit, GA_ROOT) : nullptr;
+    return windowAt(p);
+}
+
+/// The pointer placed at @p absX, @p absY, in SendInput's absolute coordinates
+/// over the whole virtual desktop.
+INPUT absoluteMove(LONG absX, LONG absY)
+{
+    INPUT input = {};
+    input.type = INPUT_MOUSE;
+    input.mi.dx = absX;
+    input.mi.dy = absY;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    return input;
+}
+
+/// One button's edge as SendInput takes it; false for a button there is none of.
+bool buttonInput(int button, bool down, INPUT& input)
+{
+    input = {};
+    input.type = INPUT_MOUSE;
+    switch (button) {
+    case 1: input.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
+    case 2: input.mi.dwFlags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
+    case 3: input.mi.dwFlags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP; break;
+    case 4:
+        input.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+        input.mi.mouseData = XBUTTON1;
+        break;
+    case 5:
+        input.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+        input.mi.mouseData = XBUTTON2;
+        break;
+    default: return false;
+    }
+    return true;
+}
+
+bool isModifierKey(int vk)
+{
+    switch (vk) {
+    case VK_SHIFT:
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+    case VK_CONTROL:
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+    case VK_MENU:
+    case VK_LMENU:
+    case VK_RMENU:
+    case VK_LWIN:
+    case VK_RWIN: return true;
+    default: return false;
+    }
 }
 
 int64_t steadyNowUs()
@@ -1044,7 +1116,14 @@ void Win32Input::injectNow(const InputEvent& event)
     // the injection. Reported once per change, not once per drop.
     if (isPress(event.type)) {
         const bool mouse = isMouse(event.type);
-        HWND target = mouse ? windowUnderCursor() : nullptr;
+        if (!m_AllowElevated && !event.resync) settleAfterSwitch(!mouse);
+        HWND target = nullptr;
+        if (mouse && anchored()) {
+            POINT placed = {static_cast<LONG>(m_PlacedX), static_cast<LONG>(m_PlacedY)};
+            target = windowAt(placed);
+        } else if (mouse) {
+            target = windowUnderCursor();
+        }
         if (!target) target = ::GetForegroundWindow();
         const WindowStanding& standing = cachedStanding(target, mouse ? m_UnderCursor : m_Focused);
         if (*gateReason(standing)) {
@@ -1053,8 +1132,22 @@ void Win32Input::injectNow(const InputEvent& event)
             return;
         }
     }
+    // Ctrl+Alt+Suppr opens the secure desktop, which locks the host, signs
+    // its user out or starts Task Manager: an administrator's act, held back
+    // from a viewer the policy holds back (share_guests_admin_windows lets
+    // them through with the rest).
+    if (event.type == InputEvent::Type::SecureAttention && !m_AllowElevated) {
+        m_Gated.fetch_add(1, std::memory_order_relaxed);
+        log::warning("[native] input: Ctrl+Alt+Suppr not sent — this viewer is not let into "
+                     "administrator windows, and the secure desktop is one");
+        return;
+    }
+    // A foreground that cannot be read is said only by a press it held back,
+    // just above: one that comes and goes as a window loses activation would
+    // otherwise flash the viewer's strip at every motion.
     HWND foreground = ::GetForegroundWindow();
-    reportGate(cachedStanding(foreground, m_Focused), foreground);
+    const WindowStanding& focused = cachedStanding(foreground, m_Focused);
+    if (focused.level >= 0 || focused.ours) reportGate(focused, foreground);
     m_Injected.fetch_add(1, std::memory_order_relaxed);
 
     switch (event.type) {
@@ -1093,6 +1186,63 @@ void Win32Input::injectNow(const InputEvent& event)
         if (m_Gamepad) m_Gamepad->remove(event);
         break;
     }
+    if (!m_AllowElevated && !event.resync) noteSwitch(event);
+}
+
+/// What may switch windows under a viewer the gate holds back. Windows does it
+/// a little after the keys that ask for it — Alt+Tab when Alt goes up — so a
+/// press sent right behind them would be checked against the window that is
+/// leaving, and land in the one that comes: an administrator's, perhaps
+/// (security review M2, 26/10/2026). Noted here, waited for by the next press
+/// (settleAfterSwitch).
+void Win32Input::noteSwitch(const InputEvent& event)
+{
+    switch (event.type) {
+    case InputEvent::Type::KeyUp:
+        // Alt+Tab, Alt+Esc, the Start menu: the switch lands as Alt or the
+        // Windows key goes up.
+        if (event.keyCode == VK_MENU || event.keyCode == VK_LMENU || event.keyCode == VK_RMENU ||
+            event.keyCode == VK_LWIN || event.keyCode == VK_RWIN)
+            m_SwitchUs = steadyNowUs();
+        break;
+    case InputEvent::Type::KeyDown:
+    case InputEvent::Type::CharDown: {
+        // Any key with Alt or the Windows key held (Alt+F4, Win+1), and
+        // Ctrl+Esc or Ctrl+Shift+Esc, which opens Task Manager — an
+        // administrator's window wherever its user is one.
+        if (event.type == InputEvent::Type::KeyDown && isModifierKey(event.keyCode)) break;
+        std::lock_guard<std::mutex> lock(m_HeldMutex);
+        const WinHeldMods held = heldModsLocked();
+        if (held.alt || held.win || (held.ctrl && event.keyCode == VK_ESCAPE))
+            m_SwitchUs = steadyNowUs();
+        break;
+    }
+    case InputEvent::Type::MouseButtonUp:
+        // A click activates the window it lands on, the taskbar's included —
+        // a switch for the keyboard. Not while the viewer moves relatively,
+        // as a game does: keys pressed with a click there would all wait.
+        if (!m_Relative) m_ClickUs = steadyNowUs();
+        break;
+    default: break;
+    }
+}
+
+void Win32Input::settleAfterSwitch(bool keyboard)
+{
+    // Long enough for the shell's switch, measured by nobody but generous;
+    // short enough that a key typed right after Alt+Tab is barely late.
+    constexpr int64_t kSettleUs = 100000;
+    const int64_t since = std::max<int64_t>(m_SwitchUs, keyboard ? m_ClickUs : 0);
+    m_SwitchUs = 0;
+    if (keyboard) m_ClickUs = 0;
+    if (since == 0) return;
+    const int64_t waitUs = since + kSettleUs - steadyNowUs();
+    if (waitUs > 0) std::this_thread::sleep_for(std::chrono::microseconds(waitUs));
+}
+
+bool Win32Input::anchored() const
+{
+    return !m_AllowElevated && !m_Relative && m_Placed;
 }
 
 void Win32Input::injectKey(const InputEvent& event, bool down)
@@ -1406,7 +1556,10 @@ const Win32Input::WindowStanding& Win32Input::cachedStanding(void* window, Stand
 
 const char* Win32Input::gateReason(const WindowStanding& standing) const
 {
-    if (standing.level < 0) return "";
+    if (standing.ours) return "";
+    // Unknown is closed to a viewer the policy holds back, never open: that
+    // is where a UAC prompt is, for a worker that cannot see it (standingOf).
+    if (standing.level < 0) return m_AllowElevated ? "" : "policy";
     const int ours = ownIntegrityLevel();
     // The OS's refusal first: it applies whatever the policy says, and naming
     // it tells the operator what to change (run elevated), where "policy"
@@ -1439,6 +1592,9 @@ void Win32Input::reportGate(const WindowStanding& standing, void* window, bool f
             std::string(reason) == "uipi"
                 ? "runs elevated and MoonlightWeb does not (UIPI) — nothing reaches it until "
                   "another window takes focus, or MoonlightWeb runs elevated"
+            : standing.level < 0
+                ? "cannot be told apart from an administrator's, and this viewer is not one "
+                  "here — presses are dropped until a window that can be read takes focus"
                 : "runs as administrator and this viewer is not one here — presses are dropped "
                   "until another window takes focus";
         log::warning("[native] input gate closed: the window " + standing.name + " " + why);
@@ -1668,11 +1824,13 @@ void Win32Input::injectMousePosition(const InputEvent& event)
         m_WheelNotches.reset();
         m_PanNotches.reset();
     }
-    INPUT input = {};
-    input.type = INPUT_MOUSE;
-    input.mi.dx = absX;
-    input.mi.dy = absY;
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    // Kept for the press that follows: see anchored().
+    m_Placed = true;
+    m_PlacedX = x;
+    m_PlacedY = y;
+    m_PlacedAbsX = absX;
+    m_PlacedAbsY = absY;
+    INPUT input = absoluteMove(absX, absY);
     sendOne(input);
 }
 
@@ -1701,8 +1859,15 @@ void Win32Input::injectMouseButton(int button, bool down)
 
     // Through our mouse while the viewer moves relatively; released the way it
     // was pressed, whatever the viewer does in between.
+    //
+    // Never for a viewer the policy holds back from administrator windows: a
+    // device's report is hardware input, which reaches the secure desktop and
+    // its UAC prompt, and lands wherever the pointer is when Windows reads it,
+    // not where the gate looked. SendInput reaches neither. Their motion still
+    // goes through our mouse, which shows the pointer and clicks nothing.
     const uint8_t bit = systemmouse::buttonBit(button);
-    const bool throughMouse = m_Mouse && (down ? m_Relative : (m_MouseButtons & bit) != 0);
+    const bool throughMouse =
+        m_Mouse && (down ? m_Relative && m_AllowElevated : (m_MouseButtons & bit) != 0);
     const int64_t startUs = m_ClickTrace && down ? steadyNowUs() : 0;
     if (throughMouse) {
         m_MouseButtons = static_cast<uint8_t>(down ? m_MouseButtons | bit : m_MouseButtons & ~bit);
@@ -1713,6 +1878,11 @@ void Win32Input::injectMouseButton(int button, bool down)
             m_HeldButtons.insert(button);
             sendMouseButton(button, true);
         }
+    } else if (down && anchored()) {
+        // With the position the gate looked at, in the same SendInput: a
+        // placement still on its way cannot move the press anywhere else.
+        INPUT batch[2] = {absoluteMove(m_PlacedAbsX, m_PlacedAbsY), {}};
+        if (buttonInput(button, true, batch[1])) sendBatch(batch, 2);
     } else {
         sendMouseButton(button, down);
     }
@@ -1724,24 +1894,7 @@ void Win32Input::injectMouseButton(int button, bool down)
 void Win32Input::sendMouseButton(int button, bool down)
 {
     INPUT input = {};
-    input.type = INPUT_MOUSE;
-
-    switch (button) {
-    case 1: input.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
-    case 2: input.mi.dwFlags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
-    case 3: input.mi.dwFlags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP; break;
-    case 4:
-        input.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
-        input.mi.mouseData = XBUTTON1;
-        break;
-    case 5:
-        input.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
-        input.mi.mouseData = XBUTTON2;
-        break;
-    default: return;
-    }
-
-    sendOne(input);
+    if (buttonInput(button, down, input)) sendOne(input);
 }
 
 void Win32Input::injectScroll(int amount, bool horizontal)
@@ -1749,8 +1902,9 @@ void Win32Input::injectScroll(int amount, bool horizontal)
     if (amount == 0) return;
 
     // Through our mouse while the viewer moves relatively, in whole notches:
-    // a report carries no less.
-    if (m_Mouse && m_Relative) {
+    // a report carries no less. Not for a viewer held back from administrator
+    // windows, as a button is not (injectMouseButton).
+    if (m_Mouse && m_Relative && m_AllowElevated) {
         const int notches = (horizontal ? m_PanNotches : m_WheelNotches).take(amount);
         if (notches == 0) return;
         std::lock_guard<std::mutex> lock(m_HeldMutex);
@@ -1766,6 +1920,12 @@ void Win32Input::injectScroll(int amount, bool horizontal)
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL;
     input.mi.mouseData = static_cast<DWORD>(amount);
+    if (anchored()) {
+        // Where the gate looked, as a click is (injectMouseButton).
+        INPUT batch[2] = {absoluteMove(m_PlacedAbsX, m_PlacedAbsY), input};
+        sendBatch(batch, 2);
+        return;
+    }
     sendOne(input);
 }
 
@@ -1855,7 +2015,12 @@ void Win32Input::dropVirtualMouseLocked()
 /// the pointer. Looked at four times a second at most.
 bool Win32Input::showsPointer()
 {
-    if (!m_Mouse) return false;
+    // Read under the lock: the input thread lets go of our mouse when it
+    // refuses a report (dropVirtualMouseLocked), and this runs on the capture's.
+    {
+        std::lock_guard<std::mutex> lock(m_HeldMutex);
+        if (!m_Mouse) return false;
+    }
     constexpr int64_t kLookEveryUs = 250 * 1000;
     constexpr int64_t kGraceUs = 3 * 1000 * 1000;
     const int64_t nowUs = steadyNowUs();
