@@ -177,7 +177,7 @@ chmod +x moonlightweb-*.AppImage
   <h3 data-i18n="tr3.h">弱网络下串流卡顿</h3>
   <p data-i18n-html="tr3.p">降低串流分辨率并启用 <strong>Video Enhancement（视频增强）</strong>：串流会在客户端 GPU 上放大并锐化（WebGL2 或 WebGPU 运行 MoonlightWeb 自研放大算法），于是 720p 串流看起来接近 1440p。</p>
 
-  <div class="note" data-i18n-html="note"><strong>网络受限？</strong>MoonlightWeb 会自动回退（UDP → TCP），因此在严格防火墙和恶劣的酒店 Wi-Fi 下也能继续工作。</div>
+  <div class="note" data-i18n-html="note"><strong>网络受限？</strong>当网络屏蔽 UDP 时，MoonlightWeb 会自动回退到 TCP，仍是直连——除非 PC 的防火墙已开启（firewalld，或已启用的 ufw）：目前安装包只为串流开放 UDP 端口。</div>
 
   <h2 data-i18n="read.h">继续阅读</h2>
   <div class="xlinks">

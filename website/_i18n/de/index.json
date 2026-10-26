@@ -32,7 +32,7 @@
   "card7.h3": "Von Grund auf Peer‑to‑Peer",
   "card7.p": "Der Stream geht direkt von deinem PC zu deinem Browser — keine Cloud dazwischen. Ein Fernzugriffslink erreicht deinen PC von überall, ohne einen einzigen Web‑Port freizugeben.",
   "card8.h3": "Lässt dich nie hängen",
-  "card8.p": "Automatischer Transport‑Fallback (UDP → TCP) kommt durch restriktive Netzwerke und strikte Firewalls.",
+  "card8.p": "Automatischer Transport‑Fallback (UDP → TCP) kommt durch restriktive Netzwerke, weiterhin direkt, nie über ein Relay.",
   "card9.h3": "Koop für bis zu 4 Spieler",
   "card9.p": "Lade bis zu drei Freunde in das Spiel ein, das schon auf deinem PC läuft — vier Spieler in einer Sitzung. Ein Spielstand, ein Bildschirm pro Person: Sie spielen von ihrem eigenen Gerät, mit ihrem eigenen Gamepad, als säßen sie neben dir.",
   "show.kicker": "Einblicke",

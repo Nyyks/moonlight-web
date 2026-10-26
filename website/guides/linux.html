@@ -213,8 +213,8 @@ chmod +x moonlightweb-*.AppImage
   <p data-i18n-html="tr3.p">Lower the streamed resolution and enable <strong>Video Enhancement</strong>: the stream is upscaled and
      sharpened on the client's GPU (WebGL2 or WebGPU running MoonlightWeb's own upscaler), so a 720p stream looks close to 1440p.</p>
 
-  <div class="note" data-i18n-html="note"><strong>Restrictive network?</strong> MoonlightWeb falls back automatically
-    (UDP → TCP), so it keeps working through strict firewalls and hostile hotel Wi-Fi.</div>
+  <div class="note" data-i18n-html="note"><strong>Restrictive network?</strong> When a network blocks UDP, MoonlightWeb falls back to TCP on its own,
+    still direct — unless the PC's firewall is on (firewalld, or ufw if enabled): the package opens only UDP for the stream, for now.</div>
 
   <h2 data-i18n="read.h">Keep reading</h2>
   <div class="xlinks">

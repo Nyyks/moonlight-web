@@ -120,7 +120,7 @@
         {
           "@type": "Question",
           "name": "What happens on strict firewalls or hotel Wi-Fi?",
-          "acceptedAnswer": {"@type": "Answer", "text": "The transport falls back automatically: UDP first for lowest latency, then TCP. The stream keeps working through restrictive networks — it just picks the best path available."}
+          "acceptedAnswer": {"@type": "Answer", "text": "UDP first, for the lowest latency. On a network that blocks UDP, the stream falls back to TCP on its own, still a direct connection, never through a relay. A network that only lets web ports out (80 and 443) can still block it: the host's direct address is then the way."}
         },
         {
           "@type": "Question",
@@ -206,7 +206,7 @@
   </details>
   <details>
     <summary data-i18n="q11.s">Que se passe-t-il sur un pare-feu strict ou un Wi-Fi d’hôtel ?</summary>
-    <div class="a" data-i18n-html="q11.a"><p>Le transport bascule automatiquement : UDP d’abord pour la latence la plus faible, puis TCP. Le stream continue de fonctionner à travers les réseaux restrictifs — il choisit simplement le meilleur chemin disponible.</p></div>
+    <div class="a" data-i18n-html="q11.a"><p>UDP d’abord, pour la latence la plus faible. Sur un réseau qui bloque l’UDP, le stream bascule de lui-même sur TCP, toujours en connexion directe, jamais par un relais. Un réseau qui ne laisse sortir que les ports web (80 et 443) peut encore le bloquer : l’adresse directe de l’hôte est alors la solution.</p></div>
   </details>
 
   <h2 data-i18n="h2.internet">Jeu sur Internet et sécurité</h2>

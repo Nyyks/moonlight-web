@@ -31,7 +31,7 @@
   "q10.s": "Qu’est-ce que le Video Enhancement ?",
   "q10.a": "<p>Un upscaling et une accentuation sur GPU, dans le navigateur via WebGL2 ou WebGPU (l’upscaler de MoonlightWeb). Streamez en 720p en 4G ou en Wi-Fi d’hôtel et affichez une qualité proche du 1440p — sans aucune charge supplémentaire sur le PC gamer, puisque tout s’exécute côté client.</p>",
   "q11.s": "Que se passe-t-il sur un pare-feu strict ou un Wi-Fi d’hôtel ?",
-  "q11.a": "<p>Le transport bascule automatiquement : UDP d’abord pour la latence la plus faible, puis TCP. Le stream continue de fonctionner à travers les réseaux restrictifs — il choisit simplement le meilleur chemin disponible.</p>",
+  "q11.a": "<p>UDP d’abord, pour la latence la plus faible. Sur un réseau qui bloque l’UDP, le stream bascule de lui-même sur TCP, toujours en connexion directe, jamais par un relais. Un réseau qui ne laisse sortir que les ports web (80 et 443) peut encore le bloquer : l’adresse directe de l’hôte est alors la solution.</p>",
   "h2.internet": "Jeu sur Internet et sécurité",
   "q12.s": "Comment jouer sur Internet, loin de chez moi ?",
   "q12.a": "<p>Le flux est une connexion WebRTC directe, pair-à-pair, entre votre navigateur et votre PC. Votre PC maintient une connexion sortante vers un serveur d’introduction et se rejoint par un lien qui lui est propre — sans sous-domaine public, sans port web exposé ; les installations qui détiennent déjà un sous-domaine le conservent jusqu’en février 2027. Vous pouvez aussi utiliser votre propre domaine et certificat.</p>",

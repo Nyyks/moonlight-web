@@ -177,7 +177,7 @@ chmod +x moonlightweb-*.AppImage
   <h3 data-i18n="tr3.h">Le stream saccade sur une connexion faible</h3>
   <p data-i18n-html="tr3.p">Baissez la résolution streamée et activez le <strong>Video Enhancement</strong> : le stream est upscalé et accentué sur le GPU du client (WebGL2 ou WebGPU avec l’upscaler de MoonlightWeb), si bien qu’un stream 720p paraît proche du 1440p.</p>
 
-  <div class="note" data-i18n-html="note"><strong>Réseau restrictif ?</strong> MoonlightWeb bascule automatiquement (UDP → TCP), et continue donc de fonctionner à travers les pare-feu stricts et le Wi-Fi d’hôtel hostile.</div>
+  <div class="note" data-i18n-html="note"><strong>Réseau restrictif ?</strong> Quand un réseau bloque l’UDP, MoonlightWeb bascule de lui-même sur TCP, toujours en direct — sauf si le pare-feu du PC est actif (firewalld, ou ufw s’il est activé) : pour l’instant, le paquet n’ouvre que l’UDP pour le stream.</div>
 
   <h2 data-i18n="read.h">À lire ensuite</h2>
   <div class="xlinks">

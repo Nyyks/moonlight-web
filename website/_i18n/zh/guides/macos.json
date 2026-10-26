@@ -45,7 +45,7 @@
   "tr2.p": "在 Safari 里打开同一个网址——无需从 App Store 下载。你将获得多点触控触控板和带修饰键的原生虚拟键盘；Mac 主机不接收游戏手柄（macOS 不允许虚拟手柄）。",
   "tr3.h": "弱网络下串流卡顿",
   "tr3.p": "降低串流分辨率并启用 <strong>Video Enhancement（视频增强）</strong>：串流会在客户端 GPU 上放大并锐化（WebGL2 或 WebGPU 运行 MoonlightWeb 自研放大算法），于是 720p 串流看起来接近 1440p。",
-  "note": "<strong>网络受限？</strong>MoonlightWeb 会自动回退（UDP → TCP），因此在严格防火墙和恶劣的酒店 Wi-Fi 下也能继续工作。",
+  "note": "<strong>网络受限？</strong>UDP 被屏蔽时，MoonlightWeb 会自动回退到 TCP，仍是直连，因此在大多数严格防火墙和恶劣的酒店 Wi-Fi 下也能继续工作。",
   "read.h": "继续阅读",
   "x.faq.t": "常见问题",
   "x.faq.d": "延迟、编解码器、安全、互联网远程游玩——所有常见问题。",
