@@ -4,7 +4,8 @@
  *
  * The PIN page's two small promises: the session name typed once comes back
  * the next time this browser has to unlock (the host lists the device by it),
- * and the caret never leaves the slot right after the last digit typed.
+ * and a digit always lands right after the last one typed, where a mouse's
+ * caret is kept and a finger's is not taken away from.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -107,6 +108,50 @@ describe('LoginView session name and PIN caret', () => {
         pin.setSelectionRange(6, 6); // among the dashes
         pin.dispatchEvent(new Event('click'));
         expect([pin.selectionStart, pin.selectionEnd]).toEqual([2, 2]);
+    });
+
+    it("leaves a finger's caret where it landed, so a tap on it brings Paste", async () => {
+        await open();
+        const pin = pinInput();
+        pin.focus();
+        type(pin, '34');
+        const down = new Event('pointerdown');
+        Object.defineProperty(down, 'pointerType', { value: 'touch' });
+        pin.dispatchEvent(down);
+        pin.setSelectionRange(6, 6); // tapped among the dashes
+        document.dispatchEvent(new Event('selectionchange'));
+        pin.dispatchEvent(new Event('click'));
+        expect([pin.selectionStart, pin.selectionEnd]).toEqual([6, 6]);
+    });
+
+    it('puts a digit typed or erased away from the slot after the last one', async () => {
+        await open();
+        const pin = pinInput();
+        pin.focus();
+        type(pin, '34');
+        const edit = (inputType, data, cancelable = true) => {
+            const e = new Event('beforeinput', { cancelable });
+            Object.defineProperty(e, 'inputType', { value: inputType });
+            Object.defineProperty(e, 'data', { value: data });
+            pin.dispatchEvent(e);
+            return e;
+        };
+
+        pin.setSelectionRange(1, 1); // "3|4"
+        expect(edit('insertText', '5').defaultPrevented).toBe(true);
+        expect(pin.value).toBe('345 ---');
+
+        pin.setSelectionRange(0, 0);
+        edit('deleteContentBackward', null);
+        expect(pin.value).toBe('34- ---');
+
+        // A browser that will not let it be cancelled types it where the
+        // caret was; the input that follows puts it in its place.
+        pin.setSelectionRange(1, 1);
+        edit('insertText', '7', false);
+        type(pin, '374- ---');
+        expect(pin.value).toBe('347 ---');
+        expect([pin.selectionStart, pin.selectionEnd]).toEqual([3, 3]);
     });
 
     it('leaves a long-press selection alone, so the Paste menu stays', async () => {

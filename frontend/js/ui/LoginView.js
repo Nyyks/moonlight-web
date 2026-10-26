@@ -512,8 +512,8 @@ export class LoginView {
 
         if (!input || !btn) return;
 
-        // Right after the last digit (start when none yet): the only place the
-        // caret may be. Anywhere else, the next digit lands among the dashes
+        // Right after the last digit (start when none yet): where the caret is
+        // kept. Anywhere else, the next digit would land among the dashes
         // or between two digits, and the mask then reads them back in an
         // order the person never typed. A selection is left alone: a long
         // press makes one, and it is what brings up the phone's Paste — put
@@ -523,8 +523,18 @@ export class LoginView {
             const count = input.value.replace(/\D/g, '').length;
             return count + (count > 3 ? 1 : 0);
         };
-        const pinCaret = () => {
+        // A finger's caret is left where it landed. iOS opens Paste on a tap
+        // ON the caret: put back after the last digit, it was only ever there,
+        // and only a tap at the very start brought the menu (iPhone,
+        // 26/10/2026). What is typed away from the slot still lands after the
+        // last digit: see beforeinput below.
+        let byTouch = false;
+        input.addEventListener('pointerdown', (e) => {
+            byTouch = e.pointerType !== 'mouse';
+        });
+        const pinCaret = (force) => {
             if (document.activeElement !== input) return;
+            if (byTouch && force !== true) return;
             if (input.selectionStart !== input.selectionEnd) return;
             const slot = caretSlot();
             if (input.selectionStart !== slot || input.selectionEnd !== slot) {
@@ -532,10 +542,39 @@ export class LoginView {
             }
         };
 
+        // A digit typed or erased with the caret off its slot (a finger put it
+        // there) is still the next one, or the last one, and never lands among
+        // the others. Done here when the browser lets it; otherwise the input
+        // that follows reads it from `offSlot`.
+        let offSlot = null;
+        input.addEventListener('beforeinput', (e) => {
+            offSlot = null;
+            const at = input.selectionStart;
+            if (at !== input.selectionEnd || at === caretSlot()) return;
+            const typed = input.value.replace(/\D/g, '');
+            if (e.inputType === 'insertText') {
+                offSlot = (typed + (e.data || '').replace(/\D/g, '')).slice(0, 6);
+            } else if (e.inputType === 'deleteContentBackward') {
+                offSlot = typed.slice(0, -1);
+            } else {
+                return;
+            }
+            if (e.cancelable) {
+                e.preventDefault();
+                showDigits(offSlot);
+                offSlot = null;
+            }
+        });
+
         input.addEventListener('input', () => {
+            const digits = offSlot ?? input.value.replace(/\D/g, '').slice(0, 6);
+            offSlot = null;
+            showDigits(digits);
+        });
+
+        const showDigits = (digits) => {
             // Mask: fill a "DDD DDD" template left-to-right — each typed digit
             // replaces the next dash. Caret stays right after the last digit.
-            const digits = input.value.replace(/\D/g, '').slice(0, 6);
             const filled = digits.padEnd(6, '-');
             input.value = filled.slice(0, 3) + ' ' + filled.slice(3);
             const caret = caretSlot();
@@ -546,7 +585,7 @@ export class LoginView {
             if (digits.length === 6 && window.matchMedia?.('(pointer: coarse)').matches) {
                 input.blur();
             }
-        });
+        };
 
         // Show the "--- ---" template (centered) while focused, caret on the
         // first dash; clear it on blur so the dim placeholder shows when empty.
@@ -555,8 +594,9 @@ export class LoginView {
             if (digits.length === 0) {
                 input.value = '--- ---';
             }
-            // Defer so it wins over the mouse-click caret placement.
-            setTimeout(pinCaret, 0);
+            // Defer so it wins over the mouse-click caret placement. The tap
+            // that opens the field gets the slot too; the next ones do not.
+            setTimeout(() => pinCaret(true), 0);
         });
 
         // A copied PIN fills the field wherever the caret or selection was:
@@ -570,10 +610,10 @@ export class LoginView {
             input.dispatchEvent(new Event('input'));
         });
 
-        // A click, a tap or an arrow key would all move the caret off its
-        // slot: each is put straight back. selectionchange
-        // covers taps and drags on every engine; the key and pointer events are
-        // there for the ones that do not fire it for text fields.
+        // A click or an arrow key would move the caret off its slot: each is
+        // put straight back (a finger's tap is not, see above). selectionchange
+        // covers clicks and drags on every engine; the key and pointer events
+        // are there for the ones that do not fire it for text fields.
         input.addEventListener('keydown', (e) => {
             if (/^(Arrow(Left|Right|Up|Down)|Home|End|PageUp|PageDown)$/.test(e.key)) {
                 e.preventDefault();
