@@ -151,7 +151,7 @@ window.addEventListener('error', (evt) => {
                 <div class="hosts-header"><h2>${t('appError.title')}</h2></div>
                 <div class="hosts-error">
                     <p>${t('appError.failedToLoad')}</p>
-                    <p class="hint">${(evt.error && evt.error.message) || evt.message || t('appError.unknownError')}</p>
+                    <p class="hint">${escapeHtml((evt.error && evt.error.message) || evt.message || t('appError.unknownError'))}</p>
                     <button class="btn btn-reload">${t('common.retry')}</button>
                 </div>
             </div>
@@ -169,7 +169,7 @@ window.addEventListener('unhandledrejection', (evt) => {
             <div class="hosts-view">
                 <div class="hosts-header"><h2>${t('appError.initTitle')}</h2></div>
                 <div class="hosts-error">
-                    <p>${msg}</p>
+                    <p>${escapeHtml(msg)}</p>
                     <button class="btn btn-reload">${t('common.retry')}</button>
                 </div>
             </div>
@@ -1581,7 +1581,7 @@ export const MoonlightApp = {
                     <div class="hosts-header"><h2>${t('appError.connectionTitle')}</h2></div>
                     <div class="hosts-error">
                         <p>${t('appError.unableToConnect')}</p>
-                        <p class="hint">${err.message || t('appError.unknownError')}</p>
+                        <p class="hint">${escapeHtml(err.message || t('appError.unknownError'))}</p>
                         <button class="btn btn-reload">${t('common.retry')}</button>
                     </div>
                 </div>
