@@ -122,10 +122,12 @@ jobs:
   # The entry page holds every machine's interface against the list of the
   # release it says it runs (bootstrap/v1/official.js, D26), so a list that does
   # not match its tag would turn away every machine of that release. Each list
-  # is rebuilt here from its tag. On a v* tag the release's own list must be in
-  # the tagged commit, and — once production refuses rather than reports —
-  # production must serve it before a package is built: a machine that installs
-  # the release before the server knows it would be refused.
+  # is rebuilt here from its tag, and one whose release is not tagged yet from
+  # the commit itself, which is the one that will be tagged. On a v* tag the
+  # release's own list must be in the tagged commit, and — once production
+  # refuses rather than reports — production must serve it before a package is
+  # built: a machine that installs the release before the server knows it would
+  # be refused.
   interface-lists:
     name: Official interface lists
     runs-on: ubuntu-latest

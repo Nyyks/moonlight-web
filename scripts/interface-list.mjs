@@ -20,7 +20,9 @@
      node scripts/interface-list.mjs build 0.4.1 --ref HEAD   from a commit, before
                                                               the tag exists
      node scripts/interface-list.mjs check                    every list against
-                                                              its tag; exit 1 if
+                                                              its tag (HEAD for
+                                                              one not tagged
+                                                              yet); exit 1 if
                                                               one differs
      node scripts/interface-list.mjs check --release 0.4.1    the same, and the
                                                               list of 0.4.1 must
@@ -32,10 +34,12 @@
                                                               committed one
 
    A release commit carries its own list: build it with --ref HEAD on the commit
-   that will be tagged, and commit it there. Production must serve it before a
-   machine installs the release, or the entry page turns that machine away
-   wherever the check is enforced: `live` waits for it, and the packages are
-   only built once it is there. */
+   that will be tagged, and commit it there. Until the tag exists, `check` holds
+   it against HEAD: CI's other runs pass on that commit, and fail on a later one
+   that changes the interface without building the list again. Production must
+   serve it before a machine installs the release, or the entry page turns that
+   machine away wherever the check is enforced: `live` waits for it, and the
+   packages are only built once it is there. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -88,6 +92,16 @@ function served(rel) {
 
 function git(args, input) {
     return execFileSync('git', args, { cwd: ROOT, input, maxBuffer: 1 << 30 });
+}
+
+/** Whether @p ref names a commit here. */
+function isCommit(ref) {
+    try {
+        git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /** The blobs under frontend/ at @p ref: [{ rel, oid }]. */
@@ -188,7 +202,10 @@ function main(argv) {
         }
         let bad = 0;
         for (const version of versions.sort()) {
-            const ref = version === release ? 'HEAD' : `v${version}`;
+            // A list whose tag is not there yet is the release being prepared:
+            // it was built on the commit that will be tagged, so until then it
+            // describes HEAD.
+            const ref = version === release || !isCommit(`v${version}`) ? 'HEAD' : `v${version}`;
             let fresh;
             try {
                 fresh = buildList(version, ref);
@@ -200,8 +217,13 @@ function main(argv) {
             if (fresh === committedList(version)) {
                 console.log(`ok    ${version} (${ref})`);
             } else {
+                const fix =
+                    ref === 'HEAD'
+                        ? `: build it again (node scripts/interface-list.mjs build ${version} ` +
+                          '--ref HEAD) and commit it'
+                        : '';
                 console.error(
-                    `::error::bootstrap/v1/interfaces/${version}.json does not match ${ref}`,
+                    `::error::bootstrap/v1/interfaces/${version}.json does not match ${ref}${fix}`,
                 );
                 bad++;
             }
