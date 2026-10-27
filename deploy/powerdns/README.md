@@ -723,8 +723,9 @@ Every machine shares the `stream.` origin, so the entry page opens only the
 interface of a release, file for file (`bootstrap/v1/official.js`). Each
 release's list is `bootstrap/v1/interfaces/<version>.json`, the digest of
 every file an installed machine of that release serves, built from its tag by
-`scripts/interface-list.mjs`. CI rebuilds every list from its tag, and the
-bootstrap watchdog compares them like the scripts.
+`scripts/interface-list.mjs`. CI rebuilds every list from its tag, and one
+whose release is not tagged yet from the commit itself, which is the one that
+will be tagged. The bootstrap watchdog compares them like the scripts.
 
 - **A release commit carries its own list**: on the commit that will be
   tagged, `node scripts/interface-list.mjs build X.Y.Z --ref HEAD`, then commit
