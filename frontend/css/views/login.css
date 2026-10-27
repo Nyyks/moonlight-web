@@ -75,6 +75,10 @@
 .login-cert-upload-wrap {
     width: 100%;
 }
+/* The PIN field is centred under the form; its label sits right above it. */
+.login-field--pin > .login-label {
+    text-align: center;
+}
 
 .login-cert-input {
     width: 100%;

@@ -358,7 +358,7 @@
         "certSubtitle": "上传你的证书文件以进行身份验证",
         "nameSession": "为此会话命名",
         "namePlaceholder": "例如 BrunoXT Chrome",
-        "pinLabel": "PIN",
+        "pinLabel": "PIN 码",
         "pinPlaceholder": "--- ---",
         "unlock": "解锁",
         "attemptsRemaining": "锁定前还剩 {{count}} 次尝试",

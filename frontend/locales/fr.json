@@ -358,7 +358,7 @@
         "certSubtitle": "Téléversez votre fichier de certificat pour vous authentifier",
         "nameSession": "Nommer cette session",
         "namePlaceholder": "ex. BrunoXT Chrome",
-        "pinLabel": "PIN",
+        "pinLabel": "Code PIN",
         "pinPlaceholder": "--- ---",
         "unlock": "Déverrouiller",
         "attemptsRemaining": "{{count}} tentative(s) restante(s) avant blocage",

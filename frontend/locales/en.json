@@ -358,7 +358,7 @@
         "certSubtitle": "Upload your certificate file to authenticate",
         "nameSession": "Name this session",
         "namePlaceholder": "e.g. BrunoXT Chrome",
-        "pinLabel": "PIN",
+        "pinLabel": "PIN code",
         "pinPlaceholder": "--- ---",
         "unlock": "Unlock",
         "attemptsRemaining": "{{count}} attempt(s) remaining before lockout",
