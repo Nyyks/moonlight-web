@@ -22,6 +22,9 @@ import { t } from '../i18n/i18n.js';
  *  before we consider it open (an accessory bar alone is smaller than this). */
 const KB_OPEN_THRESHOLD = 120;
 
+/** What is left between the picture and the special-keys bar while typing. */
+const KB_PICTURE_GAP = 4;
+
 /** Typematic for the press-and-hold toolbar keys: how long a finger has to
  *  stay down before the key starts repeating, and how fast it repeats then.
  *  Roughly the Windows defaults, which is what the arrows should feel like. */
@@ -614,6 +617,7 @@ export class StreamViewKeyboard {
                 this._kbToolbar.style.top = vv.offsetTop + vv.height - tbHeight + 'px';
             }
             this.streamEl.style.height = Math.max(0, vv.height - tbHeight) + 'px';
+            this._seatPictureOnKbToolbar();
             // A hidden standby leg measures the same viewport as the live one;
             // let the visible view own the document-wide inset.
             if (!this._standby) publishKbdInset(covered + tbHeight);
@@ -630,11 +634,43 @@ export class StreamViewKeyboard {
             this.streamEl.style.bottom = shifted ? 'auto' : '';
             this.streamEl.style.top = shifted ? vv.offsetTop + 'px' : '';
             this.streamEl.style.height = shifted ? vv.height + 'px' : '';
+            this._seatPictureOnKbToolbar(false);
             this._hideKbToolbar();
             if (!this._standby) publishKbdInset(0);
         }
         // The header moves with the visible area; the stats card sits under it.
         this._positionStatsOverlay();
+    }
+
+    /**
+     * With the soft keyboard up, the picture rests a few pixels above the
+     * special-keys bar instead of in the middle of the area left to it: a
+     * landscape desktop on a portrait phone otherwise leaves half the spare
+     * height as a band of black between the picture and the bar (27/10/2026).
+     * The area is moved, not the picture inside it: every mapping of a touch
+     * or the cursor reads the area through getBoundingClientRect, which
+     * carries the move, so the letterbox arithmetic stays centred.
+     * @this {StreamViewInstance}
+     * @param {boolean} [seat] false puts the area back where the layout has it.
+     */
+    _seatPictureOnKbToolbar(seat = true) {
+        const area = this.canvasArea;
+        if (!area) return;
+        let shift = 0;
+        if (seat && typeof this._surfaceIntrinsic === 'function') {
+            const [iw, ih] = this._surfaceIntrinsic(this._displayEl());
+            const w = area.offsetWidth,
+                h = area.offsetHeight;
+            if (iw > 0 && ih > 0 && w > 0 && h > 0) {
+                const picH = ih * Math.min(w / iw, h / ih);
+                shift = Math.max(0, Math.floor((h - picH) / 2) - KB_PICTURE_GAP);
+            }
+        }
+        const transform = shift ? `translateY(${shift}px)` : '';
+        if (area.style.transform === transform) return;
+        area.style.transform = transform;
+        this._invalidateMediaRect?.();
+        this._placeClientCursor?.();
     }
 
     /**

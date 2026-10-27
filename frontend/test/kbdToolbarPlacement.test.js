@@ -78,6 +78,29 @@ describe('touch keyboard bar placement', () => {
         expect(document.documentElement.style.getPropertyValue('--kbd-inset')).toBe(BAR + 'px');
     });
 
+    it('rests the picture a few pixels above the bar, and back when the keyboard closes', () => {
+        const v = view();
+        v.canvasArea = document.createElement('div');
+        Object.defineProperty(v.canvasArea, 'offsetWidth', { get: () => 390 });
+        Object.defineProperty(v.canvasArea, 'offsetHeight', { get: () => 400 });
+        v._displayEl = () => null;
+        v._surfaceIntrinsic = () => [1920, 1080];
+        v._invalidateMediaRect = vi.fn();
+        viewport(800, 800);
+        v._handleViewportResize();
+        v._kbdVisible = true;
+        viewport(450, 450);
+        v._handleViewportResize();
+        // 1920×1080 across 390 px is 219 px tall: centred, 90 px of black
+        // would sit under it; seated, only 4.
+        expect(v.canvasArea.style.transform).toBe('translateY(86px)');
+        expect(v._invalidateMediaRect).toHaveBeenCalled();
+        v._kbdVisible = false;
+        viewport(800, 800);
+        v._handleViewportResize();
+        expect(v.canvasArea.style.transform).toBe('');
+    });
+
     it('goes when the keyboard closes, and a new page height is learnt', () => {
         const v = view();
         viewport(800, 800);
