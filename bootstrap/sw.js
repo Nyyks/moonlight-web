@@ -31,6 +31,26 @@ const SHELL_CACHE = 'mw-shell';
 const CLIENT_TIMEOUT_MS = 30000;
 
 /**
+ * This worker's revision, which the entry page asks for before it hands over
+ * where the interface check is enforced (boot.js, WORKER_REVISION). 2 is the
+ * first to serve only the files that page checked.
+ */
+const SW_REVISION = 2;
+
+/**
+ * Whether this origin holds every machine to the official interface
+ * (bootstrap/v1/official.js, interfacePolicy — repeated here, since a worker is a
+ * classic script and cannot import the module; a test keeps the two equal).
+ *
+ * Where it does, this worker serves the checked files and nothing else: a file
+ * the cache lacks is not asked of the machine, which could answer anything, and
+ * what the machine answers on /api/ is never taken as code. Elsewhere it does
+ * what it always did.
+ */
+const PRODUCTION_ENFORCES = false;
+const ENFORCED = /^stream\.dev\./.test(self.location.hostname) || PRODUCTION_ENFORCES;
+
+/**
  * A shell from before v0.3.1 never asks its host whether it is still current.
  *
  * It only learns of an update when the machine's link — /<id> — is opened,
@@ -57,16 +77,17 @@ const STALE_NOTE = '/stale-shell-redirect';
 const STALE_RETRY_MS = 60 * 60 * 1000;
 
 /**
- * When the entry page last checked the cache against its machine, and how long
- * a navigation may still be answered from it after that.
+ * When the entry page last checked the cache, and how long a navigation may
+ * still be answered from it after that.
  *
  * Every machine reached through this origin shares it, so any of their pages
  * can write the cache this worker serves. The entry page is the one thing here
  * no machine serves — it comes from the introduction server — and it checks the
- * cache against the hashes the machine itself sends (boot.js,
- * cacheMatchesManifest). So the cached interface opens only right after one of
- * those checks; every other navigation, a reload or a home-screen shortcut, goes
- * through the entry page first (security review R1, 26/10/2026).
+ * cache against the official interface, or the machine's own hashes where no
+ * list applies (boot.js, shellIsTrusted). So the cached interface opens only
+ * right after one of those checks; every other navigation, a reload or a
+ * home-screen shortcut, goes through the entry page first (security review R1,
+ * 26/10/2026).
  *
  * Held in this worker's memory and nowhere else: a note in storage could be
  * written by any page. A worker stopped in between forgets it, and the
@@ -77,7 +98,16 @@ const CHECKED_FOR_MS = 15000;
 let checkedAt = 0;
 
 self.addEventListener('message', (event) => {
-    if (event.data && event.data.type === 'mw-shell-checked') checkedAt = Date.now();
+    const data = event.data;
+    if (!data) return;
+    if (data.type === 'mw-sw-revision') {
+        if (event.ports[0]) event.ports[0].postMessage({ revision: SW_REVISION });
+        return;
+    }
+    // An entry page of before revision 2 says only 'mw-shell-checked', for a
+    // check against the machine's own hashes: not the one enforced here.
+    if (data.type === 'mw-shell-verified' || (data.type === 'mw-shell-checked' && !ENFORCED))
+        checkedAt = Date.now();
 });
 
 self.addEventListener('install', () => {
@@ -92,18 +122,26 @@ self.addEventListener('activate', (event) => {
 });
 
 /**
- * Ask the page that owns the tunnel to make this request for us.
+ * The page a request is to be carried by: the one it came from.
  *
- * The client is resolved by id first — that is the page the request came from —
- * and only then by "any window", which covers a request from a worker or an
- * <img> whose client id the browser did not attach.
+ * Each page's connection goes to the machine IT opened, and two tabs may be on
+ * two machines. So where the check is enforced, a request whose page has gone —
+ * a beacon sent as a tab closes — is not handed to another tab, whose machine
+ * would receive it with that machine's own cookie; and one the browser named no
+ * page for goes to the only page there is, or to none. Elsewhere any window
+ * will do, as it always did.
  */
+async function pageFor(clientId) {
+    const own = clientId ? await self.clients.get(clientId) : null;
+    if (own) return own;
+    const windows = await self.clients.matchAll({ type: 'window' });
+    if (!ENFORCED) return windows[0];
+    return !clientId && windows.length === 1 ? windows[0] : null;
+}
+
+/** Ask the page that owns the tunnel to make this request for us. */
 async function askThePage(request, clientId) {
-    let client = clientId ? await self.clients.get(clientId) : null;
-    if (!client) {
-        const windows = await self.clients.matchAll({ type: 'window' });
-        client = windows[0];
-    }
+    const client = await pageFor(clientId);
     if (!client) return new Response('no page holds the connection', { status: 503 });
 
     const body =
@@ -151,6 +189,90 @@ async function askThePage(request, clientId) {
             [channel.port2],
         );
     });
+}
+
+/**
+ * What the host answers on these is the machine's own word, and only ever data:
+ * /api/… and the version it runs. Asked of it each time, never from the cache.
+ */
+function fromTheMachine(pathname) {
+    return pathname.startsWith('/api/') || pathname === '/version.json';
+}
+
+/**
+ * The kinds of request whose answer the browser runs, or lays out, as code. A
+ * checked page never makes one for an answer of the machine's own, so where the
+ * check is enforced such a request is refused rather than carried.
+ */
+const RUNS_AS_CODE = new Set([
+    'audioworklet',
+    'document',
+    'embed',
+    'frame',
+    'iframe',
+    'json',
+    'object',
+    'paintworklet',
+    'script',
+    'serviceworker',
+    'sharedworker',
+    'style',
+    'worker',
+    'xslt',
+]);
+
+/** The types the host serves the application's files under (StaticFileHandler). */
+const CONTENT_TYPES = {
+    html: 'text/html; charset=utf-8',
+    css: 'text/css; charset=utf-8',
+    js: 'application/javascript; charset=utf-8',
+    json: 'application/json',
+    webmanifest: 'application/manifest+json',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    svg: 'image/svg+xml',
+    ico: 'image/x-icon',
+    woff: 'font/woff',
+    woff2: 'font/woff2',
+    ttf: 'font/ttf',
+    map: 'application/json',
+};
+
+/**
+ * The headers a checked file is served with, where the check is enforced.
+ *
+ * Written here rather than read from the cache, which holds them as the machine
+ * sent them. The policy is what keeps a checked page from running anything that
+ * was not checked, so a machine that chose it could lift it. It is the host's
+ * own (HttpServer::securityHeaders), unchanged from v0.3.0 to v0.4.1.
+ */
+function shellHeaders(extension) {
+    return {
+        'Content-Type': CONTENT_TYPES[extension] || 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Content-Security-Policy':
+            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; " +
+            "style-src 'self' 'unsafe-inline'; font-src 'self'; " +
+            `img-src 'self' data: blob:; connect-src 'self' wss://${self.location.host}; ` +
+            "worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; " +
+            "form-action 'self'; object-src 'none'",
+        'Cache-Control': 'no-cache',
+    };
+}
+
+function extensionOf(pathname) {
+    const name = pathname.slice(pathname.lastIndexOf('/') + 1);
+    const dot = name.lastIndexOf('.');
+    return dot < 0 ? '' : name.slice(dot + 1).toLowerCase();
+}
+
+/** A cached file as this worker serves it where the check is enforced. */
+function checkedFile(hit, extension) {
+    return new Response(hit.body, { status: 200, headers: shellHeaders(extension) });
 }
 
 /**
@@ -258,17 +380,33 @@ self.addEventListener('fetch', (event) => {
                 if (!(await shellChecksItself(cache)) && (await timeForStaleRedirect())) {
                     return backThroughTheLink();
                 }
-                return shell;
+                return ENFORCED ? checkedFile(shell, 'html') : shell;
             }
 
-            // /version.json is how the application notices the host was updated,
-            // so it must never come from the copy it is checking.
-            if (url.pathname !== '/version.json') {
-                const hit = await cache.match(url.pathname);
-                if (hit) return hit;
+            if (!ENFORCED) {
+                // /version.json is how the application notices the host was
+                // updated, so it must never come from the copy it is checking.
+                if (url.pathname !== '/version.json') {
+                    const hit = await cache.match(url.pathname);
+                    if (hit) return hit;
+                }
+                return askThePage(request, event.clientId);
             }
 
-            return askThePage(request, event.clientId);
+            if (fromTheMachine(url.pathname)) {
+                if (RUNS_AS_CODE.has(request.destination))
+                    return new Response('not code', { status: 403 });
+                return askThePage(request, event.clientId);
+            }
+            const hit = await cache.match(url.pathname);
+            // The web manifest is the one entry no list checks (official.js,
+            // WEB_MANIFEST): served as a manifest, never as anything that runs.
+            if (
+                !hit ||
+                (url.pathname === '/manifest.webmanifest' && RUNS_AS_CODE.has(request.destination))
+            )
+                return new Response('not part of the interface', { status: 404 });
+            return checkedFile(hit, extensionOf(url.pathname));
         })(),
     );
 });

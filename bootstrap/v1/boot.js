@@ -34,6 +34,16 @@ import {
     storeShellFile,
     SHELL_CACHE,
 } from './tunnel.js';
+import {
+    appVersionOf,
+    cacheMatchesList,
+    cacheMatchesManifest,
+    fetchList,
+    interfacePolicy,
+    isRelease,
+    judgeFile,
+    officialDigest,
+} from './official.js';
 
 const ui = {
     stage: document.getElementById('stage'),
@@ -157,11 +167,11 @@ async function settle() {
     ticking = false;
 }
 
-function fail(message, hint) {
+function fail(message, hint, heading = 'Not connected') {
     ticking = false;
     clearInterval(heartbeat);
     document.body.dataset.state = 'failed';
-    say('Not connected', message);
+    say(heading, message);
     if (ui.note) ui.note.textContent = hint || '';
     // Every path into here ends on a page the person is left looking at, and on
     // most of them the machine in the address is exactly the one that cannot
@@ -468,51 +478,90 @@ function writeStamp(hostId, version) {
     }
 }
 
-/** SHA-256 of @p buffer, in hex, as the host's manifest spells it. */
-async function sha256Hex(buffer) {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
-    let hex = '';
-    for (const byte of digest) hex += byte.toString(16).padStart(2, '0');
-    return hex;
+/* ── Only the official interface ──────────────────────────────────────────
+ *
+ * Every machine reached through here shares this one origin, and so does the
+ * interface each of them serves: whatever it runs, it runs beside the pairing
+ * keys and the sessions of every other machine this browser knows (D26). The
+ * machine itself cannot be vouched for — it is its owner's, key and disk
+ * included — but the code it sends can. So every file is held against the list
+ * of the release the machine says it runs (official.js), before it is stored:
+ * a file that differs stops the start with nothing of it run, and a file that
+ * is not part of the interface is never stored, so never served.
+ *
+ * How strictly depends on where this page was served from (interfacePolicy):
+ * the staging server refuses, production only reports until it is switched
+ * over. A build between two releases has no list; the staging server lets it
+ * through, and its own hashes keep the cache honest as before.
+ */
+const policy = interfacePolicy(location.hostname);
+
+/** The machine serves an interface that is not the official one. */
+function refusal(why) {
+    const err = new Error('This machine serves a modified interface.');
+    err.hint = 'MoonlightWeb only opens the official one, so nothing from it was run.';
+    err.refused = true;
+    err.why = why;
+    return err;
+}
+
+/** Said in the console of a production page while it only reports. */
+function reportOnly(why) {
+    console.warn(
+        `[MW] Interface check: ${why} — this machine will be refused once production enforces the check`,
+    );
 }
 
 /**
- * Whether the cache holds exactly what this machine serves, by the hashes its
- * manifest carries — and nothing it does not serve.
+ * What this machine's interface is held against.
  *
- * Every machine reached through here shares this one origin, so the page of any
- * of them can write this cache: a hostile machine's page could leave its own
- * code in place of another machine's interface, under that machine's stamp. The
- * hashes come from THIS machine, over the channel its key signed, so they are
- * the one thing here no other page can have written (security review R1,
- * 26/10/2026). An entry the manifest does not name is deleted, so nothing
- * planted beside the files can be served in their place either.
- *
- * A machine of before v0.4.1 sends no hashes, and its cache is taken on trust,
- * as it always was.
+ * @returns {Promise<{version: string|null, list: Map<string, string>|null, enforce: boolean}>}
+ *   `list` null where none applies; `enforce` whether a difference stops the start
  */
-async function cacheMatchesManifest(cache, files, hashes) {
-    if (!Array.isArray(hashes) || hashes.length !== files.length) return true;
-    const named = new Set(files);
-    named.add('/');
-    for (const request of await cache.keys()) {
-        const path = new URL(request.url).pathname;
-        if (!named.has(path)) await cache.delete(request);
+async function officialCheck(manifestVersion) {
+    const version = appVersionOf(manifestVersion);
+    let list = null;
+    try {
+        list = await fetchList(version);
+    } catch (e) {
+        // The introduction server could not say, which is no verdict on the
+        // machine: a refusal here would be a lie.
+        if (policy.enforce)
+            throw new Error(`this page could not check it (${e.message}) — reload the page`);
+        console.warn(`[MW] Interface check skipped: ${e.message}`);
+        return { version, list: null, enforce: false };
     }
-    const results = await Promise.all(
-        files.map(async (path, i) => {
-            const want = hashes[i];
-            // Empty where the copy legitimately differs (the web manifest).
-            if (typeof want !== 'string' || !want) return true;
-            // The navigation is answered from '/', a copy of the main page.
-            for (const name of path === '/index.html' ? ['/index.html', '/'] : [path]) {
-                const hit = await cache.match(name);
-                if (!hit || (await sha256Hex(await hit.arrayBuffer())) !== want) return false;
-            }
-            return true;
-        }),
-    );
-    return results.every(Boolean);
+    if (list) return { version, list, enforce: policy.enforce };
+
+    const why = `version ${version || manifestVersion} is not an official release`;
+    if (!isRelease(version) && policy.unreleasedAllowed) {
+        console.info(
+            `[MW] Interface check: ${version || manifestVersion} is a build between releases, let through here`,
+        );
+    } else if (policy.enforce) {
+        throw refusal(why);
+    } else {
+        reportOnly(why);
+    }
+    return { version, list: null, enforce: false };
+}
+
+/**
+ * Whether the cache holds what this machine's interface should be: the official
+ * one, file for file, where a list applies — this machine's own hashes
+ * otherwise, as before. Where production only reports, the list's verdict is
+ * said and the hashes decide.
+ */
+async function shellIsTrusted(cache, files, manifest, check) {
+    if (check.list) {
+        const { ok, differs } = await cacheMatchesList(cache, check.list, location.origin, {
+            prune: check.enforce,
+        });
+        if (check.enforce) return ok;
+        if (differs.length)
+            reportOnly(`${differs.join(', ')} differ from the official ${check.version}`);
+    }
+    return cacheMatchesManifest(cache, files, manifest.sha256);
 }
 
 /**
@@ -525,7 +574,8 @@ async function cacheMatchesManifest(cache, files, hashes) {
  * The file list comes from the host rather than from anything published here.
  * Guessing it by reading index.html would miss every module a script imports at
  * runtime, and hard-coding it here would make this page need a release every
- * time the application gained a file.
+ * time the application gained a file. What each of those files must BE is what
+ * is published here, per release.
  */
 async function fetchShell(tunnel, hostId) {
     say('Checking for updates…', '');
@@ -539,6 +589,8 @@ async function fetchShell(tunnel, hostId) {
     const files = Array.isArray(manifest.files) ? manifest.files : [];
     if (files.length === 0) throw new Error('your machine reported no interface files');
 
+    const check = await officialCheck(manifest.version);
+
     const stamp = cachedStamp();
     if (stamp && stamp.hostId === hostId && stamp.version === manifest.version) {
         // Trust the stamp only as far as the cache backs it up: a browser may
@@ -546,7 +598,7 @@ async function fetchShell(tunnel, hostId) {
         // would hand the service worker an empty shelf.
         const cache = await caches.open(SHELL_CACHE);
         if (await cache.match('/index.html')) {
-            if (await cacheMatchesManifest(cache, files, manifest.sha256)) {
+            if (await shellIsTrusted(cache, files, manifest, check)) {
                 progress(SHELL_AT);
                 return manifest.version;
             }
@@ -565,6 +617,11 @@ async function fetchShell(tunnel, hostId) {
     const fresh = await caches.open(SHELL_CACHE);
 
     let done = 0;
+    const differs = [];
+    const unlisted = [];
+    // The first thing that went wrong. Every worker stops at it, so the cache is
+    // only cleared once nothing more can be written to it.
+    let failure = null;
     // A dozen at a time, the largest first. One at a time is needlessly slow over
     // a channel with a round trip; all at once would put the whole application in
     // the host's send queue at the same moment, and the last request would wait
@@ -573,17 +630,61 @@ async function fetchShell(tunnel, hostId) {
     // starts, and more of them in flight fill those waits.
     const queue = shellFetchOrder(files, manifest.sizes);
     const worker = async () => {
-        for (;;) {
+        while (!failure) {
             const path = queue.shift();
             if (!path) return;
-            const response = await tunnel.fetch(path);
-            if (response.ok) await storeShellFile(fresh, path, response);
+            try {
+                const response = await tunnel.fetch(path);
+                if (response.ok) {
+                    // Judged BEFORE it is stored: the cache is shared with every
+                    // tab of this origin, and none of them may be served a file
+                    // that has not passed.
+                    const bytes = new Uint8Array(await response.arrayBuffer());
+                    const verdict = check.list
+                        ? judgeFile(check.list, path, await officialDigest(path, bytes))
+                        : 'unchecked';
+                    if (verdict === 'differs') differs.push(path);
+                    if (verdict === 'unlisted') unlisted.push(path);
+                    if (verdict === 'differs' && check.enforce)
+                        throw refusal(`${path} is not the file ${check.version} shipped`);
+                    if (!(verdict === 'unlisted' && check.enforce) && !failure) {
+                        await storeShellFile(
+                            fresh,
+                            path,
+                            new Response(bytes, {
+                                status: response.status,
+                                headers: response.headers,
+                            }),
+                        );
+                    }
+                }
+            } catch (e) {
+                failure = failure || e;
+                return;
+            }
             done++;
             progress(MANIFEST_AT + (SHELL_AT - MANIFEST_AT) * (done / files.length));
             say('Fetching the interface…', `${done} of ${files.length} files`);
         }
     };
     await Promise.all(Array.from({ length: SHELL_FETCH_WORKERS }, worker));
+    if (failure) {
+        await caches.delete(SHELL_CACHE);
+        throw failure;
+    }
+    if (check.list && !check.enforce && differs.length) {
+        reportOnly(`${differs.join(', ')} differ from the official ${check.version}`);
+    }
+    if (check.list && unlisted.length) {
+        // Leftovers of an earlier install, often: an installer that does not
+        // remove what a release dropped leaves it on the disk, and the machine
+        // lists what is on its disk.
+        console.info(
+            `[MW] Not part of the official ${check.version}, left out: ${unlisted.join(', ')}`,
+        );
+    }
+    if (check.list && !differs.length)
+        console.info(`[MW] Interface check: the official ${check.version}`);
 
     // The navigation the service worker answers is this one, so it has to be
     // there under the name the worker looks for.
@@ -592,7 +693,7 @@ async function fetchShell(tunnel, hostId) {
     await fresh.put('/', index.clone());
     // Checked like a cached copy: another page of this origin could have
     // written over it while it came down.
-    if (!(await cacheMatchesManifest(fresh, files, manifest.sha256))) {
+    if (!(await shellIsTrusted(fresh, files, manifest, check))) {
         await caches.delete(SHELL_CACHE);
         throw new Error('the interface changed while it was being fetched');
     }
@@ -776,6 +877,52 @@ async function connectThroughRestart(hostId, first) {
     return null;
 }
 
+/**
+ * The revision of the service worker this page needs where the check is
+ * enforced: the first that serves only the files this page checked (sw.js,
+ * SW_REVISION). A worker older than this answers nothing when asked.
+ */
+const WORKER_REVISION = 2;
+/** How long an older worker has to make way for the current one. */
+const WORKER_UPDATE_MS = 10000;
+
+/** The revision @p worker answers with, or 0 for one too old to answer. */
+function workerRevision(worker) {
+    return new Promise((resolve) => {
+        const channel = new MessageChannel();
+        const timer = setTimeout(() => resolve(0), 1000);
+        channel.port1.onmessage = (event) => {
+            clearTimeout(timer);
+            resolve(Number(event.data?.revision) || 0);
+        };
+        worker.postMessage({ type: 'mw-sw-revision' }, [channel.port2]);
+    });
+}
+
+/**
+ * The worker in charge, once it is one this page may hand over to: an older
+ * one is asked to update, and its successor takes over at once (sw.js,
+ * skipWaiting). The browser looks for that update by itself after a
+ * navigation, so this usually answers on the first try — the wait is only for
+ * the first start after a release of this file.
+ *
+ * @returns {Promise<ServiceWorker|null>} null if none came within the time
+ */
+async function currentWorker(registration) {
+    const giveUpAt = Date.now() + WORKER_UPDATE_MS;
+    for (;;) {
+        const active = registration.active;
+        if (active && (await workerRevision(active)) >= WORKER_REVISION) return active;
+        if (Date.now() >= giveUpAt) return null;
+        try {
+            await registration.update();
+        } catch {
+            /* asked again on the next turn */
+        }
+        await sleep(500);
+    }
+}
+
 async function main() {
     const hostId = hostIdFromLocation();
 
@@ -835,18 +982,28 @@ async function main() {
     try {
         await fetchShell(tunnel, hostId);
     } catch (e) {
+        if (e.refused) {
+            // Nothing of it was run, and nothing more is asked of it.
+            console.warn(`[MW] Refused: ${e.why}`);
+            tunnel.close();
+            fail(e.message, e.hint, 'Not opened');
+            return;
+        }
         fail(`The interface did not come through: ${e.message}.`, '');
         return;
     }
 
     say('Starting…', '');
+    let registration;
     try {
         await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-        await navigator.serviceWorker.ready;
+        registration = await navigator.serviceWorker.ready;
     } catch (e) {
         fail(`This browser refused to install the application: ${e.message}.`, '');
         return;
     }
+    // Asked while the bar catches up, which it does for over a second anyway.
+    const worker = policy.enforce ? currentWorker(registration) : null;
 
     // Everything real is done. The rest is the bar catching up, its moment at
     // the end, and the floor on how briefly this page may exist.
@@ -855,9 +1012,19 @@ async function main() {
     // Tell the worker the cache was just checked: it hands the cached
     // interface only to a navigation that follows one (sw.js, R1). In its
     // memory, not in storage, which every page of this origin can write.
+    //
+    // Where the check is enforced, only a worker that serves nothing but the
+    // checked files is told: an older one would hand a file the cache lacks
+    // to the machine for (sw.js, SW_REVISION). Elsewhere the older word goes
+    // too, so the worker in place keeps opening as it always did.
+    const current = worker ? await worker : registration.active;
+    if (worker && !current) {
+        fail('This page is out of date — reload it.', '');
+        return;
+    }
     try {
-        const registration = await navigator.serviceWorker.ready;
-        registration.active?.postMessage({ type: 'mw-shell-checked' });
+        current?.postMessage({ type: 'mw-shell-verified' });
+        if (!worker) current?.postMessage({ type: 'mw-shell-checked' });
     } catch {
         /* the navigation below comes back here, and says so if it loops */
     }
