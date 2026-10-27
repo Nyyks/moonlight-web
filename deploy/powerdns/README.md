@@ -717,6 +717,31 @@ carries its own version, in two layers — neither is the app version:
 
 Release order: server first (`deploy-prod.sh` on the tag), application second.
 
+### Official interfaces
+
+Every machine shares the `stream.` origin, so the entry page opens only the
+interface of a release, file for file (`bootstrap/v1/official.js`). Each
+release's list is `bootstrap/v1/interfaces/<version>.json`, the digest of
+every file an installed machine of that release serves, built from its tag by
+`scripts/interface-list.mjs`. CI rebuilds every list from its tag, and the
+bootstrap watchdog compares them like the scripts.
+
+- **A release commit carries its own list**: on the commit that will be
+  tagged, `node scripts/interface-list.mjs build X.Y.Z --ref HEAD`, then commit
+  the file there. The tag's CI fails without it, before any package.
+- **Production serves the list before a machine installs the release**: run
+  `deploy-prod.sh vX.Y.Z --apply` right after pushing the tag, not after the
+  release is published. Once production enforces the check, the tag's CI
+  waits for `stream.` to serve the list (up to 45 minutes) and builds no
+  package until then; a machine that installs the release earlier is refused.
+- **Where it is enforced**: staging refuses a release whose files differ from
+  its list, and lets a build between releases through. Production only
+  reports in the browser console until `PRODUCTION_ENFORCES` is set to true in
+  both `official.js` and `sw.js` and shipped with a `srv-` tag.
+- **Builds between releases are refused by production** once it enforces:
+  CI's `staging` channel (`x.y.z.gSHA-stg`) included. Point them at staging
+  (`MW_DOMAIN=dev.{MW_DOMAIN}`, above).
+
 ## Contents
 
 ```
