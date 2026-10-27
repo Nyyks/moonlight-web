@@ -237,6 +237,13 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; (see AutostartCheck in [Code]), ticked by default and still within reach at
 ; the very last click — and, on an update, showing what the machine already does.
 
+#if MyArch == "arm64"
+[InstallDelete]
+; The x64 virtual display driver an earlier ARM64 installer laid down: this
+; one bundles none (see the Virtual Display page in [Code]).
+Type: filesandordirs; Name: "{app}\drivers\vdd"
+
+#endif
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
@@ -567,7 +574,11 @@ begin
   InternetSkipButton.Visible := False;
 
   // Step: "MoonlightWeb Virtual Display". Same shape as the Internet page:
-  // a question with two answers and no default, asked once.
+  // a question with two answers and no default, asked once. Not on ARM64:
+  // the driver bundled is x64 only, and Windows on ARM takes a driver package
+  // signed by Microsoft only (0x800b0109, 20/10/2026), so there is nothing to
+  // offer — VDisplayPage stays nil and every use of it below checks.
+#if MyArch != "arm64"
   VDisplayPage := CreateCustomPage(InternetPage.ID,
     ExpandConstant('{cm:VDisplayPageCaption}'), ExpandConstant('{cm:VDisplayPageDesc}'));
 
@@ -589,6 +600,7 @@ begin
   VDisplayOptionLabel.Font.Style := [fsBold];
   VDisplayOptionLabel.Font.Color := $43A02E;
   VDisplayOptionLabel.Caption := ExpandConstant('{cm:VDisplayPageOption}');
+#endif
 
   // Live checklist shown during post-install (driven in RunProvisionChecklist).
   ProgressPage := CreateOutputProgressPage(
@@ -1146,6 +1158,12 @@ var
   dir: String;
   rc: Integer;
 begin
+#if MyArch == "arm64"
+  // No driver on ARM64 (see the page above): install and uninstall alike
+  // have nothing to run.
+  Log(Format('virtual display helper (%s): skipped, no driver on ARM64', [verb]));
+  Exit;
+#endif
   dir := ExpandConstant('{tmp}\vdisplay');
   ForceDirectories(dir);
   if not SaveStringToFile(dir + '\request.json', '{"action":"' + verb + '"}', False) then Exit;
@@ -1567,6 +1585,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   lines: TArrayOfString;
   internet, consent: String;
+#if MyArch == "arm64"
+  rc: Integer;
+#endif
 begin
   // Before the file copy: nothing under {app} can be replaced while the server
   // is holding it open.
@@ -1594,8 +1615,14 @@ begin
 #endif
   // The virtual display helper task: every edition, since a DEV build can
   // stream a headless machine just as well. Refreshed on every install so
-  // the action follows {app}.
+  // the action follows {app}. Not on ARM64, which has no driver to apply;
+  // the task an earlier installer may have left there goes.
+#if MyArch != "arm64"
   RegisterVirtualDisplayTask();
+#else
+  Exec('schtasks.exe', '/Delete /TN "' + VDisplayTaskName + '" /F', '', SW_HIDE,
+       ewWaitUntilTerminated, rc);
+#endif
   // The elevated stream worker task: every edition, refreshed so the action
   // follows {app}.
   RegisterStreamWorkerTask();

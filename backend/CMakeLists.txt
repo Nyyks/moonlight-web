@@ -743,14 +743,19 @@ if(WIN32)
     # the installer's elevated helper installs from {app}\drivers\vdd.
     # The helper refuses any file it cannot match against its pinned hash, so an
     # incomplete package has to stop the build here rather than ship an
-    # installer whose driver stage fails on the user's machine.
-    foreach(_mw_vdd_file IN ITEMS MttVDD.inf mttvdd.cat MttVDD.dll)
-        if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vdd/${_mw_vdd_file}")
-            message(FATAL_ERROR "Virtual display driver payload incomplete: "
-                                "installer/drivers/vdd/${_mw_vdd_file} is missing")
-        endif()
-    endforeach()
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vdd" DESTINATION drivers)
+    # installer whose driver stage fails on the user's machine. x64 only: the
+    # package is x64, and Windows on ARM takes a driver package only signed by
+    # Microsoft (0x800b0109, 20/10/2026), so ARM64 bundles none and its
+    # installer asks nothing about it.
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+        foreach(_mw_vdd_file IN ITEMS MttVDD.inf mttvdd.cat MttVDD.dll)
+            if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vdd/${_mw_vdd_file}")
+                message(FATAL_ERROR "Virtual display driver payload incomplete: "
+                                    "installer/drivers/vdd/${_mw_vdd_file} is missing")
+            endif()
+        endforeach()
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/installer/drivers/vdd" DESTINATION drivers)
+    endif()
     # "MoonlightWeb Virtual HID": the HID passthrough's driver, and the host's
     # own mouse on a host with none, built and signed apart
     # (native-host/drivers/vhid/build.ps1 -Sign Own, our own certificate) and
