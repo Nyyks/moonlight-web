@@ -260,6 +260,10 @@ export class StreamViewTouch {
      * @this {StreamViewInstance}
      */
     _applyZoomTransform() {
+        // With the special-keys bar up, the area already ends at the bar: the
+        // bottom of the picture is reachable without pushing it any higher, and
+        // black under it is what the bar's seating removes (27/10/2026).
+        const typing = !!this._kbToolbar?.classList.contains('visible');
         if (this.canvasArea) {
             const rect = this.canvasArea.getBoundingClientRect();
             // Displayed image size at zoom 1 (object-fit: contain letterboxes it
@@ -287,7 +291,7 @@ export class StreamViewTouch {
             // Allow pushing the image up beyond the standard clamp so its bottom
             // edge can travel up to the middle of the visible area (black bar up
             // to half the height). Other edges keep the strict no-black clamp.
-            const extraDown = rect.height / 2;
+            const extraDown = typing ? 0 : rect.height / 2;
             this._panX = Math.max(-maxX, Math.min(maxX, this._panX));
             this._panY = Math.max(-(maxY + extraDown), Math.min(maxY, this._panY));
         }
@@ -297,6 +301,8 @@ export class StreamViewTouch {
                 : '';
         if (this.canvas) this.canvas.style.transform = transform;
         if (this.videoEl) this.videoEl.style.transform = transform;
+        // The zoom changes how much of the area the picture leaves free.
+        this._seatPictureOnKbToolbar?.(typing);
         // getBoundingClientRect reflects the transform, so zoom/pan moves the
         // media rect — the cached measurement is now stale.
         this._invalidateMediaRect();

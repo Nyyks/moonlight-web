@@ -18,6 +18,7 @@ vi.mock('../js/ui/Toast.js', () => ({ Toast: { warning: () => {} } }));
 vi.mock('../js/i18n/i18n.js', () => ({ t: (key) => key, applyTranslations: () => {} }));
 
 const { StreamViewKeyboard } = await import('../js/ui/StreamViewKeyboard.js');
+const { StreamViewTouch } = await import('../js/ui/StreamViewTouch.js');
 
 const BAR = 48;
 
@@ -99,6 +100,51 @@ describe('touch keyboard bar placement', () => {
         viewport(800, 800);
         v._handleViewportResize();
         expect(v.canvasArea.style.transform).toBe('');
+    });
+
+    /** The stand-in with a 390×266 area, a 2560×1440 canvas and the real zoom. */
+    function zoomedView(zoom, panY) {
+        const v = view();
+        v.canvasArea = document.createElement('div');
+        Object.defineProperty(v.canvasArea, 'offsetWidth', { get: () => 390 });
+        Object.defineProperty(v.canvasArea, 'offsetHeight', { get: () => 266 });
+        v.canvasArea.getBoundingClientRect = () => ({ width: 390, height: 266 });
+        v.canvas = { width: 2560, height: 1440, style: {} };
+        v._displayEl = () => v.canvas;
+        v._videoIsDisplay = () => false;
+        v._surfaceIntrinsic = () => [2560, 1440];
+        v._invalidateMediaRect = () => {};
+        v._placeClientCursor = () => {};
+        v._applyZoomTransform = StreamViewTouch.prototype._applyZoomTransform;
+        v._zoom = zoom;
+        v._panX = 0;
+        v._panY = panY;
+        return v;
+    }
+
+    function openKeyboard(v) {
+        viewport(800, 800);
+        v._handleViewportResize();
+        v._kbdVisible = true;
+        viewport(450, 450);
+        v._handleViewportResize();
+    }
+
+    it('keeps a zoomed picture taller than the area down on the bar (iPhone, 27/10)', () => {
+        // 2560×1440 across 390 px is 219 px tall; at ×3.5, 768: 251 px of it
+        // above or below the area. Pushed up past its edge before the keyboard.
+        const v = zoomedView(3.5, -351);
+        openKeyboard(v);
+        expect(v._panY).toBeCloseTo(-251.1, 0);
+        expect(v.canvasArea.style.transform).toBe('');
+    });
+
+    it('seats a zoomed picture still shorter than the area at its zoom', () => {
+        // ×1.1: 241 px tall in 266, so no pan and 12 px of black under it, 4 left.
+        const v = zoomedView(1.1, -40);
+        openKeyboard(v);
+        expect(Math.abs(v._panY)).toBe(0);
+        expect(v.canvasArea.style.transform).toBe('translateY(8px)');
     });
 
     it('goes when the keyboard closes, and a new page height is learnt', () => {

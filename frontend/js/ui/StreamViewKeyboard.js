@@ -617,7 +617,9 @@ export class StreamViewKeyboard {
                 this._kbToolbar.style.top = vv.offsetTop + vv.height - tbHeight + 'px';
             }
             this.streamEl.style.height = Math.max(0, vv.height - tbHeight) + 'px';
-            this._seatPictureOnKbToolbar();
+            // Re-clamp the pan to the shorter area, then seat the picture.
+            if (this._applyZoomTransform) this._applyZoomTransform();
+            else this._seatPictureOnKbToolbar();
             // A hidden standby leg measures the same viewport as the live one;
             // let the visible view own the document-wide inset.
             if (!this._standby) publishKbdInset(covered + tbHeight);
@@ -634,8 +636,9 @@ export class StreamViewKeyboard {
             this.streamEl.style.bottom = shifted ? 'auto' : '';
             this.streamEl.style.top = shifted ? vv.offsetTop + 'px' : '';
             this.streamEl.style.height = shifted ? vv.height + 'px' : '';
-            this._seatPictureOnKbToolbar(false);
             this._hideKbToolbar();
+            if (this._applyZoomTransform) this._applyZoomTransform();
+            else this._seatPictureOnKbToolbar(false);
             if (!this._standby) publishKbdInset(0);
         }
         // The header moves with the visible area; the stats card sits under it.
@@ -649,7 +652,9 @@ export class StreamViewKeyboard {
      * height as a band of black between the picture and the bar (27/10/2026).
      * The area is moved, not the picture inside it: every mapping of a touch
      * or the cursor reads the area through getBoundingClientRect, which
-     * carries the move, so the letterbox arithmetic stays centred.
+     * carries the move, so the letterbox arithmetic stays centred. A zoomed
+     * picture is measured at its zoom; once taller than the area it needs no
+     * move, the pan clamp (_applyZoomTransform) keeps its bottom on the bar.
      * @this {StreamViewInstance}
      * @param {boolean} [seat] false puts the area back where the layout has it.
      */
@@ -662,7 +667,8 @@ export class StreamViewKeyboard {
             const w = area.offsetWidth,
                 h = area.offsetHeight;
             if (iw > 0 && ih > 0 && w > 0 && h > 0) {
-                const picH = ih * Math.min(w / iw, h / ih);
+                const zoom = this._zoom > 1.001 ? this._zoom : 1;
+                const picH = ih * Math.min(w / iw, h / ih) * zoom;
                 shift = Math.max(0, Math.floor((h - picH) / 2) - KB_PICTURE_GAP);
             }
         }
