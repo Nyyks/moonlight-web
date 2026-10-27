@@ -388,7 +388,7 @@ The browser loads a few kilobytes of entry page, opens WebRTC straight to your m
                    │                                         │ held open by
                    │  WebRTC — peer to peer, DTLS encrypted  │ your PC. No
                    │  video · audio · input · the whole REST │ open port, no
-                   │  API. WSS fallback on hostile networks. │ DNS record.
+                   │  API. TCP fallback if UDP is blocked.   │ DNS record.
                    ▼                                         ▼
  ┌────────────────────────────────────────────────────────────────────────┐
  │  YOUR GAMING PC — MoonlightWeb server (C++/Qt)                         │
