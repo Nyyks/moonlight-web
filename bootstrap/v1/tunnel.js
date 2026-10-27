@@ -69,18 +69,32 @@ export function shellFetchOrder(files, sizes) {
         .map((i) => files[i]);
 }
 
+/** How long a refused file waits before its one more try. */
+export const SHELL_STORE_RETRY_MS = 500;
+
 /**
- * Put one of the application's files in the cache, naming it when the browser
- * refuses.
+ * Put one of the application's files in the cache, trying once more after a
+ * pause, and naming it when the browser refuses both times.
  *
- * The browser's own words name neither the file nor much of a cause: a fresh
- * Chrome profile once said only "Failed to execute 'put' on 'Cache': Entry
- * already exists." for the whole interface (26/10, not reproduced since). The
- * path and the storage error's name are what make the next report one to go on.
+ * A fresh Chrome profile once refused the whole interface with only "Failed to
+ * execute 'put' on 'Cache': Entry already exists." (26/10, not reproduced since),
+ * which looked like the storage failing for a moment rather than anything about
+ * the files. One more try rides out such a moment. The path and the last storage
+ * error's name are what make a report of the failure one to go on.
+ *
+ * The second try is handed a copy taken beforehand: the first put may have read
+ * the body before it failed.
  */
 export async function storeShellFile(cache, path, response) {
+    const spare = response.clone();
     try {
         await cache.put(path, response);
+        return;
+    } catch {
+        await new Promise((resolve) => setTimeout(resolve, SHELL_STORE_RETRY_MS));
+    }
+    try {
+        await cache.put(path, spare);
     } catch (e) {
         const cause = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
         throw new Error(`the browser could not store ${path} (${cause})`);
