@@ -31,6 +31,7 @@ import {
     shareTokenFromLocation,
     rememberLastHost,
     shellFetchOrder,
+    storeShellFile,
     SHELL_CACHE,
 } from './tunnel.js';
 
@@ -576,7 +577,7 @@ async function fetchShell(tunnel, hostId) {
             const path = queue.shift();
             if (!path) return;
             const response = await tunnel.fetch(path);
-            if (response.ok) await fresh.put(path, response);
+            if (response.ok) await storeShellFile(fresh, path, response);
             done++;
             progress(MANIFEST_AT + (SHELL_AT - MANIFEST_AT) * (done / files.length));
             say('Fetching the interface…', `${done} of ${files.length} files`);

@@ -69,6 +69,24 @@ export function shellFetchOrder(files, sizes) {
         .map((i) => files[i]);
 }
 
+/**
+ * Put one of the application's files in the cache, naming it when the browser
+ * refuses.
+ *
+ * The browser's own words name neither the file nor much of a cause: a fresh
+ * Chrome profile once said only "Failed to execute 'put' on 'Cache': Entry
+ * already exists." for the whole interface (26/10, not reproduced since). The
+ * path and the storage error's name are what make the next report one to go on.
+ */
+export async function storeShellFile(cache, path, response) {
+    try {
+        await cache.put(path, response);
+    } catch (e) {
+        const cause = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+        throw new Error(`the browser could not store ${path} (${cause})`);
+    }
+}
+
 /** How long a request may wait for its first byte before it is given up on. */
 const REQUEST_TIMEOUT_MS = 30000;
 
