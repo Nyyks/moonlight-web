@@ -228,6 +228,9 @@ function resume() {
  * a plain contradiction of the machines listed a centimetre below, so the button
  * says what pressing it does: "Choose a machine".
  *
+ * Except on a refusal. There a machine did answer — the page says what it
+ * served — so the dead caption stays empty rather than deny it (27/10/2026).
+ *
  * Nothing here adds to that register or renames a row in it. Only the
  * application can, because only the application ever gets close enough to a
  * machine to be told what it calls itself. The one write this page makes is
@@ -270,6 +273,8 @@ let closeMenu = null;
 /* The machine this page is for, so that a repaint after the outcome is known
    does not have to be handed it again from wherever the failure happened. */
 let paintedHostId = null;
+/* Set when that machine answered and the page refused what it served. */
+let paintedRefused = false;
 
 /**
  * @param {boolean} choosing  false while connecting (a caption), true once that
@@ -289,8 +294,9 @@ function paintInstances(choosing) {
 
     if (!choosing || others.length === 0) {
         // An identifier this browser has never reached names nothing it can
-        // show — and only a page that has given up may say so out loud.
-        const label = current ? current.name : choosing ? 'No server found' : '';
+        // show — and only a page that has given up may say so out loud, never
+        // one that refused what the machine served.
+        const label = current ? current.name : choosing && !paintedRefused ? 'No server found' : '';
         if (!label) {
             mount.hidden = true;
             return;
@@ -992,6 +998,7 @@ async function main() {
             // Nothing of it was run, and nothing more is asked of it.
             console.warn(`[MW] Refused: ${e.why}`);
             tunnel.close();
+            paintedRefused = true;
             fail(e.message, e.hint, 'Not opened');
             return;
         }

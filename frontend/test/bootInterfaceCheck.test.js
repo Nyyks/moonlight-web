@@ -10,6 +10,9 @@
  * left out and the start goes on; and only a service worker that serves nothing
  * but the checked files is told the cache was checked. Where it only reports,
  * the start is exactly what it was, with the verdict in the console.
+ *
+ * A refused machine did answer, so the caption of one this browser does not
+ * know stays empty rather than say "No server found".
  */
 
 /* global Response, Request */
@@ -103,6 +106,8 @@ function worker(revision) {
 let served;
 let tunnelClosed;
 let policy;
+/** What the connection fails with, if it does. */
+let connectError;
 
 vi.mock('../../bootstrap/v1/official.js', async (original) => ({
     ...(await original()),
@@ -118,7 +123,9 @@ vi.mock('../../bootstrap/v1/tunnel.js', async (original) => {
                 this.firstContact = false;
                 this.onstatus = null;
             }
-            async connect() {}
+            async connect() {
+                if (connectError) throw connectError;
+            }
             close() {
                 tunnelClosed = true;
             }
@@ -189,10 +196,12 @@ beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
     document.body.innerHTML =
-        '<h1 id="stage"></h1><p id="detail"></p><div id="bar"></div><p id="status"></p><p id="note"></p>';
+        '<h1 id="stage"></h1><p id="detail"></p><div id="bar"></div><p id="status"></p><p id="note"></p>' +
+        '<div id="instance-menu" hidden></div>';
     delete document.body.dataset.state;
     served = { ...OFFICIAL };
     tunnelClosed = false;
+    connectError = null;
     warnings = [];
     vi.spyOn(console, 'warn').mockImplementation((...a) => warnings.push(a.join(' ')));
     vi.spyOn(console, 'info').mockImplementation(() => {});
@@ -241,6 +250,24 @@ describe('where the check is enforced', () => {
         expect(sw.told).toEqual([]);
         expect(tunnelClosed).toBe(true);
         expect(localStorage.getItem('mw-shell-stamp')).toBeNull();
+    });
+
+    it('does not say "No server found" under a machine it refused', async () => {
+        served['/js/app.js'] = 'steal(localStorage);\n';
+        await start();
+        expect(document.getElementById('stage').textContent).toBe('Not opened');
+        const caption = document.getElementById('instance-menu');
+        expect(caption.hidden).toBe(true);
+        expect(caption.textContent).toBe('');
+    });
+
+    it('still says it where no machine answered', async () => {
+        connectError = new Error('Your machine did not answer.');
+        await start();
+        expect(document.getElementById('stage').textContent).toBe('Not connected');
+        const caption = document.getElementById('instance-menu');
+        expect(caption.hidden).toBe(false);
+        expect(caption.textContent).toBe('No server found');
     });
 
     it('refuses a changed main page as much as a changed script', async () => {
