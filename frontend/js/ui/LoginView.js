@@ -45,6 +45,11 @@ export class LoginView {
         this._loading = true;
         this._error = '';
         this._remaining = 3;
+        // A wrong PIN typed on this page. Until there is one — here, or one the
+        // host counted earlier — the attempts left are not shown: a count of
+        // tries before a lockout reads as a warning to someone who has done
+        // nothing wrong yet.
+        this._wrongPinHere = false;
         this._lockoutRemaining = 0;
         this._lockoutTimer = null;
         this._submitting = false;
@@ -298,7 +303,7 @@ export class LoginView {
                 ${this._renderRememberField()}
 
                 ${this._error ? `<p id="login-error" class="login-error">${this.esc(this._error)}</p>` : '<p id="login-error" class="login-error"></p>'}
-                <p id="login-remaining" class="login-remaining">${this._remaining > 0 && this._remaining <= 3 ? this.esc(t('login.attemptsRemaining', { count: this._remaining })) : ''}</p>
+                <p id="login-remaining" class="login-remaining">${this._showRemaining() ? this.esc(t('login.attemptsRemaining', { count: this._remaining })) : ''}</p>
                 ${
                     this._lockoutRemaining > 0
                         ? `
@@ -831,6 +836,19 @@ export class LoginView {
         });
     }
 
+    /**
+     * Whether the attempts left are worth saying: once a PIN was wrong — on this
+     * page, or before it, which the host's count says by being under its first
+     * allowance of three (AuthManager::bucketRemainingAttempts).
+     */
+    _showRemaining() {
+        return (
+            this._remaining > 0 &&
+            this._remaining <= 3 &&
+            (this._wrongPinHere || this._remaining < 3)
+        );
+    }
+
     _handlePinError(err, input, btn) {
         this._submitting = false;
         btn.disabled = false;
@@ -849,6 +867,7 @@ export class LoginView {
             }
         } else if (statusCode === 401) {
             errorMsg = t('login.invalidPin');
+            this._wrongPinHere = true;
             if (body.lockout_seconds > 0) {
                 this._startLockoutTimer(body.lockout_seconds);
             }
