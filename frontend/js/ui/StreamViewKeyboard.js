@@ -581,8 +581,24 @@ export class StreamViewKeyboard {
     _handleViewportResize() {
         const vv = window.visualViewport;
         if (!vv || !this.streamEl) return;
-        // In real fullscreen the keyboard rarely opens; skip to avoid fighting it.
-        const kbHeight = window.innerHeight - vv.height - vv.offsetTop;
+        // What the soft keyboard hides of the bottom of the layout viewport: all
+        // a bottom-anchored fixed element (the toast stack) has to clear.
+        const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        // Not every browser keeps the layout viewport when the keyboard opens.
+        // Chrome on an iPhone (27/10/2026) shrinks it with the visible area:
+        // `covered` then stays near 0 and the bar never showed, or, read before
+        // the layout caught up, the bar went that far above a bottom that had
+        // already moved — to the top of the screen. So the keyboard is told by
+        // the height the page had while no field held the focus, and the bar is
+        // placed from the top of the visible area, which holds either way.
+        const ae = document.activeElement;
+        const typing =
+            this._kbdVisible ||
+            (ae instanceof HTMLElement &&
+                (ae.isContentEditable || ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT'));
+        if (!typing || !this._layoutHeight) this._layoutHeight = window.innerHeight;
+        const kbHeight =
+            Math.max(this._layoutHeight, window.innerHeight) - vv.height - vv.offsetTop;
         if (kbHeight > KB_OPEN_THRESHOLD) {
             // Release `bottom` (set by inset:0) so `height` actually applies.
             this.streamEl.style.bottom = 'auto';
@@ -592,14 +608,15 @@ export class StreamViewKeyboard {
             // Windows taskbar) stays visible above the bar instead of behind it.
             let tbHeight = 0;
             if (this._kbToolbar) {
-                this._kbToolbar.style.bottom = kbHeight + 'px';
                 this._kbToolbar.classList.add('visible');
                 tbHeight = this._kbToolbar.offsetHeight;
+                this._kbToolbar.style.bottom = 'auto';
+                this._kbToolbar.style.top = vv.offsetTop + vv.height - tbHeight + 'px';
             }
             this.streamEl.style.height = Math.max(0, vv.height - tbHeight) + 'px';
             // A hidden standby leg measures the same viewport as the live one;
             // let the visible view own the document-wide inset.
-            if (!this._standby) publishKbdInset(kbHeight + tbHeight);
+            if (!this._standby) publishKbdInset(covered + tbHeight);
         } else {
             // iOS Safari can hand over a page whose visible area starts inside
             // the layout viewport rather than at its top — seen after an update,

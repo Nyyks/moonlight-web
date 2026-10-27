@@ -1271,7 +1271,7 @@ body.streaming-active::after {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0; /* JS parks it just above the soft keyboard */
+    bottom: 0; /* JS parks it just above the soft keyboard, by its top */
     display: none;
     align-items: stretch;
     gap: 3px;
@@ -1285,6 +1285,21 @@ body.streaming-active::after {
 }
 .stream-kbd-toolbar.visible {
     display: flex;
+}
+/* The header's controls stay above the bar, as the Share menu does (300,
+   share.css): wherever a browser puts the bar, Stop and the keyboard toggle
+   can still be reached. */
+.btn-stream-kbd,
+.btn-stream-pad,
+.btn-stream-fs,
+.stream-volume {
+    z-index: 300;
+}
+.stream-quit-btn,
+.stream-console-btn,
+.stream-support-btn {
+    position: relative;
+    z-index: 300;
 }
 .stream-kbd-key {
     flex: 1 1 0;
