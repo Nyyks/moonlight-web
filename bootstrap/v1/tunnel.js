@@ -101,6 +101,25 @@ export async function storeShellFile(cache, path, response) {
     }
 }
 
+/**
+ * Requests answered here rather than sent to the machine.
+ *
+ * /api/auth/home-screen/instances carried the list of machines this browser
+ * knows, for the menu of a home-screen shortcut. That list stays in the browser
+ * (27/10/2026). The applications of 0.3.1 and 0.4.0 still send the request, and
+ * every connection of every application version is a Tunnel of this file, so it
+ * is answered here, as the host would answer it: a shortcut's menu fills as the
+ * shortcut is used.
+ */
+const NEVER_SENT = new Set(['/api/auth/home-screen/instances']);
+
+function sentNowhere() {
+    return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+    });
+}
+
 /** How long a request may wait for its first byte before it is given up on. */
 const REQUEST_TIMEOUT_MS = 30000;
 
@@ -816,9 +835,12 @@ export class Tunnel {
 
     /** One HTTP request over the channel. Same shape as window.fetch. */
     async fetch(input, init = {}) {
+        const url = new URL(typeof input === 'string' ? input : input.url, location.origin);
+        // Answered here and never sent: see NEVER_SENT.
+        if (NEVER_SENT.has(url.pathname)) return sentNowhere();
+
         if (!this.connected) throw new Error('the tunnel is not open');
 
-        const url = new URL(typeof input === 'string' ? input : input.url, location.origin);
         const headers = {};
         new Headers(
             init.headers || (typeof input === 'object' ? input.headers : undefined),

@@ -134,12 +134,7 @@ import { SecuringOverlay } from './ui/SecuringOverlay.js';
 import { ourStunHost } from './api/IceServers.js';
 import { probeUdp } from './api/UdpProbe.js';
 import { InstanceMenu } from './ui/InstanceMenu.js';
-import {
-    currentInstanceRef,
-    importInstances,
-    listInstances,
-    rememberInstance,
-} from './util/instances.js';
+import { currentInstanceRef, importInstances, rememberInstance } from './util/instances.js';
 
 // Every module above arrived and ran: the boot watchdog (bootWatch.js) stands down.
 window.mwBooted = true;
@@ -1436,16 +1431,14 @@ export const MoonlightApp = {
      * A shortcut runs in a storage of its own, so everything it should start
      * with has to leave with the one thing Safari gives it: the address in the
      * manifest. The host writes a single-use key into that address for a
-     * signed-in session (/api/app/web-manifest), and keeps this browser's list of
-     * machines beside it, handed over when the key is spent. This machine's key
-     * only: until v0.4.1 the other machines were each asked for one, over a line
-     * opened with their own key and cookie, which every machine's page on this
-     * shared origin could do as well (security review R1). The shortcut asks
-     * their PIN the first time it opens them.
+     * signed-in session (/api/app/web-manifest), for this machine only: the
+     * shortcut asks another machine's PIN the first time it opens it. This
+     * browser's list of machines stays in the browser (the bootstrap's tunnel.js
+     * answers that request for the applications of before), so the shortcut's
+     * menu fills as it is used.
      *
-     * All best-effort. The list goes to the host first. Then the manifest with
-     * the key is fetched and written over the copy the service worker holds —
-     * the phone reads
+     * All best-effort. The manifest with the key is fetched and written over the
+     * copy the service worker holds — the phone reads
      * the manifest while its share sheet is up, with this page's scripts
      * paused behind it, so a request the worker would send to this page waits
      * out the worker's timeout and the shortcut is made with nothing; the
@@ -1463,8 +1456,6 @@ export const MoonlightApp = {
         }
         const ownId = tunnelHostId();
         if (!ownId || this._runsAsShortcut()) return;
-        const instances = listInstances();
-        BackendClient.shareInstancesForHomeScreen(instances).catch(() => {});
         try {
             const fresh = await fetch(`/api/app/web-manifest?t=${Date.now()}`, {
                 cache: 'no-store',
