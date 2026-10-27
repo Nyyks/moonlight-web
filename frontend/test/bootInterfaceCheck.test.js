@@ -11,8 +11,10 @@
  * but the checked files is told the cache was checked. Where it only reports,
  * the start is exactly what it was, with the verdict in the console.
  *
- * A refused machine did answer, so the caption of one this browser does not
- * know stays empty rather than say "No server found".
+ * A machine that answered was found, whatever fails after that — its interface
+ * refused or cut off, the worker refused or too old, the application not
+ * starting — so the caption of one this browser does not know stays empty
+ * rather than say "No server found".
  */
 
 /* global Response, Request */
@@ -88,6 +90,14 @@ function memoryCaches() {
     };
 }
 
+/** The browser's SHA-256, answered at once (see beforeEach). */
+async function digestAtOnce(algorithm, data) {
+    if (algorithm !== 'SHA-256' || !ArrayBuffer.isView(data))
+        throw new TypeError('SHA-256 of bytes only');
+    const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    return new Uint8Array(createHash('sha256').update(bytes).digest()).buffer;
+}
+
 /** The service worker in charge, answering the revision it is given. */
 function worker(revision) {
     const told = [];
@@ -108,6 +118,8 @@ let tunnelClosed;
 let policy;
 /** What the connection fails with, if it does. */
 let connectError;
+/** The file the connection drops at, if it does. */
+let droppedAt;
 
 vi.mock('../../bootstrap/v1/official.js', async (original) => ({
     ...(await original()),
@@ -130,6 +142,7 @@ vi.mock('../../bootstrap/v1/tunnel.js', async (original) => {
                 tunnelClosed = true;
             }
             async fetch(path) {
+                if (path === droppedAt) throw new Error('the channel closed');
                 if (path === '/api/app/manifest') {
                     const files = Object.keys(served);
                     return new Response(
@@ -148,11 +161,17 @@ vi.mock('../../bootstrap/v1/tunnel.js', async (original) => {
 });
 
 /** One start of the entry page, to its verdict and the handover. */
-async function start({ revision = 2 } = {}) {
+async function start({ revision = 2, registerError = null } = {}) {
     const sw = worker(revision);
     const registration = { active: sw, update: vi.fn(async () => {}) };
     vi.stubGlobal('navigator', {
-        serviceWorker: { register: async () => registration, ready: Promise.resolve(registration) },
+        serviceWorker: {
+            register: async () => {
+                if (registerError) throw registerError;
+                return registration;
+            },
+            ready: Promise.resolve(registration),
+        },
     });
     vi.resetModules();
     await import('../../bootstrap/v1/boot.js');
@@ -182,6 +201,11 @@ beforeEach(() => {
         ],
     });
     if (!globalThis.crypto?.subtle) vi.stubGlobal('crypto', webcrypto);
+    // Answered on this thread, at once. Node answers a digest from its thread
+    // pool, in real time, while start() drives the page's clock through fifty
+    // seconds in a few milliseconds: under the load of the whole suite, a start
+    // that waits out an older worker's grace had not got to its verdict by then.
+    vi.spyOn(crypto.subtle, 'digest').mockImplementation(digestAtOnce);
     vi.stubGlobal('requestAnimationFrame', () => 0);
     cachesStub = memoryCaches();
     vi.stubGlobal('caches', cachesStub);
@@ -202,6 +226,7 @@ beforeEach(() => {
     served = { ...OFFICIAL };
     tunnelClosed = false;
     connectError = null;
+    droppedAt = null;
     warnings = [];
     vi.spyOn(console, 'warn').mockImplementation((...a) => warnings.push(a.join(' ')));
     vi.spyOn(console, 'info').mockImplementation(() => {});
@@ -250,24 +275,6 @@ describe('where the check is enforced', () => {
         expect(sw.told).toEqual([]);
         expect(tunnelClosed).toBe(true);
         expect(localStorage.getItem('mw-shell-stamp')).toBeNull();
-    });
-
-    it('does not say "No server found" under a machine it refused', async () => {
-        served['/js/app.js'] = 'steal(localStorage);\n';
-        await start();
-        expect(document.getElementById('stage').textContent).toBe('Not opened');
-        const caption = document.getElementById('instance-menu');
-        expect(caption.hidden).toBe(true);
-        expect(caption.textContent).toBe('');
-    });
-
-    it('still says it where no machine answered', async () => {
-        connectError = new Error('Your machine did not answer.');
-        await start();
-        expect(document.getElementById('stage').textContent).toBe('Not connected');
-        const caption = document.getElementById('instance-menu');
-        expect(caption.hidden).toBe(false);
-        expect(caption.textContent).toBe('No server found');
     });
 
     it('refuses a changed main page as much as a changed script', async () => {
@@ -346,5 +353,67 @@ describe('where the check only reports', () => {
         served['/js/ui/ConsentBar.js'] = 'export const stale = 1;\n';
         await start();
         expect(cachesStub.shell()).toContain('/js/ui/ConsentBar.js');
+    });
+});
+
+describe('the caption under a machine this browser has never reached', () => {
+    // Enforced, which is where a refusal and a worker too old can stop a start.
+    beforeEach(() => {
+        policy = { enforce: true, unreleasedAllowed: true };
+    });
+
+    /** What the caption shows: nothing when it is hidden. */
+    function caption() {
+        const mount = document.getElementById('instance-menu');
+        return mount.hidden ? '' : mount.textContent;
+    }
+
+    it('says "No server found" where no machine answered', async () => {
+        connectError = new Error('Your machine did not answer.');
+        await start();
+        expect(document.getElementById('stage').textContent).toBe('Not connected');
+        expect(caption()).toBe('No server found');
+    });
+
+    it('stays empty under a machine it refused', async () => {
+        served['/js/app.js'] = 'steal(localStorage);\n';
+        await start();
+        expect(document.getElementById('stage').textContent).toBe('Not opened');
+        expect(caption()).toBe('');
+    });
+
+    it('stays empty under an interface cut off on its way down', async () => {
+        droppedAt = '/js/app.js';
+        await start();
+        expect(document.getElementById('detail').textContent).toBe(
+            'The interface did not come through: the channel closed.',
+        );
+        expect(caption()).toBe('');
+    });
+
+    it('stays empty when the browser refuses to install the worker', async () => {
+        await start({ registerError: new Error('The operation is insecure') });
+        expect(document.getElementById('detail').textContent).toBe(
+            'This browser refused to install the application: The operation is insecure.',
+        );
+        expect(caption()).toBe('');
+    });
+
+    it('stays empty when the worker in charge is too old for this page', async () => {
+        await start({ revision: 0 });
+        expect(document.getElementById('detail').textContent).toBe(
+            'This page is out of date — reload it.',
+        );
+        expect(caption()).toBe('');
+    });
+
+    it('stays empty when the handover did not reach the application', async () => {
+        // The last handover's reload is still on the record: it never got there.
+        sessionStorage.setItem('mw-handover-reload', String(Date.now()));
+        await start();
+        expect(document.getElementById('detail').textContent).toBe(
+            'The application is installed but did not start.',
+        );
+        expect(caption()).toBe('');
     });
 });
