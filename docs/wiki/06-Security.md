@@ -135,15 +135,13 @@ A browser arriving at the login screen holds no session, so the host cannot look
 
 ## 6.6b One address for every machine
 
-Every machine reached through the introduction server opens under the same address, `https://stream.{domain}/<id>`, and so in one **browser origin**: one storage, one service-worker cache, for all of them. That is by choice (one name users see and stream on, no name per machine, nothing per machine in DNS or in Certificate Transparency), and it has a cost: the interface a machine serves runs in the same origin as every other machine this browser knows, and could reach what they keep there.
+Every machine reached through the introduction server opens under the same address, `https://stream.{domain}/<id>`, and so in one **browser origin**: one storage, one service-worker cache, for all of them. That is by choice (one name users see and stream on, no name per machine, nothing per machine in DNS or in Certificate Transparency).
 
-What v0.4.1 does about it:
+What v0.4.1 does within that one origin:
 
 - **A session works only with the key it was paired on.** A cookie presented over a tunnel whose browser key is not the one its session was bound to is refused (401). The key cannot leave the browser it was made in, so a copied cookie is worthless anywhere else.
 - **The cached interface is checked against its own machine on every start.** The machine's file list carries the SHA-256 of each file, sent over the channel its key signed. The entry page, served fresh by the introduction server, compares the cache with it before every start and fetches the interface again at the first difference. The service worker hands the cached interface only to a start the entry page has just checked.
 - **No page connects to another machine any more.** The home-screen shortcut signs in on the machine it was made from; another machine asks its PIN the first time the shortcut opens it.
-
-**What remains.** While a page of a hostile machine is **open** in a browser, it shares that origin with your other machines and can use what this browser holds for them, as their own page would. Open a link from a machine you do not trust, an invitation included, in **another browser or another browser profile** than the one you use for your own machines.
 
 ## 6.7 Internet-access consent & audit
 
