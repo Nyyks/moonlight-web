@@ -338,4 +338,10 @@ bool lockedByNoAdmin(const QString& method, const QString& path, bool shareAllow
     return false;
 }
 
+bool tunnelKeyRefused(bool viaTunnel, const QByteArray& tunnelKey, const QByteArray& boundKey)
+{
+    if (!viaTunnel && tunnelKey.isEmpty()) return false;
+    return !boundKey.isEmpty() && boundKey != tunnelKey;
+}
+
 } // namespace RequestGuard

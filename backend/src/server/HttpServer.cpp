@@ -852,8 +852,8 @@ bool HttpServer::tunnelKeyRefused(const HttpRequest& req) const
     if (!m_AuthManager) return false;
     const QString token = sessionTokenFromRequest(req);
     if (token.isEmpty()) return false;
-    const QByteArray bound = m_AuthManager->sessionPairingKey(token);
-    return !bound.isEmpty() && bound != req.tunnelKey;
+    return RequestGuard::tunnelKeyRefused(req.viaTunnel, req.tunnelKey,
+                                          m_AuthManager->sessionPairingKey(token));
 }
 
 bool HttpServer::isAuthenticated(const HttpRequest& req) const

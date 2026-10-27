@@ -2,6 +2,7 @@
  * MoonlightWeb — TNR suite. Copyright (C) 2026 Bruno Martin. GPLv3.
  */
 #include "test_framework.h"
+#include "common/PairingCrypto.h"
 #include "server/AuthManager.h"
 #include "server/AppSettings.h"
 
@@ -159,6 +160,28 @@ void run_auth_manager_tests()
     CHECK(!auth.sessions().first().ephemeral);
     CHECK_EQ(auth.sessions().first().machineName, QStringLiteral("Home PC"));
     auth.destroyAllSessions();
+
+    // ── The browser key a session is bound to (MW-BIND-v1) ─────────────────
+    // What HttpServer::tunnelKeyRefused holds a tunnel's key against. A session
+    // keeps the key it was bound to: the cookie copied out of the browser it
+    // lives in cannot be bound again to the copier's own key.
+    {
+        const QByteArray keyA =
+            PairingCrypto::publicKeySpkiFromPrivatePem(PairingCrypto::generatePrivateKeyPem());
+        const QByteArray keyB =
+            PairingCrypto::publicKeySpkiFromPrivatePem(PairingCrypto::generatePrivateKeyPem());
+        const QString session = auth.createSession("198.51.100.50", "Phone");
+        CHECK(auth.sessionPairingKey(session).isEmpty()); // like one older than binding
+        CHECK(!auth.bindSessionKey(session, QByteArray("not a key")));
+        CHECK(auth.bindSessionKey(session, keyA));
+        CHECK(auth.bindSessionKey(session, keyA));  // the same browser, after a reconnect
+        CHECK(!auth.bindSessionKey(session, keyB)); // another browser's key
+        CHECK(auth.sessionPairingKey(session) == keyA);
+        CHECK(!auth.bindSessionKey(QString(), keyA));
+        CHECK(!auth.bindSessionKey("bogus-token", keyA));
+        CHECK(auth.sessionPairingKey("bogus-token").isEmpty());
+        auth.destroyAllSessions();
+    }
 
     // ── Certificate auth ───────────────────────────────────────────────────
     QString cert = auth.generateCertificateToken();

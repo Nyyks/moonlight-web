@@ -19,6 +19,7 @@
 
 #include "common/Types.h"
 
+#include <QByteArray>
 #include <QMap>
 #include <QString>
 
@@ -166,5 +167,11 @@ AdminTokenReply adminTokenReply(const Decision& decision, const Context& ctx, bo
 /// (share_in_booth_mode, issue #40) lets the share slots and a guest's PIN
 /// through, and nothing else.
 bool lockedByNoAdmin(const QString& method, const QString& path, bool shareAllowed = false);
+
+/// Whether a session arrives over a tunnel whose browser key is not the one it
+/// was paired with (HttpServer::tunnelKeyRefused): @p boundKey is the session's
+/// key, empty for a session older than key binding. A request off the tunnel
+/// carries no key and is never refused here.
+bool tunnelKeyRefused(bool viaTunnel, const QByteArray& tunnelKey, const QByteArray& boundKey);
 
 } // namespace RequestGuard

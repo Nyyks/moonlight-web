@@ -538,4 +538,25 @@ void run_request_guard_tests()
     CHECK(lockedByNoAdmin("POST", "/api/hosts/uuid-1/pair", true));
     CHECK(lockedByNoAdmin("POST", "/api/update/start", true));
     CHECK(lockedByNoAdmin("POST", "/api/system/restart", true));
+
+    SECTION("RequestGuard — a session on another browser's key");
+
+    {
+        // HttpServer::tunnelKeyRefused: a session cookie over a tunnel whose
+        // browser key is not the one the session was bound to. The key cannot
+        // leave the browser it was made in, so the cookie did — copied out of
+        // the jar it is kept in, and replayed from somewhere else.
+        const QByteArray keyA("spki-of-browser-a");
+        const QByteArray keyB("spki-of-browser-b");
+        CHECK(!tunnelKeyRefused(true, keyA, keyA));
+        CHECK(tunnelKeyRefused(true, keyB, keyA));
+        // The tunnel names no key, and the session has one: refused too.
+        CHECK(tunnelKeyRefused(true, QByteArray(), keyA));
+        // A session older than key binding is let through, as before.
+        CHECK(!tunnelKeyRefused(true, keyB, QByteArray()));
+        // Off the tunnel there is no browser key to hold the session against.
+        CHECK(!tunnelKeyRefused(false, QByteArray(), keyA));
+        // A signalling socket opened through the tunnel carries the key alone.
+        CHECK(tunnelKeyRefused(false, keyB, keyA));
+    }
 }
