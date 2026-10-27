@@ -149,6 +149,11 @@ function listPath(version) {
     return path.join(LISTS, `${version}.json`);
 }
 
+/** The list as committed, with LF endings whatever the checkout wrote. */
+function committedList(version) {
+    return fs.readFileSync(listPath(version), 'utf8').replace(/\r\n/g, '\n');
+}
+
 function main(argv) {
     const [command, ...rest] = argv;
     const option = (name) => {
@@ -192,7 +197,7 @@ function main(argv) {
                 bad++;
                 continue;
             }
-            if (fresh === fs.readFileSync(listPath(version), 'utf8')) {
+            if (fresh === committedList(version)) {
                 console.log(`ok    ${version} (${ref})`);
             } else {
                 console.error(
@@ -225,7 +230,7 @@ async function live(version, origin, waitSeconds) {
         console.error('usage: interface-list.mjs live <x.y.z> <origin> [--wait <seconds>]');
         return 2;
     }
-    const want = fs.readFileSync(listPath(version), 'utf8');
+    const want = committedList(version);
     const url = `${origin.replace(/\/$/, '')}${LIST_PATH}${version}.json`;
     const giveUpAt = Date.now() + (PRODUCTION_ENFORCES ? waitSeconds * 1000 : 0);
     for (;;) {

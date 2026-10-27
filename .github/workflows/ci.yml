@@ -118,6 +118,36 @@ jobs:
           path: frontend/coverage
           if-no-files-found: ignore
 
+  # ──────────────────── 1a. THE OFFICIAL INTERFACES ────────────────────
+  # The entry page holds every machine's interface against the list of the
+  # release it says it runs (bootstrap/v1/official.js, D26), so a list that does
+  # not match its tag would turn away every machine of that release. Each list
+  # is rebuilt here from its tag. On a v* tag the release's own list must be in
+  # the tagged commit, and — once production refuses rather than reports —
+  # production must serve it before a package is built: a machine that installs
+  # the release before the server knows it would be refused.
+  interface-lists:
+    name: Official interface lists
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # each list is rebuilt from its release tag
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Each list against its tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            node scripts/interface-list.mjs check --release "${GITHUB_REF_NAME#v}"
+          else
+            node scripts/interface-list.mjs check
+          fi
+      - name: Production serves the release's list
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/interface-list.mjs live "${GITHUB_REF_NAME#v}" https://stream.moonlightweb.top
+
   # ──────────────────── 1b. THE UPSCALER LABORATORY (software GPUs) ────────────────────
   # The two renderers run MoonlightWeb's own upscaler on SwiftShader — WebGPU's
   # fallback adapter, then ANGLE on SwiftShader for WebGL2 — through the lab's
@@ -301,7 +331,7 @@ jobs:
   # quality and test stages above.
   package:
     name: Installers
-    needs: [frontend, test-backend]
+    needs: [frontend, test-backend, interface-lists]
     if: github.event_name != 'pull_request'
     uses: ./.github/workflows/release.yml
     with:
@@ -333,7 +363,7 @@ jobs:
   # the pull for no gain.
   docker:
     name: Container image
-    needs: [frontend, test-backend]
+    needs: [frontend, test-backend, interface-lists]
     if: startsWith(github.ref, 'refs/tags/v')
     uses: ./.github/workflows/docker.yml
     # Every scope docker.yml requests has to be granted here, or the run fails
