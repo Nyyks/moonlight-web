@@ -1519,6 +1519,15 @@ export const MoonlightApp = {
         return this._isHostLocal() || !!this._adminUnlockAvailable;
     },
 
+    /** What /api/auth/status says this browser may do here. */
+    _readAccess(status) {
+        this._hasAdminAccess = !!status.is_localhost;
+        this._isRealHostMachine = !!status.is_host_machine;
+        // A LAN machine the operator gave the admin password to: it may ask
+        // for the admin page even though it is not the host.
+        this._adminUnlockAvailable = !!status.admin_unlock_available;
+    },
+
     async _checkAuth() {
         this.state = 'auth_check';
         console.log('[MW] Checking authentication...');
@@ -1528,11 +1537,7 @@ export const MoonlightApp = {
 
         try {
             const status = await BackendClient.getAuthStatus();
-            this._hasAdminAccess = !!status.is_localhost;
-            this._isRealHostMachine = !!status.is_host_machine;
-            // A LAN machine the operator gave the admin password to: it may ask
-            // for the admin page even though it is not the host.
-            this._adminUnlockAvailable = !!status.admin_unlock_available;
+            this._readAccess(status);
 
             // Localhost or already authenticated — proceed
             if (status.is_localhost || status.authenticated) {
@@ -1557,11 +1562,19 @@ export const MoonlightApp = {
             }
 
             // Not authenticated and not localhost — show login
-            this.loginView = new LoginView(main, () => {
+            this.loginView = new LoginView(main, async () => {
                 // On successful login, re-initialize the app
                 console.log('[MW] Authentication successful, re-initializing...');
                 this.loginView = null;
                 this._offerHomeScreenHandoff();
+                // The host offers its admin page to signed-in sessions only, so
+                // the answer read above, from before the login, never offers it.
+                // Read again, the button is there from the first visit.
+                try {
+                    this._readAccess(await BackendClient.getAuthStatus());
+                } catch (err) {
+                    console.warn('[MW] Auth re-check after login failed:', err);
+                }
                 this._initNavButtons();
                 this._initRouter();
                 this._initAsync();
