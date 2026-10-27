@@ -449,7 +449,7 @@
         "codecFallback": "已选择 {{selected}}，但此浏览器不支持。改用 {{effective}}。",
         "noCodecSupportedTitle": "无支持的编解码器。",
         "noCodecSupportedBody": "此浏览器不支持 H.264、HEVC 或 AV1 解码，无法串流。",
-        "codecAuto": "自动（HEVC，必要时 AV1，推荐）",
+        "codecAuto": "自动",
         "codecH264": "H.264（广泛兼容）",
         "codecHevc": "HEVC（高效压缩）",
         "codecAv1": "AV1（现代 GPU 的最佳压缩）",

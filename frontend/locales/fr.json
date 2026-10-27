@@ -449,7 +449,7 @@
         "codecFallback": "{{selected}} a été sélectionné mais n'est pas pris en charge par ce navigateur. Retour à {{effective}}.",
         "noCodecSupportedTitle": "Aucun codec pris en charge.",
         "noCodecSupportedBody": "Ce navigateur ne prend pas en charge le décodage H.264, HEVC ou AV1. Le streaming est impossible.",
-        "codecAuto": "Auto (HEVC, AV1 si besoin, recommandé)",
+        "codecAuto": "Auto",
         "codecH264": "H.264 (Compatibilité étendue)",
         "codecHevc": "HEVC (Compression efficace)",
         "codecAv1": "AV1 (Meilleure compression pour GPU récents)",
