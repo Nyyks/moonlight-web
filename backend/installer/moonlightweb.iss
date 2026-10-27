@@ -766,6 +766,23 @@ end;
 // click below is the one place it is called from before that.
 procedure ApplyAutostartChoice(want: Boolean); forward;
 
+// The Internet answer of a silent install: only an explicit /INTERNET=yes (or
+// on, true, 1) on the command line opens it. Anything else keeps it closed,
+// and the log says why.
+function SilentInternetWanted(): Boolean;
+var
+  value: String;
+begin
+  value := Lowercase(Trim(ExpandConstant('{param:INTERNET|}')));
+  Result := (value = 'yes') or (value = 'on') or (value = 'true') or (value = '1');
+  if Result then
+    Log('Internet: opened by /INTERNET=' + value + ' (silent install)')
+  else if value = '' then
+    Log('Internet: kept closed (silent install, no /INTERNET=yes)')
+  else
+    Log('Internet: kept closed (silent install, /INTERNET=' + value + ' is not yes)');
+end;
+
 // The Internet page is the only one that answers a question, and it answers it
 // through this hook: "Accepter" is Next itself, "Passer" is Next reached through
 // InternetSkipClick — so the flag, not the button, is the answer.
@@ -1651,12 +1668,19 @@ begin
   if (not UpdateMode) or (not SettingsHasKey('internet_access_enabled')) then begin
     // Written as UTF-8 (no BOM): the consent text is localized (accents) and the
     // server parses this file with a strict UTF-8 JSON parser.
+    // A silent install shows no page, and Inno walks it as if Next had been
+    // pressed — which used to read as "Accepter". Nobody answered there, so
+    // Internet stays closed unless the command line says otherwise.
+    if WizardSilent then InternetAuthorized := SilentInternetWanted();
     if InternetAuthorized then internet := 'true' else internet := 'false';
     // Exact agreement text the user read on the Internet page — recorded by the
-    // server in its DNS registration audit log (legal traceability).
+    // server in its DNS registration audit log (legal traceability). From a
+    // silent install, the record says the page was not read.
     consent := ExpandConstant('{cm:InternetPageBody}') + ' / '
              + ExpandConstant('{cm:InternetPageOption}');
     StringChangeEx(consent, '%n', ' ', True);
+    if WizardSilent and InternetAuthorized then
+      consent := 'Silent install, /INTERNET=yes on the command line (page not shown): ' + consent;
     // No "sunshine" object any more: this installer installs no streaming server
     // and pairs no local host, so there is nothing to auto-pair. Provisioning
     // reads a missing object as auto_pair=false and marks the step skipped, so
