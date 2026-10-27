@@ -135,9 +135,9 @@ A browser arriving at the login screen holds no session, so the host cannot look
 
 ## 6.6b One address for every machine
 
-Every machine reached through the introduction server opens under the same address, `https://stream.{domain}/<id>`, and so in one **browser origin**: one storage, one service-worker cache, for all of them. That is by choice (one name users see and stream on, no name per machine, nothing per machine in DNS or in Certificate Transparency).
+Every machine reached through the introduction server opens under the same address, `https://stream.{domain}/<id>`. That is by choice: one name users see and stream on, no name per machine, nothing per machine in DNS or in Certificate Transparency.
 
-What v0.4.1 does within that one origin:
+Since v0.4.1:
 
 - **A session works only with the key it was paired on.** A cookie presented over a tunnel whose browser key is not the one its session was bound to is refused (401). The key cannot leave the browser it was made in, so a copied cookie is worthless anywhere else.
 - **The cached interface is checked against its own machine on every start.** The machine's file list carries the SHA-256 of each file, sent over the channel its key signed. The entry page, served fresh by the introduction server, compares the cache with it before every start and fetches the interface again at the first difference. The service worker hands the cached interface only to a start the entry page has just checked.
