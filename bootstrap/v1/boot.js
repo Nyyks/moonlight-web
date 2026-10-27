@@ -883,8 +883,14 @@ async function connectThroughRestart(hostId, first) {
  * SW_REVISION). A worker older than this answers nothing when asked.
  */
 const WORKER_REVISION = 2;
-/** How long an older worker has to make way for the current one. */
-const WORKER_UPDATE_MS = 10000;
+/**
+ * How long an older worker has to make way for the current one. The browser
+ * activates the new worker only once the old one has finished what it was
+ * doing, and that worker gives a request it handed to a page up to 30 s
+ * (sw.js, CLIENT_TIMEOUT_MS): one in flight from another tab must not make this
+ * start say "out of date".
+ */
+const WORKER_UPDATE_MS = 35000;
 
 /** The revision @p worker answers with, or 0 for one too old to answer. */
 function workerRevision(worker) {
