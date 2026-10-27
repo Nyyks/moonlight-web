@@ -159,6 +159,7 @@ const MAX_EARLY_CANDIDATES = 64;
  */
 function noRouteError() {
     const err = new Error('Your machine answered, but no direct connection could be opened.');
+    err.answered = true;
     err.hint =
         'This network is not letting the two ends reach each other. Company networks and ' +
         'public Wi-Fi often block what that takes. A phone hotspot is the quickest way to tell.';

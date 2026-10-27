@@ -375,6 +375,16 @@ describe('the caption under a machine this browser has never reached', () => {
         expect(caption()).toBe('No server found');
     });
 
+    it('stays empty where the machine answered but no direct connection opened', async () => {
+        connectError = Object.assign(
+            new Error('Your machine answered, but no direct connection could be opened.'),
+            { answered: true },
+        );
+        await start();
+        expect(document.getElementById('stage').textContent).toBe('Not connected');
+        expect(caption()).toBe('');
+    });
+
     it('stays empty under a machine it refused', async () => {
         served['/js/app.js'] = 'steal(localStorage);\n';
         await start();

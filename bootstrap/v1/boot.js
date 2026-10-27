@@ -228,10 +228,11 @@ function resume() {
  * a plain contradiction of the machines listed a centimetre below, so the button
  * says what pressing it does: "Choose a machine".
  *
- * Except once the connection is made. A machine did answer then, whatever fails
- * after it — its interface refused or cut off, the worker refused or too old,
- * the application not starting — so the dead caption stays empty rather than
- * deny it (27/10/2026).
+ * Except once the machine has answered. That is so once the connection is
+ * made, whatever fails after it — its interface refused or cut off, the worker
+ * refused or too old, the application not starting — and already when it
+ * answered but the network carried no direct connection. The dead caption
+ * stays empty rather than deny it (27/10/2026).
  *
  * Nothing here adds to that register or renames a row in it. Only the
  * application can, because only the application ever gets close enough to a
@@ -866,6 +867,7 @@ async function connectThroughRestart(hostId, first) {
             say('Not connected', e.message);
         }
     }
+    if (last.answered) answered = true;
     fail(last.message, failureHint(last));
     if (!last.transient || openedHostHere() !== hostId) return null;
 
@@ -972,6 +974,7 @@ async function main() {
         // "your machine is off" — a connection that was refused by the network
         // rather than never answered has nothing to do with the machine.
         if (!e.transient) {
+            if (e.answered) answered = true;
             fail(e.message, failureHint(e));
             return;
         }
