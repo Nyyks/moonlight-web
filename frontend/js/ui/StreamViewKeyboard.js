@@ -609,6 +609,10 @@ export class StreamViewKeyboard {
             // Park the special-keys bar just above the soft keyboard, then shrink
             // the stream by its height too so the bottom of the picture (e.g. the
             // Windows taskbar) stays visible above the bar instead of behind it.
+            // The pan the shorter area is about to clamp, for the way back.
+            if (!this._panBeforeKbd) {
+                this._panBeforeKbd = { x: this._panX, y: this._panY, zoom: this._zoom };
+            }
             let tbHeight = 0;
             if (this._kbToolbar) {
                 this._kbToolbar.classList.add('visible');
@@ -637,6 +641,15 @@ export class StreamViewKeyboard {
             this.streamEl.style.top = shifted ? vv.offsetTop + 'px' : '';
             this.streamEl.style.height = shifted ? vv.height + 'px' : '';
             this._hideKbToolbar();
+            // Closing the keyboard puts the picture back where it was before:
+            // the clamp to the shorter area moved it, not the user (iPhone,
+            // 27/10/2026). A zoom changed while typing keeps its own pan.
+            const before = this._panBeforeKbd;
+            this._panBeforeKbd = null;
+            if (before && Math.abs((before.zoom ?? 1) - (this._zoom ?? 1)) < 0.001) {
+                this._panX = before.x;
+                this._panY = before.y;
+            }
             if (this._applyZoomTransform) this._applyZoomTransform();
             else this._seatPictureOnKbToolbar(false);
             if (!this._standby) publishKbdInset(0);

@@ -102,13 +102,15 @@ describe('touch keyboard bar placement', () => {
         expect(v.canvasArea.style.transform).toBe('');
     });
 
-    /** The stand-in with a 390×266 area, a 2560×1440 canvas and the real zoom. */
+    /** The stand-in with a 2560×1440 canvas and the real zoom, in an area
+     *  390 px wide: 266 px tall over the key bar, 640 without it. */
     function zoomedView(zoom, panY) {
         const v = view();
         v.canvasArea = document.createElement('div');
+        const areaH = () => (shown(v) ? 266 : 640);
         Object.defineProperty(v.canvasArea, 'offsetWidth', { get: () => 390 });
-        Object.defineProperty(v.canvasArea, 'offsetHeight', { get: () => 266 });
-        v.canvasArea.getBoundingClientRect = () => ({ width: 390, height: 266 });
+        Object.defineProperty(v.canvasArea, 'offsetHeight', { get: areaH });
+        v.canvasArea.getBoundingClientRect = () => ({ width: 390, height: areaH() });
         v.canvas = { width: 2560, height: 1440, style: {} };
         v._displayEl = () => v.canvas;
         v._videoIsDisplay = () => false;
@@ -145,6 +147,41 @@ describe('touch keyboard bar placement', () => {
         openKeyboard(v);
         expect(Math.abs(v._panY)).toBe(0);
         expect(v.canvasArea.style.transform).toBe('translateY(8px)');
+    });
+
+    function closeKeyboard(v) {
+        v._kbdVisible = false;
+        viewport(800, 800);
+        v._handleViewportResize();
+    }
+
+    it('puts a zoomed picture back where it was once the keyboard closes (iPhone, 27/10)', () => {
+        const v = zoomedView(3.5, -351);
+        openKeyboard(v);
+        closeKeyboard(v);
+        expect(v._panY).toBe(-351);
+        expect(v._panX).toBe(0);
+        expect(v.canvasArea.style.transform).toBe('');
+        expect(v.canvas.style.transform).toBe('translate(0px, -351px) scale(3.5)');
+    });
+
+    it('puts a picture at zoom 1 back in the middle once the keyboard closes', () => {
+        const v = zoomedView(1, 0);
+        openKeyboard(v);
+        // 219 px tall in 266: 23 px of black under it, 4 left.
+        expect(v.canvasArea.style.transform).toBe('translateY(19px)');
+        closeKeyboard(v);
+        expect(v.canvasArea.style.transform).toBe('');
+        expect(Math.abs(v._panY)).toBe(0);
+    });
+
+    it('keeps the pan of a zoom changed while typing', () => {
+        const v = zoomedView(3.5, -351);
+        openKeyboard(v);
+        v._zoom = 2;
+        v._panY = -50;
+        closeKeyboard(v);
+        expect(v._panY).toBe(-50);
     });
 
     it('goes when the keyboard closes, and a new page height is learnt', () => {
