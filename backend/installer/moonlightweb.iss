@@ -673,7 +673,11 @@ begin
   else if (InternetPage <> nil) and (PageID = InternetPage.ID) then
     Result := SettingsHasKey('internet_access_enabled')
   else if (VDisplayPage <> nil) and (PageID = VDisplayPage.ID) then
-    Result := RegValueExists(HKEY_LOCAL_MACHINE, VDisplaySetupKey, 'VirtualDisplayAccepted');
+    // A silent walk reads as "Accepter", and an update from the web app is
+    // always silent: a page that was skipped stays skipped rather than be
+    // answered by nobody. A silent first install does install it.
+    Result := WizardSilent or
+              RegValueExists(HKEY_LOCAL_MACHINE, VDisplaySetupKey, 'VirtualDisplayAccepted');
 end;
 
 // Content of the Ready page's memo. In update mode it says what is about to
