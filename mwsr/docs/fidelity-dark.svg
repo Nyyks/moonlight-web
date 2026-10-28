@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="828" height="478" viewBox="0 0 828 478" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<title id="t">Fidelity of MWSR, FSR1, NIS, SGSR1 and bilinear against the native frame</title>
+<desc id="d">SSIM of the luma, in percent, on a game picture and a text chart, at two scales. The values are in the table below the figure.</desc>
+<text x="0" y="22" font-size="17" font-weight="600" fill="#f0efec">Fidelity to the native frame</text>
+<text x="0" y="44" font-size="13" fill="#c3c2b7">SSIM of the luma, % (higher is closer). Each panel has its own scale.</text>
+<text x="0" y="84" font-size="13" font-weight="600" fill="#f0efec">Game (0 A.D.), 1080p → 1440p</text>
+<line x1="78.0" y1="110" x2="392.0" y2="110" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="110" font-size="13" fill="#f0efec" dominant-baseline="middle" font-weight="600">MWSR</text>
+<circle cx="262.3" cy="110" r="6" fill="#3987e5"/>
+<text x="273.3" y="110" font-size="12" fill="#c3c2b7" dominant-baseline="middle">85.9</text>
+<line x1="78.0" y1="139" x2="392.0" y2="139" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="139" font-size="13" fill="#c3c2b7" dominant-baseline="middle">FSR1</text>
+<circle cx="321.4" cy="139" r="6" fill="#8a8984"/>
+<text x="332.4" y="139" font-size="12" fill="#c3c2b7" dominant-baseline="middle">87.5</text>
+<line x1="78.0" y1="168" x2="392.0" y2="168" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="168" font-size="13" fill="#c3c2b7" dominant-baseline="middle">NIS</text>
+<circle cx="147.7" cy="168" r="6" fill="#8a8984"/>
+<text x="158.7" y="168" font-size="12" fill="#c3c2b7" dominant-baseline="middle">82.8</text>
+<line x1="78.0" y1="197" x2="392.0" y2="197" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="197" font-size="13" fill="#c3c2b7" dominant-baseline="middle">SGSR1</text>
+<circle cx="249.1" cy="197" r="6" fill="#8a8984"/>
+<text x="260.1" y="197" font-size="12" fill="#c3c2b7" dominant-baseline="middle">85.6</text>
+<line x1="78.0" y1="226" x2="392.0" y2="226" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="226" font-size="13" fill="#c3c2b7" dominant-baseline="middle">Bilinear</text>
+<circle cx="110.6" cy="226" r="6" fill="#55544f"/>
+<text x="121.6" y="226" font-size="12" fill="#c3c2b7" dominant-baseline="middle">81.8</text>
+<text x="428" y="84" font-size="13" font-weight="600" fill="#f0efec">Text, 1080p → 1440p</text>
+<line x1="506.0" y1="110" x2="820.0" y2="110" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="110" font-size="13" fill="#f0efec" dominant-baseline="middle" font-weight="600">MWSR</text>
+<circle cx="746.6" cy="110" r="6" fill="#3987e5"/>
+<text x="757.6" y="110" font-size="12" fill="#c3c2b7" dominant-baseline="middle">96.0</text>
+<line x1="506.0" y1="139" x2="820.0" y2="139" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="139" font-size="13" fill="#c3c2b7" dominant-baseline="middle">FSR1</text>
+<circle cx="654.7" cy="139" r="6" fill="#8a8984"/>
+<text x="665.7" y="139" font-size="12" fill="#c3c2b7" dominant-baseline="middle">94.4</text>
+<line x1="506.0" y1="168" x2="820.0" y2="168" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="168" font-size="13" fill="#c3c2b7" dominant-baseline="middle">NIS</text>
+<circle cx="727.0" cy="168" r="6" fill="#8a8984"/>
+<text x="738.0" y="168" font-size="12" fill="#c3c2b7" dominant-baseline="middle">95.6</text>
+<line x1="506.0" y1="197" x2="820.0" y2="197" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="197" font-size="13" fill="#c3c2b7" dominant-baseline="middle">SGSR1</text>
+<circle cx="703.5" cy="197" r="6" fill="#8a8984"/>
+<text x="714.5" y="197" font-size="12" fill="#c3c2b7" dominant-baseline="middle">95.3</text>
+<line x1="506.0" y1="226" x2="820.0" y2="226" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="226" font-size="13" fill="#c3c2b7" dominant-baseline="middle">Bilinear</text>
+<circle cx="542.6" cy="226" r="6" fill="#55544f"/>
+<text x="553.6" y="226" font-size="12" fill="#c3c2b7" dominant-baseline="middle">92.6</text>
+<text x="0" y="287" font-size="13" font-weight="600" fill="#f0efec">Game (0 A.D.), 720p → 1440p</text>
+<line x1="78.0" y1="313" x2="392.0" y2="313" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="313" font-size="13" fill="#f0efec" dominant-baseline="middle" font-weight="600">MWSR</text>
+<circle cx="234.1" cy="313" r="6" fill="#3987e5"/>
+<text x="245.1" y="313" font-size="12" fill="#c3c2b7" dominant-baseline="middle">66.2</text>
+<line x1="78.0" y1="342" x2="392.0" y2="342" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="342" font-size="13" fill="#c3c2b7" dominant-baseline="middle">FSR1</text>
+<circle cx="283.0" cy="342" r="6" fill="#8a8984"/>
+<text x="294.0" y="342" font-size="12" fill="#c3c2b7" dominant-baseline="middle">68.0</text>
+<line x1="78.0" y1="371" x2="392.0" y2="371" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="371" font-size="13" fill="#c3c2b7" dominant-baseline="middle">NIS</text>
+<circle cx="322.5" cy="371" r="6" fill="#8a8984"/>
+<text x="333.5" y="371" font-size="12" fill="#c3c2b7" dominant-baseline="middle">69.5</text>
+<line x1="78.0" y1="400" x2="392.0" y2="400" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="400" font-size="13" fill="#c3c2b7" dominant-baseline="middle">SGSR1</text>
+<circle cx="251.3" cy="400" r="6" fill="#8a8984"/>
+<text x="262.3" y="400" font-size="12" fill="#c3c2b7" dominant-baseline="middle">66.9</text>
+<line x1="78.0" y1="429" x2="392.0" y2="429" stroke="#33322f" stroke-width="1"/>
+<text x="0" y="429" font-size="13" fill="#c3c2b7" dominant-baseline="middle">Bilinear</text>
+<circle cx="109.0" cy="429" r="6" fill="#55544f"/>
+<text x="120.0" y="429" font-size="12" fill="#c3c2b7" dominant-baseline="middle">61.6</text>
+<text x="428" y="287" font-size="13" font-weight="600" fill="#f0efec">Text, 720p → 1440p</text>
+<line x1="506.0" y1="313" x2="820.0" y2="313" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="313" font-size="13" fill="#f0efec" dominant-baseline="middle" font-weight="600">MWSR</text>
+<circle cx="695.7" cy="313" r="6" fill="#3987e5"/>
+<text x="706.7" y="313" font-size="12" fill="#c3c2b7" dominant-baseline="middle">86.1</text>
+<line x1="506.0" y1="342" x2="820.0" y2="342" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="342" font-size="13" fill="#c3c2b7" dominant-baseline="middle">FSR1</text>
+<circle cx="644.9" cy="342" r="6" fill="#8a8984"/>
+<text x="655.9" y="342" font-size="12" fill="#c3c2b7" dominant-baseline="middle">84.7</text>
+<line x1="506.0" y1="371" x2="820.0" y2="371" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="371" font-size="13" fill="#c3c2b7" dominant-baseline="middle">NIS</text>
+<circle cx="749.5" cy="371" r="6" fill="#8a8984"/>
+<text x="760.5" y="371" font-size="12" fill="#c3c2b7" dominant-baseline="middle">87.6</text>
+<line x1="506.0" y1="400" x2="820.0" y2="400" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="400" font-size="13" fill="#c3c2b7" dominant-baseline="middle">SGSR1</text>
+<circle cx="749.4" cy="400" r="6" fill="#8a8984"/>
+<text x="760.4" y="400" font-size="12" fill="#c3c2b7" dominant-baseline="middle">87.6</text>
+<line x1="506.0" y1="429" x2="820.0" y2="429" stroke="#33322f" stroke-width="1"/>
+<text x="428" y="429" font-size="13" fill="#c3c2b7" dominant-baseline="middle">Bilinear</text>
+<circle cx="538.6" cy="429" r="6" fill="#55544f"/>
+<text x="549.6" y="429" font-size="12" fill="#c3c2b7" dominant-baseline="middle">81.8</text>
+<text x="0" y="472" font-size="12" fill="#8f8e88">Native frame: 0 A.D. reduced from 4K, or the lab's text chart; input: its Lanczos-3 reduction in linear light.</text>
+</svg>

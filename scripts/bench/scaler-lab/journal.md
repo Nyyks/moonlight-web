@@ -2930,3 +2930,77 @@ réduits à ×0,667, ×1/3 et ×0,21, avec ou sans vues sRGB.
 - `conform.py` dessine sur WARP et sur SwiftShader, puis compare ;
 - `check.py` compile chaque texte dans deux Chrome SwiftShader (WebGPU, puis WebGL2) ;
 - `cppcheck` compare `mwsr.h` au module.
+
+## 2026-10-28 — J53, MWSR face à FSR1, NIS et SGSR1 : le comparatif public, chacun à sa meilleure précision
+
+**La demande.** Bruno, le 28/10 :
+- une section du README de `mwsr/` qui compare MWSR à FSR1, NIS et SGSR1 : des zooms, des graphiques de qualité et de
+  temps, un tableau de ce que chacun sait faire ;
+- une image 1080p → 1440p pour le Discord de Moonlight (hors dépôt).
+
+Ses choix : les images publiques sont 0 A.D. (CC BY-SA 3.0) et la mire de texte du labo ; les temps sont pris sur la
+RTX 5060 Ti et le 780M, l'iPhone 13 Pro plus tard. Puis : « Prépare [FSR1 en fp16] avant, pour avoir un comparatif
+juste. »
+
+**FSR1 et SGSR1 en 16 bits, dans le labo seulement.**
+- `fsr1-half.js` porte le chemin 16 bits d'AMD (`FsrEasuH`, deux échantillons à la fois, et `FsrRcasH`) ;
+  `sgsr1-half.js` porte SGSR1 tel que Qualcomm l'écrit (`half` partout, coordonnées en `float`). Les notices MIT et
+  BSD-3 suivent.
+- Nouvelles cellules : `easuh`, `fsr1h`, `sgsrh`.
+- SwiftShader n'a pas `shader-f16`, et Chrome ne propose aucun adaptateur WARP à WebGPU.
+  - La logique se vérifie donc abaissée en f32 (`asF32`, cellules `easuh32`, `fsr1h32`, `sgsrh32`). FSR1 tombe à
+    1-2/255 de son port fp32 sur 0,004 % des pixels ; SGSR1 l'égale au bit près.
+  - Un premier contrôle de SGSR1 était faux : les littéraux à exposant n'étaient pas convertis, le pipeline était
+    invalide, et la cellule montrait la sortie de la précédente. Il a été corrigé et refait.
+- Sur GPU, chaque texte 16 bits est d'abord comparé à son texte 32 bits, et rien n'est chronométré au-delà de 4/255 sur
+  0,1 % des pixels. Résultats : FSR1 0,001-0,006 %, SGSR1 0,004-0,045 %, au pire 42/255 sur quelques pixels, SSIM au
+  millième.
+
+**Trois créneaux de 59** (14:12, 14:29, 14:49 ; RTX du bus 01 puis 780M).
+- Chrome sans tête épinglé par `--use-adapter-luid`, vérifié par les compteurs WDDM (0x13616 seul ; 0x15e5b, 0 sur
+  0x14a99).
+- La RTX était en P0 pendant chaque chronométrage, après 1,8-1,9 s de P8 au chargement de la page.
+- Bus 03, NVENC, --dev et modes d'écran : pas touchés. « chrome left: 0 » à chaque fois.
+- Temps GPU par lots de 100 dessins, 3 tours de 6 lots, médiane par dessin.
+
+| 1080p → 1440p, 0 A.D. | RTX f32 | RTX f16 | 780M f32 | 780M f16 |
+|---|---|---|---|---|
+| MWSR | 0,116 | 0,133 | 3,91 | 3,80 |
+| FSR1 | 0,278 | 0,265 | 9,46 | 6,33 |
+| SGSR1 | 0,118 | 0,156 | 4,44 | 2,97 |
+| NIS (notre portage) | 0,904 | — | 13,78 | — |
+| bilinéaire | 0,029 | — | 0,449 | — |
+
+- Le 16 bits ne gagne rien sur NVIDIA ; il gagne 33 % pour FSR1, 33 % pour SGSR1 et 3 % pour MWSR sur le 780M.
+- Le 780M donne les mêmes ordres de grandeur qu'au P0 (FSR1 9,4 ms) et en J49 (MWSR 3,0 ms sur l'étalon). Comme
+  son horloge n'est pas fixée, le README invite à lire ses chiffres comme des rapports.
+- **SGSR1 en half est le plus rapide sur l'iGPU** (2,97 contre 3,80 ms sur 0 A.D., 1,50 contre 2,85 sur le texte).
+  MWSR reste au niveau de SGSR1 sur la RTX, et 1,7 à 2,3 fois moins cher que FSR1.
+- NIS est marqué « notre portage » : NVIDIA livre un compute shader à mémoire partagée, plus rapide que notre
+  transcription par fragment.
+
+**Qualité** (SSIM de la luma ×100 / dépassement, mêmes chiffres sur la RTX, le 780M et SwiftShader) :
+
+| | jeu ×1,33 | texte ×1,33 | jeu ×2 | texte ×2 |
+|---|---|---|---|---|
+| MWSR | 85,9 / 0,03 % | 96,0 / 0 % | 66,2 / 0,01 % | 86,1 / 0 % |
+| FSR1 | 87,5 / 13,7 % | 94,4 / 0,2 % | 68,0 / 2,9 % | 84,7 / 0,3 % |
+| NIS | 82,8 / 42,6 % | 95,6 / 4,4 % | 69,5 / 41,7 % | 87,6 / 7,1 % |
+| SGSR1 | 85,6 / 6,5 % | 95,3 / 2,7 % | 66,9 / 6,3 % | 87,6 / 4,4 % |
+
+**Lecture**, telle que le README la donne :
+- FSR1 est le plus fidèle sur le jeu, au prix d'un halo ;
+- MWSR est le plus fidèle sur le texte à ×1,33, sans aucun halo, et le plus doux à ×2 sur le jeu ;
+- SGSR1 est proche de MWSR, et le plus rapide sur l'iGPU ;
+- MWSR est seul à réduire et à lire le 4:4:4. Pour le HDR sans tone map, ils sont deux : MWSR et NIS.
+
+**Dans le dépôt** :
+- la section « Next to FSR1, NIS and SGSR1 » de `mwsr/README.md` : texte, zooms, deux graphiques clair/sombre, deux
+  tableaux, ce que chacun sait faire, la méthode, les marques et la licence de l'image ;
+- `mwsr/docs/` : `zoom.png` (les recadrages de 0 A.D., sous CC BY-SA 3.0) et les quatre SVG.
+
+**Après le tag** :
+- l'iPhone 13 Pro, par 59 quand Bruno est disponible ;
+- la page interactive `moonlightweb.top/mwsr/`, déployée avec le site, avec le temps GPU par lots (le comparateur
+  mesure par image, au plancher de 1 ms sur NVIDIA, J37) ;
+- un NIS en compute shader, si Bruno veut le comparer à son vrai coût.

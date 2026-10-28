@@ -31,12 +31,114 @@ serve below.
 **HDR**: both modes work per channel and clamp nothing to 1.0, so they run unchanged on a float texture whose values go
 past 1.0 (1.0 = reference white).
 
-**Cost**: the upscale to 1440p takes about 0.09 ms per frame on an RTX 5060 Ti (GPU timestamps, from 720p and from
-1080p, with the card below its top clocks). The edge path, the costly one, runs only on the quads the vote marks.
+**Cost**: the upscale to 1440p takes 0.09 ms (text) to 0.12 ms (a game picture) per frame on an RTX 5060 Ti, from
+720p and from 1080p (GPU timestamps). The edge path, the costly one, runs only on the quads the vote marks.
 
 The design, the measurements against FSR1, SGSR1, NIS and the host's Lanczos, and every decision behind the defaults
 are in the lab journal, [`scripts/bench/scaler-lab/journal.md`](../scripts/bench/scaler-lab/journal.md), and the
 design document, [`docs/design/upscaler-mwsr.md`](../docs/design/upscaler-mwsr.md) (both in French).
+
+## Next to FSR1, NIS and SGSR1
+
+FSR1, NIS and SGSR1 are the single-frame upscalers a game or a video player usually reaches for, and MoonlightWeb ships
+a port of each beside MWSR. They spend their work in different places:
+
+- **FSR1** (AMD FidelityFX Super Resolution 1) runs two passes. EASU rebuilds each pixel from 12 input texels with a
+  Lanczos-like kernel stretched along the local edge, then RCAS sharpens the whole picture. On the game picture it is
+  the closest of the four to the native frame. It costs 1.7 to 2.3 times what MWSR costs, and its sharpening leaves
+  the local range on 14 % of the pixels: a light halo along strong edges.
+- **NIS** (NVIDIA Image Scaling) runs one pass over 6×6 texels: a filter bank chosen by the edge's direction, plus a
+  sharpening of the luma. It is the sharpest of the four, which lifts its SSIM at ×2, and it overshoots on 42 % of the
+  game picture's pixels: the bright rims and the grain in the zooms.
+- **SGSR1** (Snapdragon Game Super Resolution 1) runs one pass of 12 texels read in four gathers, skips the flat
+  areas and finds edges on the green channel. It lands about as close to the native frame as MWSR, with a lighter
+  halo than FSR1 (6.5 %). In half precision, as Qualcomm writes it, it is the fastest of the four on the integrated
+  GPU.
+- **MWSR** runs one pass and decides per 2×2 quad: a flat quad keeps a smooth cubic, an edge gets four more samples
+  along and across it. It bounds every pixel by its four input texels, so nothing rings (0.03 % of the pixels). It is
+  the closest to the native frame on text at ×1.33. At ×2 on the game picture it is the softest of the four, where
+  the others sharpen harder. It is the only one of the four that reduces and that reads the colour edges of a 4:4:4
+  stream, and with NIS the only one that runs on HDR without a tone map around it.
+
+![Four zooms of a 1080p frame upscaled to 1440p: the native frame, then MWSR, FSR1, NIS and SGSR1](docs/zoom.png)
+
+*1080p → 1440p, zoomed ×4 (nearest neighbour), drawn on the RTX 5060 Ti. Three crops of 0 A.D., then the lab's text
+chart.*
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/fidelity-dark.svg">
+  <img alt="Fidelity to the native frame, in the tables below" src="docs/fidelity-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/speed-dark.svg">
+  <img alt="GPU time per frame, in the tables below" src="docs/speed-light.svg">
+</picture>
+
+**1080p → 1440p**. Fidelity: the SSIM of the luma against the native frame, ×100 (higher is closer). Overshoot: the
+share of pixels that leave the range of their four input texels by more than 2/255, which measures halos and
+ringing. FLIP: NVIDIA's ꟻLIP, the mean perceptual difference to the native frame (lower is closer). Times: the game
+picture, each at its faster precision.
+
+| | Fidelity, game | Fidelity, text | Overshoot, game | FLIP, game | RTX 5060 Ti | Radeon 780M |
+|---|---|---|---|---|---|---|
+| MWSR | 85.9 | 96.0 | 0.03 % | 0.048 | 0.116 ms | 3.80 ms (f16) |
+| FSR1 | 87.5 | 94.4 | 13.7 % | 0.034 | 0.265 ms (f16) | 6.33 ms (f16) |
+| NIS * | 82.8 | 95.6 | 42.6 % | 0.100 | 0.904 ms | 13.78 ms |
+| SGSR1 | 85.6 | 95.3 | 6.5 % | 0.042 | 0.118 ms | 2.97 ms (f16) |
+| Bilinear | 81.8 | 92.6 | 0 % | 0.045 | 0.029 ms | 0.449 ms |
+
+**720p → 1440p**, the same columns:
+
+| | Fidelity, game | Fidelity, text | Overshoot, game | FLIP, game | RTX 5060 Ti | Radeon 780M |
+|---|---|---|---|---|---|---|
+| MWSR | 66.2 | 86.1 | 0.01 % | 0.065 | 0.113 ms | 3.69 ms (f16) |
+| FSR1 | 68.0 | 84.7 | 2.9 % | 0.053 | 0.273 ms | 6.32 ms (f16) |
+| NIS * | 69.5 | 87.6 | 41.7 % | 0.116 | 0.614 ms | 12.99 ms |
+| SGSR1 | 66.9 | 87.6 | 6.3 % | 0.062 | 0.118 ms | 2.95 ms (f16) |
+| Bilinear | 61.6 | 81.8 | 0 % | 0.073 | 0.029 ms | 0.422 ms |
+
+\* MoonlightWeb's per-fragment port of NIS. NVIDIA ships a compute shader with shared memory, which is faster: these
+times are those of the port, not of NIS.
+
+What each one does:
+
+| | MWSR | FSR1 | NIS | SGSR1 |
+|---|---|---|---|---|
+| Upscale | any factor | 1× to 4× the area | 1× to 2× per axis | yes |
+| Downscale | yes: an area filter in linear light, 1 to 16 samples | no | no: refused | no |
+| HDR | yes: unchanged on a float texture past 1.0 | through a reversible tone map around it (`FsrSrtm`) | yes: `NIS_HDR_MODE`, linear or PQ | no: its output is clamped to 0..1 |
+| 4:4:4 colour edges | yes, with `CHROMA444`: the vote and the weights per channel | no: edges from the luma | no: edges from the luma | no: edges from green |
+| Input | an RGB texture: 8-bit, read through sRGB views or not, or 16-bit float | RGB in 0..1, perceptual | RGB, or NV12 (`NIS_NV12_SUPPORT`) | RGB in 0..1 |
+| Precision | 32-bit, or 16-bit | 32-bit, or packed 16-bit | 32-bit, or 16-bit | 16-bit (`half`) |
+| Passes | 1 | 2 | 1 (compute) | 1 |
+| Licence | MIT | MIT | MIT | BSD-3-Clause |
+
+**How it was measured** (28/10/2026):
+- **The pictures.** The native frame is a 4K screenshot of 0 A.D. reduced to 2560×1440, or the lab's text chart drawn
+  at 2560×1440. The input is that frame reduced to 1920×1080 or 1280×720. Both reductions are Lanczos-3 in linear
+  light. Each upscaler draws the input back at 2560×1440.
+- **The times.** WebGPU in Chrome on Windows 11, with the input already in an 8-bit RGBA texture (no video decoding
+  in it). GPU timestamps wrap batches of 100 draws, in 3 rounds of 6 batches, and the figure is the median per draw.
+  The RTX 5060 Ti ran at P0 throughout. The Radeon 780M (integrated) ran at its own clock, which nothing fixed, so read
+  its figures as ratios.
+- **The ports.** These are MoonlightWeb's ports, not the vendors' own builds:
+  - FSR1: firdawolf's WGSL port of EASU and RCAS (RCAS at 0.75 stops, its noise term on), and the lab's port of
+    AMD's 16-bit path (`FsrEasuH`, `FsrRcasH`).
+  - NIS: a per-fragment transcription of NVScaler, SDK 1.0.3, with its filter tables, at sharpness 0.5.
+  - SGSR1: a port of `sgsr1.h` (mode 1, edge threshold 6/255, edge sharpness 1.5), in 32-bit and in half precision.
+  - MWSR: its defaults, in 32-bit and in 16-bit (`mwsr-up-f16.wgsl`).
+- **The precision.** Each upscaler is timed at its faster precision on each GPU. Before any timing, each 16-bit text
+  is held to its 32-bit one on that GPU: fewer than 0.05 % of the pixels differ by more than 4/255.
+- **To run it again**: `scripts/bench/scaler-lab/scaler_lab.py`, its `--quality` mode for the pictures and its
+  `cells=` cases for the times (cells `mwsr`, `mwsr:half=1`, `fsr1`, `fsr1h`, `nis`, `sgsr-repo`, `sgsrh`, `tex-s1`).
+
+FSR and FidelityFX are trademarks of Advanced Micro Devices, NVIDIA is a trademark of NVIDIA Corporation, and
+Snapdragon is a trademark of Qualcomm. MoonlightWeb made this comparison with its own ports, and none of these
+companies made or endorsed it.
+
+The 0 A.D. picture is © Wildfire Games; the screenshot is by PantheraLeo1359531 on Wikimedia Commons, under
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/). Its crops in `docs/zoom.png` are under the same licence.
 
 ## Files
 
@@ -55,6 +157,7 @@ design document, [`docs/design/upscaler-mwsr.md`](../docs/design/upscaler-mwsr.m
 | `cpp/example_d3d11.cpp` | A whole Direct3D 11 integration in one file, which also serves as a test: it reads a PNG, draws it at another size and writes a PNG. |
 | `js/MwsrShader.js` | The JavaScript module the shaders come from: it writes the texts with any parameters, picks the mode for a scale and fills the uniform block. |
 | `generate.mjs` | Writes this folder from MoonlightWeb's own module (`node mwsr/generate.mjs`). |
+| `docs/` | The figures of [the comparison](#next-to-fsr1-nis-and-sgsr1): the zooms, and the two charts in light and dark. |
 
 Every shader here is generated from the module MoonlightWeb runs, so what you take is what the product draws. The
 WGSL, GLSL and HLSL texts are twins, written from the same tables of constants. MoonlightWeb's lab holds the GLSL

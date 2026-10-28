@@ -1203,6 +1203,22 @@ async function runLabInner(p, log) {
     rcas: extractWgsl(src, "RCAS_WGSL"),
   };
   SH.sgsrSrc = sgsrSource(SH.sgsr);
+  // FSR1's 16-bit path (FSR_EASU_H, FSR_RCAS_H), the lab's own port: cells
+  // easuh and fsr1h, for a comparison at each kernel's best precision.
+  const { EASU_H_WGSL, RCAS_H_WGSL, asF32 } = await import("./fsr1-half.js");
+  SH.easuH = EASU_H_WGSL;
+  SH.rcasH = RCAS_H_WGSL;
+  // easuh32, fsr1h32: the same port lowered to f32 (its logic, on SwiftShader)
+  SH.easuH32 = asF32(EASU_H_WGSL);
+  SH.rcasH32 = asF32(RCAS_H_WGSL);
+  // SGSR1's half precision (sgsr1.h computes in half): cells sgsrh, sgsrh32
+  const { sgsrHalf } = await import("./sgsr1-half.js");
+  SH.sgsrH = sgsrHalf(SH.sgsr);
+  SH.sgsrH32 = asF32(SH.sgsrH);
+  const needF16 = (name) => {
+    if (!device.features.has("shader-f16"))
+      throw new Error(name + ": the device has no shader-f16 (f16=1 asks for it)");
+  };
   const { mwsrWgsl, mwsrUniforms, mwsrRegime } = await import(MWSR_URL);
 
   const pipelines = new Map();
@@ -1327,6 +1343,16 @@ async function runLabInner(p, log) {
           group: bind(pl, [sampler, srcView, { buffer: sgsrU }]),
         };
       }
+      case "sgsrh":
+      case "sgsrh32": {
+        if (name === "sgsrh") needF16(name);
+        const pl = pipeline(name, name === "sgsrh" ? SH.sgsrH : SH.sgsrH32, "out");
+        return {
+          pipeline: pl,
+          target: "out",
+          group: bind(pl, [sampler, srcView, { buffer: sgsrU }]),
+        };
+      }
       case "sgsr-src": {
         const pl = pipeline("sgsr-src", SH.sgsrSrc, "out");
         return {
@@ -1359,12 +1385,31 @@ async function runLabInner(p, log) {
           group: bind(pl, [srcView, sampler, { buffer: easuU }]),
         };
       }
+      case "easuh":
+      case "easuh32": {
+        if (name === "easuh") needF16(name);
+        const code = name === "easuh" ? SH.easuH : SH.easuH32;
+        const pl = pipeline(name + "-out", code, "out", ["vs_main", "fs_main"]);
+        return {
+          pipeline: pl,
+          target: "out",
+          group: bind(pl, [srcView, sampler, { buffer: easuU }]),
+        };
+      }
       default:
         throw new Error("kernel " + name + "?");
     }
   };
-  const easuToInterm = (srcView) => {
-    const pl = pipeline("easu-interm", SH.easu, "interm", [
+  // the FSR1 variant: "" the product's fp32 port, "h" the 16-bit one, "h32"
+  // the 16-bit one lowered to f32
+  const FSR1_SH = {
+    "": [SH.easu, SH.rcas],
+    h: [SH.easuH, SH.rcasH],
+    h32: [SH.easuH32, SH.rcasH32],
+  };
+  const easuToInterm = (srcView, v = "") => {
+    if (v === "h") needF16("fsr1h");
+    const pl = pipeline("easu" + v + "-interm", FSR1_SH[v][0], "interm", [
       "vs_main",
       "fs_main",
     ]);
@@ -1374,8 +1419,8 @@ async function runLabInner(p, log) {
       group: bind(pl, [srcView, sampler, { buffer: easuU }]),
     };
   };
-  const rcasFrom = (srcView) => {
-    const pl = pipeline("rcas", SH.rcas, "out", ["vs_main", "fs_main"]);
+  const rcasFrom = (srcView, v = "") => {
+    const pl = pipeline("rcas" + v, FSR1_SH[v][1], "out", ["vs_main", "fs_main"]);
     return {
       pipeline: pl,
       target: "out",
@@ -1602,15 +1647,16 @@ async function runLabInner(p, log) {
       passes.push(mwsrPass(name, feed, opts, pre ? views.blit : inView));
       return { name, feed: pre || feed === "ext" ? "ext" : "tex", passes };
     }
-    const k = /^(blit\+)?(sgsr-repo|sgsr-src|nis|easu|rcas|fsr1)$/.exec(name);
+    const k = /^(blit\+)?(sgsr-repo|sgsr-src|sgsrh|sgsrh32|nis|easu|easuh|easuh32|rcas|fsr1|fsr1h|fsr1h32)$/.exec(name);
     if (k) {
       const pre = !!k[1];
       const srcView = pre ? views.blit : inView;
       const passes = pre ? [blitPass()] : [];
       if (k[2] === "rcas") passes.push(rcasFrom(views.mid));
-      else if (k[2] === "fsr1")
-        passes.push(easuToInterm(srcView), rcasFrom(views.interm));
-      else passes.push(kernelPass(k[2], srcView));
+      else if (k[2].startsWith("fsr1")) {
+        const v = k[2].slice(4); // "", "h", "h32"
+        passes.push(easuToInterm(srcView, v), rcasFrom(views.interm, v));
+      } else passes.push(kernelPass(k[2], srcView));
       return { name, feed: pre ? "ext" : "tex", passes };
     }
     if (name.startsWith("chain-"))
