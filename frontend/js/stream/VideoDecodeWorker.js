@@ -293,6 +293,7 @@ function postCounters(force) {
 function applyEnhancerGovernor(diag, now) {
     if (!S.governor || !S.renderer) return;
     const fencesIgnored = S.governor.fencesIgnored;
+    const presentationBound = S.governor.presentationBound;
     const algo = S.governor.update({
         serviceMs: diag.renderServiceMs,
         arrivalMs: diag.arrivalAvgMs,
@@ -308,6 +309,11 @@ function applyEnhancerGovernor(diag, now) {
     if (!fencesIgnored && S.governor.fencesIgnored) {
         console.log(
             '[VideoWorker] Enhancer: the GPU fences read the plain copy late — ignored for this session',
+        );
+    }
+    if (!presentationBound && S.governor.presentationBound) {
+        console.log(
+            '[VideoWorker] Enhancer: the plain copy waits on presentation — the draw time cuts only past a whole frame, for this session',
         );
     }
     if (!algo) return;

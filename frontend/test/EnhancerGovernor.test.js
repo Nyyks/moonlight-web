@@ -597,3 +597,95 @@ describe('EnhancerGovernor — fences that read the copy late', () => {
         expect(gov.fencesIgnored).toBe(false);
     });
 });
+
+/**
+ * A copy that waits on presentation. Chrome WebGPU on a 120 Hz Radeon 780M,
+ * 1080p120 (28/10/2026): the draw ends at onSubmittedWorkDone, which waits for
+ * the swap chain too, so the plain copy alone took 5.0 to 6.0 ms of an 8.4 ms
+ * frame — over the 3.4 ms a climb needs. The session left at 'off' stayed there,
+ * and the memory started the next one at 'off' (17:02, 17:03).
+ */
+describe('EnhancerGovernor — a copy that waits on presentation', () => {
+    // [serviceMs, arrivalMs, decodeQueue] of the copy, 17:02:16 to 17:02:48.
+    const COPY_WEBGPU_120 = [
+        [5.9, 8.3, 0], [5.4, 8.4, 0], [6.0, 8.5, 0.2], [5.5, 8.7, 0], [5.4, 8.4, 0], [5.9, 8.4, 0],
+        [5.7, 8.2, 0], [5.1, 8.2, 0], [5.0, 8.3, 0], [5.1, 8.2, 0], [5.3, 8.2, 0], [5.8, 8.3, 0],
+        [5.8, 8.2, 0], [5.4, 8.2, 0], [5.0, 8.6, 0], [5.2, 8.6, 0], [5.2, 8.2, 0], [5.4, 8.3, 0],
+        [5.8, 8.4, 0], [5.3, 8.7, 0], [5.0, 9.1, 0], [5.2, 9.1, 0], [5.5, 9.2, 0], [5.6, 8.6, 0],
+        [5.6, 8.3, 0], [5.7, 8.4, 0], [5.6, 8.5, 0],
+    ];
+    const copy = (i) => COPY_WEBGPU_120[i % COPY_WEBGPU_120.length];
+
+    /** 500 ms windows, each level's [serviceMs, arrivalMs, decodeQueue]; no fences on WebGPU. */
+    function play(gov, byLevel, seconds, startMs = 0) {
+        const steps = [];
+        let now = startMs;
+        for (let i = 0; i < seconds * 2; i++) {
+            now += 500;
+            const [serviceMs, arrivalMs, decodeQueue] = byLevel[gov.level](i);
+            const algo = gov.update({ serviceMs, arrivalMs, decodeQueue, gpuBehind: null, now });
+            if (algo) steps.push({ algo, now });
+        }
+        return { steps, now };
+    }
+
+    beforeEach(() => localStorage.clear());
+
+    it('climbs back from the 17:02 memory, forgets it, and keeps an MWSR that fits a frame', () => {
+        rememberRung('webgpu', 'mwsr', 'off', 15000);
+        const start = rememberedRung('webgpu', 'mwsr');
+        const gov = new EnhancerGovernor('mwsr', {
+            startRung: start.rung,
+            recoverAfterMs: start.recoverAfterMs,
+        });
+        // MWSR a millisecond over the copy: past the 6.7 ms that cut it before.
+        const levels = { off: copy, mwsr: () => [7.0, 8.4, 0] };
+        const { steps, now } = play(gov, levels, 30);
+        expect(gov.presentationBound).toBe(true);
+        expect(steps.map((s) => s.algo)).toEqual(['mwsr']);
+        // Four windows of the copy, then the ordinary 15 s.
+        expect(steps[0].now).toBeLessThanOrEqual(25000);
+        rememberRung('webgpu', gov.ceiling, gov.level, gov.recoverAfterMs);
+        expect(rememberedRung('webgpu', 'mwsr')).toBeNull();
+        expect(play(gov, levels, 120, now).steps).toEqual([]);
+        expect(gov.level).toBe('mwsr');
+    });
+
+    it('still cuts an MWSR too slow for the GPU, and bets on it again less and less often', () => {
+        const gov = new EnhancerGovernor('mwsr', { startRung: 'off' });
+        // More than a whole frame: the GPU cannot keep up, whatever the swap chain does.
+        const { steps } = play(gov, { off: copy, mwsr: () => [12, 8.4, 0] }, 300);
+        expect(gov.presentationBound).toBe(true);
+        const algos = steps.map((s) => s.algo);
+        expect(algos.slice(0, 4)).toEqual(['mwsr', 'off', 'mwsr', 'off']);
+        // Each bet undone within the 2 s after the switch plus the 2 s it takes to cut…
+        for (let i = 1; i < steps.length; i += 2) {
+            expect(steps[i].now - steps[i - 1].now).toBeLessThanOrEqual(4500);
+        }
+        // …and the wait before the next one grows.
+        const bets = steps.filter((s) => s.algo === 'mwsr').map((s) => s.now);
+        const gaps = bets.slice(1).map((t, i) => t - bets[i]);
+        for (let i = 1; i < gaps.length; i++) expect(gaps[i]).toBeGreaterThan(gaps[i - 1]);
+    });
+
+    it('changes nothing where the copy leaves a climb its margin', () => {
+        const gov = new EnhancerGovernor('mwsr', { startRung: 'off' });
+        const { steps } = play(gov, { off: () => [2.0, 8.4, 0], mwsr: () => [7.0, 8.4, 0] }, 60);
+        expect(gov.presentationBound).toBe(false);
+        // The climb, then the cut at 7 ms > 0.8 × 8.4 as before.
+        expect(steps.map((s) => s.algo).slice(0, 2)).toEqual(['mwsr', 'off']);
+    });
+
+    it('changes nothing for a copy that does not fit a frame: a machine overloaded', () => {
+        const gov = new EnhancerGovernor('mwsr', { startRung: 'off' });
+        const { steps } = play(gov, { off: () => [8.0, 8.4, 0], mwsr: () => [9.0, 8.4, 0] }, 60);
+        expect(gov.presentationBound).toBe(false);
+        expect(steps).toEqual([]);
+    });
+
+    it("leaves the user's own off alone", () => {
+        const gov = new EnhancerGovernor('off');
+        expect(play(gov, { off: copy }, 30).steps).toEqual([]);
+        expect(gov.presentationBound).toBe(false);
+    });
+});

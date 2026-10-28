@@ -7468,6 +7468,7 @@ export class StreamView {
                 ? this._renderer.takeGpuBehind()
                 : null;
         const fencesIgnored = this._governor.fencesIgnored;
+        const presentationBound = this._governor.presentationBound;
         const algo = this._governor.update({
             serviceMs: diag.renderServiceMs,
             arrivalMs: diag.arrivalAvgMs,
@@ -7480,6 +7481,11 @@ export class StreamView {
         if (!fencesIgnored && this._governor.fencesIgnored) {
             console.log(
                 '[StreamView] Enhancer: the GPU fences read the plain copy late — ignored for this session',
+            );
+        }
+        if (!presentationBound && this._governor.presentationBound) {
+            console.log(
+                '[StreamView] Enhancer: the plain copy waits on presentation — the draw time cuts only past a whole frame, for this session',
             );
         }
         if (!algo) return;

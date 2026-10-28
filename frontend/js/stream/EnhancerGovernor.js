@@ -154,6 +154,20 @@ const GPU_BEHIND_RECOVER = 0.1;
  * windows, the 2 s it takes to cut a pass: a hiccup or two is not a verdict.
  */
 const COPY_LATE_WINDOWS = 4;
+/**
+ * Windows in which that copy fits a frame but costs more than a climb allows
+ * (between RECOVER_RATIO and DEGRADE_RATIO of it), after which the draw time
+ * is read as the presentation's for the session: it no longer holds a climb
+ * back, and cuts a pass only past a whole frame. WebGPU's draw ends at
+ * onSubmittedWorkDone, which also waits for the swap chain (WebGpuRenderer),
+ * and nothing the enhancer does shortens that wait. Measured 28/10/2026,
+ * Chrome WebGPU on a 120 Hz Radeon 780M, 1080p120: the copy took 5.0 to 6.0 ms
+ * of an 8.4 ms frame, over the 3.4 ms a climb needs, so the session left at
+ * 'off' stayed there. A pass that costs more than a frame — MWSR too slow for
+ * the GPU — is still cut; a copy that does not fit is a machine overloaded,
+ * not a presentation, and changes nothing.
+ */
+const COPY_SLOW_WINDOWS = 4;
 /** …and back below this share (with margin, so a restore is not a coin flip). */
 const RECOVER_RATIO = 0.4;
 /** A verdict must hold this long — a single busy window is not a trend. */
@@ -214,6 +228,9 @@ export class EnhancerGovernor {
         /** Windows the copy read late (COPY_LATE_WINDOWS), and the verdict. */
         this._copyLateWindows = 0;
         this._fencesIgnored = false;
+        /** Windows the copy fit but over a climb's margin (COPY_SLOW_WINDOWS). */
+        this._copySlowWindows = 0;
+        this._presentationBound = false;
     }
 
     /** Current algo — what the renderer should be running. */
@@ -242,6 +259,12 @@ export class EnhancerGovernor {
         return this._fencesIgnored;
     }
 
+    /** True once the copy alone fit a frame but not a climb's margin
+     *  (COPY_SLOW_WINDOWS): the draw time cuts only past a whole frame. */
+    get presentationBound() {
+        return this._presentationBound;
+    }
+
     /**
      * Feed one observation window.
      * @param {{serviceMs: number, arrivalMs: number, now: number,
@@ -250,7 +273,9 @@ export class EnhancerGovernor {
      *   serviceMs per-frame cost of the render stage — the draw latency divided
      *             by how many draws overlap (PipelineDiag.renderServiceMs), NOT
      *             the raw wait: with two draws in flight each one waits about
-     *             twice as long while costing the pipeline the same.
+     *             twice as long while costing the pipeline the same. Read as
+     *             the presentation's once the copy waits on it
+     *             (COPY_SLOW_WINDOWS).
      *   arrivalMs average interval between incoming frames = the frame budget
      *   now       performance.now(), passed in so the policy stays pure
      *   decodeQueue average decodeQueueSize (PipelineDiag.decodeQueueAvg) —
@@ -317,8 +342,26 @@ export class EnhancerGovernor {
         }
 
         // A flat cap replaces the frame-arrival budget when one was set.
-        const degradeAbove = this._fixedBudgetMs > 0 ? this._fixedBudgetMs : budget * DEGRADE_RATIO;
-        const recoverBelow = this._fixedBudgetMs > 0 ? -1 : budget * RECOVER_RATIO;
+        let degradeAbove = this._fixedBudgetMs > 0 ? this._fixedBudgetMs : budget * DEGRADE_RATIO;
+        let recoverBelow = this._fixedBudgetMs > 0 ? -1 : budget * RECOVER_RATIO;
+
+        // Stepped down to the copy, and the copy alone fits a frame but not a
+        // climb's margin: the draw time waits on presentation (COPY_SLOW_WINDOWS).
+        if (
+            !this._presentationBound &&
+            this._fixedBudgetMs === 0 &&
+            this.degraded &&
+            this.level === 'off' &&
+            wait > recoverBelow &&
+            wait <= degradeAbove &&
+            ++this._copySlowWindows >= COPY_SLOW_WINDOWS
+        ) {
+            this._presentationBound = true;
+        }
+        if (this._presentationBound) {
+            degradeAbove = budget;
+            recoverBelow = budget * DEGRADE_RATIO;
+        }
 
         // Either the draw no longer fits, or it says it does while the decoder
         // starves behind it, or while the GPU finishes each picture after the
