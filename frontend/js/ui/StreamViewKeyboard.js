@@ -685,9 +685,15 @@ export class StreamViewKeyboard {
                 shift = Math.max(0, Math.floor((h - picH) / 2) - KB_PICTURE_GAP);
             }
         }
-        const transform = shift ? `translateY(${shift}px)` : '';
-        if (area.style.transform === transform) return;
-        area.style.transform = transform;
+        // Moved by its relative offset, never by a transform: a transformed
+        // ancestor becomes the containing block of its fixed descendants, and
+        // the pointer drawn for the trackpad (.stream-client-cursor, fixed,
+        // placed in viewport coordinates) then landed as far down as the area
+        // itself starts — the top of the picture out of its reach (iPhone,
+        // 28/10/2026).
+        const top = shift ? shift + 'px' : '';
+        if (area.style.top === top) return;
+        area.style.top = top;
         this._invalidateMediaRect?.();
         this._placeClientCursor?.();
     }

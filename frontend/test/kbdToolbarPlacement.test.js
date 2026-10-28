@@ -94,12 +94,15 @@ describe('touch keyboard bar placement', () => {
         v._handleViewportResize();
         // 1920×1080 across 390 px is 219 px tall: centred, 90 px of black
         // would sit under it; seated, only 4.
-        expect(v.canvasArea.style.transform).toBe('translateY(86px)');
+        expect(v.canvasArea.style.top).toBe('86px');
+        // Never by a transform: that would make the area the containing block
+        // of the fixed trackpad pointer, drawn that much lower (28/10/2026).
+        expect(v.canvasArea.style.transform).toBe('');
         expect(v._invalidateMediaRect).toHaveBeenCalled();
         v._kbdVisible = false;
         viewport(800, 800);
         v._handleViewportResize();
-        expect(v.canvasArea.style.transform).toBe('');
+        expect(v.canvasArea.style.top).toBe('');
     });
 
     /** The stand-in with a 2560×1440 canvas and the real zoom, in an area
@@ -138,7 +141,7 @@ describe('touch keyboard bar placement', () => {
         const v = zoomedView(3.5, -351);
         openKeyboard(v);
         expect(v._panY).toBeCloseTo(-251.1, 0);
-        expect(v.canvasArea.style.transform).toBe('');
+        expect(v.canvasArea.style.top).toBe('');
     });
 
     it('seats a zoomed picture still shorter than the area at its zoom', () => {
@@ -146,7 +149,7 @@ describe('touch keyboard bar placement', () => {
         const v = zoomedView(1.1, -40);
         openKeyboard(v);
         expect(Math.abs(v._panY)).toBe(0);
-        expect(v.canvasArea.style.transform).toBe('translateY(8px)');
+        expect(v.canvasArea.style.top).toBe('8px');
     });
 
     function closeKeyboard(v) {
@@ -161,7 +164,7 @@ describe('touch keyboard bar placement', () => {
         closeKeyboard(v);
         expect(v._panY).toBe(-351);
         expect(v._panX).toBe(0);
-        expect(v.canvasArea.style.transform).toBe('');
+        expect(v.canvasArea.style.top).toBe('');
         expect(v.canvas.style.transform).toBe('translate(0px, -351px) scale(3.5)');
     });
 
@@ -169,9 +172,9 @@ describe('touch keyboard bar placement', () => {
         const v = zoomedView(1, 0);
         openKeyboard(v);
         // 219 px tall in 266: 23 px of black under it, 4 left.
-        expect(v.canvasArea.style.transform).toBe('translateY(19px)');
+        expect(v.canvasArea.style.top).toBe('19px');
         closeKeyboard(v);
-        expect(v.canvasArea.style.transform).toBe('');
+        expect(v.canvasArea.style.top).toBe('');
         expect(Math.abs(v._panY)).toBe(0);
     });
 
