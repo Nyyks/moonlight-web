@@ -11047,10 +11047,18 @@ export class StreamView {
      * a key held since before this event; the boolean is the fallback for a
      * synthesised event that has no such method (the test harness, and the
      * soft keyboard's own events).
+     *
+     * Under AltGr, Chrome on Windows says Control and Alt are up while its
+     * Ctrl and Alt keys are down: AltGraph stands for both. Read as up, they
+     * were let go of on the host as the AltGr went down, its Alt with nothing
+     * between, and Notepad turned its KeyTips on at each @ (29/10/2026).
      */
     static modifierHeld(e, flag) {
         const name = StreamView.MODIFIER_STATE_BY_FLAG[flag];
-        if (name && typeof e.getModifierState === 'function') return !!e.getModifierState(name);
+        if (name && typeof e.getModifierState === 'function') {
+            if (e.getModifierState(name)) return true;
+            return (flag === 'ctrlKey' || flag === 'altKey') && !!e.getModifierState('AltGraph');
+        }
         return !!e[flag];
     }
 

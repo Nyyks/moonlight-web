@@ -266,3 +266,61 @@ describe('the closing beat of the held-input heartbeat', () => {
         expect(v.sent.length).toBe(1);
     });
 });
+
+describe('a Windows AltGr', () => {
+    // Chrome on Windows: AltGr is a left Ctrl and a right Alt going down
+    // together, and from the right Alt on, getModifierState says AltGraph and
+    // neither Control nor Alt. Read as up, the Ctrl was let go of as the Alt
+    // went down, then the Alt at the next key with nothing between: Notepad
+    // turned its KeyTips on at each @ (29/10/2026).
+    const VK_MENU = 0x12;
+
+    function pressAltGr(v) {
+        v.handleKeyDown(evState('ControlLeft', 'Control', ['Control'], { ctrlKey: true }));
+        v.handleKeyDown(
+            evState('AltRight', 'AltGraph', ['AltGraph'], { ctrlKey: true, altKey: true }),
+        );
+    }
+
+    it('keeps its Ctrl and Alt down for the character it types', () => {
+        const v = keySink();
+        pressAltGr(v);
+        v.handleKeyDown(evState('Digit0', '@', ['AltGraph'], { ctrlKey: true, altKey: true }));
+
+        expect(v.sent.filter((m) => m.type === 'keyup')).toEqual([]);
+        expect(v.sent.slice(0, 2).map((m) => [m.type, m.keyCode])).toEqual([
+            ['keydown', VK_LCTRL],
+            ['keydown', VK_MENU],
+        ]);
+        expect(v._heldPhysKeys.has('ControlLeft')).toBe(true);
+        expect(v._heldPhysKeys.has('AltRight')).toBe(true);
+    });
+
+    it('still lets go of a Shift the event says is up', () => {
+        const v = keySink();
+        v.handleKeyDown(evState('ShiftLeft', 'Shift', ['Shift'], { shiftKey: true }));
+        v.handleKeyDown(evState('ControlLeft', 'Control', ['Shift', 'Control'], { ctrlKey: true }));
+        v.handleKeyDown(
+            evState('AltRight', 'AltGraph', ['Shift', 'AltGraph'], { ctrlKey: true, altKey: true }),
+        );
+        v.sent.length = 0;
+        v.handleKeyDown(evState('Digit0', '@', ['AltGraph'], { ctrlKey: true, altKey: true }));
+
+        expect(v.sent[0]).toMatchObject({ type: 'keyup', code: 'ShiftLeft' });
+    });
+
+    it('lets go of its Ctrl and Alt once AltGraph is gone too', () => {
+        const v = keySink();
+        pressAltGr(v);
+        v.sent.length = 0;
+        // Both key-ups lost: the next plain key says nothing is held.
+        v.handleKeyDown(evState('KeyA', 'a', []));
+
+        expect(
+            v.sent
+                .filter((m) => m.type === 'keyup')
+                .map((m) => m.keyCode)
+                .sort(),
+        ).toEqual([VK_LCTRL, VK_MENU].sort());
+    });
+});
