@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MWSR comparison</title>
+<meta name="description" content="MWSR, FSR1, NIS and SGSR1 side by side on your own GPU: the native frame, each upscaler's picture zoomed pixel for pixel, its fidelity, its overshoot and its GPU time per draw. SDR, HDR, 4:4:4, or your own picture.">
+<meta name="author" content="Bruno Martin">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#05080d">
+<meta property="og:site_name" content="MoonlightWeb">
+<meta property="og:title" content="MWSR next to FSR1, NIS and SGSR1">
+<meta property="og:description" content="Four single-frame upscalers on your own GPU: their pictures, fidelity and GPU time.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://moonlightweb.top/mwsr/">
+<link rel="canonical" href="https://moonlightweb.top/mwsr/">
+<link rel="icon" href="/assets/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="48x48" href="/assets/icon-48.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/icon-180.png">
+<link rel="stylesheet" href="/assets/pages.css?v={{(fileStat `/assets/pages.css`).ModTime.Unix}}">
+<link rel="stylesheet" href="/assets/chrome.css?v={{(fileStat `/assets/chrome.css`).ModTime.Unix}}">
+<link rel="stylesheet" href="/mwsr/mwsr.css?v={{(fileStat `/mwsr/mwsr.css`).ModTime.Unix}}">
+<script defer src="https://stats.moonlightweb.top/script.js"
+        data-website-id="6b952a24-dc15-4be8-a595-ae9d835fbc6a"
+        data-domains="moonlightweb.top,www.moonlightweb.top"></script>
+</head>
+<body>
+
+<!-- Not a page of scripts/website/build-site.mjs's PAGES (English only, outside
+     the menu and the sitemap): its header is its own. build-site.mjs writes the
+     kernels next to it (kernels.js, MwsrShader.js, NisTables.js). -->
+<header><div class="wrap">
+  <a class="brand" href="/"><img src="/assets/icon-192.png" alt="MoonlightWeb logo" width="28" height="28"> MOONLIGHTWEB</a>
+  <nav aria-label="Main navigation"><a href="/">Home</a><a href="/faq.html">FAQ</a><a href="https://github.com/linckosz/moonlight-web/tree/main/mwsr" target="_blank" rel="noopener">MWSR on GitHub</a></nav>
+</div></header>
+
+<main class="cmp">
+<div class="wrap">
+  <div class="kicker">Interactive comparison</div>
+  <h1>MWSR next to FSR1, NIS and SGSR1</h1>
+  <p class="lede">Four single-frame upscalers draw the same picture on <em>your</em> GPU. Each pane shows its output
+    pixel for pixel, next to the native frame it tries to rebuild. The table scores each one against that frame and
+    times it on this device. <a href="https://github.com/linckosz/moonlight-web/tree/main/mwsr#next-to-fsr1-nis-and-sgsr1" target="_blank" rel="noopener">The README</a>
+    explains the method and gives the figures for two GPUs.</p>
+  <p class="privacy"><strong>Your picture stays on this device.</strong> This page decodes, upscales and measures it
+    inside this tab and uploads nothing. The site counts page views without cookies, and that count carries nothing
+    of your picture.</p>
+  <noscript><p class="msg bad">This page needs JavaScript and WebGPU.</p></noscript>
+</div>
+
+<div class="wrap wide">
+  <section class="controls" aria-label="Settings">
+    <fieldset>
+      <legend>Picture</legend>
+      <div class="seg" id="pic">
+        <label><input type="radio" name="pic" value="text" checked> Text chart</label>
+        <label><input type="radio" name="pic" value="0ad"> 0 A.D. <small>6 MB</small></label>
+        <label><input type="radio" name="pic" value="iso"> Colour text</label>
+        <label><input type="radio" name="pic" value="hdr-text"> HDR text</label>
+        <label><input type="radio" name="pic" value="hdr-ramp"> HDR ramp</label>
+        <label><input type="radio" name="pic" value="hdr-game"> 0 A.D. HDR <small>6 MB</small></label>
+        <label class="file"><input type="radio" name="pic" value="file" disabled> <span id="file-name">Your picture…</span></label>
+      </div>
+      <input type="file" id="file" accept="image/*" hidden>
+    </fieldset>
+    <fieldset id="role-set" hidden>
+      <legend>Your picture is</legend>
+      <div class="seg" id="role">
+        <label><input type="radio" name="role" value="native" checked> the native frame <small>scored</small></label>
+        <label><input type="radio" name="role" value="input"> the input <small>not scored</small></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Scale</legend>
+      <div class="seg" id="scale">
+        <label><input type="radio" name="scale" value="1.3333333333333333" checked> <span data-scale="1.33">×1.33 <small>1080p → 1440p</small></span></label>
+        <label><input type="radio" name="scale" value="2"> <span data-scale="2">×2 <small>720p → 1440p</small></span></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Chroma of the stream</legend>
+      <div class="seg" id="chroma">
+        <label><input type="radio" name="chroma" value="444" checked> 4:4:4</label>
+        <label><input type="radio" name="chroma" value="420"> 4:2:0</label>
+      </div>
+      <label class="check"><input type="checkbox" id="c444"> MWSR reads colour edges: <code>CHROMA444</code></label>
+    </fieldset>
+    <fieldset>
+      <legend>View</legend>
+      <div class="seg" id="view">
+        <label><input type="radio" name="view" value="grid" checked> All</label>
+        <label><input type="radio" name="view" value="ab"> Side by side</label>
+        <label><input type="radio" name="view" value="wipe"> Wipe</label>
+      </div>
+      <div class="ab" id="ab" hidden>
+        <select id="a" aria-label="Left"></select>
+        <button type="button" id="swap" title="Swap left and right">⇄</button>
+        <select id="b" aria-label="Right"></select>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Zoom</legend>
+      <div class="seg" id="zoom">
+        <label><input type="radio" name="zoom" value="1"> 1×</label>
+        <label><input type="radio" name="zoom" value="2"> 2×</label>
+        <label><input type="radio" name="zoom" value="4" checked> 4×</label>
+        <label><input type="radio" name="zoom" value="8"> 8×</label>
+      </div>
+      <div class="spots" id="spots"></div>
+    </fieldset>
+  </section>
+
+  <div id="status" class="msg" role="status" aria-live="polite"></div>
+  <div id="hdr-note" class="msg" hidden></div>
+
+  <section class="viewer" id="viewer" aria-label="The pictures">
+    <div class="panes" id="panes"></div>
+    <div class="drop" id="drop" hidden>Drop a picture to compare it</div>
+  </section>
+  <div class="under">
+    <canvas id="overview" width="240" height="135" aria-label="Where the panes look: click to move"></canvas>
+    <p class="hint">Drag a pane to move all of them. Click the small picture to jump. In the wipe view, the slider moves
+      the line. Each pane shows the pixels as they are, enlarged without smoothing.</p>
+    <label class="wipe-slider" id="wipe-slider" hidden>Line <input type="range" id="split" min="0" max="1" step="0.001" value="0.5"></label>
+  </div>
+
+  <section class="results" aria-labelledby="results-title">
+    <h2 id="results-title">Scores on this device</h2>
+    <div class="table-wrap">
+      <table id="table">
+        <thead><tr>
+          <th scope="col">Upscaler</th>
+          <th scope="col">Fidelity <small>SSIM of the luma ×100, higher is closer</small></th>
+          <th scope="col">Colour <small>SSIM of R, G and B ×100</small></th>
+          <th scope="col">Overshoot <small>pixels past their 4 input texels</small></th>
+          <th scope="col">GPU time <small>per draw, ms</small></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="timing">
+      <button type="button" class="btn btn-primary" id="measure" disabled>Measure the GPU time</button>
+      <label class="check"><input type="checkbox" id="full"> As in the README: 3 rounds of 6 batches (longer)</label>
+      <span id="tprogress"></span>
+    </div>
+    <p class="small" id="device"></p>
+  </section>
+
+  <section class="notes">
+    <h2>How to read it</h2>
+    <ul>
+      <li><strong>The native frame</strong> is the picture at 2560×1440. The input is that frame reduced to 1920×1080 or
+        1280×720, by Lanczos-3 in linear light, the same reduction as the README. Each upscaler draws the input back at
+        2560×1440.</li>
+      <li><strong>Fidelity</strong> is the SSIM of the luma against the native frame, ×100: the README's measure,
+        computed here on what your GPU drew. <strong>Colour</strong> is the mean SSIM of the red, green and blue
+        channels, which sees the edges the luma misses: those of the colour text, whose colours all have one luma. On
+        HDR both are taken on the PQ code of each BT.2020 channel, and the overshoot in nits (past 1 % + 0.5 nit), as
+        the lab measures HDR.</li>
+      <li><strong>Overshoot</strong> is the share of pixels that leave the range of their four input texels by more
+        than 2/255. It counts halos and ringing.</li>
+      <li><strong>GPU time</strong> is the median of batches of 100 draws, each batch timed by two GPU timestamps. The
+        browser rounds those timestamps (to 0.1 ms in Chrome), and a batch of 100 makes the rounding a small share. When
+        your GPU has <code>shader-f16</code>, MWSR, FSR1 and SGSR1 are also timed in 16-bit and the faster of their two
+        precisions is shown. Their 16-bit picture is first held to their 32-bit one: within 4/255 on 99.9 % of the
+        pixels. The pictures and the scores are those of the 32-bit texts. Timings vary with the GPU's clock: run them
+        twice before you trust a small gap.</li>
+      <li><strong>4:2:0</strong> gives every upscaler the input a 4:2:0 stream would give it: its colour averaged over
+        2×2 pixels and brought back by interpolation, as a decoder hands it over. <code>CHROMA444</code> is MWSR's mode
+        for 4:4:4 streams. It is off by default, as in the README's figures, and the colour text shows what it does.</li>
+      <li><strong>HDR</strong>: the pictures are the lab's, drawn by this page with 1.0 = 203 nits and highlights up to
+        1000 nits. MWSR and bilinear read the floats past 1.0 as they are. FSR1 runs inside AMD's reversible tone map
+        (<code>FsrSrtm</code>), as AMD prescribes. NIS and SGSR1 run inside the same tone map, because neither port
+        reads past 1.0 (MoonlightWeb's NIS port has no <code>NIS_HDR_MODE</code>, and SGSR1 clamps to 0..1). The tone
+        map is not timed.</li>
+      <li><strong>Your picture</strong> is decoded in this tab, and a picture larger than 3840×2160 is first reduced to
+        fit. As the native frame, it is reduced and rebuilt, and scored. As the input, it is upscaled as it is and only
+        the overshoot is scored. Pictures are read as 8-bit SDR.</li>
+    </ul>
+    <h2>The ports</h2>
+    <p>These are MoonlightWeb's ports, the ones the client runs, not the vendors' own builds. FSR1 is firdawolf's WGSL
+      port of EASU and RCAS (RCAS at 0.75 stops), with the lab's port of AMD's 16-bit path (<code>FsrEasuH</code>,
+      <code>FsrRcasH</code>). NIS is a per-fragment transcription of NVScaler (SDK 1.0.3) at sharpness 0.5. NVIDIA ships
+      a compute shader with shared memory, which is faster, so its time here is the port's, not NIS's. SGSR1 is a port
+      of <code>sgsr1.h</code> (mode 1, edge threshold 6/255, edge sharpness 1.5), in 32-bit and in half precision.
+      MWSR runs with its defaults.</p>
+    <p class="small">FSR and FidelityFX are trademarks of Advanced Micro Devices, NVIDIA is a trademark of NVIDIA
+      Corporation, and Snapdragon is a trademark of Qualcomm. MoonlightWeb made this comparison with its own ports,
+      and none of these companies made or endorsed it. The ports keep their vendors' notices (MIT for FSR1 and NIS,
+      BSD-3-Clause for SGSR1) in <a href="/mwsr/kernels.js">kernels.js</a>. MWSR is under the
+      <a href="https://github.com/linckosz/moonlight-web/blob/main/mwsr/LICENSE" target="_blank" rel="noopener">MIT License</a>.</p>
+    <p class="small">The 0 A.D. picture is © Wildfire Games. The screenshot is by PantheraLeo1359531 on Wikimedia Commons,
+      under <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>,
+      reduced to 2560×1440. The text chart is the MoonlightWeb lab's.</p>
+  </section>
+</div>
+</main>
+
+<footer><div class="wrap">
+  <span><img src="/assets/icon-192.png" alt="" width="18" height="18" class="foot-logo"> MoonlightWeb · © 2026 Bruno Martin · GPL‑3.0 · MWSR: MIT</span>
+  <span><a href="/">Home</a> · <a href="/faq.html">FAQ</a> · <a href="https://github.com/linckosz/moonlight-web" target="_blank" rel="noopener">GitHub</a></span>
+</div></footer>
+
+<script type="module" id="mwsr-app" src="/mwsr/app.js?v={{(fileStat `/mwsr/app.js`).ModTime.Unix}}"
+        data-engine="/mwsr/engine.js?v={{(fileStat `/mwsr/engine.js`).ModTime.Unix}}"
+        data-worker="/mwsr/worker.js?v={{(fileStat `/mwsr/worker.js`).ModTime.Unix}}"
+        data-kernels="/mwsr/kernels.js?v={{(fileStat `/mwsr/kernels.js`).ModTime.Unix}}"
+        data-mwsr="/mwsr/MwsrShader.js?v={{(fileStat `/mwsr/MwsrShader.js`).ModTime.Unix}}"
+        data-nis="/mwsr/NisTables.js?v={{(fileStat `/mwsr/NisTables.js`).ModTime.Unix}}"></script>
+</body>
+</html>

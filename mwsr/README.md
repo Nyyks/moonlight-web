@@ -60,6 +60,10 @@ a port of each beside MWSR. They spend their work in different places:
   the others sharpen harder. It is the only one of the four that reduces and that reads the colour edges of a 4:4:4
   stream, and with NIS the only one that runs on HDR without a tone map around it.
 
+**[Compare them on your own GPU](https://moonlightweb.top/mwsr/)**: the pictures below or your own, in SDR, HDR or
+4:4:4, each upscaler's output pixel for pixel, its fidelity, and its GPU time on your device. The page runs these same
+ports and uploads nothing.
+
 ![Four zooms of a 1080p frame upscaled to 1440p: the native frame, then MWSR, FSR1, NIS and SGSR1](docs/zoom.png)
 
 *1080p → 1440p, zoomed ×4 (nearest neighbour), drawn on the RTX 5060 Ti. Three crops of 0 A.D., then the lab's text
@@ -142,6 +146,8 @@ What each one does:
   is held to its 32-bit one on that GPU: fewer than 0.05 % of the pixels differ by more than 4/255.
 - **To run it again**: `scripts/bench/scaler-lab/scaler_lab.py`, its `--quality` mode for the pictures and its
   `cells=` cases for the times (cells `mwsr`, `mwsr:half=1`, `fsr1`, `fsr1h`, `nis`, `sgsr-repo`, `sgsrh`, `tex-s1`).
+  In a browser with WebGPU, on your own GPU: [moonlightweb.top/mwsr](https://moonlightweb.top/mwsr/), with the same
+  reduction, metrics and timing, and the client's shaders.
 
 FSR and FidelityFX are trademarks of Advanced Micro Devices, NVIDIA is a trademark of NVIDIA Corporation, and
 Snapdragon is a trademark of Qualcomm. MoonlightWeb made this comparison with its own ports, and none of these

@@ -304,6 +304,74 @@ outputs.set(
     '\n</urlset>\n',
 );
 
+/* ── The MWSR comparison (website/mwsr/) ───────────────────────────────────
+   A tool page in English, outside PAGES: neither translated, nor in the menu,
+   nor in the sitemap. It runs what MoonlightWeb ships: its kernels are written
+   here from the product's modules (and the lab's 16-bit ports of FSR1 and
+   SGSR1, so that each runs at its best precision), so a shader changed in the
+   product and not rebuilt here fails --check. */
+{
+  const REPO = path.dirname(SITE);
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8').replace(/\r\n/g, '\n');
+  const renderer = read('frontend/js/stream/renderers/WebGpuRenderer.js');
+  // A WGSL template literal of the renderer by the name of its const, the
+  // vertex stage prepended to the ones built on it (the lab's extractWgsl).
+  const wgsl = (name) => {
+    const at = renderer.indexOf('const ' + name + ' =');
+    if (at < 0) throw new Error(`${name} not found in WebGpuRenderer.js`);
+    const b0 = renderer.indexOf('`', at);
+    const b1 = renderer.indexOf('`', b0 + 1);
+    const body = renderer.slice(b0 + 1, b1);
+    if (body.includes('${')) throw new Error(`${name} has an interpolation`);
+    return renderer.slice(at, b0).includes('FULLSCREEN_VS +') ? wgsl('FULLSCREEN_VS') + body : body;
+  };
+  const lab = (f) => import(new URL(`../bench/scaler-lab/${f}`, import.meta.url));
+  const { EASU_H_WGSL, RCAS_H_WGSL } = await lab('fsr1-half.js');
+  const { sgsrHalf } = await lab('sgsr1-half.js');
+  const SGSR = wgsl('SGSR_WGSL');
+  const kernels = {
+    SGSR_WGSL: SGSR,
+    SGSR_H_WGSL: sgsrHalf(SGSR),
+    NIS_WGSL: wgsl('NIS_WGSL'),
+    EASU_WGSL: wgsl('EASU_WGSL'),
+    RCAS_WGSL: wgsl('RCAS_WGSL'),
+    EASU_H_WGSL,
+    RCAS_H_WGSL,
+  };
+  const notice = (rel) =>
+    read(rel)
+      .trim()
+      .split('\n')
+      .map((l) => (' * ' + l.replace(/^\/\/ ?/, '')).trimEnd())
+      .join('\n');
+  const tp = 'backend/native-host/tools/scaler-bench/third_party/';
+  outputs.set(
+    path.join(SITE, 'mwsr', 'kernels.js'),
+    '/*\n' +
+      ' * Written by scripts/website/build-site.mjs — do not edit by hand.\n' +
+      ' *\n' +
+      ' * The kernels the comparison runs, as MoonlightWeb ships them: the WGSL of\n' +
+      ' * frontend/js/stream/renderers/WebGpuRenderer.js (GPL-3.0-or-later), which\n' +
+      ' * ports FSR1, NIS and SGSR1, and the lab\'s 16-bit ports of FSR1 and SGSR1\n' +
+      ' * (scripts/bench/scaler-lab/fsr1-half.js, sgsr1-half.js). The vendors\'\n' +
+      ' * notices of the code they port:\n' +
+      ' *\n' +
+      ' * AMD FidelityFX Super Resolution 1 (EASU, RCAS):\n *\n' +
+      notice(tp + 'ffx/LICENSE.txt') +
+      '\n *\n * NVIDIA Image Scaling (NVScaler):\n *\n' +
+      notice(tp + 'nis/LICENSE.txt') +
+      '\n *\n * Snapdragon Game Super Resolution 1:\n *\n' +
+      notice(tp + 'sgsr/LICENSE') +
+      '\n */\n' +
+      Object.entries(kernels)
+        .map(([k, v]) => `export const ${k} = ${JSON.stringify(v)};\n`)
+        .join(''),
+  );
+  // MWSR itself (MIT) and NIS's filter banks, copied as they are.
+  for (const f of ['MwsrShader.js', 'NisTables.js'])
+    outputs.set(path.join(SITE, 'mwsr', f), read('frontend/js/stream/renderers/' + f));
+}
+
 /* ── Write or check ────────────────────────────────────────────────────── */
 let stale = 0;
 for (const [file, content] of outputs) {
