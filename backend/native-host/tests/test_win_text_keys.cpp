@@ -418,15 +418,35 @@ void frenchLegacy(const WinKeyLayout& fr)
     }
     {
         // @: the left Ctrl and the RIGHT Alt around the à key, as AltGr is on
-        // a keyboard, released after it.
+        // a keyboard, released after it, with the mask before the right Alt
+        // goes up. Without it, an @ from a phone turned Notepad's KeyTips on
+        // (28/10/2026), as a US Mac's did through its keys (25/10/2026).
         std::vector<WinKeyEvent> plan;
         planText(fr, U"@", false, WinHeldMods{}, plan);
-        CHECK_EQ(plan.size(), static_cast<size_t>(6));
-        CHECK(plan.size() == 6 && plan[0].vk == VK_CONTROL && plan[0].scan == 0x1D &&
+        CHECK_EQ(plan.size(), static_cast<size_t>(8));
+        CHECK(plan.size() == 8 && plan[0].vk == VK_CONTROL && plan[0].scan == 0x1D &&
               !plan[0].extended && plan[1].vk == VK_MENU && plan[1].scan == 0x38 &&
-              plan[1].extended && plan[2].vk == '0' && plan[2].scan == 0x0B &&
-              plan[4].vk == VK_MENU && plan[4].up && plan[4].extended && plan[5].vk == VK_CONTROL &&
-              plan[5].up);
+              plan[1].extended && plan[2].vk == '0' && plan[2].scan == 0x0B && plan[3].up &&
+              plan[4].vk == kWinMaskVk && !plan[4].up && plan[5].vk == kWinMaskVk && plan[5].up &&
+              plan[6].vk == VK_MENU && plan[6].up && plan[6].extended && plan[7].vk == VK_CONTROL &&
+              plan[7].up);
+        CHECK(typeOut(fr, plan, false, WinHeldMods{}) == U"@");
+        CHECK(balanced(plan, WinHeldMods{}));
+    }
+    {
+        // Every right Alt that goes up from text is masked first: "@a{" lets
+        // go of the AltGr twice, and both are masked.
+        std::vector<WinKeyEvent> plan;
+        planText(fr, U"@a{", false, WinHeldMods{}, plan);
+        int masked = 0;
+        for (size_t i = 0; i < plan.size(); ++i) {
+            if (plan[i].vk != VK_MENU || !plan[i].up || !plan[i].extended) continue;
+            CHECK(i >= 2 && plan[i - 2].vk == kWinMaskVk && plan[i - 1].vk == kWinMaskVk &&
+                  plan[i - 1].up);
+            ++masked;
+        }
+        CHECK_EQ(masked, 2);
+        CHECK(typeOut(fr, plan, false, WinHeldMods{}) == U"@a{");
     }
     {
         // "aA": Shift only around the capital.

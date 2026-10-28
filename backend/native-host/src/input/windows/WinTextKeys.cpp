@@ -275,11 +275,16 @@ void mask(std::vector<WinKeyEvent>& out)
 /// press, so a level is never briefly both. An Alt down without Ctrl is masked
 /// before anything under it is let go, and after it is pressed alone. Under a
 /// Ctrl, Windows reads Alt as an ordinary key, which opens nothing.
+///
+/// The right Alt of an AltGr is masked before it goes up too: whatever reads
+/// its release then has a key after its press. Without it, Notepad's KeyTips
+/// came on after an @, from a US Mac's keys (25/10/2026) and from a phone's
+/// text (28/10/2026).
 void transition(Mods& now, const Mods& want, std::vector<WinKeyEvent>& out)
 {
     const bool letsGo = (now.shift && !want.shift) || (now.alt && !want.alt) ||
                         (now.altGr && !want.altGr) || (now.ctrl && !want.ctrl);
-    if (letsGo && now.alt && !now.ctrl) mask(out);
+    if ((letsGo && now.alt && !now.ctrl) || (now.altGr && !want.altGr)) mask(out);
     if (now.shift && !want.shift) pushKey(out, VK_SHIFT, kShiftScan, false, true);
     if (now.alt && !want.alt) pushKey(out, VK_MENU, kAltScan, false, true);
     if (now.altGr && !want.altGr) {
@@ -617,14 +622,9 @@ bool planKeyEdge(const WinStroke& key, bool down, WinHeldMods held, std::vector<
     }
     transition(now, want, out);
     pushKey(out, key.vk, key.scan, key.extended, false);
-    if (want.altGr) {
-        // The key back up before the right Alt, as a keyboard lets them go,
-        // and the mask between: whatever reads the right Alt's release has a
-        // key after its press. With the key let go after the right Alt, an @
-        // typed from a US Mac turned Notepad's KeyTips on (25/10/2026).
-        pushKey(out, key.vk, key.scan, key.extended, true);
-        mask(out);
-    }
+    // The key back up before the right Alt, as a keyboard lets them go; the
+    // way back masks the right Alt (transition).
+    if (want.altGr) pushKey(out, key.vk, key.scan, key.extended, true);
     transition(now, rest, out);
     return !want.altGr;
 }
