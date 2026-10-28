@@ -2874,3 +2874,59 @@ décode pas, et localiser la traîne p99 que J47 avait laissée sur la réductio
 
 **Pour rejouer.** Lancer `hdr_check.py --time 800 --cdp PORT` dans un Chrome qu'on a soi-même épinglé et vérifié sur
 le GPU, avec nvidia-smi à côté (`-lms 50`). Ajouter `--gap 4000` pour voir les paliers.
+
+## 2026-10-28 — J52, MWSR pour les autres programmes : le jumeau HLSL, et `X2_FLAT` d'un GPU à l'autre
+
+**La demande.** Bruno, le 28/10 : distribuer le shader à d'autres développeurs. Ses choix :
+- la licence MIT, pour le seul shader : le reste du dépôt reste sous GPL-3 ;
+- un dossier `mwsr/` dans le dépôt ;
+- le nom MWSR ;
+- les shaders et le module, plus du C++ pour l'intégrer comme dans sa PR de moonlight-qt (`d3d12va_shaders.cpp`).
+
+**Ce que contient `mwsr/`** (cb766889, puis ce commit) :
+- `generate.mjs` l'écrit tout entier depuis `MwsrShader.js` ;
+- `mwsrDist.test.js` échoue dès qu'un fichier retarde sur le module ;
+- les fichiers : WGSL, GLSL ES 3.00, HLSL (Direct3D 11 et 12), `cpp/mwsr.h` (le côté processeur, C++17 sans
+  dépendance), `cpp/example_d3d11.cpp` (une intégration complète en un fichier) et un README anglais.
+
+**Le jumeau HLSL (`mwsrHlsl`).**
+- **Écrit à partir des mêmes tables que le WGSL**, ligne à ligne. Chaque constante devient une définition `MWSR_<nom>`,
+  que le compilateur reçoit comme NIS reçoit les siennes dans moonlight-qt. Les registres aussi sont des définitions.
+- **Les dérivées gardent leur signe** : l'axe y de l'écran descend sous Direct3D comme sous WebGPU.
+- **Compilé avec FXC** (`ps_5_0`, `vs_5_0`) **et DXC 1.8** (`ps_6_0`, HLSL 2021 ; `ps_6_2` avec les types 16 bits pour
+  la variante `min16float`), avec les valeurs par défaut et avec les variantes.
+- **Vérifié par les tests du module** : chaque constante avec sa valeur par défaut, les dérivées avant le branchement,
+  les mêmes grilles de réduction, aucune constante des noyaux voisins.
+
+**La conformité, sans GPU** : le HLSL sur WARP, par l'exemple D3D11, contre le WGSL sur SwiftShader (la page refuse
+tout autre adaptateur). Il y a 16 cas : le jeu 0 A.D., l'étalon de Bruno et une mire de texte, agrandis à ×2 et ×1,33,
+réduits à ×0,667, ×1/3 et ×0,21, avec ou sans vues sRGB.
+- **Le filtrage bilinéaire seul** (tout en chemin plat, `FLAT_TAPS 1`) : 1/255 au plus. C'est l'écart des deux
+  rastériseurs entre eux.
+- **Les agrandissements**, par défaut comme avec `FLAT_TAPS 3`, `CHROMA444 1` et `DERING 1` :
+  - de 0,0001 à 0,02 % des pixels au-delà de 2/255, pour un PSNR de 66 à 73 dB ;
+  - ce sont des quads proches du seuil, que le vote envoie de l'autre côté : les votes ne diffèrent que sur 0,0008 %
+    des pixels.
+- **Les réductions** : 1/255 au plus.
+- **La variante `min16float`** sur WARP : 2/255 au plus de la version f32.
+- **`mwsr.h` contre le module** : mêmes modes et mêmes 16 flottants, au bit près, sur 484 combinaisons de tailles.
+
+**`X2_FLAT` n'est pas stable d'un GPU à l'autre.**
+- **L'écart** : avec `X2_FLAT 0,5` (une constante de labo, neutre par défaut), 1,1 % des pixels diffèrent de plus de
+  8/255.
+- **Le mécanisme** : ce n'est pas le jumeau, les deux textes sont identiques.
+  - Sur un pixel du chemin plat, le gradient de luma est presque nul.
+  - WARP l'arrondit à 0 exactement, SwiftShader en garde une trace (≥ 1e-6).
+  - La normalisation de `n` fait de cette trace une direction unité, et `X2_FLAT` affûte le long de cette direction :
+    ici à la verticale, en travers des traits d'un pixel.
+- **Ce qui a été écarté** : les dérivées « fines » à la place des « grossières » ne changent rien ; `X2_BASE` et
+  `X2_R_ACROSS`, seuls, restent dans le bruit des agrandissements.
+- **Conséquence** : aucune pour le produit, qui ne pose pas `X2_FLAT`. Le README le déconseille sans mesure sur ses
+  cibles.
+- **Correctif possible, à la décision de Bruno** : doser l'affûtage du chemin plat par la taille du gradient, au lieu
+  de sa seule direction.
+
+**Pour rejouer** (hors dépôt, scratchpad `mwsrdist/`) :
+- `conform.py` dessine sur WARP et sur SwiftShader, puis compare ;
+- `check.py` compile chaque texte dans deux Chrome SwiftShader (WebGPU, puis WebGL2) ;
+- `cppcheck` compare `mwsr.h` au module.

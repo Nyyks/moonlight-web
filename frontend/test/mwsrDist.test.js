@@ -34,6 +34,11 @@ describe('the mwsr/ folder', () => {
             expect(text, path).toContain('Permission is hereby granted, free of charge');
         }
         expect(read(join(MWSR, 'LICENSE'))).toMatch(/^MIT License\n\nCopyright \(c\) 2026 Bruno Martin/);
+        // the example is written by hand, under the same notice
+        const example = read(join(MWSR, 'cpp', 'example_d3d11.cpp'));
+        expect(example).toContain('Copyright (c) 2026 Bruno Martin');
+        expect(example).toContain('SPDX-License-Identifier: MIT');
+        expect(example).toContain('Permission is hereby granted, free of charge');
     });
 
     it('keeps #version first in each GLSL text, as GLSL ES requires', () => {
@@ -41,14 +46,21 @@ describe('the mwsr/ folder', () => {
             expect(read(join(MWSR, path)).startsWith('#version 300 es\n'), path).toBe(true);
     });
 
-    it('carries one WGSL text per regime the renderers build', () => {
+    it('carries one text per regime the renderers build, in each language, and the C++ header', () => {
         expect(Object.keys(dist).sort()).toEqual(
             [
+                'cpp/mwsr.h',
                 'glsl/mwsr-down-16.frag',
                 'glsl/mwsr-down-4.frag',
                 'glsl/mwsr-down-9.frag',
                 'glsl/mwsr-up.frag',
                 'glsl/mwsr.vert',
+                'hlsl/mwsr-down-1.hlsl',
+                'hlsl/mwsr-down-16.hlsl',
+                'hlsl/mwsr-down-4.hlsl',
+                'hlsl/mwsr-down-9.hlsl',
+                'hlsl/mwsr-up-half.hlsl',
+                'hlsl/mwsr-up.hlsl',
                 'js/MwsrShader.js',
                 'wgsl/mwsr-down-1.wgsl',
                 'wgsl/mwsr-down-16.wgsl',

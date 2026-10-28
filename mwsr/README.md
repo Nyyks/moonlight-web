@@ -48,12 +48,23 @@ design document, [`docs/design/upscaler-mwsr.md`](../docs/design/upscaler-mwsr.m
 | `glsl/mwsr.vert` | The full-screen triangle every GLSL fragment text expects. |
 | `glsl/mwsr-up.frag` | The upscale, GLSL ES 3.00 (WebGL2, OpenGL ES 3.0). The parameters are constants at the top. |
 | `glsl/mwsr-down-4.frag`, `-9`, `-16` | The reduction, GLSL ES 3.00. |
-| `js/MwsrShader.js` | The JavaScript module all the above come from: it writes the texts with any parameters, picks the mode for a scale and fills the uniform block. |
+| `hlsl/mwsr-up.hlsl` | The upscale, HLSL, for Direct3D 11 (FXC, `ps_5_0`) and 12 (DXC, `ps_6_0`). Its parameters are `MWSR_*` defines. |
+| `hlsl/mwsr-up-half.hlsl` | The same, its edge path in `min16float`. |
+| `hlsl/mwsr-down-1.hlsl`, `-4`, `-9`, `-16` | The reduction, HLSL. |
+| `cpp/mwsr.h` | The CPU side for a native renderer, C++17, header only: the mode for a scale and its shader file, the 64 bytes of the constant buffer, the defines to compile with. |
+| `cpp/example_d3d11.cpp` | A whole Direct3D 11 integration in one file, which also serves as a test: it reads a PNG, draws it at another size and writes a PNG. |
+| `js/MwsrShader.js` | The JavaScript module the shaders come from: it writes the texts with any parameters, picks the mode for a scale and fills the uniform block. |
 | `generate.mjs` | Writes this folder from MoonlightWeb's own module (`node mwsr/generate.mjs`). |
 
 Every shader here is generated from the module MoonlightWeb runs, so what you take is what the product draws. The
-WGSL and GLSL texts are twins, written from the same tables of constants; MoonlightWeb's lab holds them to 2/255 of
-each other.
+WGSL, GLSL and HLSL texts are twins, written from the same tables of constants. MoonlightWeb's lab holds the GLSL
+one to 2/255 of the WGSL one. The HLSL one, drawn on WARP, against the WGSL one on SwiftShader, on 16 cases (28/10/2026):
+- **Bilinear filtering alone:** the two rasterisers differ by 1/255 at most.
+- **Upscales:** a few quads near the vote's threshold go the other way, on 0.0001 to 0.02 % of the pixels; PSNR 66 to
+  73 dB.
+- **Reductions:** 1/255 at most.
+
+The C++ header gives the JavaScript module's modes and floats bit for bit.
 
 ## Integrating
 
@@ -162,6 +173,55 @@ gl.uniform4fv(gl.getUniformLocation(program, 'uZoneBonus'), u.subarray(12, 16));
 gl.drawArrays(gl.TRIANGLES, 0, 3);
 ```
 
+### Direct3D 11 and 12 (HLSL, C++)
+
+Each `hlsl/` file holds both stages: `MwsrVS`, the full-screen triangle from `SV_VertexID`, and `MwsrPS`. Registers:
+`b0` the constant buffer (`cbuffer MwsrConstants`, the 16 floats above), `t0` the input (`Texture2D<float4>`), `s0`
+a sampler with linear filtering and clamp addressing. Each register is a define as well (`MWSR_CB_REGISTER`,
+`MWSR_TEX_REGISTER`, `MWSR_SAMPLER_REGISTER`), for a root signature that wants others. Every parameter is a define of
+its name prefixed `MWSR_`, at its default unless you pass another: `MWSR_FLAT_TAPS=3`, `MWSR_R_DOWN=1.25`.
+
+`cpp/mwsr.h` does the CPU side, with no dependency:
+
+```cpp
+#include "mwsr.h"
+
+// once per size: the mode, the file, the defines
+const mwsr::Regime reg = mwsr::regime(inW, inH, outW, outH);   // Mode::Copy at 1:1: copy the frame instead
+const std::string file = "hlsl/" + mwsr::shaderFile(reg);        // "mwsr-up.hlsl", "mwsr-down-9.hlsl"...
+const std::vector<mwsr::Define> defines = mwsr::defines(reg, {{"FLAT_TAPS", "3"}});  // a phone; {} on a computer
+// compile MwsrVS (vs_5_0 / vs_6_0) and MwsrPS (ps_5_0 / ps_6_0) from `file` with `defines`
+// (D3D_SHADER_MACRO for D3DCompile, -D NAME=VALUE for DXC)
+
+// the constant buffer, 64 bytes, rewritten when a size changes
+const mwsr::Constants cb = mwsr::constants(inW, inH, outW, outH);
+
+// each frame: input SRV on t0, sampler on s0, cb on b0, render target of outW x outH,
+// no input layout, triangle list, Draw(3)
+```
+
+`cpp/example_d3d11.cpp` is all of it in one file: the device, the textures with their sRGB views, the sampler, the
+constant buffer, the compilation and the draw. It runs on WARP, the software rasteriser, unless given `--hardware`.
+
+```
+cl /std:c++17 /EHsc /W4 /O2 example_d3d11.cpp d3d11.lib d3dcompiler.lib windowscodecs.lib ole32.lib
+example_d3d11 frame_720p.png 2560 1440 out.png --hlsl ../hlsl --define FLAT_TAPS=3
+```
+
+**On Direct3D 12**, the same files compile with DXC, `-T ps_6_0 -E MwsrPS`, HLSL 2021 included. With
+`-enable-16bit-types` (`ps_6_2`), `mwsr-up-half.hlsl`'s `min16float` becomes a true `half`; DXC says so in a warning.
+A root signature for it:
+- the 16 floats as root constants at `b0` (16 32-bit values) or a CBV;
+- a descriptor table with the input's SRV at `t0`;
+- a static sampler at `s0`: `D3D12_FILTER_MIN_MAG_MIP_LINEAR`, `D3D12_TEXTURE_ADDRESS_MODE_CLAMP`.
+
+Draw it as an ordinary pixel pass over the output: viewport and scissor of the output's size, `DrawInstanced(3, 1,
+0, 0)`.
+
+**The input on Direct3D**: a decoder hands YUV. Convert it to RGB in a pass before MWSR, at the stream's size, as
+MoonlightWeb does: MWSR reads RGB. For the exact reduction, create that RGB texture `DXGI_FORMAT_R8G8B8A8_TYPELESS`,
+read it through an `_UNORM_SRGB` view, write the output through one, and pass `srgbViews = true` to `mwsr::regime`.
+
 ## Parameters
 
 ### Per-frame values
@@ -191,7 +251,8 @@ That gives `1.85` at ×1.33, `1.542` at ×1.4, and `1.233` from ×1.5 up. A redu
 
 ### Pipeline constants
 
-They are `override` constants in WGSL, set at pipeline creation, and `const` lines in GLSL.
+They are `override` constants in WGSL, set at pipeline creation; `const` lines in GLSL; defines in HLSL, the name
+prefixed `MWSR_`.
 
 | Constant | Type | Default | What it does |
 |---|---|---|---|
@@ -217,6 +278,10 @@ They are `override` constants in WGSL, set at pipeline creation, and `const` lin
 
 The three `X2_` constants are neutral by default: in the lab they helped one content at ×2 and hurt another, with no
 common value.
+
+`X2_FLAT` also differs from one GPU to another. It sharpens across the flat path's own gradient, which is nearly
+zero there: a GPU that rounds it to exactly 0 (WARP) sharpens nothing, and one that leaves a trace of it
+(SwiftShader) sharpens along that trace. Keep it at 0 unless you have measured it on your targets.
 
 ### Recommended values
 

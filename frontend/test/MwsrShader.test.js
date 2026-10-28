@@ -12,6 +12,7 @@ import {
     mwsrSharpness,
     MWSR_SHARP_REF_SCALE,
     mwsrGlsl,
+    mwsrHlsl,
     mwsrRegime,
     mwsrRegimeKey,
     mwsrRegimes,
@@ -25,6 +26,8 @@ describe('the mwsr shader text', () => {
     const down = mwsrWgsl({ mode: 'down' });
     const glsl = mwsrGlsl();
     const glslDown = mwsrGlsl({ mode: 'down' });
+    const hlsl = mwsrHlsl();
+    const hlslDown = mwsrHlsl({ mode: 'down' });
     const kernel = (s) => s.slice(s.indexOf('override '));
 
     it('reads either feed with the same kernel', () => {
@@ -181,8 +184,10 @@ describe('the mwsr shader text', () => {
     });
 
     it('uses no gather, no discard, no loop, no dynamic indexing (plan §3.4)', () => {
-        for (const text of [tex, down, mwsrWgsl({ mode: 'down', taps: 16 }), glsl, glslDown])
-            expect(text).not.toMatch(/textureGather|discard|\bfor\s*\(|\bloop\b|\bwhile\b|\[\s*i\s*\]/);
+        for (const text of [tex, down, mwsrWgsl({ mode: 'down', taps: 16 }), glsl, glslDown, hlsl, hlslDown])
+            expect(text).not.toMatch(
+                /textureGather|\.Gather|discard|clip\(|\bfor\s*\(|\bloop\b|\bwhile\b|\[\s*i\s*\]/,
+            );
     });
 
     it('has a GLSL ES 3.00 twin written from the same tables (plan §3.6)', () => {
@@ -249,8 +254,50 @@ describe('the mwsr shader text', () => {
             '8.0 / 255.0',
             '23.0 / 255.0',
         ]) {
-            for (const text of [tex, down, glsl, glslDown]) expect(text, bad).not.toContain(bad);
+            for (const text of [tex, down, glsl, glslDown, hlsl, hlslDown]) expect(text, bad).not.toContain(bad);
         }
+    });
+
+    it('has an HLSL twin written from the same tables, its constants as defines (the mwsr/ folder)', () => {
+        for (const text of [hlsl, hlslDown]) {
+            for (const [name, [type, value]] of Object.entries(MWSR_OVERRIDE_SPEC)) {
+                const lit =
+                    type === 'u32' ? `${value}u` : Number.isInteger(value) ? `${value}.0` : `${value}`;
+                expect(text).toContain(`#ifndef MWSR_${name}\n#define MWSR_${name} ${lit}\n#endif\n`);
+                expect(text).toContain(`static const ${type === 'u32' ? 'uint' : 'float'} ${name} = MWSR_${name};`);
+            }
+            expect(text).toContain('static const float3 LUMA = float3(0.25, 0.625, 0.125);');
+            expect(text).toContain('cbuffer MwsrConstants : register(MWSR_CB_REGISTER) {');
+            expect(text).toContain('VSOut MwsrVS(uint vid : SV_VertexID) {');
+            expect(text).toContain('float4 MwsrPS(VSOut i) : SV_Target {');
+            expect(text).toContain('tex.SampleLevel(samp, uv, 0.0)');
+            expect(text).not.toMatch(/\.Sample\(/);
+        }
+        // the block's 16 floats, in the order of mwsrUniforms()
+        const cb = hlsl.slice(hlsl.indexOf('cbuffer'), hlsl.indexOf('};', hlsl.indexOf('cbuffer')));
+        expect([...cb.matchAll(/^\s+(float\d?) (\w+);/gm)].map((m) => m[2])).toEqual([
+            'texel', 'scale', 'tau', 'sharp', 'gaze', 'pad', 'zc', 'zr', 'zring', 'ztau', 'zsharp', 'pad2',
+        ]);
+        // Direct3D's y runs down as WebGPU's: the derivatives keep their sign
+        const ps = hlsl.slice(hlsl.indexOf('float4 MwsrPS'));
+        expect(ps).toContain('float3 dy = ddy_coarse(C) * scale.y;');
+        expect(ps.indexOf('ddx_coarse(C)')).toBeGreaterThan(0);
+        expect(ps.indexOf('ddx_coarse(C)')).toBeLessThan(ps.indexOf('if (isFlat)'));
+        expect(ps.slice(ps.indexOf('if (isFlat)'))).not.toMatch(/dd[xy]/);
+        expect(hlsl).toContain('float strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);');
+        // the edge path in min16float for the half text, and in f32 otherwise
+        expect(mwsrHlsl({ half: true })).toContain('typedef min16float3 h3;');
+        expect(hlsl).toContain('typedef float3 h3;');
+        expect(mwsrHlsl({ mode: 'down', half: true })).toBe(hlslDown);
+        // the same grids, from the same offsets, and the WGSL text's light (3 included)
+        const offs = (t) =>
+            [...t.matchAll(/(?:vec2f?|float2)\(([-\d.]+), ([-\d.]+)\) \* span/g)].map((m) => m[1] + ',' + m[2]);
+        for (const taps of [1, 4, 9, 16]) {
+            const w = offs(mwsrWgsl({ mode: 'down', taps }));
+            expect(offs(mwsrHlsl({ mode: 'down', taps }))).toEqual(w);
+        }
+        expect(hlslDown).toContain('if (LINEAR_LIGHT >= 2u) {\n        return linToSrgb(c);');
+        expect(() => mwsrHlsl({ mode: 'side' })).toThrow(/mode/);
     });
 
     it('packs the uniform block the way the text reads it', () => {
