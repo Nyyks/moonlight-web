@@ -292,6 +292,7 @@ function postCounters(force) {
 // what is running.
 function applyEnhancerGovernor(diag, now) {
     if (!S.governor || !S.renderer) return;
+    const fencesIgnored = S.governor.fencesIgnored;
     const algo = S.governor.update({
         serviceMs: diag.renderServiceMs,
         arrivalMs: diag.arrivalAvgMs,
@@ -304,6 +305,11 @@ function applyEnhancerGovernor(diag, now) {
         passthrough: S.renderer.passthrough === true,
         now,
     });
+    if (!fencesIgnored && S.governor.fencesIgnored) {
+        console.log(
+            '[VideoWorker] Enhancer: the GPU fences read the plain copy late — ignored for this session',
+        );
+    }
     if (!algo) return;
     const pass = rendererAlgo(algo, S.renderer.kind);
     if (!S.renderer.setAlgo(pass)) return;

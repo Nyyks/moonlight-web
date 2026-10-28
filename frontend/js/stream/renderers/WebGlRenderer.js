@@ -608,6 +608,18 @@ void main() {
 
 export const WEBGL_ALGOS = ['gl-fsr1', 'gl-sgsr', 'gl-nis', 'gl-mwsr'];
 
+/**
+ * A draw's fence is looked at once it is this old (takeGpuBehind): at the next
+ * draw at 60 fps, as when the signal was calibrated (25/09/2026), two draws
+ * later at 120 fps. In Chrome a fence's status reaches the page with a delay
+ * of its own, and on a 120 Hz Radeon 780M (28/10/2026) that delay was often
+ * longer than one frame: a plain copy, 0.3 ms of GPU work, read "behind" in
+ * half the windows, and the ladder cut MWSR for a lag that was not there.
+ */
+const FENCE_MIN_AGE_MS = 12;
+/** Fences waiting for that age, at most; past it the oldest goes unread. */
+const FENCE_MAX_PENDING = 4;
+
 export class WebGlRenderer extends VideoRenderer {
     constructor() {
         super();
@@ -645,27 +657,28 @@ export class WebGlRenderer extends VideoRenderer {
         this._probePixels = null;
         this._probeDrawnAt = null;
         /**
-         * GPU lag, see takeGpuBehind(): the fence set after the last draw, when
-         * it was set, and the draws counted since the last read.
+         * GPU lag, see takeGpuBehind(): the fences set after the draws and not
+         * looked at yet, oldest first ({sync, at}), and the draws counted since
+         * the last read.
          */
-        this._fence = null;
-        this._fenceAt = 0;
+        this._fences = [];
         this._gpuChecked = 0;
         this._gpuBehind = 0;
     }
 
     /**
-     * Share of draws whose GPU work was still running when the next frame came
+     * Share of draws whose GPU work was still running when a later frame came
      * to be drawn, since the last call — or null when none could be judged.
      *
      * drawArrays only records commands, so the draw timing measures submission
      * and a pass that is too heavy for the GPU never shows there: it keeps the
      * frame rate while every picture is finished frames late (EnhancerGovernor,
-     * GPU_BEHIND_DEGRADE). A fence after each draw, looked at when the next one
+     * GPU_BEHIND_DEGRADE). A fence after each draw, looked at when a later one
      * starts — a later task, so its status has had the chance to move — says
-     * whether the GPU had caught up. A look taken under 5 ms after the fence
-     * (two frames back to back after a network hiccup) is not counted: no GPU
-     * finishes a pass that fast, whatever its speed.
+     * whether the GPU had caught up. It is looked at once FENCE_MIN_AGE_MS old:
+     * the next draw at 60 fps, the one after at 120 fps, and frames back to
+     * back after a network hiccup leave theirs for a later draw instead of
+     * reading them before any GPU could have finished.
      */
     takeGpuBehind() {
         const n = this._gpuChecked;
@@ -675,28 +688,29 @@ export class WebGlRenderer extends VideoRenderer {
         return share;
     }
 
-    _checkFence(now) {
+    _checkFences(now) {
         const gl = this.gl;
-        if (!this._fence) return;
-        try {
-            if (now - this._fenceAt >= 5) {
+        // Oldest first: once one is too young, so are the ones after it.
+        while (this._fences.length > 0 && now - this._fences[0].at >= FENCE_MIN_AGE_MS) {
+            const sync = this._fences.shift().sync;
+            try {
                 this._gpuChecked++;
-                if (gl.getSyncParameter(this._fence, gl.SYNC_STATUS) !== gl.SIGNALED)
-                    this._gpuBehind++;
+                if (gl.getSyncParameter(sync, gl.SYNC_STATUS) !== gl.SIGNALED) this._gpuBehind++;
+                gl.deleteSync(sync);
+            } catch (e) {
+                // a lost context takes its syncs with it
             }
-            gl.deleteSync(this._fence);
-        } catch (e) {
-            // a lost context takes its syncs with it
         }
-        this._fence = null;
     }
 
     _setFence(now) {
+        const gl = this.gl;
         try {
-            this._fence = this.gl.fenceSync(this.gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-            this._fenceAt = now;
+            const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+            if (sync) this._fences.push({ sync, at: now });
+            if (this._fences.length > FENCE_MAX_PENDING) gl.deleteSync(this._fences.shift().sync);
         } catch (e) {
-            this._fence = null;
+            // a lost context sets no fence
         }
     }
 
@@ -801,6 +815,8 @@ export class WebGlRenderer extends VideoRenderer {
         });
         canvas.addEventListener?.('webglcontextrestored', () => {
             r._lost = false;
+            // the lost context's fences went with it, unread
+            r._fences = [];
             r._buildResources();
             console.log('[WebGlRenderer] context restored');
         });
@@ -1123,7 +1139,7 @@ export class WebGlRenderer extends VideoRenderer {
         }
         const drawStart = performance.now();
         let waitMs = 0;
-        this._checkFence(drawStart);
+        this._checkFences(drawStart);
         // Closed before the draw below: the content-age probe dates it by this.
         const frameTs = frame.timestamp;
 
@@ -1319,8 +1335,8 @@ export class WebGlRenderer extends VideoRenderer {
                     if (t) gl.deleteTexture(t);
                 if (this._fbo) gl.deleteFramebuffer(this._fbo);
                 if (this._vao) gl.deleteVertexArray(this._vao);
-                if (this._fence) gl.deleteSync(this._fence);
-                this._fence = null;
+                for (const f of this._fences) gl.deleteSync(f.sync);
+                this._fences = [];
                 for (const p of [this._easu, this._rcas, this._sgsr, this._nis, this._blit])
                     if (p) gl.deleteProgram(p.prog);
                 if (this._mwsr) for (const p of this._mwsr.values()) gl.deleteProgram(p.prog);

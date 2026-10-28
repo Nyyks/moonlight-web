@@ -7467,6 +7467,7 @@ export class StreamView {
             typeof this._renderer.takeGpuBehind === 'function'
                 ? this._renderer.takeGpuBehind()
                 : null;
+        const fencesIgnored = this._governor.fencesIgnored;
         const algo = this._governor.update({
             serviceMs: diag.renderServiceMs,
             arrivalMs: diag.arrivalAvgMs,
@@ -7476,6 +7477,11 @@ export class StreamView {
             passthrough: this._renderer.passthrough === true,
             now,
         });
+        if (!fencesIgnored && this._governor.fencesIgnored) {
+            console.log(
+                '[StreamView] Enhancer: the GPU fences read the plain copy late — ignored for this session',
+            );
+        }
         if (!algo) return;
         const pass = rendererAlgo(algo, this._renderer.kind);
         if (!this._renderer.setAlgo(pass)) return;
