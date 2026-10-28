@@ -11,6 +11,9 @@
  * A stored HEVC cannot say whether it was chosen or only left as the default,
  * so it becomes Auto once per browser (codecAfterAutoMigration). Auto is HEVC
  * but where HEVC fails: nothing is lost, and a HEVC picked afterwards stays.
+ *
+ * Where HEVC failed, Auto remembers it (hevcFailedHere) and asks H.264 from
+ * the next launch on, instead of failing HEVC first at every launch.
  */
 
 export const CODEC_AUTO = 'auto';
@@ -69,4 +72,75 @@ export function migrateStoredCodecToAuto(s = store()) {
     } catch (e) {
         // Unreadable settings are the Settings page's to repair, not this.
     }
+}
+
+/** The browsers whose HEVC failed to decode: user agent → when (ms). */
+const HEVC_FAILED_KEY = 'mw_hevc_failed';
+
+/** How long such a verdict holds. Past it, Auto asks HEVC again. */
+export const HEVC_FAILED_DAYS = 30;
+const HEVC_FAILED_MS = HEVC_FAILED_DAYS * 24 * 3600 * 1000;
+
+const userAgent = () => (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+
+/** @param {Storage|null} s @returns {Object<string, number>} */
+function hevcVerdicts(s) {
+    try {
+        const kept = s && JSON.parse(s.getItem(HEVC_FAILED_KEY) || '{}');
+        return kept && typeof kept === 'object' ? kept : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+/**
+ * Whether this browser's HEVC was seen failing: the decoder refused every
+ * configuration, or gave no picture, and the stream fell back to H.264.
+ * Firefox on the UM790Pro asked HEVC under Auto, failed it in 0.8 s and came
+ * back in H.264, at every launch (28/10/2026). The verdict is kept under the
+ * user agent (a new version of the browser is asked again) and for
+ * HEVC_FAILED_DAYS at most.
+ * @param {string} [ua]
+ * @param {Storage|null} [s]
+ * @param {number} [now] ms since the epoch
+ * @returns {boolean}
+ */
+export function hevcFailedHere(ua = userAgent(), s = store(), now = Date.now()) {
+    const seen = hevcVerdicts(s)[ua];
+    // A date ahead of the clock (the clock set back) holds no longer either.
+    return typeof seen === 'number' && now >= seen && now - seen < HEVC_FAILED_MS;
+}
+
+/**
+ * Remember it (hevcFailedHere), dropping the verdicts past their time.
+ * @param {string} [ua]
+ * @param {Storage|null} [s]
+ * @param {number} [now]
+ */
+export function noteHevcFailed(ua = userAgent(), s = store(), now = Date.now()) {
+    if (!s) return;
+    try {
+        const kept = {};
+        for (const [k, seen] of Object.entries(hevcVerdicts(s))) {
+            if (typeof seen === 'number' && now >= seen && now - seen < HEVC_FAILED_MS)
+                kept[k] = seen;
+        }
+        kept[ua] = now;
+        s.setItem(HEVC_FAILED_KEY, JSON.stringify(kept));
+    } catch (e) {
+        // Not kept: the next launch finds out again, a relaunch later.
+    }
+}
+
+/**
+ * The codec an Auto launch asks the host for: HEVC, or H.264 in a browser
+ * whose HEVC failed (hevcFailedHere). The HDR route may still turn HEVC into
+ * AV1 (BrowserDetect.hdrLaunchCodec).
+ * @param {string} [ua]
+ * @param {Storage|null} [s]
+ * @param {number} [now]
+ * @returns {'hevc'|'h264'}
+ */
+export function autoLaunchCodec(ua, s, now) {
+    return hevcFailedHere(ua, s, now) ? 'h264' : 'hevc';
 }

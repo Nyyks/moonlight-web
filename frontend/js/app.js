@@ -83,7 +83,7 @@ import {
     chroma444ClientCapability,
     chroma444Codec,
 } from './util/BrowserDetect.js';
-import { CODEC_AUTO, migrateStoredCodecToAuto } from './util/CodecAuto.js';
+import { CODEC_AUTO, autoLaunchCodec, migrateStoredCodecToAuto } from './util/CodecAuto.js';
 import {
     startRefreshRateMonitor,
     currentRefreshMilliHz,
@@ -2056,13 +2056,18 @@ export const MoonlightApp = {
             streamingSettings.hdr_enabled = hdrOverride === true;
         }
         // « Auto » (util/CodecAuto.js): HEVC, the codec the host is asked for,
-        // unless HDR below finds that HEVC cannot do the job (hdrLaunchCodec).
+        // unless HDR below finds that HEVC cannot do the job (hdrLaunchCodec),
+        // or H.264 in a browser whose HEVC already failed (hevcFailedHere).
         // No codec stored at all is still the server's default, as before. A
         // fallback relaunch keeps the word of the launch it follows: the
         // overlay still says Auto.
         if (!codecOverride) {
             this._codecAuto = streamingSettings.video_codec === CODEC_AUTO;
-            if (this._codecAuto) streamingSettings.video_codec = 'hevc';
+            if (this._codecAuto) {
+                streamingSettings.video_codec = autoLaunchCodec();
+                if (streamingSettings.video_codec === 'h264')
+                    console.log('[MW] Auto: HEVC failed in this browser before — asking H.264');
+            }
         }
         // « PyroWave (Wired LAN only) »: asked of a host that says it codes it,
         // by a browser that decodes it, with the HDR box off; otherwise this
@@ -2121,6 +2126,13 @@ export const MoonlightApp = {
                 );
                 streamingSettings.hdr_enabled = false;
             }
+        }
+        // Auto's H.264 (this browser's HEVC failed) is asked without HDR: H.264
+        // HDR is High 4:4:4 Predictive 10-bit, which nearly nothing decodes, and
+        // H.264 SDR is where the fallback from HEVC would have ended anyway.
+        if (this._codecAuto && !codecOverride && streamingSettings.video_codec === 'h264') {
+            if (streamingSettings.hdr_enabled) console.log('[MW] Auto in H.264: HDR not asked');
+            streamingSettings.hdr_enabled = false;
         }
         // The codec HDR asks for (hdrLaunchCodec): HEVC for an AV1 this
         // browser hands opaque and breaks on import (WebKit); AV1 for Auto's
@@ -4700,6 +4712,8 @@ export const MoonlightApp = {
         // Capture fallback state BEFORE nulling streamView
         const fallbackRequested = this.streamView && this.streamView._codecFallbackRequested;
         const fallbackTarget = this.streamView && this.streamView._codecFallback;
+        // Whether the stream that asks for it was asked HDR: only then is HDR lost.
+        const fallbackFromHdr = !!(this.streamView && this.streamView._hdrEnabled);
         const fallbackHost = this._lastStreamHost;
         const fallbackApp = this._lastStreamApp;
 
@@ -4743,8 +4757,11 @@ export const MoonlightApp = {
             );
 
             // When the fallback drops HDR, persist the unchecked preference so the
-            // Settings HDR checkbox reflects reality, and inform the user.
-            if (fallbackTarget.hdr === false && !sameCodecAgain) {
+            // Settings HDR checkbox reflects reality, and inform the user. Not
+            // when the stream had no HDR to drop: an SDR HEVC falling back to
+            // H.264 told a viewer who never asked for HDR that it was
+            // unavailable (Firefox, 28/10/2026).
+            if (fallbackTarget.hdr === false && fallbackFromHdr && !sameCodecAgain) {
                 // Not for the native host, which never reads the checkbox: its
                 // HDR comes back on the next launch if this screen can show it.
                 if (fallbackHost && fallbackHost.backendType !== 'native')

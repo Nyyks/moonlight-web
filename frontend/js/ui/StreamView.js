@@ -90,6 +90,7 @@ import {
     supportsDisplayHdr,
     supportsGamingMode,
 } from '../util/BrowserDetect.js';
+import { noteHevcFailed } from '../util/CodecAuto.js';
 import * as RemoteNav from './RemoteNav.js';
 import { StreamRemoteMenu } from './StreamRemoteMenu.js';
 import { RemotePointer } from '../stream/RemotePointer.js';
@@ -3564,6 +3565,12 @@ export class StreamView {
         const cur = (this.videoCodec === 'auto' ? 'hevc' : this.videoCodec).toLowerCase();
         this._codecFallback = target;
         this._codecFallbackRequested = true;
+        // An 8-bit 4:2:0 HEVC this browser could not decode: the browser keeps
+        // the verdict, and Auto asks it H.264 from the next launch on
+        // (CodecAuto.hevcFailedHere). Not an HDR or a 4:4:4 HEVC, which fail
+        // where plain HEVC may still decode.
+        if (cur === 'hevc' && !this._hdrEnabled && !this._yuv444 && target.codec === 'h264')
+            noteHevcFailed();
 
         console.warn(
             `[StreamView] Codec fallback: ${cur}${this._hdrEnabled ? ' HDR' : ''} → ` +
