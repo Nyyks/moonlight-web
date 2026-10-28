@@ -261,8 +261,21 @@ constexpr int kMatchedRateMaxHz = 330;
 /// when @p gpus is empty, nothing known yet of the machine's — so that a
 /// 165 Hz screen refused 330 gets 165 (×1), and a 144 Hz one on the same host
 /// still tries 288. @p capHz when nothing applies. An update tries again.
+///
+/// A refusal is no verdict for good (D27, option B of 28/10/2026): two
+/// captures that missed by a hair under a passing load had held a bench's
+/// display at the client's rate for the whole version. Each one keeps the
+/// cap for refusalHoldMs() of its `count` from its `at` (ms since the epoch),
+/// then the next stream tries the rate again. An entry without `at` — written
+/// before the hold expired — or one dated after @p nowMs is no longer in force.
 int matchCapAfterRefusals(int capHz, const QJsonArray& refused, const QString& version,
-                          const QStringList& gpus);
+                          const QStringList& gpus, qint64 nowMs);
+
+/// How long the @p count-th refusal in a row of one GPU and rate keeps the
+/// cap: 12 h for the first, twice as long for each one after, at most 14
+/// days. A host whose capture really cannot hold the rate gets one stream of
+/// folded frames per hold — after 12 h, 1, 2, 4, 8 days, then every 14.
+qint64 refusalHoldMs(int count);
 
 /// What EncoderTuning::vddMatch's -1, the product's, means: on under Windows
 /// since V2 of plan glissade (15/10/2026: no picture lost to the beat, an age

@@ -1058,17 +1058,23 @@ QJsonArray AppSettings::vddMatchRefused() const
     return readAll().value(QStringLiteral("vdd_match_refused")).toArray();
 }
 
-void AppSettings::addVddMatchRefusal(const QString& gpu, int milliHz, const QString& version)
+int AppSettings::addVddMatchRefusal(const QString& gpu, int milliHz, const QString& version,
+                                    qint64 nowMs)
 {
-    if (milliHz <= 0) return;
+    if (milliHz <= 0) return 0;
     QJsonObject obj = readAll();
     QJsonArray kept;
+    int count = 1;
     for (const QJsonValue& v : obj.value(QStringLiteral("vdd_match_refused")).toArray()) {
         const QJsonObject o = v.toObject();
         if (o.value(QLatin1String("version")).toString() != version) continue;
         if (o.value(QLatin1String("gpu")).toString() == gpu &&
-            o.value(QLatin1String("milli_hz")).toInteger() == milliHz)
-            return; // known already: no file written for nothing
+            o.value(QLatin1String("milli_hz")).toInteger() == milliHz) {
+            // Refused again once its hold ran out: one more in a row, held
+            // twice as long. Bounded, so the count never outgrows its doubling.
+            count = qMin(16, static_cast<int>(o.value(QLatin1String("count")).toInteger(1)) + 1);
+            continue;
+        }
         kept.append(o);
     }
     // A handful at most: one per GPU and rate a client asked of this host.
@@ -1076,7 +1082,27 @@ void AppSettings::addVddMatchRefusal(const QString& gpu, int milliHz, const QStr
         kept.removeFirst();
     kept.append(QJsonObject{{QStringLiteral("gpu"), gpu},
                             {QStringLiteral("milli_hz"), milliHz},
-                            {QStringLiteral("version"), version}});
+                            {QStringLiteral("version"), version},
+                            {QStringLiteral("at"), nowMs},
+                            {QStringLiteral("count"), count}});
+    obj[QStringLiteral("vdd_match_refused")] = kept;
+    writeAll(obj);
+    return count;
+}
+
+void AppSettings::clearVddMatchRefusal(const QString& gpu, int milliHz)
+{
+    QJsonObject obj = readAll();
+    const QJsonArray before = obj.value(QStringLiteral("vdd_match_refused")).toArray();
+    QJsonArray kept;
+    for (const QJsonValue& v : before) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QLatin1String("gpu")).toString() == gpu &&
+            o.value(QLatin1String("milli_hz")).toInteger() == milliHz)
+            continue;
+        kept.append(o);
+    }
+    if (kept.size() == before.size()) return; // nothing refused: no file written for nothing
     obj[QStringLiteral("vdd_match_refused")] = kept;
     writeAll(obj);
 }

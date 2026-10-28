@@ -654,12 +654,17 @@ public:
     // stream on (VirtualDisplay::matchCapAfterRefusals) — the client's own
     // rate where twice it was refused. Never a mode changed under a stream.
     //
-    // Stored as "vdd_match_refused", an array of {gpu, milli_hz, version},
-    // file-only. One entry per GPU and rate; an entry of another app version
-    // is dropped on the next refusal, and ignored before: an update tries
-    // again.
+    // Stored as "vdd_match_refused", an array of {gpu, milli_hz, version, at,
+    // count}, file-only. One entry per GPU and rate; an entry of another app
+    // version is dropped on the next refusal, and ignored before: an update
+    // tries again. `at` is when it was last refused (ms since the epoch) and
+    // `count` how many times in a row: the cap lasts
+    // VirtualDisplay::refusalHoldMs(count) from `at`, and a retry that holds
+    // removes the entry (D27, option B of 28/10/2026).
     QJsonArray vddMatchRefused() const;
-    void addVddMatchRefusal(const QString& gpu, int milliHz, const QString& version);
+    /// Returns the entry's count after this refusal, 0 when nothing was kept.
+    int addVddMatchRefusal(const QString& gpu, int milliHz, const QString& version, qint64 nowMs);
+    void clearVddMatchRefusal(const QString& gpu, int milliHz);
 
     // ── Instance name ────────────────────────────────────────────────────────
     //

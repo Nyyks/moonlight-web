@@ -4066,9 +4066,10 @@ int main(int argc, char* argv[])
                              });
             // The capture's word on the virtual display it held (plan glissade,
             // V): a rate above the 240 Hz every host runs, not held over the
-            // stream's dense content, is kept — `vddmatch` stays under it from
-            // the next stream on (matchCapAfterRefusals). Only for our own
-            // display: a physical one's rate is no choice of ours.
+            // stream's dense content, is kept — `vddmatch` stays under it for
+            // a while from the next stream on (matchCapAfterRefusals), and a
+            // stream that holds it again clears it. Only for our own display:
+            // a physical one's rate is no choice of ours.
             QObject::connect(
                 worker, &StreamWorkerHost::captureHoldReceived, qApp,
                 [&appSettings, portalVirtual](const QJsonObject& verdict) {
@@ -4079,14 +4080,21 @@ int main(int argc, char* argv[])
                         << "the display at" << VirtualDisplay::rateText(milliHz) << "Hz"
                         << (held ? QString()
                                  : QStringLiteral("(%1)").arg(verdict["why"].toString()));
-                    if (held || !portalVirtual ||
+                    if (!portalVirtual ||
                         milliHz <= VirtualDisplay::kRateMax * VirtualDisplay::kMilliHz)
                         return;
-                    appSettings.addVddMatchRefusal(verdict["gpu"].toString(), milliHz,
-                                                   QCoreApplication::applicationVersion());
+                    const QString gpu = verdict["gpu"].toString();
+                    if (held) {
+                        appSettings.clearVddMatchRefusal(gpu, milliHz);
+                        return;
+                    }
+                    const int count = appSettings.addVddMatchRefusal(
+                        gpu, milliHz, QCoreApplication::applicationVersion(),
+                        QDateTime::currentMSecsSinceEpoch());
                     qInfo().noquote() << "[Session] vddmatch keeps the virtual display under"
-                                      << VirtualDisplay::rateText(milliHz)
-                                      << "Hz on this host from the next stream on";
+                                      << VirtualDisplay::rateText(milliHz) << "Hz on this host for"
+                                      << VirtualDisplay::refusalHoldMs(count) / 3600000
+                                      << "h (refusal" << count << "in a row), then tries it again";
                 });
             // One of the owner's apps (AppSettings::hostApps): opened on the
             // desktop once this stream shows it — the virtual display is on and
@@ -4521,7 +4529,8 @@ int main(int argc, char* argv[])
                                 gpus << QString::fromStdString(g.name);
                             cap = VirtualDisplay::matchCapAfterRefusals(
                                 cap, appSettings.vddMatchRefused(),
-                                QCoreApplication::applicationVersion(), gpus);
+                                QCoreApplication::applicationVersion(), gpus,
+                                QDateTime::currentMSecsSinceEpoch());
                         }
                         const bool capLowered =
                             vdTuning.vddMatchMaxHz <= 0 && cap < VirtualDisplay::kMatchedRateMaxHz;

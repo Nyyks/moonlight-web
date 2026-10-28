@@ -592,38 +592,89 @@ void run_virtual_display_tests()
 
     SECTION("VirtualDisplay — under the rates the capture did not hold");
     {
-        const auto refusal = [](const char* gpu, int milliHz, const char* version) {
+        // Refused an hour before `now`, the first time.
+        const qint64 now = 1'800'000'000'000LL;
+        const qint64 hour = 3'600'000LL;
+        const auto refusal = [now, hour](const char* gpu, int milliHz, const char* version) {
             return QJsonObject{{QStringLiteral("gpu"), QString::fromLatin1(gpu)},
                                {QStringLiteral("milli_hz"), milliHz},
-                               {QStringLiteral("version"), QString::fromLatin1(version)}};
+                               {QStringLiteral("version"), QString::fromLatin1(version)},
+                               {QStringLiteral("at"), now - hour},
+                               {QStringLiteral("count"), 1}};
         };
         const QStringList gpus{QStringLiteral("GPU A"), QStringLiteral("GPU B")};
         // Nothing refused: the product's ceiling.
-        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, {}, "1.0", gpus), kMatchedRateMaxHz);
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, {}, "1.0", gpus, now), kMatchedRateMaxHz);
         // 330 refused: a 165 Hz screen gets its own rate (×1), a 144 Hz one
         // still tries 288.
         QJsonArray refused{refusal("GPU A", 330000, "1.0")};
-        int cap = matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", gpus);
+        int cap = matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", gpus, now);
         CHECK_EQ(cap, 323);
         CHECK_EQ(matchedRefreshMilliHz(165000, 165, cap), 165000);
         CHECK_EQ(matchedRefreshMilliHz(144000, 144, cap), 288000);
         CHECK_EQ(matchedRefreshMilliHz(119872, 120, cap), 239744);
         // 288 refused too: the lowest one rules, and 144 gets 144.
         refused.append(refusal("GPU A", 287694, "1.0"));
-        cap = matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", gpus);
+        cap = matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", gpus, now);
         CHECK_EQ(cap, 281);
         CHECK_EQ(matchedRefreshMilliHz(143847, 144, cap), 143847);
         CHECK_EQ(matchedRefreshMilliHz(119872, 120, cap), 239744);
         // Another version's refusals, a GPU this machine no longer has: none.
-        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.1", gpus), kMatchedRateMaxHz);
-        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", {"GPU C"}),
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.1", gpus, now),
+                 kMatchedRateMaxHz);
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", {"GPU C"}, now),
                  kMatchedRateMaxHz);
         // No GPU known yet: every refusal of this version counts.
-        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", {}), 281);
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused, "1.0", {}, now), 281);
         // Never above the ceiling it was given (the bench's vddmatchmax).
-        CHECK_EQ(matchCapAfterRefusals(240, refused, "1.0", gpus), 240);
+        CHECK_EQ(matchCapAfterRefusals(240, refused, "1.0", gpus, now), 240);
         // A malformed entry is skipped.
-        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, QJsonArray{QJsonObject{}}, "1.0", gpus),
+        CHECK_EQ(
+            matchCapAfterRefusals(kMatchedRateMaxHz, QJsonArray{QJsonObject{}}, "1.0", gpus, now),
+            kMatchedRateMaxHz);
+    }
+
+    SECTION("VirtualDisplay — a refusal holds the cap for a while, not for the version (D27)");
+    {
+        constexpr qint64 hour = 3'600'000LL;
+        // 12 h, doubled for each refusal in a row, at most 14 days.
+        CHECK_EQ(refusalHoldMs(1), 12 * hour);
+        CHECK_EQ(refusalHoldMs(2), 24 * hour);
+        CHECK_EQ(refusalHoldMs(3), 48 * hour);
+        CHECK_EQ(refusalHoldMs(5), 192 * hour);
+        CHECK_EQ(refusalHoldMs(6), 14 * 24 * hour);
+        CHECK_EQ(refusalHoldMs(16), 14 * 24 * hour);
+        CHECK_EQ(refusalHoldMs(0), 12 * hour);
+
+        const qint64 now = 1'800'000'000'000LL;
+        const QStringList gpus{QStringLiteral("GPU A")};
+        const auto refused = [](qint64 at, int count) {
+            QJsonObject o{{QStringLiteral("gpu"), QStringLiteral("GPU A")},
+                          {QStringLiteral("milli_hz"), 330000},
+                          {QStringLiteral("version"), QStringLiteral("1.0")},
+                          {QStringLiteral("count"), count}};
+            if (at > 0) o.insert(QStringLiteral("at"), at);
+            return QJsonArray{o};
+        };
+        // In force for its hold, and the next stream after it tries again.
+        CHECK_EQ(
+            matchCapAfterRefusals(kMatchedRateMaxHz, refused(now - 11 * hour, 1), "1.0", gpus, now),
+            323);
+        CHECK_EQ(
+            matchCapAfterRefusals(kMatchedRateMaxHz, refused(now - 12 * hour, 1), "1.0", gpus, now),
+            kMatchedRateMaxHz);
+        // The third in a row holds two days.
+        CHECK_EQ(
+            matchCapAfterRefusals(kMatchedRateMaxHz, refused(now - 47 * hour, 3), "1.0", gpus, now),
+            323);
+        CHECK_EQ(
+            matchCapAfterRefusals(kMatchedRateMaxHz, refused(now - 48 * hour, 3), "1.0", gpus, now),
+            kMatchedRateMaxHz);
+        // Without a date — kept by a build before the hold expired, like the
+        // bench's of 28/10 at 02:17 — or dated ahead of the clock: tried again.
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused(0, 1), "1.0", gpus, now),
+                 kMatchedRateMaxHz);
+        CHECK_EQ(matchCapAfterRefusals(kMatchedRateMaxHz, refused(now + hour, 1), "1.0", gpus, now),
                  kMatchedRateMaxHz);
     }
 

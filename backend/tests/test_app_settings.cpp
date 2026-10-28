@@ -344,24 +344,36 @@ void run_app_settings_tests()
     }
 
     // The display rates the capture did not hold (vddmatch): none on a fresh
-    // install; one per GPU and rate; the same refusal again writes nothing;
-    // another app version's entries go with the next refusal.
+    // install; one per GPU and rate; the same refusal again counts one more
+    // in a row and is dated anew; a retry that holds clears it; another app
+    // version's entries go with the next refusal.
     CHECK_EQ(s.vddMatchRefused().size(), 0);
-    s.addVddMatchRefusal("GPU A", 330000, "1.0");
-    s.addVddMatchRefusal("GPU A", 288000, "1.0");
-    s.addVddMatchRefusal("GPU B", 330000, "1.0");
-    s.addVddMatchRefusal("GPU A", 330000, "1.0");
+    CHECK_EQ(s.addVddMatchRefusal("GPU A", 330000, "1.0", 1000), 1);
+    s.addVddMatchRefusal("GPU A", 288000, "1.0", 1000);
+    s.addVddMatchRefusal("GPU B", 330000, "1.0", 1000);
+    CHECK_EQ(s.addVddMatchRefusal("GPU A", 330000, "1.0", 5000), 2);
     CHECK_EQ(s.vddMatchRefused().size(), 3);
-    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("gpu").toString(), QString("GPU A"));
-    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("milli_hz").toInt(), 330000);
-    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("version").toString(), QString("1.0"));
-    s.addVddMatchRefusal("GPU A", 0, "1.0");
+    {
+        const QJsonObject again = s.vddMatchRefused().at(2).toObject();
+        CHECK_EQ(again.value("gpu").toString(), QString("GPU A"));
+        CHECK_EQ(again.value("milli_hz").toInt(), 330000);
+        CHECK_EQ(again.value("version").toString(), QString("1.0"));
+        CHECK_EQ(again.value("at").toInteger(), 5000);
+        CHECK_EQ(again.value("count").toInt(), 2);
+    }
+    CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("count").toInt(), 1);
+    s.clearVddMatchRefusal("GPU A", 330000);
+    CHECK_EQ(s.vddMatchRefused().size(), 2);
+    CHECK_EQ(s.addVddMatchRefusal("GPU A", 330000, "1.0", 9000), 1);
+    s.clearVddMatchRefusal("GPU C", 330000);
     CHECK_EQ(s.vddMatchRefused().size(), 3);
-    s.addVddMatchRefusal("GPU A", 330000, "1.1");
+    CHECK_EQ(s.addVddMatchRefusal("GPU A", 0, "1.0", 9000), 0);
+    CHECK_EQ(s.vddMatchRefused().size(), 3);
+    s.addVddMatchRefusal("GPU A", 330000, "1.1", 9000);
     CHECK_EQ(s.vddMatchRefused().size(), 1);
     CHECK_EQ(s.vddMatchRefused().at(0).toObject().value("version").toString(), QString("1.1"));
     for (int hz = 241; hz < 251; ++hz)
-        s.addVddMatchRefusal("GPU A", hz * 1000, "1.1");
+        s.addVddMatchRefusal("GPU A", hz * 1000, "1.1", 9000);
     CHECK_EQ(s.vddMatchRefused().size(), 8);
     CHECK_EQ(s.vddMatchRefused().at(7).toObject().value("milli_hz").toInt(), 250000);
     // The other settings were left alone.

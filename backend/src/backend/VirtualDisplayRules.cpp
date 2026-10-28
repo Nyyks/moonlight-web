@@ -265,14 +265,27 @@ int matchedRefreshMilliHz(int clientMilliHz, int streamFps, int capHz)
     return 0;
 }
 
+qint64 refusalHoldMs(int count)
+{
+    constexpr qint64 kFirstMs = 12LL * 3600 * 1000;
+    constexpr qint64 kMaxMs = 14LL * 24 * 3600 * 1000;
+    const int doublings = std::clamp(count, 1, 16) - 1;
+    return std::min(kMaxMs, kFirstMs << doublings);
+}
+
 int matchCapAfterRefusals(int capHz, const QJsonArray& refused, const QString& version,
-                          const QStringList& gpus)
+                          const QStringList& gpus, qint64 nowMs)
 {
     int cap = capHz;
     for (const QJsonValue& v : refused) {
         const QJsonObject o = v.toObject();
         if (o.value(QLatin1String("version")).toString() != version) continue;
         if (!gpus.isEmpty() && !gpus.contains(o.value(QLatin1String("gpu")).toString())) continue;
+        // Its hold over: the next stream tries the rate again. A clock set
+        // back puts the refusal in the future; trying again is the cheap side.
+        const qint64 at = o.value(QLatin1String("at")).toInteger(0);
+        const int count = static_cast<int>(o.value(QLatin1String("count")).toInteger(1));
+        if (at <= 0 || at > nowMs || nowMs - at >= refusalHoldMs(count)) continue;
         const qint64 milliHz = o.value(QLatin1String("milli_hz")).toInteger();
         if (milliHz <= 0) continue;
         // 2 % under it, whole hertz: a screen a little slower than the one
