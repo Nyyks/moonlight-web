@@ -31,9 +31,9 @@ Moonlight‑Web turns your gaming PC into a stream, and **any device with a mode
 
 - 🖥️ **Its own capture & encode engine** — the machine it runs on is a host straight away: no Sunshine, no pairing, no PIN. One card per display. Windows, Linux and macOS.
 - 🎮 **Low‑latency streaming** up to 4K HDR, 240 FPS, **H.264 / HEVC / AV1**, on **NVENC · AMF · Quick Sync · VA‑API · VideoToolbox** (software fallback).
-- 🌐 **WebRTC transport** (DataChannels + RTP media tracks), automatic WSS fallback.
+- 🌐 **WebRTC transport** (DataChannels + RTP media tracks), direct, UDP first with an automatic TCP fallback; WSS on the host's direct address.
 - 🔊 **Opus audio**, adaptive jitter buffer, stereo.
-- ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble. On Windows it reaches the lock screen and UAC prompts too, and **Ctrl+Alt+Del** works from the touch keyboard bar (Ctrl, Alt, then Del). A Windows PC with no mouse plugged in shows its pointer in the stream too. **Racing wheels, flight sticks and RC radios** too, as an Xbox pad or sent to the game as themselves, force feedback included ([see below](#controllers)).
+- ⌨️🖱️🎮 **Full input**: keyboard, mouse (pointer‑lock), touch trackpad, **Xbox/PS gamepads** with rumble. A phone's keyboard types into every window of a Windows host, classic consoles included. On Windows it reaches the lock screen and UAC prompts too, and **Ctrl+Alt+Del** works from the touch keyboard bar (Ctrl, Alt, then Del), and its Win key latches like Shift, Ctrl and Alt, for Win+L or Win+R. A Windows PC with no mouse plugged in shows its pointer in the stream too, and its games see a mouse. **Racing wheels, flight sticks and RC radios** too, as an Xbox pad or sent to the game as themselves, force feedback included ([see below](#controllers)).
 - 🤝 **Pairs with other hosts too** — Sunshine/Apollo, Wolf, MultiSeat: [see below](#other-hosts-it-can-pair-with). mDNS discovery, PIN pairing, multi‑host.
 - 🌍 **Internet access** opt‑in, at a `stream.moonlightweb.top/「id」` address, with nothing published in your name.
 - 🪄 **Video Enhancement** (bonus): GPU upscaling & sharpening in the browser.
@@ -65,7 +65,7 @@ The browser decodes with **WebCodecs + WebGPU/canvas** and plays audio through i
 
 **PyroWave (Wired LAN only)** joins the codec menu, for a device on Ethernet streaming a Windows native host: every frame travels whole, about 130 Mbit/s at 120 fps, and the page decodes it on the GPU — WebGPU, or WebGL2 where WebGPU is off (Chrome on Linux, Safari 18), both checked against the reference decoder. On an NVIDIA PC its picture arrives about 1 ms after HEVC's, with less sharp text, and without HDR. The option is greyed out, with the reason, where no host codes it; a choice that cannot run streams as Auto.
 
-> The engine also runs under the Windows service, in the logged‑on user's session. Where it cannot run (no usable encoder, Windows ARM64), the card is hidden and the app offers a host to pair with. A **headless** PC keeps its card through **"MoonlightWeb Virtual Display"**, a signed virtual monitor offered by the installer (a Mac creates its own). It turns on for a stream and your displays are restored when it ends. On Windows it runs faster than your screen, at a whole multiple of its measured rate: 239.744 Hz for a "120 Hz" panel that really runs at 119.872, up to 330 Hz, and 240 Hz when no multiple fits. What the PC draws reaches the stream sooner (6 to 17 ms less behind an Intel or AMD GPU), the stream keeps your screen's rate, and no picture is lost to a beat between the two. A PC whose capture does not hold such a rate goes back to your screen's own from its next stream on.
+> The engine also runs under the Windows service, in the logged‑on user's session. Where it cannot run (no usable encoder, Windows ARM64), the card is hidden and the app offers a host to pair with. A **headless** PC keeps its card through **"MoonlightWeb Virtual Display"**, a signed virtual monitor offered by the installer (a Mac creates its own). It turns on for a stream and your displays are restored when it ends. On Windows it runs faster than your screen, at a whole multiple of its measured rate: 239.744 Hz for a "120 Hz" panel that really runs at 119.872, up to 330 Hz, and 240 Hz when no multiple fits. What the PC draws reaches the stream sooner (6 to 17 ms less behind an Intel or AMD GPU), the stream keeps your screen's rate, and no picture is lost to a beat between the two. A PC whose capture does not hold such a rate goes back to your screen's own from its next stream on. On Windows, **Admin › Turn off the other screens during the stream** darkens the PC's other screens while a stream runs on the virtual display; they come back on when it ends.
 
 **With the FPS on Auto, the stream can go faster than your screen.** When the picture on the host changes faster than your screen refreshes and your device keeps up, a Windows host steps the stream up, to 240 at most. The step stays only while what you see gets younger: 1 to 14 ms younger on a PC on Ethernet, 3 to 15 ms on a Mac on Wi-Fi. A device that falls behind is back at its own rate within three seconds, and remembers it: its next streams to that PC do not try again in their first quarter of an hour. A TV keeps its own rate.
 
@@ -178,8 +178,10 @@ Each player row gives **a link and a 6‑digit PIN**. Send them separately: the 
 | A **Viewer** just watches and listens. | **Full control** hands over the keyboard and mouse. |
 
 - **The level can change mid‑game**, and keys held by the guest are released. Permissions are enforced by the server, and clipboard sync is off for guests.
+- **Administrator windows** of a Windows host (an elevated console, a game run as administrator) stay closed to guests unless you open them in `settings.json` ([how, and the risk](docs/wiki/06-Security.md#64c-invited-players-and-administrator-windows)).
 - **One invitation, one machine.** The first device to enter the PIN owns the link; any other attempt is refused and shown on the board.
 - **Regenerate** issues a new link and PIN and disconnects the old one.
+- **The link's address**: Automatic (your entry link, or the LAN when the PC has no internet access), or pinned per host from the board to the LAN, Tailscale or another network.
 - **Lifetime:** 1 h, 4 h, 8 h, 24 h, 48 h or unlimited. A guest can rejoin until you close the row, press Stop, or time runs out.
 - **Your quality stays fixed** while a link is live, so the auto ladder never restarts the stream under your guests.
 - **Stop** asks: **Leave** (the game and players carry on) or **Stop everything**.
@@ -291,7 +293,7 @@ caveats).
 
 | | |
 |---|---|
-| **Tags** | `latest` · `0.4.0` · `0.4` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
+| **Tags** | `latest` · `0.4.1` · `0.4` · `sha-<commit>`. Release tags only — no `edge`, no nightly, so `latest` can never be work in progress. |
 | **Ports to open** | **443/tcp** (web UI + signalling) and **80/tcp** (HTTP→HTTPS redirect). WebRTC media takes **48550‑48573/udp**, one port per stream slot, with or without UPnP. A GameStream host is reached *outbound* on 47989/47984/47990 tcp, 47998‑48000 udp, 48010 tcp/udp. |
 | **Volume** | `/data` — settings, TLS material, paired hosts and the **client identity**. Losing it un‑pairs every host. |
 | **Env** | `MW_HTTPS_PORT` · `MW_HTTP_PORT` · `MW_UPNP` · `TZ` |
@@ -318,7 +320,9 @@ Prefer to build it yourself? See [Fork & build](#fork--build).
 
 ## Video Enhancement (bonus)
 
-Browser‑side image enhancement on the GPU (WebGL2, or WebGPU in HDR): **upscaling (FSR1 & SGSRv1)** + **sharpening**, to gain sharpness when the stream resolution differs from the display resolution.
+Browser‑side image enhancement on the GPU (WebGL2, or WebGPU in HDR and on iPhone): **MoonlightWeb's own upscaler**, FSR1's sharpness for less than SGSRv1's cost, its sharpening following the scale, to gain sharpness when the stream resolution differs from the display resolution.
+
+The upscaler, **MWSR**, is under the MIT License and packaged for other programs in [`mwsr/`](mwsr/README.md): its WebGPU, WebGL2 and Direct3D shaders, a C++ header, their parameters and examples.
 
 <div align="center">
 
@@ -381,7 +385,7 @@ The browser loads a few kilobytes of entry page, opens WebRTC straight to your m
                    │                                         │ held open by
                    │  WebRTC — peer to peer, DTLS encrypted  │ your PC. No
                    │  video · audio · input · the whole REST │ open port, no
-                   │  API. WSS fallback on hostile networks. │ DNS record.
+                   │  API. TCP fallback if UDP is blocked.   │ DNS record.
                    ▼                                         ▼
  ┌────────────────────────────────────────────────────────────────────────┐
  │  YOUR GAMING PC — MoonlightWeb server (C++/Qt)                         │
@@ -418,10 +422,10 @@ Most settings live in the UI and are stored **server‑side** in `settings.json`
 | **macOS** | `~/Library/Application Support/MoonlightWeb/MoonlightWeb/settings.json` |
 | **Linux** | `~/.local/share/MoonlightWeb/MoonlightWeb/settings.json` |
 
-Notable keys not exposed in the UI: `domain` (custom FQDN), `cert_pem` / `cert_key` (your own cert, path or env‑var name), `audio_time_stretch`, `latency_flag_enabled`, `keyboard_layout_fidelity`, `keyboard_debug`, `http_port` / `https_port`, `stun_server`, `update_relay_enabled`, `session_metrics_enabled`, `session_location_enabled`, `metrics_consent`, `native_host_enabled`.\
+Notable keys not exposed in the UI: `domain` (custom FQDN), `cert_pem` / `cert_key` (your own cert, path or env‑var name), `audio_time_stretch`, `latency_flag_enabled`, `keyboard_layout_fidelity`, `keyboard_debug`, `http_port` / `https_port`, `stun_server`, `update_relay_enabled`, `session_metrics_enabled`, `session_location_enabled`, `metrics_consent`, `native_host_enabled`, `share_guests_admin_windows`, `share_in_booth_mode`.\
 Restart the server after a manual edit. Every key is described in the [settings reference](docs/wiki/07-Settings-Reference.md).
 
-`keyboard_layout_fidelity` (default `false`) types the character **your** layout produced, whatever the host's layout: `azerty` on an AZERTY board shows `azerty` on a QWERTY host, and every key stays a real key press games can read. The **MoonlightWeb host** corrects every key; a **Sunshine Windows host** corrects letters only; Sunshine macOS, Linux and Wolf hosts stay positional.
+`keyboard_layout_fidelity` (default `"auto"`) decides when the host types the character **your** layout produced rather than the key's position. `"auto"` types your characters in the desktop mouse mode (`azerty` on an AZERTY board shows `azerty` on a QWERTY host) and plays gaming mode by key positions, so movement keys and weapon slots stay put; `"always"` keeps your characters in games too; `"never"` sends positions everywhere, as Moonlight does. Every key stays a real key press. The **MoonlightWeb host** corrects every key, AltGr and a Mac's Option layer included; a **Sunshine Windows host** corrects letters; Sunshine macOS, Linux and Wolf hosts stay positional. A shortcut keeps its letter (Ctrl+A is the host's A) and sends any other key by position (Ctrl+1 stays Ctrl+1), as the numeric keypad always does. A `true` or `false` from 0.4.0 becomes `"always"` or `"auto"`.
 
 `keyboard_debug` (default `false`, add it by hand) logs how each printable key was resolved, with two verdicts: **Notepad** (the character typed) and **Game** (the physical key). The log then holds what you type, so nothing is written while the lock screen or a UAC prompt has the keyboard. Remove it once the diagnosis is done.
 
