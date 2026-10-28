@@ -8292,3 +8292,86 @@ character(s) on keys, 0 through dead keys ».
     deux minutes de calme ; ensuite, une entrée plus récente que la dernière du banc (1,5 s de
     marge) est celle de quelqu'un. Le premier passage, à 15:25, s'est arrêté faute de savoir le
     lire.
+
+### 36.8 Séances avec Bruno et correctifs suivants (23-26/10)
+
+**P5, le texte d'un téléphone** (iPhone et Android, hôte FR, 23-24/10) : Bloc-notes, cmd, Windows
+PowerShell, Windows Terminal, accords de la barre, tout juste, ~ compris dans PowerShell 5.1. Dans
+Windows Terminal, un emoji sort en deux carrés : ses deux moitiés arrivent séparées, en Unicode,
+comme avant. Dans Portal 2, Espace (saut) et E (utiliser) marchent ; marcher ne se teste pas ainsi :
+un clavier tactile donne une lettre tapée, jamais une touche tenue, et `injectText` presse et lâche
+dans le même `SendInput`.
+
+**P4, administrateur et SYSTEM** (24-25/10, édition DEV installée, worker SYSTEM du service ; la
+`--dev` n'en a pas) : depuis l'Android, le texte arrive dans un PowerShell administrateur, et le PIN
+Windows se tape à l'écran de verrouillage. Pour un invité (lien de partage, Chrome de banc), la clé
+`share_guests_admin_windows` décide, essai par essai :
+
+| Clé | Texte dans la fenêtre administrateur | Clic | Bandeau, journal du worker |
+|---|---|---|---|
+| `false` | rien | 0 | bandeau ; « input gate closed (policy) », appuis jetés |
+| `true` | tapé | 1 | « administrator windows open to this invited player » |
+| `false` | rien | 0, au même point | bandeau |
+
+- Pièges du banc : l'édition DEV et la `--dev` partagent le bloc de tunnel 46064-46095 et la base de
+  signalisation (Internet et UPnP coupés, `--ws-port` à part) ; l'invité voit l'image avec ses bandes
+  noires, le point de clic se calcule dans l'image ; l'arrivée et le départ d'un invité font chacun
+  une notification de l'hôte, qui peut sonner (`stream_notifications` à `false` le temps du banc).
+
+**C5, l'AZERTY d'un Mac** (24/10) :
+- **@ et #** : la touche en haut à gauche d'un clavier Mac arrive en `IntlBackslash`, envoyée en
+  VK_OEM_102 brut (« < » sur l'hôte FR). Au Bureau, sur l'hôte natif, `IntlBackslash` et `IntlRo`
+  tapent maintenant leur caractère (`aae86dcf`).
+- **Les touches mortes du Mac** (~ par Option+N, ^, ¨) : relevé dans Chrome et Safari, une page qui
+  n'est pas un champ de texte ne compose jamais : « Dead », puis la lettre seule. Dans un champ, la
+  touche suivante porte la composition (keyCode 229, sans keypress) ; Chrome compose au keydown,
+  Safari a déjà fini. Sur un Mac sans écran tactile, les touches passent donc par un champ de texte
+  invisible (`textarea.stream-kbd-capture`), au Bureau seulement, et la touche composée part tout
+  de suite (`e0ba72f9`) : ~ ñ ê ë, et une touche tenue répète sans bulle d'accents. En Jeu, ce sont
+  des positions : Option+N puis Espace ne donne rien de composé, voulu.
+- Le reste passait déjà : § ! - < > _ { } [ ] | \ €.
+
+**C0, reconnaître un jeu** (sonde en lecture seule, 24/10, 4 jeux lancés par Bruno en mode Jeu, puis
+10 fenêtres de saisie) :
+
+| Fenêtre | Game Bar | Bibliothèque Steam | Classe | ZQSD |
+|---|---|---|---|---|
+| Ravenfield | oui | oui | UnityWndClass | non |
+| Portal 2 | oui | oui | Valve001 | non |
+| Vanquish | oui | oui | VANQUISH | oui |
+| Half-Life 2, tout premier lancement | non, puis oui 1 s après | oui | Valve001 | non |
+| Bloc-notes, Windows Terminal, Chrome, Edge, Explorateur, VS Code, Steam, Big Picture, Discord, Word | non | non | divers | — |
+
+- Aucun faux positif ; la bibliothèque Steam reconnaît un jeu neuf dès son premier passage au
+  premier plan. Moins de 0,3 ms par changement de premier plan, rien à chaque touche ; le plein
+  écran ne distingue rien (`SHQueryUserNotificationState` jusqu'à 114 ms : écarté).
+- **Décision de Bruno (D-C2) : pas de détection.** Elle marche, mais ne change rien à ce qu'il a vu :
+  un Mac AZERTY et un PC AZERTY mettent les lettres aux mêmes places, caractère et position donnent
+  le même scancode. Le « ZQSD non » vient du jeu : Source et Unity lisent la lettre dans la
+  disposition de l'hôte, avec des commandes QWERTY (avancer = W, comme avec un clavier AZERTY branché
+  sur l'hôte) ; Vanquish lit la position. Présenter au jeu une disposition US en mode Jeu : non aussi.
+
+**Les KeyTips du Bloc-notes** (25-26/10) : depuis un Mac US, le texte était juste, mais le Bloc-notes
+de Windows 11 ouvrait les KeyTips de sa barre de menus après un @ (Maj+2 en US, AltGr+à sur l'hôte
+FR). La séquence était Maj↑ (l'hôte la lâche), Ctrl↓, Alt droit↓, à↓, Alt droit↑, Ctrl↑, Maj↓, puis
+à↑ au relâchement. Une fenêtre WinUI 3 à barre de menus ne l'a jamais reproduit (702 essais) : le
+défaut tient au Bloc-notes. Correctif (`95bcbfaa`) : `planKeyEdge` tape un caractère du niveau AltGr
+en entier à l'appui (touche enfoncée puis relâchée sous l'Alt droit, masque VK 0xE8 avant de lâcher
+l'Alt droit), rien au relâchement, et dit si la touche reste enfoncée ; `injectChar` ne retient rien
+pour elle. Vérifié par Bruno dans le Bloc-notes, depuis le Mac US : plus aucun KeyTips.
+
+**La touche Win de la barre** (26/10, décision de Bruno) se verrouille comme Maj, Ctrl et Alt
+(`41c43b84`) : Win puis L verrouille le PC, Win puis R ouvre Exécuter ; tapée seule, elle ouvre
+Démarrer.
+
+**Le Verr. Num** (26/10) :
+- La synchronisation des verrous, et la touche Verr. Num du client, partaient en scancode E0 45.
+  Injecté ainsi, Windows le lit comme aucune touche (VK 0xFF, FR et US, Windows 26200) : le Verr. Num
+  de l'hôte ne suivait jamais. Verr. Num est un 0x45 seul, sans E0 (`d6227f61`) ; Pause est
+  E1 1D 45. Un test relit chaque touche à E0 sur la disposition US.
+- Un clavier Apple n'a pas de Verr. Num, et son pavé tape toujours des chiffres. Envoyé « éteint »,
+  il aurait éteint celui du PC au premier appui. Depuis un Mac ou un iPad, la synchronisation dit
+  donc « allumé » (`f86bfdf2`). Sa touche Clear porte le code NumLock : appuyée en premier, le PC la
+  bascule après la synchronisation, qui dit alors « éteint » pour finir allumé.
+- À vérifier avant la v0.4.1 : depuis un Mac, le Verr. Num du PC s'allume à la première touche ;
+  depuis un PC Windows, il prend l'état de celui du client, puis bascule avec sa touche.
