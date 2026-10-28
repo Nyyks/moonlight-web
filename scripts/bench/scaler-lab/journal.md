@@ -2789,3 +2789,88 @@ A et B tirés au sort.
 **Vérifié dans le code.** Aucun chemin du produit ne pose `DERING` : `MwsrShader.js` le déclare à 2, et
 `setMwsrOverrides` n'est appelé que par les pages du labo. `DERING 1` ne vit plus qu'en option de labo : les cellules
 `mwsr:dering=1`, `hdr-compare.html`, `hdr_check.py --ablate` et `--dering`.
+
+## 2026-10-28 — J51, la vitesse de J47 refaite au calme, et la traîne p99 localisée
+
+**La demande.** V10, go de Bruno le 28/10 au matin, par 59 : refaire la vitesse HDR et SDR de J47 sur la RTX qui ne
+décode pas, et localiser la traîne p99 que J47 avait laissée sur la réduction HDR à ×0,667.
+
+**Le banc (créneau de 59, 08:47 à 08:59).**
+- **La carte** : la RTX 5060 Ti du bus 01 (DISPLAY1), celle de J47.
+  - LUID revérifiés le 28/10 par `D3DKMTOpenAdapterFromGdiDisplayName` : DISPLAY1 → 0,79382 (bus 01), DISPLAY5 →
+    0,84633 (bus 03), 780M 0,89691.
+  - Ni encodeur ni décodeur actif sur la carte pendant tout le banc.
+- **Le Chrome** : celui de J47, sans tête, épinglé par `--use-adapter-luid`, l'épinglage vérifié par les compteurs
+  WDDM avant toute mesure.
+- **Ce qui est nouveau** :
+  - la page date chaque tirage. Le `seq` de `hdr-time.json` porte maintenant, pour chacun, la passe 0, le noyau et
+    son début ;
+  - à côté de la page, deux relevés. nvidia-smi lit la carte toutes les 50 ms (horloges, P-state). Les compteurs WDDM
+    lisent, toutes les deux secondes environ, le moteur 3D de chaque processus sur la carte. Pendant les trois passes,
+    seuls dwm et Discord y ont dessiné, sous 3,5 %. Pendant la passe ciblée, dwm est monté une fois à 20 %.
+- **HDR** : trois passes de 800 tirages par variante, sur les cas de J47.
+- **SDR** : les cellules `chain-mwsr` de J47, deux tours ABBA. « Avant » = 87286046.
+
+**HDR : les gains de J47 tiennent.** Médiane des trois passes, total des passes en ms, p50 / p99 ; « après » est
+`mwsr`, « avant » `mwsr-enc`.
+
+| cas | après | avant | écart | J47 |
+|---|---|---|---|---|
+| témoin 720p → 1440p (même chemin) | 0,1216 / 0,123 | 0,1215 / 0,123 | +0,1 % | −1,3 % |
+| 2160p → 1440p (×0,667) | 0,3050 / 0,311 | 0,3451 / 0,354 | **−11,6 %** | −11,3 % |
+| 2160p → 720p (×1/3) | 0,3231 / 0,333 | 0,3498 / 0,357 | **−7,6 %** | −7,4 % |
+| 1440p → 720p (×0,5) | 0,0994 / 0,102 | 0,1124 / 0,114 | **−11,5 %** | −11,2 % |
+
+- Le p99 de ×0,667 est de 0,311 ms, contre 2,914 en J47.
+- Sur les 2400 tirages mesurés par variante, un seul dépasse trois fois la médiane (0,97 ms).
+
+**La traîne vient de l'état d'énergie de la carte, pas du shader.**
+- **Ce qu'on voit** : au premier passage, les 8 premiers tirages de ×0,667 prennent 2,5 à 3,5 ms (passe 0 1,4 à 2,5,
+  noyau 0,7 à 1,2). C'est la grandeur exacte de la traîne de J47.
+  - Ces 8 tirages tombent tous en P5, mémoire à 810 MHz.
+  - Dès que la carte passe en P3 (7001 MHz), les mêmes tirages prennent 0,31 ms.
+- **Pourquoi** : la réduction 4K est bornée par la mémoire. À un huitième de son horloge, elle va neuf fois moins
+  vite.
+- **Ce que fait la carte** :
+  - le banc la charge peu et par à-coups : un tirage, puis l'attente de la relecture des horodatages ;
+  - elle reste donc en P3, mémoire à moitié, et redescend en P5 ou P8 dès une pause ;
+  - le pilote met environ 0,5 s à remonter.
+- **La preuve, sur les deux variantes** : une passe ciblée, `--gap 4000`, avec 4 s d'arrêt avant chaque bloc. Deux
+  passes de 160 tirages sur ×0,667. Les deux variantes paient pareil :
+  - tirages lents : 28 et 9 pour « après », 47 et 51 pour « avant » ;
+  - il y a trois paliers, et l'écart tient à chacun (ms) :
+
+  | mémoire | après | avant |
+  |---|---|---|
+  | 14 001 MHz (P0) | 0,24 | 0,28 |
+  | 7001 MHz (P3) | 0,31 | 0,35 |
+  | 810 MHz (P5) | 2,5 à 3,5 | 2,5 à 3,5 |
+
+- **Pourquoi seulement « après » en J47 : non établi.** Il n'y avait pas de relevé d'horloge ce jour-là. La grandeur,
+  elle, est celle du P5.
+- **Dans le produit** :
+  - un stream charge la carte sans pause : décodage, dessin et présentation, à chaque image ;
+  - une image en P5 coûterait au pire 3,5 ms, sous les 8,3 ms d'une image à 120 Hz, le temps que le pilote remonte ;
+  - rien à changer.
+- **Pour les bancs** :
+  - les temps absolus de ce banc sont ceux de P3, pas du maximum ;
+  - seules les comparaisons par blocs ABBA sont sûres ;
+  - un temps absolu doit dire son P-state, ce que `seq` et le relevé nvidia-smi permettent maintenant.
+
+**SDR : pas de régression.** `gpu` p50 des cellules `chain-mwsr`, passes faites entièrement à 7001 MHz.
+- **Les écarts** :
+  - ×2 : −1,1 % (0,1036 contre 0,1048), et +0,2 % à 60 Hz ;
+  - ×1,33 : 0,1154 contre 0,1156, et +0,3 % à 60 Hz ;
+  - ×0,67 : −0,1 %, et +0,3 % à 60 Hz.
+- **Les passes qui s'écartent ont changé de palier en cours de route** :
+  - en partie à 810 MHz : ×1,33 « avant », de 0,17 à 0,22 ; ×1,33 « après », 0,245 une fois ;
+  - en partie à 14 001 MHz : ×0,67 « après », 0,12.
+- **J47 vérifié** : J47 attribuait son écart de ×1,33 à « une horloge plus basse ». C'est vérifié cette fois.
+
+**L'outillage.**
+- `hdr-check.js` : chaque entrée de `seq` porte la passe 0, le noyau et l'heure de début ; `&gap=MS` met la pause
+  avant chaque bloc (`hdr_check.py --gap MS`).
+- Le banc lui-même (Chrome épinglé, relevés nvidia-smi et WDDM) reste hors dépôt, comme celui de J47.
+
+**Pour rejouer.** Lancer `hdr_check.py --time 800 --cdp PORT` dans un Chrome qu'on a soi-même épinglé et vérifié sur
+le GPU, avec nvidia-smi à côté (`-lms 50`). Ajouter `--gap 4000` pour voir les paliers.

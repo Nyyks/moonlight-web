@@ -2,7 +2,7 @@
 adapter: upscaled and downscaled, on the two HDR paths that run it.
 
     python -X utf8 hdr_check.py [--dir DIR] [--keep] [--only NAME,...]
-    python -X utf8 hdr_check.py --time N --cdp PORT [--vendor WORD] [--only NAME,...]
+    python -X utf8 hdr_check.py --time N --cdp PORT [--vendor WORD] [--only NAME,...] [--gap MS]
 
 The lab's HDR mires (hdr_mires.py: a PQ ramp up to 10 000 nits with fine
 1000 / 0.5-nit stripes, text on 1000 nits, the 0 A.D. capture of
@@ -59,7 +59,9 @@ launches no Chrome: --cdp names one the caller launched pinned on that GPU
 (--use-adapter-luid, its own profile, --mute-audio) and checked, before
 anything is measured, by the growth of the WDDM counters on that adapter
 alone; the page refuses SwiftShader and an adapter whose name lacks
---vendor.
+--vendor. Each draw's start and passes go into hdr-time.json too (`seq`), to
+set a tail against the GPU's clocks; --gap MS idles before each block, so
+that the GPU drops its P-state in front of both variants (V10).
 """
 import argparse
 import functools
@@ -330,6 +332,8 @@ def drive(a, cdp, port):
         query += "&ab=dering"
     if a.dry:
         query += "&dry=1"
+    if a.gap:
+        query += "&gap=%d" % a.gap
     call("Page.navigate", url="http://127.0.0.1:%d/scripts/bench/scaler-lab/hdr-check.html%s" % (port, query))
     deadline = time.time() + a.timeout
     shown = None
@@ -633,6 +637,8 @@ def main():
     ap.add_argument("--dering", action="store_true",
                     help="DERING 2 against 1, on 'linear' and on the SDR yardstick (with --time: their speed)")
     ap.add_argument("--dry", action="store_true", help="--time on SwiftShader: the code alone, figures worth nothing")
+    ap.add_argument("--gap", type=int, default=0,
+                    help="--time: MS of idle before each block, for the GPU to drop its P-state (V10, 28/10/2026)")
     a = ap.parse_args()
     a.only = [s for s in a.only.split(",") if s]
     if not a.only:

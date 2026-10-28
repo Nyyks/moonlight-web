@@ -20,7 +20,9 @@
 // case — N draws each, in ABBA order after a warm-up, every render pass of
 // the renderer stamped (timestamp-query) so that pass 0 and the kernel are
 // timed apart. The page then refuses SwiftShader and any adapter whose name
-// lacks WORD.
+// lacks WORD. &gap=MS (hdr_check.py --gap): MS of idle before each block, so
+// that the GPU drops its P-state in front of both variants (V10, 28/10/2026:
+// at 810 MHz of memory, P5, a 4K reduction takes nine times longer).
 //
 // &ab=dering (hdr_check.py --dering, 26/10/2026): the edge path's bound
 // instead, today's DERING 2 against DERING 1, on 'linear' and, for a case
@@ -35,6 +37,7 @@ const T = GPUTextureUsage;
 const B = GPUBufferUsage;
 const PARAMS = new URLSearchParams(location.search);
 const TIME = Math.max(0, parseInt(PARAMS.get("time") || "0", 10) || 0);
+const GAP = Math.max(0, parseInt(PARAMS.get("gap") || "0", 10) || 0);
 const ABLATE = PARAMS.get("ablate") === "1";
 const DERING_AB = PARAMS.get("ab") === "dering";
 const DERING_SETS = [
@@ -269,10 +272,13 @@ function installStamps() {
   };
 }
 
-/** n draws of case c by renderer r; each one's pass times (ms), in order. */
-async function timedDraws(r, c, planes, n, ts, mode) {
+/** n draws of case c by renderer r; each one's pass times (ms), in order, and
+ *  into `walls` each draw's start (ms since the epoch), to set a tail against
+ *  the GPU's clocks read beside the page. */
+async function timedDraws(r, c, planes, n, ts, mode, walls = []) {
   const out = [];
   for (let i = 0; i < n; i++) {
+    walls.push(Math.round(performance.timeOrigin + performance.now()));
     STAMPS.q = 0;
     STAMPS.on = true;
     await r.draw(hdrFrame(c, planes, ts.next++ * 16667, mode));
@@ -307,13 +313,24 @@ async function timeCase(c, planes, n, ts, mode = "linear") {
   const [A, Bv] = DERING_AB ? DERING_SETS.map(([v]) => v) : ["mwsr", "mwsr-enc"];
   const draws = { [A]: [], [Bv]: [] };
   const regimes = {};
-  // every draw's total in order, warm-up included, for the tails (hdr-time.json)
+  // every draw in order, warm-up included, for the tails (hdr-time.json): the
+  // variant (1 = A), its total, pass 0, the kernel (ms), its start (epoch ms)
   const seq = [];
   const run = async (v, k) => {
     if (DERING_AB) r.setMwsrOverrides(DERING_SETS.find(([name]) => name === v)[1].overrides);
     else r._mwsrLinearDown = v === "mwsr";
-    const d = await timedDraws(r, c, planes, k, ts, mode);
-    for (const p of d) seq.push([v === A ? 1 : 0, +p.reduce((a, b) => a + b, 0).toFixed(4)]);
+    if (GAP) await new Promise((done) => setTimeout(done, GAP));
+    const walls = [];
+    const d = await timedDraws(r, c, planes, k, ts, mode, walls);
+    d.forEach((p, i) =>
+      seq.push([
+        v === A ? 1 : 0,
+        +p.reduce((a, b) => a + b, 0).toFixed(4),
+        +p[0].toFixed(4),
+        +p[p.length - 1].toFixed(4),
+        walls[i],
+      ]),
+    );
     regimes[v] = mwsrRegime(c.in[0], c.in[1], canvas.width, canvas.height, {
       srgb: r._srgbViews,
       linear: r._p0Linear,
