@@ -68,7 +68,7 @@ describe('the mwsr shader text', () => {
         expect(tex).toContain('let dx = dpdxCoarse(C) * u.scale.x;');
         expect(tex).toContain('let c444 = CHROMA444 == 1u;');
         expect(tex).toContain('let gx = select(dot(dx, LUMA), select(select(dx.r, dx.g, rg), dx.b, b), c444);');
-        expect(tex).toContain('coherence(Cc.r, T1.r, T2.r, X1.r, X2.r)');
+        expect(tex).toContain('coherence(Ch.r, T1.r, T2.r, X1.r, X2.r)');
         expect(tex).not.toContain('LUMA_SHARP');
     });
 
@@ -407,33 +407,22 @@ describe('the mwsr shader text', () => {
             // the blend's own bound is lifted at 2 only, the texels' kept at 1 and 2
             expect(text).toContain('if (DERING == 2u) {');
             expect(text).toContain('if (DERING != 0u) {');
-            // the bound is one function since J39 (the ×2 law's unsharp of the flat path shares it)
+            // the bound is one function (J39)
             expect(text).toContain('return clamp(R, min(min(q00, q10), min(q01, q11)), max(max(q00, q10), max(q01, q11)));');
             expect(text).toContain('R = texelBound(uv, R);');
         }
         expect(mwsrGlsl({ overrides: { DERING: 1 } })).toContain('const uint DERING = 1u;');
     });
 
-    it('keeps the ×2 law neutral by default, in both twins (plan §12, J39)', () => {
-        // the law weighs in from S_FULL to S_X2; its three constants change nothing at their defaults
-        expect(MWSR_OVERRIDES.S_X2).toBe(2);
-        expect(MWSR_OVERRIDES.X2_BASE).toBe(0);
-        expect(MWSR_OVERRIDES.X2_FLAT).toBe(0);
-        expect(MWSR_OVERRIDES.X2_R_ACROSS).toBe(MWSR_OVERRIDES.R_ACROSS);
-        for (const text of [tex, glsl]) {
-            expect(text).toContain('x2 = clamp((smin - S_FULL) / max(S_X2 - S_FULL, 0.001), 0.0, 1.0);');
-            // a difference of two equal constants, not a mix: exact at the defaults
-            expect(text).toContain('(R_ACROSS + (X2_R_ACROSS - R_ACROSS) * x2);');
-            expect(text).toContain('if (X2_BASE == 1u && x2 > 0.0) {');
-            expect(text).toContain('if (X2_FLAT > 0.0 && x2 > 0.0) {');
-            expect(text).toContain('F = texelBound(uv, F - (X2_FLAT * x2) * ridge);');
-            // the coherence reads the bilinear sample whatever the base
-            expect(text).toContain('coherence(Cc.r, T1.r, T2.r, X1.r, X2.r)');
+    it('has no ×2 law left, in the three twins (A29: neutral by default, never used)', () => {
+        // X2_BASE, X2_FLAT and X2_R_ACROSS, and S_X2 that weighed them in, are gone
+        for (const k of ['S_X2', 'X2_BASE', 'X2_FLAT', 'X2_R_ACROSS']) expect(MWSR_OVERRIDES).not.toHaveProperty(k);
+        for (const text of [tex, mwsrWgsl({ feed: 'tex', half: true }), glsl, hlsl]) {
+            expect(text).not.toMatch(/X2_|S_X2|\bx2 = /);
+            // the across pair at R_ACROSS; the blend and the coherence on the one bilinear sample
+            expect(text).toMatch(/dn = n \* [\w.]+ \* R_ACROSS;/);
+            expect(text).toContain('coherence(Ch.r, T1.r, T2.r, X1.r, X2.r)');
         }
-        const law = mwsrGlsl({ overrides: { X2_BASE: 1, X2_FLAT: 0.5, X2_R_ACROSS: 0.75 } });
-        expect(law).toContain('const uint X2_BASE = 1u;');
-        expect(law).toContain('const float X2_FLAT = 0.5;');
-        expect(law).toContain('const float X2_R_ACROSS = 0.75;');
     });
 
     it('holds the across weight of ×1.33 from there up in the sharpness law (J39, wired since J40)', () => {

@@ -123,10 +123,6 @@ constexpr Constant kConstants[] = {
     {"FLAT_ZONE", true, 0.0},
     {"R_DOWN", false, 1.0},
     {"LINEAR_LIGHT", true, 1.0},
-    {"S_X2", false, 2.0},
-    {"X2_BASE", true, 0.0},
-    {"X2_FLAT", false, 0.0},
-    {"X2_R_ACROSS", false, 1.0},
 };
 
 // The mode, the grid, its span and its light for a frame (mwsrRegime()).

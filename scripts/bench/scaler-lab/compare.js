@@ -21,9 +21,6 @@
 //                      threshold; the defaults are the product's, the
 //                      sharpness by the scale law (mwsrSharpness, J40)
 //                      unless the link names one
-//   x2b=1, x2r=, x2f=  the ×2 law (MwsrShader's X2_ constants, plan §12, J39):
-//                      the flat path's picture as the edge path's base, the
-//                      across taps' distance, the flat path's unsharp; off by default
 //   soft=1             the WebGPU fallback adapter (SwiftShader), for a test
 //   viewer=2d          the bands drawn by Canvas2D drawImage, not WebGL2 (a test)
 //
@@ -101,9 +98,6 @@ const MWSR_DEF = {
   flat: 1,
   fc: 0.5,
   dr: 1,
-  x2b: 0,
-  x2r: 1,
-  x2f: 0,
 };
 // MwsrShader's module once loaded (boot): its sharpness law by the scale
 let mwsrModule = null;
@@ -127,17 +121,6 @@ const BOUND_CHOICES = [
   [1, "cinq échantillons, puis texels"],
   [2, "texels seuls"],
 ];
-// The ×2 law (MwsrShader's X2_ constants, plan §12, J39), weighing in from
-// ×1.5 to ×2: the edge path's base (the bilinear sample, or the flat path's
-// picture), the distance of the across pair (1.25 helps text, 0.75 a game's
-// soft edges, J39) and the flat path's unsharp, bounded by the texels.
-// Pipeline constants: the renderer rebuilds. Off in the product.
-const X2B_CHOICES = [
-  [0, "échantillon bilinéaire"],
-  [1, "chemin plat (CR5 ou Q3)"],
-];
-const X2R_RANGE = [0.5, 1.5, 0.05];
-const X2F_RANGE = [0, 1.5, 0.05];
 // The gaze zone (MwsrShader's MWSR_ZONE and its GAZE constant, plan §15.2):
 // the green ellipse's centre y and half-axes (fractions of the picture), the
 // orange ring's width (a fraction of the half-axes), and the vote threshold
@@ -186,9 +169,6 @@ const state = {
   flat: MWSR_DEF.flat,
   fc: MWSR_DEF.fc,
   dr: MWSR_DEF.dr,
-  x2b: MWSR_DEF.x2b,
-  x2r: MWSR_DEF.x2r,
-  x2f: MWSR_DEF.x2f,
   // the gaze zone: off (the product on a still picture), its values, the
   // rings drawn over the bands, the flat path's cubic inside it only
   gaze: false,
@@ -219,20 +199,13 @@ const overrides = () => ({
   FLAT_C: state.fc,
   ...(state.dr === MWSR_DEF.dr ? {} : { DERING: state.dr }),
   ...(state.gaze && state.fz ? { FLAT_ZONE: 1 } : {}),
-  ...(state.x2b ? { X2_BASE: 1 } : {}),
-  ...(x2rSet() ? { X2_R_ACROSS: state.x2r } : {}),
-  ...(state.x2f > 0 ? { X2_FLAT: state.x2f } : {}),
 });
-const x2rSet = () => Math.abs(state.x2r - MWSR_DEF.x2r) > 1e-9;
 const tuned = () =>
   state.sharp !== null ||
   Math.abs(state.tau - MWSR_DEF.tau) > 1e-9 ||
   state.flat !== MWSR_DEF.flat ||
   (state.flat !== 1 && Math.abs(state.fc - MWSR_DEF.fc) > 1e-9) ||
   state.dr !== MWSR_DEF.dr ||
-  state.x2b !== MWSR_DEF.x2b ||
-  x2rSet() ||
-  Math.abs(state.x2f - MWSR_DEF.x2f) > 1e-9 ||
   state.gaze;
 const zoneText = () =>
   " · zone " +
@@ -246,13 +219,6 @@ const zoneText = () =>
   " · nc " +
   fr(state.gz.sharp, 2) +
   (state.fz ? " · plat zone" : "");
-const x2Text = () =>
-  state.x2b || x2rSet() || state.x2f > 0
-    ? " · ×2" +
-      (state.x2b ? " base plate" : "") +
-      (x2rSet() ? " travers " + fr(state.x2r, 2) : "") +
-      (state.x2f > 0 ? " plat " + fr(state.x2f, 2) : "")
-    : "";
 const tuningText = () =>
   "netteté " +
   fr(sharpNow(), 2) +
@@ -269,7 +235,6 @@ const tuningText = () =>
     : state.dr === 1
       ? " · borne cinq puis texels"
       : "") +
-  x2Text() +
   (state.gaze ? zoneText() : "");
 const currentCase = () => CASE_BY[state.caseId];
 const sizeOf = (level) => [Math.round((level * 16) / 9), level];
@@ -323,11 +288,6 @@ function readState() {
   if (fc >= 0 && fc <= 2) state.fc = fc;
   const dr = parseInt(q.dr, 10);
   if (BOUND_CHOICES.some(([n]) => n === dr)) state.dr = dr;
-  state.x2b = q.x2b === "1" ? 1 : MWSR_DEF.x2b;
-  const xr = parseFloat(q.x2r);
-  if (xr >= 0.5 && xr <= 1.5) state.x2r = xr;
-  const xf = parseFloat(q.x2f);
-  if (xf >= 0 && xf <= 1.5) state.x2f = xf;
   state.gaze = q.gaze === "1";
   for (const [id, , [min, max], key] of ZONE_SLIDERS) {
     const v = parseFloat(q[id]);
@@ -354,9 +314,6 @@ function writeState() {
     p.set("fc", String(state.fc));
   }
   if (state.dr !== MWSR_DEF.dr) p.set("dr", String(state.dr));
-  if (state.x2b) p.set("x2b", "1");
-  if (x2rSet()) p.set("x2r", String(state.x2r));
-  if (state.x2f > 0) p.set("x2f", String(state.x2f));
   if (state.gaze) {
     p.set("gaze", "1");
     for (const [id, , , key] of ZONE_SLIDERS) p.set(id, String(state.gz[key]));
@@ -595,12 +552,6 @@ const outKey = (algoId) =>
       state.fc +
       "|d" +
       state.dr +
-      "|x" +
-      state.x2b +
-      "," +
-      state.x2r +
-      "," +
-      state.x2f +
       (state.gaze
         ? "|g" +
           ZONE_SLIDERS.map(([, , , k]) => state.gz[k]).join(",") +
@@ -1873,20 +1824,6 @@ function buildPanel() {
   body.append(
     el("div", { class: "row" }, el("span", null, "borne (arêtes)"), drSel),
   );
-  const x2bSel = el("select", {
-    id: "x2b",
-    onchange: () => {
-      state.x2b = parseInt(x2bSel.value, 10);
-      changed("mwsr");
-    },
-  });
-  for (const [n, label] of X2B_CHOICES)
-    x2bSel.append(el("option", { value: n, selected: state.x2b === n }, label));
-  body.append(
-    el("div", { class: "row" }, el("span", null, "×2 : base"), x2bSel),
-  );
-  slider("x2r", "×2 : distance en travers", X2R_RANGE, "x2r", 2);
-  slider("x2f", "×2 : affûtage plat", X2F_RANGE, "x2f", 2);
   body.append(
     el(
       "div",
@@ -1901,9 +1838,6 @@ function buildPanel() {
             state.flat = MWSR_DEF.flat;
             state.fc = MWSR_DEF.fc;
             state.dr = MWSR_DEF.dr;
-            state.x2b = MWSR_DEF.x2b;
-            state.x2r = MWSR_DEF.x2r;
-            state.x2f = MWSR_DEF.x2f;
             state.gaze = false;
             state.gz = { ...ZONE_DEF };
             state.fz = false;
@@ -2124,8 +2058,6 @@ function syncPanel() {
     ["sharp", "sharp", 2],
     ["tau", "tau", 3],
     ["fc", "fc", 2],
-    ["x2r", "x2r", 2],
-    ["x2f", "x2f", 2],
   ]) {
     const input = document.getElementById(id);
     const val = document.getElementById(id + "v");
@@ -2137,8 +2069,6 @@ function syncPanel() {
   if (flatSel) flatSel.value = String(state.flat);
   const drSel = document.getElementById("dr");
   if (drSel) drSel.value = String(state.dr);
-  const x2bSel = document.getElementById("x2b");
-  if (x2bSel) x2bSel.value = String(state.x2b);
   const gazeSel = document.getElementById("gaze");
   if (gazeSel) gazeSel.value = state.gaze ? "1" : "0";
   for (const [id, , , key, dec] of ZONE_SLIDERS) {
@@ -2311,20 +2241,12 @@ async function boot() {
     }
     if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.DERING !== undefined)
       MWSR_DEF.dr = m.MWSR_OVERRIDES.DERING;
-    if (m.MWSR_OVERRIDES && m.MWSR_OVERRIDES.X2_BASE !== undefined) {
-      MWSR_DEF.x2b = m.MWSR_OVERRIDES.X2_BASE;
-      MWSR_DEF.x2r = m.MWSR_OVERRIDES.X2_R_ACROSS;
-      MWSR_DEF.x2f = m.MWSR_OVERRIDES.X2_FLAT;
-    }
     if (m.MWSR_ZONE) Object.assign(ZONE_DEF, m.MWSR_ZONE);
     state.sharp = null;
     state.tau = MWSR_DEF.tau;
     state.flat = MWSR_DEF.flat;
     state.fc = MWSR_DEF.fc;
     state.dr = MWSR_DEF.dr;
-    state.x2b = MWSR_DEF.x2b;
-    state.x2r = MWSR_DEF.x2r;
-    state.x2f = MWSR_DEF.x2f;
     state.gz = { ...ZONE_DEF };
   } catch (e) {
     console.warn("MwsrShader.js :", e);

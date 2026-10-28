@@ -390,17 +390,6 @@ prefixed `MWSR_`.
 | `FLAT_ZONE` | u32 | `0` | With `GAZE 1`: `1` keeps the flat path's cubic inside the zone only, and the periphery keeps the bilinear sample. |
 | `R_DOWN` | f32 | `1.0` | Reduction: the span of the grid, as a fraction of the pixel's footprint. Set it from [the mode table](#what-every-version-needs). |
 | `LINEAR_LIGHT` | u32 | `1` | Reduction: the light the samples are averaged in. `0`: the hardware's, through sRGB views. `1`: gamma 2 (a square and a square root). `2`: the exact sRGB curve (at most 0.35 dB better, 15 `pow` per pixel). `3`: the input already holds linear light, and the output is encoded once. WGSL only for `3`. |
-| `S_X2` | f32 | `2.0` | The ×2 law: the scale at which the three `X2_` constants weigh in full. They fade in from `S_FULL`. |
-| `X2_BASE` | u32 | `0` | `1`: the edge path blends from the flat path's picture instead of the bilinear sample, by the law's weight. |
-| `X2_FLAT` | f32 | `0` | An unsharp of the flat path at the law's full weight, bounded by the four texels. `0`: none. |
-| `X2_R_ACROSS` | f32 | `1.0` | `R_ACROSS` at the law's full weight. |
-
-The three `X2_` constants are neutral by default: in the lab they helped one content at ×2 and hurt another, with no
-common value.
-
-`X2_FLAT` also differs from one GPU to another. It sharpens across the flat path's own gradient, which is nearly
-zero there: a GPU that rounds it to exactly 0 (WARP) sharpens nothing, and one that leaves a trace of it
-(SwiftShader) sharpens along that trace. Keep it at 0 unless you have measured it on your targets.
 
 ### Recommended values
 
@@ -410,7 +399,6 @@ zero there: a GPU that rounds it to exactly 0 (WARP) sharpens nothing, and one t
 | A phone or a tablet | `FLAT_TAPS 3` | 9 to 13 % faster on an iPhone 13 Pro and a realme Note 60, for a hundredth of SSIM. MoonlightWeb's choice there. |
 | A 4:4:4 stream (desktop work, text) | `CHROMA444 1` | Colour borders of one luma, such as red text on green, get sharpened too. |
 | An AMD integrated GPU (Radeon 780M) | `wgsl/mwsr-up-f16.wgsl` | 9 to 10 % faster. Nothing gained on NVIDIA. |
-| Text at ×2 | `X2_R_ACROSS 1.25` | The lab's value for text. For a game's soft edges at ×2, it was `0.75`. |
 | A softer picture | `sharp` lower, `tau` higher | Less sharpening, and fewer pixels on the edge path. |
 | An HDR float input | the defaults | Unchanged for the upscale. A reduction takes `LINEAR_LIGHT 3` if the input holds linear light. |
 
@@ -426,7 +414,7 @@ const pipeline = device.createRenderPipeline({
         module,
         entryPoint: 'fs',
         targets: [{ format }],
-        constants: { CHROMA444: 1, X2_R_ACROSS: 1.25 },
+        constants: { CHROMA444: 1 },
     },
     primitive: { topology: 'triangle-list' },
 });

@@ -82,10 +82,6 @@ override GAZE : u32 = 0u;
 override FLAT_ZONE : u32 = 0u;
 override R_DOWN : f32 = 1.0;
 override LINEAR_LIGHT : u32 = 1u;
-override S_X2 : f32 = 2.0;
-override X2_BASE : u32 = 0u;
-override X2_FLAT : f32 = 0.0;
-override X2_R_ACROSS : f32 = 1.0;
 
 const LUMA : vec3f = vec3f(0.25, 0.625, 0.125);
 
@@ -215,7 +211,7 @@ fn flatPath(uv : vec2f, C : vec3f, zg : f32) -> vec3f {
 }
 
 // The exact bound: the four input texels around the pixel, the footprint of
-// its bilinear sample (DERING 1 and 2; the ×2 law's unsharp of the flat path).
+// its bilinear sample (DERING 1 and 2).
 fn texelBound(uv : vec2f, R : vec3f) -> vec3f {
     let dims = vec2i(textureDimensions(tex));
     let pt = uv * vec2f(dims) - 0.5;
@@ -257,40 +253,19 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         return vec4f(vec3f(zg), 1.0);
     }
     // Strength: none at 1:1 (the renderer copies the frame there), full from
-    // S_FULL on; and the ×2 law's weight (plan §12, J39): 0 up to S_FULL, 1
-    // from S_X2 on, sliding the X2_ constants in — neutral by default, so
-    // the kernel is the one before them, at the pixel.
+    // S_FULL on.
     let smin = min(u.scale.x, u.scale.y);
     let strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
-    let x2 = clamp((smin - S_FULL) / max(S_X2 - S_FULL, 0.001), 0.0, 1.0);
-    // The normal of the edge the derivatives measure.
-    let n = vec2f(gx, gy) * inverseSqrt(max(gx * gx + gy * gy, 1e-12));
     if (flat) {
-        var F = flatPath(uv, C, zg);
-        if (X2_FLAT > 0.0 && x2 > 0.0) {
-            // The law's unsharp of the flat path: the ridge across the (weak)
-            // gradient at R_ACROSS, taken off by X2_FLAT, bounded by the four
-            // texels — no halo, as on the edge path.
-            let dnf = n * u.texel * R_ACROSS;
-            let ridge = S(uv - dnf) + S(uv + dnf) - 2.0 * C;
-            F = texelBound(uv, F - (X2_FLAT * x2) * ridge);
-        }
-        return vec4f(F, 1.0);
+        return vec4f(flatPath(uv, C, zg), 1.0);
     }
-    // The taps along and across the edge; the across pair's distance slides
-    // to X2_R_ACROSS with the law.
+    // The normal of the edge the derivatives measure, and the taps along and
+    // across it.
+    let n = vec2f(gx, gy) * inverseSqrt(max(gx * gx + gy * gy, 1e-12));
     let dt = vec2f(-n.y, n.x) * u.texel * R_ALONG;
-    let dn = n * u.texel * (R_ACROSS + (X2_R_ACROSS - R_ACROSS) * x2);
-    // The blend's base: the bilinear sample, or (X2_BASE) the flat path's
-    // picture by the law's weight; the coherence reads the bilinear sample
-    // whatever the base.
-    var Cb = C;
-    if (X2_BASE == 1u && x2 > 0.0) {
-        Cb = C + (flatPath(uv, C, zg) - C) * x2;
-    }
+    let dn = n * u.texel * R_ACROSS;
     // From here the arithmetic is hf (f32, or f16 when the module says so).
-    let Ch = h3(Cb);
-    let Cc = h3(C);
+    let Ch = h3(C);
     let T1 = h3(S(uv - dt));
     let T2 = h3(S(uv + dt));
     let X1 = h3(S(uv - dn));
@@ -302,9 +277,9 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let lX2 = lumah(X2);
     var a : h3;
     if (CHROMA444 == 1u) {
-        a = h3(coherence(Cc.r, T1.r, T2.r, X1.r, X2.r),
-               coherence(Cc.g, T1.g, T2.g, X1.g, X2.g),
-               coherence(Cc.b, T1.b, T2.b, X1.b, X2.b)) * hf(strength);
+        a = h3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+               coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+               coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * hf(strength);
     } else {
         a = h3(coherence(lCh, lT1, lT2, lX1, lX2) * hf(strength));
     }

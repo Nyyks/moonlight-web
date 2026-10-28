@@ -58,10 +58,6 @@ const uint GAZE = 0u;
 const uint FLAT_ZONE = 0u;
 const float R_DOWN = 1.25;
 const uint LINEAR_LIGHT = 1u;
-const float S_X2 = 2.0;
-const uint X2_BASE = 0u;
-const float X2_FLAT = 0.0;
-const float X2_R_ACROSS = 1.0;
 
 const vec3 LUMA = vec3(0.25, 0.625, 0.125);
 

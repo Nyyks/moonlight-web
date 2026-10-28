@@ -135,22 +135,6 @@ static const float R_DOWN = MWSR_R_DOWN;
 #define MWSR_LINEAR_LIGHT 1u
 #endif
 static const uint LINEAR_LIGHT = MWSR_LINEAR_LIGHT;
-#ifndef MWSR_S_X2
-#define MWSR_S_X2 2.0
-#endif
-static const float S_X2 = MWSR_S_X2;
-#ifndef MWSR_X2_BASE
-#define MWSR_X2_BASE 0u
-#endif
-static const uint X2_BASE = MWSR_X2_BASE;
-#ifndef MWSR_X2_FLAT
-#define MWSR_X2_FLAT 0.0
-#endif
-static const float X2_FLAT = MWSR_X2_FLAT;
-#ifndef MWSR_X2_R_ACROSS
-#define MWSR_X2_R_ACROSS 1.0
-#endif
-static const float X2_R_ACROSS = MWSR_X2_R_ACROSS;
 
 static const float3 LUMA = float3(0.25, 0.625, 0.125);
 

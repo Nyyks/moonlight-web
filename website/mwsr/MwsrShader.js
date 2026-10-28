@@ -52,11 +52,7 @@
  *      left alone; the whole fades to C near 1:1;
  *   5. the result is bounded by the four input texels around the pixel
  *      (DERING 2, the default since J37: a line one texel wide keeps its
- *      depth, J35), or by the five samples first, then the texels (DERING 1);
- *   6. past S_FULL the ×2 law (the X2_ constants, plan §12, J39; all neutral
- *      by default) may slide in: the flat path's picture as the blend's base,
- *      an unsharp of the flat path bounded by the texels, the across pair's
- *      distance.
+ *      depth, J35), or by the five samples first, then the texels (DERING 1).
  *   With CHROMA444 (4:4:4 streams, plan §4.2) the vote, the coherence and the
  *   weights are taken per channel, so that a border between two colours of one
  *   luma is seen and sharpened too.
@@ -133,22 +129,6 @@ export const MWSR_OVERRIDE_SPEC = Object.freeze({
     R_DOWN: ['f32', 1.0],
     /** Reduction: 0 average the encoded values; 1 in gamma-2 light (square, square root); 2 in sRGB linear light (≤ 0.35 dB better, 15 pow per pixel); 3 the feed is linear light already (the HDR pass 0 wrote it), averaged as it comes and encoded by the sRGB transfer once, at the output. */
     LINEAR_LIGHT: ['u32', 1],
-    /** The ×2 law (plan §12, journal J39), for the blur Bruno sees at ×2: the scale from which the
-     *  three X2_ constants below weigh in full; they slide in from S_FULL, where the weight is 0,
-     *  so that the kernel is the one before them up to there. All three are neutral by default
-     *  (laboratory parameters; a floor under the coherence and a cap by the scale were measured
-     *  dead at ×2, J39). */
-    S_X2: ['f32', 2.0],
-    /** 1: the edge path blends from the flat path's picture (FLAT_TAPS) instead of the bilinear
-     *  sample, by the law's weight: the reconstruction a texture's pixel loses when its coherence
-     *  sends it to the edge path, where a low coherence leaves it the bilinear sample. */
-    X2_BASE: ['u32', 0],
-    /** The flat path's unsharp at the law's full weight: this times the ridge across the (weak)
-     *  gradient at R_ACROSS is taken off, bounded by the four texels around the pixel (0: none). */
-    X2_FLAT: ['f32', 0],
-    /** R_ACROSS at the law's full weight (R_ACROSS's own value: no change): 1.25 for text, 0.75
-     *  for a game's soft edges at ×2 (J39), no common value. */
-    X2_R_ACROSS: ['f32', 1.0],
 });
 
 /** The defaults alone, name → value. */
@@ -592,7 +572,7 @@ fn flatPath(uv : vec2f, C : vec3f, zg : f32) -> vec3f {
 }
 
 // The exact bound: the four input texels around the pixel, the footprint of
-// its bilinear sample (DERING 1 and 2; the ×2 law's unsharp of the flat path).
+// its bilinear sample (DERING 1 and 2).
 fn texelBound(uv : vec2f, R : vec3f) -> vec3f {
     let dims = vec2i(textureDimensions(tex));
     let pt = uv * vec2f(dims) - 0.5;
@@ -634,40 +614,19 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         return vec4f(vec3f(zg), 1.0);
     }
     // Strength: none at 1:1 (the renderer copies the frame there), full from
-    // S_FULL on; and the ×2 law's weight (plan §12, J39): 0 up to S_FULL, 1
-    // from S_X2 on, sliding the X2_ constants in — neutral by default, so
-    // the kernel is the one before them, at the pixel.
+    // S_FULL on.
     let smin = min(u.scale.x, u.scale.y);
     let strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
-    let x2 = clamp((smin - S_FULL) / max(S_X2 - S_FULL, 0.001), 0.0, 1.0);
-    // The normal of the edge the derivatives measure.
-    let n = vec2f(gx, gy) * inverseSqrt(max(gx * gx + gy * gy, 1e-12));
     if (flat) {
-        var F = flatPath(uv, C, zg);
-        if (X2_FLAT > 0.0 && x2 > 0.0) {
-            // The law's unsharp of the flat path: the ridge across the (weak)
-            // gradient at R_ACROSS, taken off by X2_FLAT, bounded by the four
-            // texels — no halo, as on the edge path.
-            let dnf = n * u.texel * R_ACROSS;
-            let ridge = S(uv - dnf) + S(uv + dnf) - 2.0 * C;
-            F = texelBound(uv, F - (X2_FLAT * x2) * ridge);
-        }
-        return vec4f(F, 1.0);
+        return vec4f(flatPath(uv, C, zg), 1.0);
     }
-    // The taps along and across the edge; the across pair's distance slides
-    // to X2_R_ACROSS with the law.
+    // The normal of the edge the derivatives measure, and the taps along and
+    // across it.
+    let n = vec2f(gx, gy) * inverseSqrt(max(gx * gx + gy * gy, 1e-12));
     let dt = vec2f(-n.y, n.x) * u.texel * R_ALONG;
-    let dn = n * u.texel * (R_ACROSS + (X2_R_ACROSS - R_ACROSS) * x2);
-    // The blend's base: the bilinear sample, or (X2_BASE) the flat path's
-    // picture by the law's weight; the coherence reads the bilinear sample
-    // whatever the base.
-    var Cb = C;
-    if (X2_BASE == 1u && x2 > 0.0) {
-        Cb = C + (flatPath(uv, C, zg) - C) * x2;
-    }
+    let dn = n * u.texel * R_ACROSS;
     // From here the arithmetic is hf (f32, or f16 when the module says so).
-    let Ch = h3(Cb);
-    let Cc = h3(C);
+    let Ch = h3(C);
     let T1 = h3(S(uv - dt));
     let T2 = h3(S(uv + dt));
     let X1 = h3(S(uv - dn));
@@ -679,9 +638,9 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let lX2 = lumah(X2);
     var a : h3;
     if (CHROMA444 == 1u) {
-        a = h3(coherence(Cc.r, T1.r, T2.r, X1.r, X2.r),
-               coherence(Cc.g, T1.g, T2.g, X1.g, X2.g),
-               coherence(Cc.b, T1.b, T2.b, X1.b, X2.b)) * hf(strength);
+        a = h3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+               coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+               coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * hf(strength);
     } else {
         a = h3(coherence(lCh, lT1, lT2, lX1, lX2) * hf(strength));
     }
@@ -934,26 +893,14 @@ void main() {
     }
     float smin = min(uTexelScale.z, uTexelScale.w);
     float strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
-    float x2 = clamp((smin - S_FULL) / max(S_X2 - S_FULL, 0.001), 0.0, 1.0);
-    vec2 n = vec2(gx, gy) * inversesqrt(max(gx * gx + gy * gy, 1e-12));
     if (isFlat) {
-        vec3 F = flatPath(uv, C, zg);
-        if (X2_FLAT > 0.0 && x2 > 0.0) {
-            vec2 dnf = n * uTexelScale.xy * R_ACROSS;
-            vec3 ridge = S(uv - dnf) + S(uv + dnf) - 2.0 * C;
-            F = texelBound(uv, F - (X2_FLAT * x2) * ridge);
-        }
-        oColor = vec4(F, 1.0);
+        oColor = vec4(flatPath(uv, C, zg), 1.0);
         return;
     }
+    vec2 n = vec2(gx, gy) * inversesqrt(max(gx * gx + gy * gy, 1e-12));
     vec2 dt = vec2(-n.y, n.x) * uTexelScale.xy * R_ALONG;
-    vec2 dn = n * uTexelScale.xy * (R_ACROSS + (X2_R_ACROSS - R_ACROSS) * x2);
-    vec3 Cb = C;
-    if (X2_BASE == 1u && x2 > 0.0) {
-        Cb = C + (flatPath(uv, C, zg) - C) * x2;
-    }
-    mediump vec3 Ch = Cb;
-    mediump vec3 Cc = C;
+    vec2 dn = n * uTexelScale.xy * R_ACROSS;
+    mediump vec3 Ch = C;
     mediump vec3 T1 = S(uv - dt);
     mediump vec3 T2 = S(uv + dt);
     mediump vec3 X1 = S(uv - dn);
@@ -965,9 +912,9 @@ void main() {
     mediump float lX2 = lumah(X2);
     mediump vec3 a;
     if (CHROMA444 == 1u) {
-        a = vec3(coherence(Cc.r, T1.r, T2.r, X1.r, X2.r),
-                 coherence(Cc.g, T1.g, T2.g, X1.g, X2.g),
-                 coherence(Cc.b, T1.b, T2.b, X1.b, X2.b)) * strength;
+        a = vec3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+                 coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+                 coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * strength;
     } else {
         a = vec3(coherence(lCh, lT1, lT2, lX1, lX2) * strength);
     }
@@ -1317,25 +1264,13 @@ float4 MwsrPS(VSOut i) : SV_Target {
     }
     float smin = min(scale.x, scale.y);
     float strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
-    float x2 = clamp((smin - S_FULL) / max(S_X2 - S_FULL, 0.001), 0.0, 1.0);
-    float2 n = float2(gx, gy) * rsqrt(max(gx * gx + gy * gy, 1e-12));
     if (isFlat) {
-        float3 F = flatPath(uv, C, zg);
-        if (X2_FLAT > 0.0 && x2 > 0.0) {
-            float2 dnf = n * texel * R_ACROSS;
-            float3 ridge = S(uv - dnf) + S(uv + dnf) - 2.0 * C;
-            F = texelBound(uv, F - (X2_FLAT * x2) * ridge);
-        }
-        return float4(F, 1.0);
+        return float4(flatPath(uv, C, zg), 1.0);
     }
+    float2 n = float2(gx, gy) * rsqrt(max(gx * gx + gy * gy, 1e-12));
     float2 dt = float2(-n.y, n.x) * texel * R_ALONG;
-    float2 dn = n * texel * (R_ACROSS + (X2_R_ACROSS - R_ACROSS) * x2);
-    float3 Cb = C;
-    if (X2_BASE == 1u && x2 > 0.0) {
-        Cb = C + (flatPath(uv, C, zg) - C) * x2;
-    }
-    h3 Ch = (h3)Cb;
-    h3 Cc = (h3)C;
+    float2 dn = n * texel * R_ACROSS;
+    h3 Ch = (h3)C;
     h3 T1 = (h3)S(uv - dt);
     h3 T2 = (h3)S(uv + dt);
     h3 X1 = (h3)S(uv - dn);
@@ -1347,9 +1282,9 @@ float4 MwsrPS(VSOut i) : SV_Target {
     hf lX2 = lumah(X2);
     h3 a;
     if (CHROMA444 == 1u) {
-        a = h3(coherence(Cc.r, T1.r, T2.r, X1.r, X2.r),
-               coherence(Cc.g, T1.g, T2.g, X1.g, X2.g),
-               coherence(Cc.b, T1.b, T2.b, X1.b, X2.b)) * (hf)strength;
+        a = h3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+               coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+               coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * (hf)strength;
     } else {
         a = (coherence(lCh, lT1, lT2, lX1, lX2) * (hf)strength).xxx;
     }

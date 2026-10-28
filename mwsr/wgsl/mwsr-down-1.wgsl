@@ -82,10 +82,6 @@ override GAZE : u32 = 0u;
 override FLAT_ZONE : u32 = 0u;
 override R_DOWN : f32 = 1.0;
 override LINEAR_LIGHT : u32 = 1u;
-override S_X2 : f32 = 2.0;
-override X2_BASE : u32 = 0u;
-override X2_FLAT : f32 = 0.0;
-override X2_R_ACROSS : f32 = 1.0;
 
 const LUMA : vec3f = vec3f(0.25, 0.625, 0.125);
 

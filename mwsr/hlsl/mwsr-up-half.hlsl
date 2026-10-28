@@ -135,22 +135,6 @@ static const float R_DOWN = MWSR_R_DOWN;
 #define MWSR_LINEAR_LIGHT 1u
 #endif
 static const uint LINEAR_LIGHT = MWSR_LINEAR_LIGHT;
-#ifndef MWSR_S_X2
-#define MWSR_S_X2 2.0
-#endif
-static const float S_X2 = MWSR_S_X2;
-#ifndef MWSR_X2_BASE
-#define MWSR_X2_BASE 0u
-#endif
-static const uint X2_BASE = MWSR_X2_BASE;
-#ifndef MWSR_X2_FLAT
-#define MWSR_X2_FLAT 0.0
-#endif
-static const float X2_FLAT = MWSR_X2_FLAT;
-#ifndef MWSR_X2_R_ACROSS
-#define MWSR_X2_R_ACROSS 1.0
-#endif
-static const float X2_R_ACROSS = MWSR_X2_R_ACROSS;
 
 static const float3 LUMA = float3(0.25, 0.625, 0.125);
 
@@ -294,25 +278,13 @@ float4 MwsrPS(VSOut i) : SV_Target {
     }
     float smin = min(scale.x, scale.y);
     float strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
-    float x2 = clamp((smin - S_FULL) / max(S_X2 - S_FULL, 0.001), 0.0, 1.0);
-    float2 n = float2(gx, gy) * rsqrt(max(gx * gx + gy * gy, 1e-12));
     if (isFlat) {
-        float3 F = flatPath(uv, C, zg);
-        if (X2_FLAT > 0.0 && x2 > 0.0) {
-            float2 dnf = n * texel * R_ACROSS;
-            float3 ridge = S(uv - dnf) + S(uv + dnf) - 2.0 * C;
-            F = texelBound(uv, F - (X2_FLAT * x2) * ridge);
-        }
-        return float4(F, 1.0);
+        return float4(flatPath(uv, C, zg), 1.0);
     }
+    float2 n = float2(gx, gy) * rsqrt(max(gx * gx + gy * gy, 1e-12));
     float2 dt = float2(-n.y, n.x) * texel * R_ALONG;
-    float2 dn = n * texel * (R_ACROSS + (X2_R_ACROSS - R_ACROSS) * x2);
-    float3 Cb = C;
-    if (X2_BASE == 1u && x2 > 0.0) {
-        Cb = C + (flatPath(uv, C, zg) - C) * x2;
-    }
-    h3 Ch = (h3)Cb;
-    h3 Cc = (h3)C;
+    float2 dn = n * texel * R_ACROSS;
+    h3 Ch = (h3)C;
     h3 T1 = (h3)S(uv - dt);
     h3 T2 = (h3)S(uv + dt);
     h3 X1 = (h3)S(uv - dn);
@@ -324,9 +296,9 @@ float4 MwsrPS(VSOut i) : SV_Target {
     hf lX2 = lumah(X2);
     h3 a;
     if (CHROMA444 == 1u) {
-        a = h3(coherence(Cc.r, T1.r, T2.r, X1.r, X2.r),
-               coherence(Cc.g, T1.g, T2.g, X1.g, X2.g),
-               coherence(Cc.b, T1.b, T2.b, X1.b, X2.b)) * (hf)strength;
+        a = h3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+               coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+               coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * (hf)strength;
     } else {
         a = (coherence(lCh, lT1, lT2, lX1, lX2) * (hf)strength).xxx;
     }

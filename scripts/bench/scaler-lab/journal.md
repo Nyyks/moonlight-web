@@ -3004,3 +3004,32 @@ juste. »
 - la page interactive `moonlightweb.top/mwsr/`, déployée avec le site, avec le temps GPU par lots (le comparateur
   mesure par image, au plancher de 1 ms sur NVIDIA, J37) ;
 - un NIS en compute shader, si Bruno veut le comparer à son vrai coût.
+
+## 2026-10-28 — J54, la loi ×2 retirée (A29)
+
+**La décision.** Bruno, le 28/10 au soir, par 59 : « Si on doit faire quelques tests avec le Shader, alors je
+souhaiterai en profiter pour supprimer X2 pour la v0.4.1 ». A29, prévue pour la v0.4.2, passe donc avant le tag.
+
+**Ce qui part.**
+- Les quatre constantes de la loi ×2 de J39 : `S_X2`, `X2_BASE`, `X2_FLAT` et `X2_R_ACROSS`. Elles étaient
+  neutres par défaut, et le produit ne les a jamais réglées.
+- Leur code, dans les trois jumeaux (WGSL, GLSL, HLSL) :
+  - le chemin plat rend son cubique tel quel ;
+  - la paire en travers est à `R_ACROSS` ;
+  - la base du mélange et la cohérence lisent le même échantillon bilinéaire (`Ch`) ;
+  - la normale de l'arête n'est plus calculée sur le chemin plat.
+- Leurs réglages : dans le labo (`mwsr:sx2`, `x2base`, `x2flat`, `x2racross`), dans le comparateur (`x2b`, `x2r`,
+  `x2f`, leurs curseurs et leurs liens), et dans le README de `mwsr/` (le tableau des constantes, les deux
+  paragraphes qui le suivaient, la valeur conseillée « texte à ×2 », l'exemple 4:4:4).
+- L'instabilité de `X2_FLAT` d'un GPU à l'autre, notée en J52, disparaît avec elle.
+
+**Vérifié, sur SwiftShader et WARP seulement** :
+- dorés (`--golden-check`) : OK avant et après, au bit près ;
+- conformité des jumeaux WebGPU et WebGL2 (`--conformity`, les deux côtés) : OK, FLIP 0,000, au plus 0,05 dB ;
+- jumeau HLSL sur WARP contre WGSL sur SwiftShader (`mwsrdist/conform.py`, les 12 cas hors loi ×2) : les mêmes
+  chiffres qu'en J52, cas par cas ;
+- `node mwsr/generate.mjs --check`, `node scripts/website/build-site.mjs --check` (la page `/mwsr/` copie le
+  module), 184 fichiers de tests et 1962 tests verts.
+
+Aucun GPU réel n'a servi : le code retiré ne tournait pas aux valeurs par défaut, et les dorés le montrent au bit
+près. À l'œil de Bruno, comme avant, le ×2 (720p → 1440p) sur texte et sur jeu.

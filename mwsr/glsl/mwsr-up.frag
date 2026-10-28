@@ -58,10 +58,6 @@ const uint GAZE = 0u;
 const uint FLAT_ZONE = 0u;
 const float R_DOWN = 1.0;
 const uint LINEAR_LIGHT = 1u;
-const float S_X2 = 2.0;
-const uint X2_BASE = 0u;
-const float X2_FLAT = 0.0;
-const float X2_R_ACROSS = 1.0;
 
 const vec3 LUMA = vec3(0.25, 0.625, 0.125);
 
@@ -211,26 +207,14 @@ void main() {
     }
     float smin = min(uTexelScale.z, uTexelScale.w);
     float strength = clamp((smin - 1.0) / (S_FULL - 1.0), 0.0, 1.0);
-    float x2 = clamp((smin - S_FULL) / max(S_X2 - S_FULL, 0.001), 0.0, 1.0);
-    vec2 n = vec2(gx, gy) * inversesqrt(max(gx * gx + gy * gy, 1e-12));
     if (isFlat) {
-        vec3 F = flatPath(uv, C, zg);
-        if (X2_FLAT > 0.0 && x2 > 0.0) {
-            vec2 dnf = n * uTexelScale.xy * R_ACROSS;
-            vec3 ridge = S(uv - dnf) + S(uv + dnf) - 2.0 * C;
-            F = texelBound(uv, F - (X2_FLAT * x2) * ridge);
-        }
-        oColor = vec4(F, 1.0);
+        oColor = vec4(flatPath(uv, C, zg), 1.0);
         return;
     }
+    vec2 n = vec2(gx, gy) * inversesqrt(max(gx * gx + gy * gy, 1e-12));
     vec2 dt = vec2(-n.y, n.x) * uTexelScale.xy * R_ALONG;
-    vec2 dn = n * uTexelScale.xy * (R_ACROSS + (X2_R_ACROSS - R_ACROSS) * x2);
-    vec3 Cb = C;
-    if (X2_BASE == 1u && x2 > 0.0) {
-        Cb = C + (flatPath(uv, C, zg) - C) * x2;
-    }
-    mediump vec3 Ch = Cb;
-    mediump vec3 Cc = C;
+    vec2 dn = n * uTexelScale.xy * R_ACROSS;
+    mediump vec3 Ch = C;
     mediump vec3 T1 = S(uv - dt);
     mediump vec3 T2 = S(uv + dt);
     mediump vec3 X1 = S(uv - dn);
@@ -242,9 +226,9 @@ void main() {
     mediump float lX2 = lumah(X2);
     mediump vec3 a;
     if (CHROMA444 == 1u) {
-        a = vec3(coherence(Cc.r, T1.r, T2.r, X1.r, X2.r),
-                 coherence(Cc.g, T1.g, T2.g, X1.g, X2.g),
-                 coherence(Cc.b, T1.b, T2.b, X1.b, X2.b)) * strength;
+        a = vec3(coherence(Ch.r, T1.r, T2.r, X1.r, X2.r),
+                 coherence(Ch.g, T1.g, T2.g, X1.g, X2.g),
+                 coherence(Ch.b, T1.b, T2.b, X1.b, X2.b)) * strength;
     } else {
         a = vec3(coherence(lCh, lT1, lT2, lX1, lX2) * strength);
     }
