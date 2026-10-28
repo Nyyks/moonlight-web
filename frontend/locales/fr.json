@@ -545,7 +545,7 @@
         "packetMarkingOn": "Le prochain stream sera prioritaire sur le réseau",
         "packetMarkingOff": "Le prochain stream partagera le réseau comme les autres appareils",
         "vdExclusive": "Éteindre les autres écrans pendant le stream",
-        "vdExclusiveDesc": "Pendant un stream sur l'écran virtuel, les autres écrans de ce PC s'éteignent. Ils se rallument à la fin du stream. S'ils restent noirs, appuyez sur Windows+P et choisissez Étendre. S'applique au prochain stream.",
+        "vdExclusiveDesc": "Seulement pour l'hôte natif MoonlightWeb de ce PC, et seulement quand vous streamez son écran virtuel. Pendant un tel stream, les autres écrans de ce PC s'éteignent. Ils se rallument à la fin du stream. S'ils restent noirs, appuyez sur Windows+P et choisissez Étendre. S'applique au prochain stream.",
         "vdExclusiveOn": "Activé au prochain stream",
         "vdExclusiveOff": "Désactivé au prochain stream",
         "autostart": "Lancer MoonlightWeb à l'ouverture de session",

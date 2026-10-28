@@ -545,7 +545,7 @@
         "packetMarkingOn": "The next stream will have priority on the network",
         "packetMarkingOff": "The next stream will share the network like any other device",
         "vdExclusive": "Turn off the other screens during the stream",
-        "vdExclusiveDesc": "While a stream runs on the virtual display, this PC's other screens go dark. They come back on when the stream ends. If they stay dark, press Windows+P and choose Extend. Applies from the next stream.",
+        "vdExclusiveDesc": "Only for this PC's MoonlightWeb native host, and only when you stream its virtual display. While such a stream runs, this PC's other screens go dark. They come back on when the stream ends. If they stay dark, press Windows+P and choose Extend. Applies from the next stream.",
         "vdExclusiveOn": "On from the next stream",
         "vdExclusiveOff": "Off from the next stream",
         "autostart": "Start MoonlightWeb when I log in",
