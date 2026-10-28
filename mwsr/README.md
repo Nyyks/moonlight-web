@@ -103,16 +103,26 @@ times are those of the port, not of NIS.
 
 What each one does:
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/support-dark.svg">
+  <img alt="What each one does: the table below, each cell marked as meeting the need, with a condition or a limit, or not" src="docs/support-light.svg">
+</picture>
+
+<details>
+<summary>The same table as text</summary>
+
 | | MWSR | FSR1 | NIS | SGSR1 |
 |---|---|---|---|---|
-| Upscale | any factor | 1× to 4× the area | 1× to 2× per axis | yes |
+| Upscale | any factor | 1× to 4× the area (2× per axis) | 1× to 2× per axis | yes, no stated limit |
 | Downscale | yes: an area filter in linear light, 1 to 16 samples | no | no: refused | no |
 | HDR | yes: unchanged on a float texture past 1.0 | through a reversible tone map around it (`FsrSrtm`) | yes: `NIS_HDR_MODE`, linear or PQ | no: its output is clamped to 0..1 |
 | 4:4:4 colour edges | yes, with `CHROMA444`: the vote and the weights per channel | no: edges from the luma | no: edges from the luma | no: edges from green |
 | Input | an RGB texture: 8-bit, read through sRGB views or not, or 16-bit float | RGB in 0..1, perceptual | RGB, or NV12 (`NIS_NV12_SUPPORT`) | RGB in 0..1 |
-| Precision | 32-bit, or 16-bit | 32-bit, or packed 16-bit | 32-bit, or 16-bit | 16-bit (`half`) |
+| Precision | 32-bit, or 16-bit | 32-bit, or packed 16-bit | 32-bit, or 16-bit | 16-bit (`half`) only |
 | Passes | 1 | 2 | 1 (compute) | 1 |
 | Licence | MIT | MIT | MIT | BSD-3-Clause |
+
+</details>
 
 **How it was measured** (28/10/2026):
 - **The pictures.** The native frame is a 4K screenshot of 0 A.D. reduced to 2560×1440, or the lab's text chart drawn
@@ -157,7 +167,7 @@ The 0 A.D. picture is © Wildfire Games; the screenshot is by PantheraLeo1359531
 | `cpp/example_d3d11.cpp` | A whole Direct3D 11 integration in one file, which also serves as a test: it reads a PNG, draws it at another size and writes a PNG. |
 | `js/MwsrShader.js` | The JavaScript module the shaders come from: it writes the texts with any parameters, picks the mode for a scale and fills the uniform block. |
 | `generate.mjs` | Writes this folder from MoonlightWeb's own module (`node mwsr/generate.mjs`). |
-| `docs/` | The figures of [the comparison](#next-to-fsr1-nis-and-sgsr1): the zooms, and the two charts in light and dark. |
+| `docs/` | The figures of [the comparison](#next-to-fsr1-nis-and-sgsr1): the zooms, then the two charts and the table, in light and dark. |
 
 Every shader here is generated from the module MoonlightWeb runs, so what you take is what the product draws. The
 WGSL, GLSL and HLSL texts are twins, written from the same tables of constants. MoonlightWeb's lab holds the GLSL
