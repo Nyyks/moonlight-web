@@ -272,19 +272,20 @@ void mask(std::vector<WinKeyEvent>& out)
 }
 
 /// From the modifiers that are down to the ones wanted: let go first, then
-/// press, so a level is never briefly both. An Alt down without Ctrl is masked
-/// before anything under it is let go, and after it is pressed alone. Under a
-/// Ctrl, Windows reads Alt as an ordinary key, which opens nothing.
+/// press, so a level is never briefly both. An Alt that is down is masked
+/// before anything under it is let go, and after it is pressed: whatever reads
+/// its release then has a key after its press.
 ///
-/// The right Alt of an AltGr is masked before it goes up too: whatever reads
-/// its release then has a key after its press. Without it, Notepad's KeyTips
-/// came on after an @, from a US Mac's keys (25/10/2026) and from a phone's
-/// text (28/10/2026).
+/// Under a Ctrl too. Windows reads Alt there as an ordinary key, but Notepad
+/// does not: its KeyTips came on after an @, from a US Mac's keys (25/10/2026)
+/// and a phone's text through the right Alt of the AltGr (28/10/2026), and
+/// from a Windows AltGr, whose Alt goes back down here after the key and is let
+/// go by the client after its Ctrl (28/10/2026).
 void transition(Mods& now, const Mods& want, std::vector<WinKeyEvent>& out)
 {
     const bool letsGo = (now.shift && !want.shift) || (now.alt && !want.alt) ||
                         (now.altGr && !want.altGr) || (now.ctrl && !want.ctrl);
-    if ((letsGo && now.alt && !now.ctrl) || (now.altGr && !want.altGr)) mask(out);
+    if ((letsGo && now.alt) || (now.altGr && !want.altGr)) mask(out);
     if (now.shift && !want.shift) pushKey(out, VK_SHIFT, kShiftScan, false, true);
     if (now.alt && !want.alt) pushKey(out, VK_MENU, kAltScan, false, true);
     if (now.altGr && !want.altGr) {
@@ -299,7 +300,7 @@ void transition(Mods& now, const Mods& want, std::vector<WinKeyEvent>& out)
     if (!now.ctrl && want.ctrl) pushKey(out, VK_CONTROL, kCtrlScan, false, false);
     if (!now.alt && want.alt) {
         pushKey(out, VK_MENU, kAltScan, false, false);
-        if (!want.ctrl) mask(out);
+        mask(out);
     }
     if (!now.altGr && want.altGr) pushKey(out, VK_MENU, kAltScan, true, false);
     if (!now.shift && want.shift) pushKey(out, VK_SHIFT, kShiftScan, false, false);
