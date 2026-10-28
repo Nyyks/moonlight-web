@@ -104,15 +104,27 @@ address changed hands out the current form without being revoked.
   so the bootstrap infers it. The bootstrap carries the token across the handover
   and the guest's page ends up at `/p#{id}&t={token}`. A link minted before this
   and spelling the page out (`#p=/p&t={token}`) is still honoured.
+- Otherwise, with a `domain` of your own in `settings.json` ([Settings §7.5](07-Settings-Reference.md#75-bring-your-own-domain--certificate)):
+  `https://{domain}/p/{token}`, no port (the 443 forward is part of serving it),
+  `reach: "domain"`.
+- Otherwise, the address the owner opened the board on: the `Host` their
+  browser sent, or `X-Forwarded-Host` from a reverse proxy on this PC or its
+  LAN — `https://{that name}[:port]/p/{token}`. Never loopback, never over the
+  rendezvous tunnel. An IP of this PC keeps its network's `reach` (`lan`,
+  `tailscale`, `other`); a private address that is not one of its networks is
+  skipped; a `.local`, `.lan`, `.home.arpa` or single-label name is `lan`, a
+  `.ts.net` name `tailscale`, anything else (a public name or IP) `direct`.
 - Otherwise: `https://{the host's default-route LAN IPv4}[:port]/p/{token}`, and `local_only` is **true**.
   Self-signed, same network only. Never loopback — the guest is on another PC.
 
-That is Automatic. The owner can pin a host's links to one network on its board
-(`POST /api/share/link-address`): `https://{that address}[:port]/p/{token}`, the
+That is Automatic. The owner can pin a host's links to one address on its board
+(`POST /api/share/link-address`): their domain (`domain`, offered first when set),
+or `https://{that address}[:port]/p/{token}`, the
 LAN even with a line up, Tailscale's 100.x, or another card's address. The
 networks that exist only inside the PC (Hyper-V's Default Switch, WSL,
 VirtualBox, VMware, Docker, libvirt) are never offered. `reach` says where the
-link opens from: `public`, `lan`, `tailscale` or `other`. A pinned network that
+link opens from: `public`, `domain`, `direct`, `lan`, `tailscale` or `other`;
+the board says nothing about `domain` and `direct`, which it cannot test. A pinned network that
 is gone (Tailscale disconnected) gives the Automatic link with
 `link_address_missing: true`, and the pick is kept.
 

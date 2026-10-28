@@ -22,6 +22,7 @@
 #include "network/UPNPClient.h"
 #include "server/AuthManager.h"
 #include "server/HttpServer.h"
+#include "server/NetClassify.h"
 #include "server/RestRouter.h"
 #include "server/routes/LogRoutes.h"
 
@@ -131,20 +132,33 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
 
     RestRouter* router = server.router();
 
+    // The networks the board offers, the owner's own domain first when
+    // settings.json names one.
+    auto menu = [&server]() {
+        return LinkAddresses::withDomain(LinkAddresses::choices(LinkAddresses::readAdapters()),
+                                         server.domain());
+    };
+
     // The address a guest opens, whole.
     //
-    // The owner may have pinned the host's links to one network on its board
-    // (LinkAddresses): the LAN, Tailscale, another card. That address is used as
-    // long as this PC still has it; once it is gone (Tailscale disconnected) the
-    // link falls back to Automatic and says so, and the pick is kept for when it
-    // comes back.
+    // The owner may have pinned the host's links to one address on its board
+    // (LinkAddresses): their domain, the LAN, Tailscale, another card. That
+    // address is used as long as this PC still has it; once it is gone
+    // (Tailscale disconnected) the link falls back to Automatic and says so,
+    // and the pick is kept for when it comes back.
     //
     // Automatic: the rendezvous answers it whenever this machine has a line to the outside:
     // the path names the machine and the invitation rides in the fragment, where
-    // the introduction server never sees it. When there is no such line the only
-    // thing left to offer is this machine's own LAN address, which reaches a
-    // guest on the same network and nobody else — so the caller is told, and the
-    // board says so rather than letting an owner send a link that cannot open.
+    // the introduction server never sees it. Without that line, in this order:
+    //   - the owner's own domain (settings.json "domain"), which they serve on
+    //     443 with their own certificate (issue #41);
+    //   - the address the owner opened this board on: a name or a forward that
+    //     reached this PC from their browser leads a guest to it too. Never
+    //     loopback, never the rendezvous tunnel, and only ever an owner's
+    //     request: both routes that build a link are on the owner's side;
+    //   - this machine's own LAN address, which reaches a guest on the same
+    //     network and nobody else — so the caller is told, and the board says
+    //     so rather than letting an owner send a link that cannot open.
     //
     // Never loopback either way: the guest is on another PC.
     //
@@ -153,16 +167,26 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
     // LAN-only, or the reverse — a rare disagreement, and the kind nobody would
     // ever reproduce.
     //
-    // `reach` names where the link opens from (public, lan, tailscale, other);
-    // `local_only` is kept for a board that predates it.
+    // `reach` names where the link opens from (public, domain, direct, lan,
+    // tailscale, other); `local_only` is kept for a board that predates it.
+    // "domain" and "direct" go straight to this PC under a name or a forward
+    // nothing here can test, so the board claims nothing about them.
     //
     // Copied into the route closures, and holds only references to objects that
     // outlive them (all three live in main).
-    auto fillLink = [&deps, &server, &share](QJsonObject& obj, const QString& token,
-                                             const QString& hostUuid) {
+    auto fillLink = [&deps, &server, &share, menu](QJsonObject& obj, const QString& token,
+                                                   const QString& hostUuid,
+                                                   const HttpRequest& req) {
         const QString wanted = share.linkAddress(hostUuid);
-        const QList<LinkAddresses::Choice> list =
-            LinkAddresses::choices(LinkAddresses::readAdapters());
+        const QList<LinkAddresses::Choice> list = menu();
+        const QString path = QStringLiteral("/p/") + token;
+        auto direct = [&obj, &path](const QString& origin, const QString& reach) {
+            obj[QStringLiteral("url")] = origin + path;
+            obj[QStringLiteral("reach")] = reach;
+            obj[QStringLiteral("local_only")] = reach == QLatin1String("lan") ||
+                                                reach == QLatin1String("tailscale") ||
+                                                reach == QLatin1String("other");
+        };
         std::optional<LinkAddresses::Choice> pinned;
         if (wanted != QLatin1String("auto")) {
             pinned = LinkAddresses::find(list, wanted);
@@ -176,17 +200,34 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
                 obj[QStringLiteral("local_only")] = false;
                 return;
             }
-            pinned = LinkAddresses::find(list, QStringLiteral("lan"));
+            pinned = LinkAddresses::find(list, QStringLiteral("domain"));
+            if (!pinned && !req.viaTunnel) {
+                // A reverse proxy in front of this PC names the address the
+                // browser used; anyone else's word for it is the Host itself.
+                const NetClassify::Kind peer = NetClassify::classify(req.clientAddress);
+                QString authority;
+                if (peer == NetClassify::Kind::Loopback || peer == NetClassify::Kind::Private)
+                    authority = req.headers.value(QStringLiteral("x-forwarded-host"))
+                                    .section(QLatin1Char(','), 0, 0)
+                                    .trimmed();
+                if (authority.isEmpty()) authority = req.headers.value(QStringLiteral("host"));
+                if (const auto board = LinkAddresses::boardOrigin(authority, list)) {
+                    direct(board->origin, board->reach);
+                    return;
+                }
+            }
+            if (!pinned) pinned = LinkAddresses::find(list, QStringLiteral("lan"));
+        }
+        if (pinned && pinned->kind == LinkAddresses::Kind::Domain) {
+            direct(QStringLiteral("https://") + pinned->address, QStringLiteral("domain"));
+            return;
         }
         const QString address = pinned ? pinned->address : lanIPv4();
         const quint16 port = server.activeHttpsPort();
         const QString origin = port == 443 ? QStringLiteral("https://%1").arg(address)
                                            : QStringLiteral("https://%1:%2").arg(address).arg(port);
-        obj[QStringLiteral("url")] = origin + QStringLiteral("/p/") + token;
-        obj[QStringLiteral("reach")] =
-            pinned ? QString::fromLatin1(LinkAddresses::kindName(pinned->kind))
-                   : QStringLiteral("lan");
-        obj[QStringLiteral("local_only")] = true;
+        direct(origin, pinned ? QString::fromLatin1(LinkAddresses::kindName(pinned->kind))
+                              : QStringLiteral("lan"));
     };
 
     // ── Owner side ──────────────────────────────────────────────────────────
@@ -197,7 +238,7 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
     // GET /api/share/status[?host=<uuid>] — the rows of the sharing board, and
     // the guests' picture height for the host it was opened on (the one being
     // streamed when none is named).
-    router->get(QStringLiteral("/api/share/status"), [&share, &deps](const HttpRequest& req) {
+    router->get(QStringLiteral("/api/share/status"), [&share, &deps, menu](const HttpRequest& req) {
         // Not named `slots`: Qt's moc keyword macro would eat it.
         QJsonArray slotArray;
         for (const ShareManager::SlotStatus& st : share.status())
@@ -223,8 +264,7 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
         obj[QStringLiteral("shared_feed")] = picture.shared;
         // The address menu, and this host's pick. A pick whose network this PC
         // no longer has stays the pick; the board says it is missing.
-        const QList<LinkAddresses::Choice> list =
-            LinkAddresses::choices(LinkAddresses::readAdapters());
+        const QList<LinkAddresses::Choice> list = menu();
         const QString pick = share.linkAddress(hostUuid);
         obj[QStringLiteral("link_addresses")] = linkAddressesJson(list);
         obj[QStringLiteral("link_address")] = pick;
@@ -236,15 +276,14 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
     // POST /api/share/link-address — {host_uuid, link_address}: the address the
     // host's guest links carry from now on. A live share keeps its token and
     // PIN; the board asks for its credentials again and shows the new link.
-    router->post(QStringLiteral("/api/share/link-address"), [&share](const HttpRequest& req) {
+    router->post(QStringLiteral("/api/share/link-address"), [&share, menu](const HttpRequest& req) {
         const QJsonObject body = QJsonDocument::fromJson(req.body).object();
         const QString hostUuid = body.value(QStringLiteral("host_uuid")).toString();
         const QString id = body.value(QStringLiteral("link_address")).toString();
         if (hostUuid.isEmpty()) return HttpResponse::error(400, "Pick a host");
         // Only what the menu offers right now: an id that names no network of
         // this PC would just fall back to Automatic behind the owner's back.
-        if (id != QLatin1String("auto") &&
-            !LinkAddresses::find(LinkAddresses::choices(LinkAddresses::readAdapters()), id))
+        if (id != QLatin1String("auto") && !LinkAddresses::find(menu(), id))
             return HttpResponse::error(400, "Unknown address");
         if (!share.setLinkAddress(hostUuid, id)) return HttpResponse::error(400, "Unknown address");
         QJsonObject obj;
@@ -304,7 +343,7 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
                          return HttpResponse::error(500, "Could not share this slot");
 
                      QJsonObject obj = slotJson(st);
-                     fillLink(obj, token, hostUuid);
+                     fillLink(obj, token, hostUuid, req);
                      obj[QStringLiteral("pin")] = pin;
                      return HttpResponse::json(obj);
                  });
@@ -330,7 +369,7 @@ void registerShareRoutes(HttpServer& server, ShareManager& share, const ShareRou
                          return HttpResponse::json(obj);
                      }
                      obj[QStringLiteral("available")] = true;
-                     fillLink(obj, token, share.hostForSlot(slot));
+                     fillLink(obj, token, share.hostForSlot(slot), req);
                      obj[QStringLiteral("pin")] = pin;
                      return HttpResponse::json(obj);
                  });

@@ -129,6 +129,7 @@ void testIdsAndLookup()
 {
     SECTION("link addresses: the ids the board may store, and a pick that is gone");
     CHECK(LinkAddresses::isValidId(QStringLiteral("auto")));
+    CHECK(LinkAddresses::isValidId(QStringLiteral("domain")));
     CHECK(LinkAddresses::isValidId(QStringLiteral("lan")));
     CHECK(LinkAddresses::isValidId(QStringLiteral("tailscale")));
     CHECK(LinkAddresses::isValidId(QStringLiteral("iface:wg0")));
@@ -145,6 +146,69 @@ void testIdsAndLookup()
     CHECK(!LinkAddresses::find(LinkAddresses::choices(cards), QStringLiteral("tailscale")));
 }
 
+void testOwnDomainLeadsTheMenu()
+{
+    SECTION("link addresses: the owner's own domain comes first, and only when there is one");
+    const QList<LinkAddresses::Choice> none =
+        LinkAddresses::withDomain(LinkAddresses::choices(dualRtx()), QString());
+    CHECK_EQ(none.size(), 2);
+    CHECK(!LinkAddresses::find(none, QStringLiteral("domain")));
+
+    const QList<LinkAddresses::Choice> list = LinkAddresses::withDomain(
+        LinkAddresses::choices(dualRtx()), QStringLiteral("stream.example.org"));
+    CHECK_EQ(list.size(), 3);
+    CHECK_EQ(list.value(0).id, QStringLiteral("domain"));
+    CHECK(list.value(0).kind == LinkAddresses::Kind::Domain);
+    CHECK_EQ(list.value(0).address, QStringLiteral("stream.example.org"));
+    CHECK_EQ(QString::fromLatin1(LinkAddresses::kindName(list.value(0).kind)),
+             QStringLiteral("domain"));
+    CHECK_EQ(list.value(1).id, QStringLiteral("lan"));
+}
+
+void testBoardOrigin()
+{
+    SECTION("link addresses: the address the owner opened the board on (issue #41)");
+    const QList<LinkAddresses::Choice> list = LinkAddresses::choices(dualRtx());
+    auto origin = [&list](const char* authority) {
+        const auto o = LinkAddresses::boardOrigin(QString::fromLatin1(authority), list);
+        return o ? o->origin + QLatin1Char(' ') + o->reach : QStringLiteral("-");
+    };
+
+    // A name behind the owner's reverse proxy, on 443: no port in the link.
+    CHECK_EQ(origin("moonlight.sidefix.example"),
+             QStringLiteral("https://moonlight.sidefix.example direct"));
+    CHECK_EQ(origin("Moonlight.Sidefix.Example:443"),
+             QStringLiteral("https://moonlight.sidefix.example direct"));
+    CHECK_EQ(origin("moonlight.sidefix.example:8443"),
+             QStringLiteral("https://moonlight.sidefix.example:8443 direct"));
+    // This PC's own addresses keep the network they belong to.
+    CHECK_EQ(origin("192.168.1.66:8443"), QStringLiteral("https://192.168.1.66:8443 lan"));
+    CHECK_EQ(origin("100.116.41.43:8443"), QStringLiteral("https://100.116.41.43:8443 tailscale"));
+    // A public address came through the owner's forward.
+    CHECK_EQ(origin("203.0.113.7:8443"), QStringLiteral("https://203.0.113.7:8443 direct"));
+    // Names only the owner's own networks resolve.
+    CHECK_EQ(origin("dualrtx:8443"), QStringLiteral("https://dualrtx:8443 lan"));
+    CHECK_EQ(origin("dualrtx.local:8443"), QStringLiteral("https://dualrtx.local:8443 lan"));
+    CHECK_EQ(origin("nas.home.arpa"), QStringLiteral("https://nas.home.arpa lan"));
+    CHECK_EQ(origin("dualrtx.tail1234.ts.net"),
+             QStringLiteral("https://dualrtx.tail1234.ts.net tailscale"));
+
+    // Never a link that leads a guest to their own machine, nor into this PC.
+    CHECK_EQ(origin("localhost:8443"), QStringLiteral("-"));
+    CHECK_EQ(origin("app.localhost"), QStringLiteral("-"));
+    CHECK_EQ(origin("127.0.0.1:8443"), QStringLiteral("-"));
+    CHECK_EQ(origin("[::1]:8443"), QStringLiteral("-"));
+    CHECK_EQ(origin("169.254.10.2"), QStringLiteral("-"));
+    CHECK_EQ(origin("172.29.128.1:8443"), QStringLiteral("-")); // Hyper-V's Default Switch
+    // Nothing but a host and a port.
+    CHECK_EQ(origin(""), QStringLiteral("-"));
+    CHECK_EQ(origin("user@example.org"), QStringLiteral("-"));
+    CHECK_EQ(origin("example.org/evil"), QStringLiteral("-"));
+    CHECK_EQ(origin("exa mple.org"), QStringLiteral("-"));
+    CHECK_EQ(origin("example.org\"\"onload"), QStringLiteral("-"));
+    CHECK_EQ(origin("-bad.example"), QStringLiteral("-"));
+}
+
 } // namespace
 
 void run_link_addresses_tests()
@@ -156,4 +220,6 @@ void run_link_addresses_tests()
     testTailscaleIsNeverTheLan();
     testUnusableAddressesAreDropped();
     testIdsAndLookup();
+    testOwnDomainLeadsTheMenu();
+    testBoardOrigin();
 }

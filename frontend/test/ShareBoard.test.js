@@ -475,6 +475,24 @@ describe('ShareBoard', () => {
             expect(reachOf(2).dataset.reach).toBe('lanOnly');
         });
 
+        // Issue #41: the owner's own domain, or the name they opened the board
+        // on, reaches this PC without the rendezvous line. Whether it answers
+        // is not something the board can see, so it claims nothing.
+        it.each(['domain', 'direct'])(
+            'says nothing about a %s link, even with no line out',
+            async (where) => {
+                BackendClient.shareCredentials.mockResolvedValue({
+                    available: true,
+                    url: 'https://moonlight.example.org/p/tok',
+                    pin: '482917',
+                    reach: where,
+                    local_only: false,
+                });
+                await openBoard([live(), slot(3), slot(4)], undefined, { remote_reachable: false });
+                expect(reachOf(2)).toBeNull();
+            },
+        );
+
         it('says nothing on a row that was never opened', async () => {
             await openBoard([slot(2), slot(3), slot(4)], undefined, { remote_reachable: false });
             expect(reachOf(2)).toBeNull();
@@ -522,6 +540,25 @@ describe('ShareBoard', () => {
             });
             expect([...menu().options].map((o) => o.value)).toEqual(['auto', 'lan', 'tailscale']);
             expect(menu().value).toBe('tailscale');
+        });
+
+        it("offers the owner's own domain first, under its name", async () => {
+            await openBoard([slot(2), slot(3), slot(4)], undefined, {
+                link_addresses: [
+                    networks[0],
+                    { id: 'domain', kind: 'domain', address: 'moonlight.example.org', adapter: '' },
+                    ...networks.slice(1),
+                ],
+                link_address: 'domain',
+            });
+            expect([...menu().options].map((o) => o.value)).toEqual([
+                'auto',
+                'domain',
+                'lan',
+                'tailscale',
+            ]);
+            expect(menu().value).toBe('domain');
+            expect(menu().options[1].textContent).toContain('sharing.linkAddressDomain');
         });
 
         it('stores the pick for this host and reads the live link again', async () => {

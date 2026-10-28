@@ -489,6 +489,7 @@ export class ShareBoard {
 
     /** The name a pick goes by in a sentence: "Tailscale", a card's own name. */
     _linkAddressName(id = this._linkAddress) {
+        if (id === 'domain') return t('sharing.networkDomain');
         if (id === 'lan') return t('sharing.networkLan');
         if (id === 'tailscale') return 'Tailscale';
         const entry = this._linkAddresses.find((a) => a.id === id);
@@ -499,6 +500,7 @@ export class ShareBoard {
     _linkAddressLabel(entry) {
         if (entry.id === 'auto') return t('sharing.linkAddressAuto');
         const vars = { address: entry.address, name: entry.adapter };
+        if (entry.kind === 'domain') return t('sharing.linkAddressDomain', vars);
         if (entry.kind === 'lan') return t('sharing.linkAddressLan', vars);
         if (entry.kind === 'tailscale') return t('sharing.linkAddressTailscale', vars);
         return t('sharing.linkAddressOther', vars);
@@ -656,13 +658,17 @@ export class ShareBoard {
         //
         // A link the owner pinned to one network says which, rather than
         // pointing at internet access as if the LAN were an accident.
+        //
+        // The owner's own domain, or the name they opened this board on
+        // ("domain", "direct"), goes straight to this PC by a road nothing here
+        // can test: no sentence either way.
         let reach = '';
         if (live && creds?.available !== false) {
             const where = creds?.reach || (creds?.local_only ? 'lan' : 'public');
             if (where === 'lan') reach = this._linkAddress === 'lan' ? 'reachLan' : 'lanOnly';
             else if (where === 'tailscale') reach = 'reachTailscale';
             else if (where === 'other') reach = 'reachOther';
-            else if (!this._remoteReachable) reach = 'offline';
+            else if (where === 'public' && !this._remoteReachable) reach = 'offline';
         }
 
         // Built, then hidden by CSS (.share-warning). The badge already names

@@ -195,6 +195,8 @@ Confirm in `logs/moonlightweb.log`: `SSL certificate loaded: CN=stream.example.c
 
 **5. Internet Access — optional.** With a custom domain it registers nothing and requests no certificate; it re-detects the public IP, tests NAT hairpin, and allows the per-slot media mapping (`RouterPortAllocator::enabled()` = `upnp_enabled && internet_access_enabled`). Turn it off and the 48550+ mappings become manual too. `GET /api/internet/status` reports `custom_domain: true` in that mode.
 
+**Guest links.** With internet access off, the links of the sharing board's invitations carry `https://{domain}/p/{token}` instead of the LAN address. With it on, Automatic stays the rendezvous link; pick *Your domain* in the board's **Link address** menu to hand out your own name instead ([REST API §8.3b](08-REST-API.md#83b-session-sharing-shareroutescpp)).
+
 The host machine's **own** entry points — tray menu, Desktop shortcut, browser auto-open — stay on `https://localhost:<port>` whatever you configure here. They are not built from `domain` at all: the tray resolves its address at the click and prefers the entry link with a single-use host key, everything else is written down ahead of the click and stays on loopback. Your domain is for every *other* device.
 
 Authentication is unchanged: remote devices still need the admin PIN or the certificate-auth token file (see [Security](06-Security.md)).
