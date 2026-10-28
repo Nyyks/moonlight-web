@@ -57,12 +57,13 @@ export function appVersionOf(manifestVersion) {
 }
 
 /**
- * Whether production refuses an interface that is not official. False while the
- * verdict is only written to the console, for long enough to know that no
- * genuine machine is turned away by a list that is wrong; the day it becomes
- * true, sw.js's copy of it changes with it.
+ * Whether production refuses an interface that is not official. True from
+ * v0.4.1: every official release that reaches this server has its list, held
+ * against its packages. False puts production back to writing its verdict in
+ * the console and nothing more — the way back if a list turned a genuine
+ * machine away. sw.js's copy changes with it.
  */
-export const PRODUCTION_ENFORCES = false;
+export const PRODUCTION_ENFORCES = true;
 
 /**
  * How strictly this page holds a machine to the list, by the name it was served

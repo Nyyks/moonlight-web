@@ -124,10 +124,10 @@ jobs:
   # not match its tag would turn away every machine of that release. Each list
   # is rebuilt here from its tag, and one whose release is not tagged yet from
   # the commit itself, which is the one that will be tagged. On a v* tag the
-  # release's own list must be in the tagged commit, and — once production
-  # refuses rather than reports — production must serve it before a package is
-  # built: a machine that installs the release before the server knows it would
-  # be refused.
+  # release's own list must be in the tagged commit, and — while production
+  # refuses rather than reports (PRODUCTION_ENFORCES) — production must serve it
+  # before a package is built: a machine that installs the release before the
+  # server knows it would be refused.
   interface-lists:
     name: Official interface lists
     runs-on: ubuntu-latest

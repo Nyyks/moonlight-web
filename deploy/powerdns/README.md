@@ -736,12 +736,17 @@ will be tagged. The bootstrap watchdog compares them like the scripts.
   waits for `stream.` to serve the list (up to 45 minutes) and builds no
   package until then; a machine that installs the release earlier is refused.
 - **Where it is enforced**: staging refuses a release whose files differ from
-  its list, and lets a build between releases through. Production only
-  reports in the browser console until `PRODUCTION_ENFORCES` is set to true in
-  both `official.js` and `sw.js` and shipped with a `srv-` tag.
-- **Builds between releases are refused by production** once it enforces:
-  CI's `staging` channel (`x.y.z.gSHA-stg`) included. Point them at staging
+  its list, and lets a build between releases through. Production refuses
+  from v0.4.1 (`PRODUCTION_ENFORCES`, in both `official.js` and `sw.js`); it
+  only reported in the browser console before.
+- **Builds between releases are refused by production**: CI's `staging`
+  channel (`x.y.z.gSHA-stg`) included. Point them at staging
   (`MW_DOMAIN=dev.{MW_DOMAIN}`, above).
+- **The way back**, if a list turns genuine machines away: set
+  `PRODUCTION_ENFORCES` to false in both files on a commit over the running
+  tag, tag it `srv-<date>`, and deploy that tag. Only `bootstrap/` changes, so
+  nothing is rebuilt; the bootstrap is served `no-cache`, so every browser
+  reports instead of refusing on its next visit.
 
 ## Contents
 

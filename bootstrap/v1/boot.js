@@ -499,9 +499,10 @@ function writeStamp(hostId, version) {
  * is not part of the interface is never stored, so never served.
  *
  * How strictly depends on where this page was served from (interfacePolicy):
- * the staging server refuses, production only reports until it is switched
- * over. A build between two releases has no list; the staging server lets it
- * through, and its own hashes keep the cache honest as before.
+ * the staging server refuses, and production too while PRODUCTION_ENFORCES is
+ * set; otherwise production only reports. A build between two releases has no
+ * list; the staging server lets it through, and its own hashes keep the cache
+ * honest as before.
  */
 const policy = interfacePolicy(location.hostname);
 

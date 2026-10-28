@@ -47,7 +47,7 @@ const SW_REVISION = 2;
  * what the machine answers on /api/ is never taken as code. Elsewhere it does
  * what it always did.
  */
-const PRODUCTION_ENFORCES = false;
+const PRODUCTION_ENFORCES = true;
 const ENFORCED = /^stream\.dev\./.test(self.location.hostname) || PRODUCTION_ENFORCES;
 
 /**
