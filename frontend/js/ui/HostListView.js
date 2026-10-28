@@ -794,6 +794,10 @@ export class HostListView {
                 h.currentGameId,
                 h.resumableApps,
                 h.restartSupported,
+                // The native host's display state: without it here a virtual
+                // display going off never reaches the card, nor the app list
+                // the card then asks for again.
+                h.nativeDisplay,
             ]),
         );
     }
