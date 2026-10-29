@@ -194,12 +194,14 @@
         within 4/255 on 99.9 % of the pixels. The pictures and the scores are those of the 32-bit texts. Timings vary
         with the GPU's clock: run them twice before you trust a small gap.</li>
       <li><strong>4:2:0</strong> gives every upscaler the input a 4:2:0 stream would give it: its colour averaged over
-        2×2 pixels and brought back by interpolation, as a decoder hands it over. <code>CHROMA444</code> is MWSR's mode
-        for 4:4:4 streams. It is off by default, as in the README's figures, and the colour text shows what it does.
-        This page makes both inputs itself, so every GPU shows them. A 4:4:4 stream needs more: a host whose encoder
-        makes it (on MoonlightWeb's own host, NVENC in H.264 or HEVC) and a browser that decodes it. MoonlightWeb
-        streams it in 8-bit SDR, offers it only where the browser says it decodes it, and then turns
-        <code>CHROMA444</code> on by itself.</li>
+        2×2 pixels and brought back by interpolation, as a decoder hands it over. This page makes both inputs itself,
+        so every GPU shows them. A 4:4:4 stream needs more: a host whose encoder makes it (on MoonlightWeb's own host,
+        NVENC in H.264 or HEVC) and a browser that decodes it. MoonlightWeb streams it in 8-bit SDR and offers it only
+        where the browser says it decodes it.</li>
+      <li><strong>MWSR sharpens colour edges too</strong> runs <code>CHROMA444</code>, the mode MoonlightWeb turns on by
+        itself for a 4:4:4 stream: MWSR then also sharpens the border between two colours of one brightness, as in
+        coloured text or code. Zoom on the colour text to see it. It does nothing on 4:2:0, whose colours are already
+        blurred, and it is off by default, as in the README's figures.</li>
       <li><strong>HDR</strong>: the pictures are the lab's, drawn by this page with 1.0 = 203 nits and highlights up to
         1000 nits. MWSR and bilinear read the floats past 1.0 as they are. FSR1 runs inside AMD's reversible tone map
         (<code>FsrSrtm</code>), as AMD prescribes. NIS and SGSR1 run inside the same tone map, because neither port
