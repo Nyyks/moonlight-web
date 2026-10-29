@@ -178,6 +178,31 @@ FLIP plus bas = plus proche.
 - Le lissage le long du bord (`W_ALONG` 0,22 ou 0,3) et le cubique des zones plates (`FLAT_C` 0,33 ou
   0,75) ne changent presque rien. On les garde.
 
+**La courbe, après la question de Bruno** (même banc, la netteté de 0 à 3 par pas de 0,25, plus le
+code coloré du labo ; les courbes et les planches restent hors dépôt). Bruno juge d'abord sur le
+texte, parce qu'on juge la netteté en lisant. Il trouve aussi 0,83 un peu flou sur le jeu à ×2, malgré
+la fidélité. La « netteté mesurée » est la moyenne du gradient de la luma, en % de celle du natif.
+
+| Image | Meilleure SSIM luma à ×1,33 | à ×2 |
+|---|---|---|
+| Texte | 2,25 (96,13) | 2,5 (86,78) |
+| Code coloré | 0,5 (98,23) | 0,25 (95,34) |
+| 0 A.D. | 1,5 (86,12) | 1,25 (66,25) |
+| Étalon | 1,25 (93,91) | 0,83 (86,29) |
+
+- Le FLIP veut toujours moins d'affûtage, entre 0,5 et 1,0. C'est lui qui tirait vers 1,25, et l'œil
+  trouve ce réglage trop doux. La 1re proposition (1,25, soit 0,83 à ×2) est retirée.
+- **À ×1,33, on garde 1,85.** Il reste à 0,3 point au plus du meilleur de chaque image (texte −0,17,
+  0 A.D. −0,20, étalon −0,27, code −0,20). Le meilleur au pire cas serait 1,75 (−0,24 au plus) : un
+  écart invisible.
+- **À ×2, la loi donne 1,23.** 0 A.D. y est à son meilleur, mais le texte perd 0,66 point.
+  - Compromis, 1,5 : texte +0,35, 0 A.D. −0,08, étalon −0,41, code −0,23. Les contours du jeu
+    deviennent aussi nets que ceux de FSR1 (netteté mesurée 48,6 % contre 48,8 %).
+  - Texte d'abord, 2,0 : texte +0,60, mais 0 A.D. −0,84, étalon −1,18, code −0,57.
+- La loi du compromis : la netteté descend de 1,85 à ×1,33 jusqu'à 1,5 au lieu de 1,23, puis y
+  reste. C'est un plancher dans `mwsrSharpness`. Il faut le vérifier à ×1,5 avant d'y toucher, et
+  rien n'entre au produit sans le oui de Bruno.
+
 **Les variantes YUV** (texte, 1080p → 1440p, plans BT.709 à plage limitée) :
 
 | Cellule | SSIM | SSIM luma | FLIP |
