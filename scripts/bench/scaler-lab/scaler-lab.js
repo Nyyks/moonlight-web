@@ -13,6 +13,8 @@
 //   set=feed,base,chain          which cells (see CELL_SETS), or cells=a,b,c
 //   codec=avc|none               VideoFrames from a WebCodecs encode → decode
 //                                loop (the external-texture feed), or none
+//   enc=sw                       that encode in software (plan B §6: never the
+//                                encoder on the GPU that decodes and is timed)
 //   pace=back|tick period=16.67  back to back, or one iteration per period
 //   batch=16 batches=8 warm=2 rounds=3   the measurement (ABBA across rounds)
 //   power=high-performance|low-power fallback=1   which adapter
@@ -600,7 +602,7 @@ async function makePicture(kind, w, h, k) {
 
 // ── the video frames ───────────────────────────────────────────────────────
 
-async function makeFrames(pictures, codec, log) {
+async function makeFrames(pictures, codec, log, encSw = false) {
   const w = pictures[0].width;
   const h = pictures[0].height;
   // H.264 High at the level the picture needs: 5.0 holds 1440p60 (22080
@@ -617,16 +619,16 @@ async function makeFrames(pictures, codec, log) {
     bitrate: 20_000_000,
     framerate: 60,
     latencyMode: "realtime",
-    hardwareAcceleration: "prefer-hardware",
+    hardwareAcceleration: encSw ? "prefer-software" : "prefer-hardware",
   };
   if (codec !== "hevc") encConfig.avc = { format: "annexb" };
   else encConfig.hevc = { format: "annexb" };
   let sup = await VideoEncoder.isConfigSupported(encConfig);
-  if (!sup.supported) {
+  if (!sup.supported && !encSw) {
     encConfig.hardwareAcceleration = "no-preference";
     sup = await VideoEncoder.isConfigSupported(encConfig);
-    if (!sup.supported) throw new Error("no encoder for " + codecString);
   }
+  if (!sup.supported) throw new Error("no encoder for " + codecString + (encSw ? " in software" : ""));
   const encHw = encConfig.hardwareAcceleration;
   let encErr = null;
   const encoder = new VideoEncoder({
@@ -787,7 +789,8 @@ async function runGlLab(p, log, ctx) {
   if (bad.length) throw new Error("gl=1 runs chain-gl-* cells only, not " + bad.join(","));
   const pictures = [];
   for (let k = 0; k < 12; k++) pictures.push(await makePicture(content, inW, inH, k));
-  const made = codec !== "none" ? await makeFrames(pictures, codec, log) : makeRgbaFrames(pictures);
+  const made =
+    codec !== "none" ? await makeFrames(pictures, codec, log, p.enc === "sw") : makeRgbaFrames(pictures);
   const frames = made.frames;
   log("frames: " + JSON.stringify(made.info));
   const { WebGlRenderer } = await import(WEBGL_RENDERER_URL);
@@ -1108,11 +1111,11 @@ async function runLabInner(p, log) {
   let frames = [];
   let frameInfo = null;
   const needExt = cellNames.some(
-    (c) => c.startsWith("ext") || c.startsWith("blit") || c.startsWith("chain"),
+    (c) => c.startsWith("ext") || c.startsWith("blit") || c.startsWith("chain") || c.startsWith("split"),
   );
   if (codec !== "none" && needExt && pictures.length) {
     try {
-      const r = await makeFrames(pictures, codec, log);
+      const r = await makeFrames(pictures, codec, log, p.enc === "sw");
       frames = r.frames;
       frameInfo = r.info;
     } catch (e) {
