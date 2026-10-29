@@ -700,8 +700,9 @@ void StreamRelay::onWsTextMessage(const QString& message)
         // depends on the host (IMediaEngine::sendSecureAttention).
         m_Shim->sendSecureAttention();
     } else if (type == "textinput") {
-        // Virtual/soft keyboard text (UTF-8) — forwarded as a text event.
-        m_Shim->sendUtf8Text(msg["text"].toString());
+        // Virtual/soft keyboard text: as text, or as US keys on a host that
+        // cannot type text without an input method (InputMsg::planText).
+        InputMsg::sendText(*m_Shim, msg["text"].toString());
     } else if (type == "locksync") {
         // Align the host's toggle locks (Num/Caps/Scroll) with the client's,
         // sent once per session on the browser's first real keyboard event.

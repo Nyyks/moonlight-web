@@ -619,4 +619,108 @@ inline void sendKey(IMediaEngine& engine, const QJsonObject& msg, bool down, boo
                         withHold && msg["hold"].toBool(false));
 }
 
+/// The key a US keyboard types @p c with, and whether it takes Shift. False for
+/// a character no US key carries (an accent, an emoji, a control character).
+inline bool usKeyOf(QChar c, short& vk, bool& shift)
+{
+    const char16_t u = c.unicode();
+    shift = false;
+    if (u >= 'a' && u <= 'z') {
+        vk = static_cast<short>(u - 'a' + 'A');
+        return true;
+    }
+    if (u >= 'A' && u <= 'Z') {
+        vk = static_cast<short>(u);
+        shift = true;
+        return true;
+    }
+    if (u >= '0' && u <= '9') {
+        vk = static_cast<short>(u);
+        return true;
+    }
+    static constexpr struct
+    {
+        char16_t plain, shifted;
+        short vk;
+    } kKeys[] = {
+        {' ', 0, 0x20},   {'\n', 0, 0x0D},   {'\t', 0, 0x09},  {';', ':', 0xBA},  {'=', '+', 0xBB},
+        {',', '<', 0xBC}, {'-', '_', 0xBD},  {'.', '>', 0xBE}, {'/', '?', 0xBF},  {'`', '~', 0xC0},
+        {'[', '{', 0xDB}, {'\\', '|', 0xDC}, {']', '}', 0xDD}, {'\'', '"', 0xDE}, {0, ')', '0'},
+        {0, '!', '1'},    {0, '@', '2'},     {0, '#', '3'},    {0, '$', '4'},     {0, '%', '5'},
+        {0, '^', '6'},    {0, '&', '7'},     {0, '*', '8'},    {0, '(', '9'},
+    };
+    for (const auto& k : kKeys) {
+        if (u == k.plain || (k.shifted && u == k.shifted)) {
+            vk = k.vk;
+            shift = u == k.shifted;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// One step of typing a string: a key pressed and released (its US position,
+/// Shift in the modifier byte), or a run of text.
+struct TextStep
+{
+    short keyCode = 0;
+    bool shift = false;
+    QString text;
+
+    bool isText() const { return !text.isEmpty(); }
+};
+
+/// How the touch keyboard's text reaches a host running @p mode.
+///
+/// Everywhere but a positional host it goes as text, which those hosts inject
+/// exactly. A positional host — Wolf, Sunshine on Linux — types text through
+/// the GTK/IBus sequence (Ctrl+Shift+U, hex, space), and a session with no
+/// input method running gets nothing, or the hex digits: a game in a Wolf
+/// container took no letter at all from a phone, while its arrows worked and
+/// the official app typed fine (issue #44, 28/10/2026). So a character a US
+/// key carries goes as that key, Shift riding in the modifier byte, which
+/// Wolf and Sunshine both press around the key — what Moonlight for Android
+/// does with its soft keyboard (Game.java, handleKeyDown). The host's layout
+/// decides what the key types, as it does for the physical keyboard on these
+/// hosts. Only what no US key carries is left to text.
+inline QVector<TextStep> planText(const QString& text, KeyboardMode mode)
+{
+    QVector<TextStep> steps;
+    if (text.isEmpty()) return steps;
+    if (mode != KeyboardMode::Positional) {
+        steps.append({0, false, text});
+        return steps;
+    }
+    QString run;
+    for (const QChar c : text) {
+        short vk = 0;
+        bool shift = false;
+        if (!usKeyOf(c, vk, shift)) {
+            run += c;
+            continue;
+        }
+        if (!run.isEmpty()) {
+            steps.append({0, false, run});
+            run.clear();
+        }
+        steps.append({vk, shift, QString()});
+    }
+    if (!run.isEmpty()) steps.append({0, false, run});
+    return steps;
+}
+
+/// Type the touch keyboard's @p text on the host (see planText).
+inline void sendText(IMediaEngine& engine, const QString& text)
+{
+    for (const TextStep& step : planText(text, engine.keyboardMode())) {
+        if (step.isText()) {
+            engine.sendUtf8Text(step.text);
+            continue;
+        }
+        const char mods = step.shift ? MODIFIER_SHIFT : 0;
+        engine.sendKeyEvent(step.keyCode, true, mods, 0);
+        engine.sendKeyEvent(step.keyCode, false, mods, 0);
+    }
+}
+
 } // namespace InputMsg

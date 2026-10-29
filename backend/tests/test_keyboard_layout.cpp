@@ -706,4 +706,39 @@ void run_keyboard_layout_tests()
         CHECK(InputMsg::parseLayoutFidelity("") == LayoutFidelity::Auto);
         CHECK(InputMsg::parseLayoutFidelity("true") == LayoutFidelity::Auto);
     }
+
+    // ── The touch keyboard's text ────────────────────────────────────────────
+    //
+    // A positional host — Wolf, Sunshine on Linux — types text through IBus,
+    // and a game with no input method got no letter at all from a phone
+    // (issue #44). There, what a US key carries goes as that key, Shift in the
+    // modifier byte; only the rest stays text, in order.
+    {
+        using InputMsg::planText;
+        const auto steps = planText(QStringLiteral("aZ1!?é😀 x"), KeyboardMode::Positional);
+        CHECK_EQ(steps.size(), 8);
+        if (steps.size() == 8) {
+            CHECK(!steps[0].isText() && steps[0].keyCode == 0x41 && !steps[0].shift);
+            CHECK(!steps[1].isText() && steps[1].keyCode == 0x5A && steps[1].shift);
+            CHECK(!steps[2].isText() && steps[2].keyCode == 0x31 && !steps[2].shift);
+            CHECK(!steps[3].isText() && steps[3].keyCode == 0x31 && steps[3].shift);
+            CHECK(!steps[4].isText() && steps[4].keyCode == 0xBF && steps[4].shift);
+            // The accent and the emoji (a surrogate pair) stay one run of text.
+            CHECK(steps[5].text == QStringLiteral("é😀"));
+            CHECK(!steps[6].isText() && steps[6].keyCode == 0x20 && !steps[6].shift);
+            CHECK(!steps[7].isText() && steps[7].keyCode == 0x58 && !steps[7].shift);
+        }
+        // Every printable ASCII character has its US key.
+        for (char16_t u = 0x20; u < 0x7F; ++u) {
+            short vk = 0;
+            bool shift = false;
+            CHECK(InputMsg::usKeyOf(QChar(u), vk, shift));
+        }
+        // Hosts that inject text exactly keep it, untouched.
+        for (KeyboardMode mode : {KeyboardMode::Native, KeyboardMode::SunshineWindows}) {
+            const auto kept = planText(QStringLiteral("aZ1!"), mode);
+            CHECK(kept.size() == 1 && kept[0].text == QStringLiteral("aZ1!"));
+        }
+        CHECK(planText(QString(), KeyboardMode::Positional).isEmpty());
+    }
 }
