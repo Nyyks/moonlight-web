@@ -285,9 +285,27 @@ la loi vient de la vérification à ×1,5 et à ×1,75, sur les mêmes images :
 - **V5 confirme P0 et P2** : lire la texture externe à chaque prise coûte plus que la passe 0.
 - **V6** (la chroma d'après Y) **et V7** (le fondu HDR) ne sont pas codées : pas de temps.
 - **Reste à mesurer**, si Bruno veut V2 dans le produit :
-  - le f16, que le produit prend sur les GPU intégrés AMD ;
-  - un téléphone ;
+  - ~~le f16, que le produit prend sur les GPU intégrés AMD~~ : fait le 29/10, ci-dessous ;
+  - un téléphone : le realme Note 60, le 29/10 au soir (décision de Bruno) ;
   - le natif (D3D11 sur WARP, puis un GPU), où V2 lit les plans du décodeur sans aucune passe 0.
+
+**Le f16 sur l'iGPU (29/10, 18:10-18:12, créneau de 59, l'iGPU seul).** SwiftShader n'a pas
+`shader-f16` et Chrome n'expose pas WARP : la V2 en f16 a compilé pour la première fois là.
+- Elle rend comme la f32 : 0,0002 de SSIM au plus (×2, texte et 0 A.D. du comparateur).
+- Temps en f16, au p50, sur le jeu et le texte du labo (clip encodé en logiciel, décodé sur l'iGPU) :
+
+| Cas | Chaîne du produit (passe 0 + MWSR) | Chaîne V2 | Écart | Noyau V0 | Noyau V2 | Écart |
+|---|---|---|---|---|---|---|
+| ×2, jeu | 2,40 ms | 2,02 ms | −16 % | 2,30 ms | 1,85 ms | −20 % |
+| ×2, texte | 2,81 ms | 2,44 ms | −13 % | 2,70 ms | 2,25 ms | −17 % |
+| ×1,33, jeu | 2,67 ms | 2,39 ms | −10 % | 2,66 ms | 2,20 ms | −17 % |
+| ×1,33, texte | 3,04 ms | 2,75 ms | −10 % | 2,79 ms | 2,34 ms | −16 % |
+
+- **Le f16 ne gagne presque plus rien sur cet iGPU** : V0 −0 à −2 % contre la f32. V2 est même un
+  peu plus lente en f16 (+0,3 à +1,9 %) : elle ne calcule qu'une valeur, la luma, alors que le f16 gagne
+  surtout en traitant trois couleurs à la fois. En P2.3, le f16 valait −9 à −10 % ; le noyau a changé
+  depuis. Un Mali calcule souvent deux fois plus vite en f16 : le realme peut dire l'inverse.
+- Le labo lit le clip en VP9 logiciel (`codec=vp9`) si un téléphone n'a pas de H.264 logiciel.
 - **Le vrai Radeon 780M, plus tard** (oui de Bruno, 29/10) : les temps du README, et ceux de V2, sur
   l'UM790Pro. Ce sera quand elle sera libre ; elle est sous Ubuntu pour les tests du clavier.
 
@@ -345,3 +363,65 @@ dépôt).
 - Si Bruno veut l'essayer à l'œil : la version globale lissée, avec deux réglages choisis à l'œil
   (texte ou jeu), pour 2 à 5 % de temps GPU. Elle attend un détecteur de texte plus solide que ceux
   testés ici.
+
+## 11. Netteté adaptative : l'analyse à part et l'auto-test (29/10/2026, idée de Bruno)
+
+Bruno, après le §10 : l'analyse n'a pas à être dans le rendu. Elle tourne à part, à intervalle
+régulier, et produit une grille que MWSR lit comme un paramètre.
+- C'est l'architecture du §10 b-d (grille 16 × 9, lue au bilinéaire, lissée sur 0,3 s), en moins
+  souvent.
+- Le navigateur n'a qu'une file GPU, sans priorité basse : « à part » veut dire une image sur N, ou le
+  travail réparti sur plusieurs images. Un renderer natif peut avoir une file de calcul à basse
+  priorité.
+- On moyenne les résultats de l'analyse, pas les images : le lissage du §10 c le fait déjà.
+
+**Ce que ça permet : un auto-test à rebours.** L'analyse peut coûter plus cher, donc mesurer au lieu
+de deviner.
+- Le client n'a pas l'image native, mais il a l'image reçue L. Il la réduit du même facteur, la
+  remonte avec MWSR à plusieurs nettetés, et garde celle qui retrouve le mieux L, par tuile.
+- Hypothèse : une image se ressemble d'une échelle à l'autre.
+- Banc : les images reçues du balayage du §8 (×2 : 1280 × 720 ; ×1,33 : 1920 × 1080), 13 nettetés, sur
+  SwiftShader. L'oracle du §10 juge le choix (`b-self/judge.py`, hors dépôt).
+- Images mixtes : la moitié gauche d'une image et la moitié droite d'une autre (24 paires).
+
+| Lecture | Images seules (8 cas) | Images mixtes (24 cas) |
+|---|---|---|
+| Oracle global, contre la loi | +0,09 à +0,98 | 0 à +0,65 |
+| Oracle par tuiles | +0,18 à +0,99 | +0,20 à +0,97 |
+| Auto-test global | −0,06 à +0,39 | −0,17 à +0,31 |
+| Auto-test par tuiles | −0,07 à +0,56 | +0,03 à +0,49 |
+| Auto-test par tuiles, jamais sous la loi | −0,01 à +0,31 | −0,02 à +0,15 |
+
+- **L'auto-test trouve le réglage là où les mesures du §10 échouaient.**
+  - À ×2, il choisit exactement l'oracle sur le texte (2,5) et 0 A.D. (1,25) ; l'étalon à 0,25 près.
+  - À ×1,33, il choisit exactement l'oracle sur 0 A.D. et l'étalon ; le texte à 0,5 près (1,75 au lieu
+    de 2,25).
+  - Le code coloré le trompe aux deux échelles (1,5 au lieu de 0,25 à 0,5), sans perte contre la loi.
+  - Les mesures simples du §10 faisaient perdre jusqu'à 4,6 points au texte ; l'auto-test, 0,07 au
+    pire.
+- **Une calibration apprise sur les autres images échoue** (texte −2,5 à −4,9). Le choix brut de
+  l'auto-test est le bon.
+- **Il vise la fidélité, plus douce que l'œil.** Libre, il descend le jeu à 1,25-1,5 à ×1,33, sous les
+  1,85 que Bruno a validés.
+- **D'où la variante « jamais sous la loi »** : l'auto-test ne peut que monter la netteté.
+  - À ×1,33, elle ne change rien : la loi est déjà au-dessus de ce qu'il demande.
+  - À ×2, elle détecte le texte : 2,5 sur le texte (+0,31) ; +0,14 à +0,15 sur les images mixtes avec
+    du texte ; rien ailleurs (−0,02 au pire).
+  - Elle n'a donc à tourner qu'à partir de ×1,75 environ.
+- **Le coût, estimé et pas mesuré.** Par analyse à ×2 vers 1440p :
+  - une réduction de L ;
+  - trois passes MWSR de 640 × 360 vers 1280 × 720 (la loi, +0,5, +1), chacune le quart de la passe
+    du rendu ;
+  - une statistique par tuile.
+  
+  Soit environ une passe MWSR de rendu. Une analyse toutes les 15 images coûte donc de l'ordre de 7 %
+  du temps de MWSR, réparti sur ces 15 images. Une analyse toutes les 3 images en coûterait environ un
+  tiers.
+- **Limites.** Quatre images seulement, propres, sans artefacts de codec. Il faut encore :
+  - les séquences encodées de P7, à 10 et 20 Mbit/s ;
+  - d'autres jeux ;
+  - l'œil de Bruno sur le texte à 2,5, par zones.
+- **Recommandation :** la variante « jamais sous la loi », par tuiles, à partir de ×1,75, une analyse
+  toutes les 15 images environ.
+  - Validation d'abord dans le labo : une cellule qui lit une grille, puis P7 et les coupes de scène.
+  - Rien dans le produit sans le oui de Bruno.
