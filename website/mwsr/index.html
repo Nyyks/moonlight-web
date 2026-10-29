@@ -60,22 +60,15 @@
         <label><input type="radio" name="pic" value="hdr-text"> HDR text</label>
         <label><input type="radio" name="pic" value="hdr-ramp"> HDR ramp</label>
         <label><input type="radio" name="pic" value="hdr-game"> 0 A.D. HDR <small>6 MB</small></label>
-        <label class="file"><input type="radio" name="pic" value="file" disabled> <span id="file-name">Your picture…</span></label>
+        <label class="file"><input type="radio" name="pic" value="file" disabled> <span id="file-name" class="name">Your picture…</span></label>
       </div>
       <input type="file" id="file" accept="image/*" hidden>
-    </fieldset>
-    <fieldset id="role-set" hidden>
-      <legend>Your picture is</legend>
-      <div class="seg" id="role">
-        <label><input type="radio" name="role" value="native" checked> the native frame <small>scored</small></label>
-        <label><input type="radio" name="role" value="input"> the input <small>not scored</small></label>
-      </div>
     </fieldset>
     <fieldset>
       <legend>Scale</legend>
       <div class="seg" id="scale">
-        <label><input type="radio" name="scale" value="1.3333333333333333" checked> <span data-scale="1.33">×1.33 <small>1080p → 1440p</small></span></label>
-        <label><input type="radio" name="scale" value="2"> <span data-scale="2">×2 <small>720p → 1440p</small></span></label>
+        <label><input type="radio" name="scale" value="1.3333333333333333" checked> ×1.33 <small>1080p → 1440p</small></label>
+        <label><input type="radio" name="scale" value="2"> ×2 <small>720p → 1440p</small></label>
       </div>
     </fieldset>
     <fieldset>
@@ -99,7 +92,7 @@
         <label><input type="radio" name="view" value="flip"> Flip</label>
         <label><input type="radio" name="view" value="wipe"> Wipe</label>
       </div>
-      <div class="ab" id="ab" hidden>
+      <div class="ab" id="ab">
         <select id="a" aria-label="Left"></select>
         <button type="button" id="swap" title="Swap left and right">⇄</button>
         <select id="b" aria-label="Right"></select>
@@ -113,22 +106,36 @@
         <label><input type="radio" name="zoom" value="4" checked> 4×</label>
         <label><input type="radio" name="zoom" value="8"> 8×</label>
       </div>
-      <div class="spots" id="spots"></div>
     </fieldset>
   </section>
 
+  <!-- one line, kept empty: what the page is doing never moves the panes -->
   <div id="status" class="msg" role="status" aria-live="polite"></div>
-  <div id="hdr-note" class="msg" hidden></div>
 
   <section class="viewer" id="viewer" aria-label="The pictures">
     <div class="panes" id="panes"></div>
     <div class="drop" id="drop" hidden>Drop a picture to compare it</div>
   </section>
+  <div id="hdr-note" class="msg" hidden></div>
+  <!-- under the panes, so that a picture of one's own moves none of them -->
+  <div class="file-bar" id="role-set" hidden>
+    <fieldset>
+      <legend>Your picture is</legend>
+      <div class="seg" id="role">
+        <label><input type="radio" name="role" value="native" checked> the native frame <small>scored</small></label>
+        <label><input type="radio" name="role" value="input"> the input <small>not scored</small></label>
+      </div>
+    </fieldset>
+    <div id="file-note" class="msg" hidden></div>
+  </div>
   <div class="under">
     <canvas id="overview" width="240" height="135" aria-label="Where the panes look: click to move"></canvas>
-    <p class="hint">Drag a pane to move all of them. Click the small picture to jump. In the flip view, a click on the
-      pane (or Space) shows the other one, in the same place. In the wipe view, the slider moves the line. Each pane
-      shows the pixels as they are, enlarged without smoothing.</p>
+    <div class="nav">
+      <div class="spots"><span class="lbl">Jump to</span><span id="spots"></span></div>
+      <p class="hint">Drag a pane to move all of them. Click the small picture, or a place above, to jump. In the flip
+        view, a click on the pane (or Space) shows the other one, in the same place. In the wipe view, the slider moves
+        the line. Each pane shows the pixels as they are, enlarged without smoothing.</p>
+    </div>
     <label class="wipe-slider" id="wipe-slider" hidden>Line <input type="range" id="split" min="0" max="1" step="0.001" value="0.5"></label>
   </div>
 

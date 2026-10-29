@@ -215,7 +215,8 @@ function syncControls() {
   $('c444').checked = S.c444 && S.chroma === '444';
   $('c444').disabled = S.chroma !== '444';
   $('role-set').hidden = S.pic !== 'file';
-  $('ab').hidden = S.view === 'grid';
+  // the two choices keep their place in the grid, unused: shown and hidden, they moved the panes
+  for (const id of ['a', 'swap', 'b']) $(id).disabled = S.view === 'grid';
   $('wipe-slider').hidden = S.view !== 'wipe';
   $('a').value = S.a;
   $('b').value = S.b;
@@ -223,6 +224,7 @@ function syncControls() {
   $('spots').innerHTML = PICS[S.pic].spots
     .map(([n, x, y]) => `<button type="button" data-x="${x}" data-y="${y}">${n}</button>`)
     .join('');
+  $('spots').parentElement.hidden = !PICS[S.pic].spots.length;
 }
 function onRadio(name, fn) {
   for (const r of radios(name)) r.addEventListener('change', () => r.checked && fn(r.value));
@@ -305,7 +307,9 @@ function useFile(file) {
   S.center = null; // its middle, once its size is known
   const r = radios('pic').find((x) => x.value === 'file');
   r.disabled = false;
-  $('file-name').textContent = file.name.length > 28 ? file.name.slice(0, 25) + '…' : file.name;
+  // the chip keeps its width (mwsr.css): a long name ends in an ellipsis, and shows whole on hover
+  $('file-name').textContent = file.name;
+  $('file-name').title = file.name;
   syncControls();
   load();
 }
@@ -352,7 +356,14 @@ async function load() {
     return;
   }
   C = c;
-  scaleLabels();
+  // a picture of one's own: its sizes, under the panes
+  const fn = $('file-note');
+  fn.hidden = S.pic !== 'file';
+  fn.textContent =
+    S.pic !== 'file'
+      ? ''
+      : `Drawn from ${c.inW}×${c.inH} to ${c.outW}×${c.outH}.` +
+        (c.reduced ? ` Your picture (${c.reduced[0]}×${c.reduced[1]}) was first reduced to fit 3840×2160.` : '');
   clampCenter();
   await makePreview();
   // the pixels are on the GPU and in the worker now: keep only whether there is a native frame
@@ -374,10 +385,7 @@ async function load() {
   if (my !== token) return;
   // timed once the 16-bit gate has said which precisions may run
   $('measure').disabled = false;
-  const note = c.reduced
-    ? `Your picture (${c.reduced[0]}×${c.reduced[1]}) was reduced to ${c.outW}×${c.outH}, the page's largest size. `
-    : '';
-  status(note);
+  status('');
 }
 
 async function score(my, ids = KERNELS.map((k) => k.id)) {
@@ -401,18 +409,6 @@ async function score(my, ids = KERNELS.map((k) => k.id)) {
     if (my !== token) return;
     R[k.id] = { ...R[k.id], f16: g.share <= 0.001 ? 'ok' : 'refused', f16share: g.share };
     renderTable();
-  }
-}
-
-function scaleLabels() {
-  const file = S.pic === 'file';
-  for (const span of document.querySelectorAll('[data-scale]')) {
-    const s = span.dataset.scale === '2' ? 2 : 4 / 3;
-    const name = s === 2 ? '×2' : '×1.33';
-    if (!file || !C)
-      span.innerHTML = name + (s === 2 ? ' <small>720p → 1440p</small>' : ' <small>1080p → 1440p</small>');
-    else if (s === S.scale) span.innerHTML = `${name} <small>${C.inW}×${C.inH} → ${C.outW}×${C.outH}</small>`;
-    else span.innerHTML = name;
   }
 }
 

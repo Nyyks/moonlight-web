@@ -9,9 +9,9 @@ main.cmp{padding:40px 0 64px}
 small{color:var(--muted); font-size:.78em}
 
 /* settings */
-.controls{display:flex; flex-wrap:wrap; gap:14px 22px; margin:28px 0 14px}
-.controls fieldset{border:0; margin:0; padding:0; min-width:0}
-.controls legend{font:700 .72rem/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; padding:0}
+.controls{display:flex; flex-wrap:wrap; gap:14px 22px; margin:28px 0 10px}
+.controls fieldset, .file-bar fieldset{border:0; margin:0; padding:0; min-width:0}
+.controls legend, .file-bar legend{font:700 .72rem/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; padding:0}
 .seg{display:flex; flex-wrap:wrap; gap:6px}
 .seg label{position:relative; display:inline-flex; align-items:baseline; gap:.4em; cursor:pointer;
   padding:.38rem .75rem; border:1px solid var(--line); border-radius:8px; background:var(--panel);
@@ -21,7 +21,9 @@ small{color:var(--muted); font-size:.78em}
 .seg label:has(input:checked){border-color:var(--cyan); background:rgba(25,211,255,.12); color:#fff}
 .seg label:has(input:focus-visible){outline:2px solid var(--cyan); outline-offset:2px}
 .seg label:has(input:disabled){opacity:.85}
-.seg label.file{border-style:dashed}
+.seg label.file{border-style:dashed; align-items:center}
+/* the same width whatever the name: a longer one would move the panes */
+.seg label.file .name{display:inline-block; width:8em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .check{display:flex; align-items:center; gap:.5em; margin-top:8px; font-size:.88rem; color:var(--muted); cursor:pointer}
 .check input{accent-color:var(--cyan); width:16px; height:16px}
 .check:has(input:disabled){opacity:.45; cursor:default}
@@ -41,7 +43,10 @@ small{color:var(--muted); font-size:.78em}
 .ab select, .ab button{font:inherit; font-size:.88rem; color:var(--txt); background:var(--panel-2);
   border:1px solid var(--line); border-radius:8px; padding:.3rem .5rem}
 .ab button{cursor:pointer; min-width:2.2rem}
-.spots{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+.ab :disabled{opacity:.45; cursor:default}
+.spots{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 8px}
+.spots .lbl{font:700 .68rem/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-right:2px}
+#spots{display:contents}
 .spots button{font:inherit; font-size:.8rem; color:var(--muted); background:none; border:1px solid var(--line);
   border-radius:999px; padding:.15rem .6rem; cursor:pointer}
 .spots button:hover{color:var(--cyan); border-color:var(--line-glow)}
@@ -51,6 +56,13 @@ small{color:var(--muted); font-size:.78em}
 .msg:empty{min-height:0; margin:0}
 .msg.bad{color:#ff8fb8}
 .msg.warn{color:var(--yellow)}
+/* the status line keeps its height, empty or not, so that no setting moves the
+   panes; a failure, the end of the page's work, may take more lines */
+#status{height:1.5em; line-height:1.5; margin:0 0 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+#status.bad{height:auto; min-height:1.5em; white-space:normal}
+#hdr-note{margin:10px 0 0}
+.file-bar{display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 18px; margin-top:12px}
+.file-bar #file-note{margin:0 0 .4rem}
 
 /* panes */
 .viewer{position:relative}
@@ -76,7 +88,8 @@ small{color:var(--muted); font-size:.78em}
   background:rgba(5,8,13,.85); font-weight:700; color:var(--cyan)}
 .under{display:flex; flex-wrap:wrap; gap:12px 18px; align-items:flex-start; margin-top:12px}
 #overview{width:240px; height:auto; aspect-ratio:16 / 9; border:1px solid var(--line); border-radius:8px; cursor:crosshair; background:#04070b}
-.hint{flex:1 1 280px; margin:0; font-size:.85rem; color:var(--muted)}
+.under .nav{flex:1 1 280px; min-width:0}
+.hint{margin:0; font-size:.85rem; color:var(--muted)}
 .wipe-slider{display:flex; align-items:center; gap:.6em; font-size:.85rem; color:var(--muted); flex-basis:100%}
 .wipe-slider input{flex:1; accent-color:var(--cyan)}
 
