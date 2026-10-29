@@ -203,7 +203,7 @@ sur un lot quand elles manquent) et relit les pixels pour les métriques de qual
 
 | Machine | GPU | Rôle pour ce plan |
 |---|---|---|
-| DualRTX | Radeon 780M (iGPU), Arc A380, RTX 5060 Ti | trois GPU d'ordinateur, trois écrans ; encodeur et décodeur jamais sur le même GPU |
+| DualRTX | iGPU du Ryzen 9 9900X (RDNA 2, 2 unités de calcul), Arc A380, RTX 5060 Ti | trois GPU d'ordinateur, trois écrans ; encodeur et décodeur jamais sur le même GPU |
 | N95 (`mw-intel`) | Intel UHD (Alder Lake-N) | iGPU faible, client Wi-Fi ; f16 y a déjà aidé (Lanczos-2 14 → 11,3 ms côté hôte) |
 | UM790Pro | Radeon 780M | Windows / Ubuntu, client Ethernet |
 | Mac M1 (Léo) | Apple M1 | **seule machine où la puissance GPU se lit** (`powermetrics`) ; créneaux de Bruno |
@@ -211,6 +211,11 @@ sur un lot quand elles manquent) et relit les pixels pour les métriques de qual
 | AMD 610M (192.168.1.190) | Radeon 610M | bon client, iGPU minimal |
 | iPhone / iPad | Apple A / M | Safari (WebKit) ; WebGPU selon la version d'iOS ; batterie |
 | Mi TV, Freebox POP | Mali-G31 | exclus de l'enhancer (mémoire ≤ 1 Go, TV) : hors cible |
+
+**Correction du 29/10/2026** : la ligne DualRTX disait « Radeon 780M (iGPU) ». C'est l'iGPU du
+Ryzen 9 9900X (id 0x13C0, plan B §9). Dans ce plan, dans ses rapports P0 à P4 et dans le journal du
+labo, le « 780M » du DualRTX désigne ce GPU. Seul l'UM790Pro a un vrai 780M. Le README de `mwsr/` et
+/mwsr/ le nomment juste depuis le 29/10.
 
 **Trous** : aucun téléphone Android, aucun Mali de téléphone, aucun Adreno récent. L'objectif
 « plus rapide que SGSR1 sur mobile » sera donc **démontré sur Adreno 618 et sur Apple**, et
@@ -1456,6 +1461,8 @@ upscalers spatiaux.
 - [x] **Étude « netteté dynamique selon l'échelle », faite le 24/10 (journal J39)** : la loi ×2 en paramètres du noyau (`S_X2`, `X2_BASE`, `X2_FLAT`, `X2_R_ACROSS`, neutres par défaut, dorés intacts ; plancher de cohérence et plafond `W_MIN` par l'échelle mesurés morts, retirés) ; le levier à ×2 est l'uniforme : netteté 1,25 → étalon centre 28,8 → 31,0 dB, FLIP 0,067 → 0,056 (FSR1 32,3 / 0,045), `game` 34,9 → 35,5, texte au FLIP de FSR1 ; `mwsrSharpness(s)` écrite et testée, pas câblée ; comparateur : bouton de la loi et les trois constantes en réglages (`x2b`, `x2r`, `x2f`)
 - [x] **Loi d'échelle de la netteté (J39), câblée le 24/10 au oui de Bruno (journal J40)** : `mwsrUniforms()` prend `mwsrSharpness(min(outW/inW, outH/inH))` quand l'appelant ne nomme pas de netteté (1,85 jusqu'à ×1,33, 1,542 à ×1,4, 1,233 dès ×1,5 ; réduction inchangée), le comparateur part de la loi (« (loi) » au réglage, `sharp=` du lien prime) ; dorés refaits, conformité des deux côtés ; aucune UI touchée
 - [x] **La netteté à ×2 passe à 1,5, au choix de Bruno du 29/10 (plan B §8)** : `MWSR_SHARP_X2` ; la loi d'avant jusqu'à ×1,75 (1,85 jusqu'à ×1,33, 1,23 dès ×1,5), puis une rampe jusqu'à 1,5 à ×2, tenue au-delà ; vérifiée à ×1,5 et ×1,75 (rien n'y gagnait) ; texte ×2 86,1 → 86,5, jeu 66,2 ; dorés des trois cas ×2 refaits, conformité des deux jumeaux ; `cpp/mwsr.h`, README et comparateur suivent
+- [x] **Le nom de l'iGPU AMD corrigé, oui de Bruno du 29/10** : « Radeon iGPU (Ryzen 9 9900X) » dans le README de `mwsr/`, ses figures de vitesse et /mwsr/ ; « AMD iGPU » dans les commentaires du code ; notes de correction ici (§1.8), dans P0 et dans le journal du labo. Les chiffres ne changent pas
+- [ ] **Le vrai Radeon 780M, oui de Bruno du 29/10** : les temps du README sur l'UM790Pro, quand elle sera libre (elle est sous Ubuntu pour les tests du clavier) ; même labo, Chrome épinglé sur son LUID, créneau de 59 (plan B §9) [`high`]
 - [ ] En réduction, un affûtage après la grille seulement si Bruno le demande [`low`]
 - [x] **Le HDR dans le chemin du produit, testé les 25 et 26/10 à la demande de Bruno (journal J45).** `hdr_check.py` fait dessiner au vrai `WebGpuRenderer` des images PQ BT.2020 en 10 bits, agrandies et réduites, sur les chemins `linear` et `tonemap`. Le mode « off » en HDR mettait à l'échelle au plus proche voisin : corrigé en 1d6f92f5
 - [x] La réduction HDR assombrit le contraste fin (rayures de 1000 et 0,5 nit : −8 % à ×0,5, −28 % à ×0,667). Proposé : sur un feed flottant, la passe 0 écrit de la lumière linéaire quand on réduit (exact, sans coût en plus) ; à la décision de Bruno [`high`] — oui de Bruno le 26/10, fait (journal J47) : `LINEAR_LIGHT 3`, les rayures gardent 0,987 à 1,004 de leur lumière ; RTX : −7 à −11 % de temps GPU sur les réductions HDR, SDR inchangé (dorés au bit près, temps à 1 % près)
@@ -1542,7 +1549,7 @@ texte de référence, ce chapitre dit ce qui change.
 - **Arc A380** : absente de la liste des adaptateurs de DualRTX le 19/10 au soir (seuls le RTX 5060 Ti,
   le Radeon 780M et les écrans virtuels y figurent) ; Bruno a confirmé le 20/10 qu'il a dû la
   **débrancher**, sa compatibilité sera vérifiée plus tard. Le §1.8 la comptait comme troisième GPU
-  d'ordinateur ; sans elle, les classes d'ordinateur restent NVIDIA (RTX), AMD (780M, deux machines),
+  d'ordinateur ; sans elle, les classes d'ordinateur restent NVIDIA (RTX), AMD (iGPU du 9900X et 780M de l'UM790Pro),
   Intel (N95) et Apple (M1) ; la classe Intel Arc attend son retour.
 
 **Ce que cela change aux critères.** C1 et C6 se lisent désormais « iPhone 13 Pro, realme Note 60,

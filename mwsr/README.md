@@ -84,7 +84,7 @@ share of pixels that leave the range of their four input texels by more than 2/2
 ringing. FLIP: NVIDIA's ꟻLIP, the mean perceptual difference to the native frame (lower is closer). Times: the game
 picture, each at its faster precision.
 
-| | Fidelity, game | Fidelity, text | Overshoot, game | FLIP, game | RTX 5060 Ti | Radeon 780M |
+| | Fidelity, game | Fidelity, text | Overshoot, game | FLIP, game | RTX 5060 Ti | Radeon iGPU (Ryzen 9 9900X) |
 |---|---|---|---|---|---|---|
 | MWSR | 85.9 | 96.0 | 0.03 % | 0.048 | 0.116 ms | 3.80 ms (f16) |
 | FSR1 | 87.5 | 94.4 | 13.7 % | 0.034 | 0.265 ms (f16) | 6.33 ms (f16) |
@@ -94,7 +94,7 @@ picture, each at its faster precision.
 
 **720p → 1440p**, the same columns:
 
-| | Fidelity, game | Fidelity, text | Overshoot, game | FLIP, game | RTX 5060 Ti | Radeon 780M |
+| | Fidelity, game | Fidelity, text | Overshoot, game | FLIP, game | RTX 5060 Ti | Radeon iGPU (Ryzen 9 9900X) |
 |---|---|---|---|---|---|---|
 | MWSR | 66.2 | 86.5 | 0.01 % | 0.071 | 0.113 ms | 3.69 ms (f16) |
 | FSR1 | 68.0 | 84.7 | 2.9 % | 0.053 | 0.273 ms | 6.32 ms (f16) |
@@ -134,8 +134,8 @@ What each one does:
   light. Each upscaler draws the input back at 2560×1440.
 - **The times.** WebGPU in Chrome on Windows 11, with the input already in an 8-bit RGBA texture (no video decoding
   in it). GPU timestamps wrap batches of 100 draws, in 3 rounds of 6 batches, and the figure is the median per draw.
-  The RTX 5060 Ti ran at P0 throughout. The Radeon 780M (integrated) ran at its own clock, which nothing fixed, so read
-  its figures as ratios.
+  The RTX 5060 Ti ran at P0 throughout. The Ryzen 9 9900X's integrated Radeon (RDNA 2, 2 compute units) ran at its own
+  clock, which nothing fixed, so read its figures as ratios.
 - **The ports.** These are MoonlightWeb's ports, not the vendors' own builds:
   - FSR1: firdawolf's WGSL port of EASU and RCAS (RCAS at 0.75 stops, its noise term on), and the lab's port of
     AMD's 16-bit path (`FsrEasuH`, `FsrRcasH`).
@@ -401,7 +401,7 @@ prefixed `MWSR_`.
 | A computer | the defaults | They are MoonlightWeb's on desktop and laptop. |
 | A phone or a tablet | `FLAT_TAPS 3` | 9 to 13 % faster on an iPhone 13 Pro and a realme Note 60, for a hundredth of SSIM. MoonlightWeb's choice there. |
 | A 4:4:4 stream (desktop work, text) | `CHROMA444 1` | Colour borders of one luma, such as red text on green, get sharpened too. |
-| An AMD integrated GPU (Radeon 780M) | `wgsl/mwsr-up-f16.wgsl` | 9 to 10 % faster. Nothing gained on NVIDIA. |
+| An AMD integrated GPU (Ryzen 9 9900X) | `wgsl/mwsr-up-f16.wgsl` | 9 to 10 % faster. Nothing gained on NVIDIA. |
 | A softer picture | `sharp` lower, `tau` higher | Less sharpening, and fewer pixels on the edge path. |
 | An HDR float input | the defaults | Unchanged for the upscale. A reduction takes `LINEAR_LIGHT 3` if the input holds linear light. |
 

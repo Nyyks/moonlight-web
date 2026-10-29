@@ -211,6 +211,8 @@ annonçait, mesuré : 2,6 × sur le plancher.
   sur Adreno vers 1080p-1600p) ; cet iGPU ne pilote aucun écran sur DualRTX et sa fréquence sous
   Chrome n'est pas connue. Les rapports entre cellules, mesurés dans les mêmes conditions, sont
   la donnée de P0 ; l'UM790Pro (même GPU, écran) recoupera les absolus en P5.
+  - Correction du 29/10/2026 : ce n'était pas un 780M, mais l'iGPU du Ryzen 9 9900X, à 2 unités
+    de calcul (plan B §9). Cela explique la lenteur. L'UM790Pro, elle, a un vrai 780M.
 
 ## 4 bis. Qualité : premiers repères des noyaux livrés
 

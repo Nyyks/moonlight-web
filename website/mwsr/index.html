@@ -233,13 +233,14 @@
     <p class="small">The README's figures (28/10/2026), in Chrome's WebGPU on Windows 11, the input already in an 8-bit
       texture, on the 0 A.D. picture (game) and the text chart (text). Fidelity and overshoot as in the table above;
       the times per draw, each upscaler at its faster precision.
-      The Radeon 780M ran at its own clock: read its times as ratios. NIS is MoonlightWeb's port (see the ports
-      below).</p>
+      The Ryzen 9 9900X's integrated Radeon ran at its own clock: read its times as ratios. NIS is MoonlightWeb's
+      port (see the ports below).</p>
     <div class="table-wrap">
       <table>
         <caption>1080p → 1440p (×1.33)</caption>
         <thead><tr><th scope="col">Upscaler</th><th scope="col">Fidelity, game</th><th scope="col">Fidelity, text</th>
-          <th scope="col">Overshoot, game</th><th scope="col">RTX 5060 Ti</th><th scope="col">Radeon 780M</th></tr></thead>
+          <th scope="col">Overshoot, game</th><th scope="col">RTX 5060 Ti</th>
+          <th scope="col">Radeon iGPU (Ryzen 9 9900X)</th></tr></thead>
         <tbody>
           <tr><th scope="row">MWSR</th><td>85.9</td><td>96.0</td><td>0.03 %</td><td>0.116 ms</td><td>3.80 ms (f16)</td></tr>
           <tr><th scope="row">FSR1</th><td>87.5</td><td>94.4</td><td>13.7 %</td><td>0.265 ms (f16)</td><td>6.33 ms (f16)</td></tr>
@@ -253,7 +254,8 @@
       <table>
         <caption>720p → 1440p (×2)</caption>
         <thead><tr><th scope="col">Upscaler</th><th scope="col">Fidelity, game</th><th scope="col">Fidelity, text</th>
-          <th scope="col">Overshoot, game</th><th scope="col">RTX 5060 Ti</th><th scope="col">Radeon 780M</th></tr></thead>
+          <th scope="col">Overshoot, game</th><th scope="col">RTX 5060 Ti</th>
+          <th scope="col">Radeon iGPU (Ryzen 9 9900X)</th></tr></thead>
         <tbody>
           <tr><th scope="row">MWSR</th><td>66.2</td><td>86.5</td><td>0.01 %</td><td>0.113 ms</td><td>3.69 ms (f16)</td></tr>
           <tr><th scope="row">FSR1</th><td>68.0</td><td>84.7</td><td>2.9 %</td><td>0.273 ms</td><td>6.32 ms (f16)</td></tr>

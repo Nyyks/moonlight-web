@@ -8,6 +8,10 @@ la qualité se mesure sur SwiftShader au fil de l'eau, les temps sur le RTX à l
 session d'orchestration. Règle de salle blanche (§10.2) : les constantes ci-dessous sont les
 nôtres, produites par ce journal.
 
+**Correction du 29/10/2026.** Le GPU intégré du DualRTX n'est pas un Radeon 780M, mais celui du
+Ryzen 9 9900X : RDNA 2, 2 unités de calcul, id 0x13C0 (plan B §9). Dans les entrées ci-dessous, le
+« 780M » du DualRTX désigne ce GPU. Seul l'UM790Pro a un vrai 780M (J36-J37).
+
 ## 2026-10-21 — J1, le noyau de base tel qu'écrit (`MwsrShader.js`, P2.1)
 
 **Le texte.** Une passe, feed `texture_2d` d'abord. Cinq échantillons bilinéaires : le centre C,

@@ -48,7 +48,7 @@
  *   encode at the output (LINEAR_LIGHT 3, journal J47); a frame that pass did
  *   not take keeps the software light. The f16 module (`half`) runs
  *   where the adapter has shader-f16 and is not NVIDIA's: 9-10 % off the
- *   kernel on the 780M for the same pixels, nothing on the RTX (P2.3).
+ *   kernel on the AMD iGPU for the same pixels, nothing on the RTX (P2.3).
  *
  * mwsr 2 and 3 (opts.deblock 'fixed' or 'qp': the debug menu's « MoonlightWeb
  *   2 » and « 3 », never 'auto'): the same kernel after a deblocking of the
@@ -1158,10 +1158,10 @@ export class WebGpuRenderer extends VideoRenderer {
 
     /**
      * The device, with shader-f16 where the adapter has it and is not
-     * NVIDIA's: mwsr's f16 module took 9-10 % off the kernel on the 780M for
-     * the same pixels and nothing on the RTX (upscaler-mwsr-p2.md §3), and a
-     * feature granted costs nothing to the other passes. A device refused with
-     * it is asked for bare; the kernel then runs in f32.
+     * NVIDIA's: mwsr's f16 module took 9-10 % off the kernel on the AMD iGPU
+     * for the same pixels and nothing on the RTX (upscaler-mwsr-p2.md §3), and
+     * a feature granted costs nothing to the other passes. A device refused
+     * with it is asked for bare; the kernel then runs in f32.
      * @param {GPUAdapter} adapter
      * @returns {Promise<GPUDevice>}
      */

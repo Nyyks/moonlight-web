@@ -69,7 +69,8 @@
  *   3×3 and 4×4 grids serve below ×0.5 with five times less aliasing energy
  *   than in software light (J15). Without the views (an rgba16float feed)
  *   LINEAR_LIGHT 1 decodes each sample by a square (2: exact sRGB, three times
- *   the cost on the 780M) and the 2×2 grid serves between ×0.5 and 1:1 (J12).
+ *   the cost on the AMD iGPU) and the 2×2 grid serves between ×0.5 and 1:1
+ *   (J12).
  *   No vote, no sharpening: a reduction sharpens by itself.
  *
  * HDR (plan §4.1): the renderer's `linear` feed is sRGB-encoded past 1.0
@@ -749,11 +750,12 @@ ${lines.join('\n')}
  * @param {{feed?: 'tex'|'ext', half?: boolean, mode?: 'up'|'down', taps?: number}} [opts]
  *   'tex' reads a texture_2d<f32>: the product's path, after its pass 0 (the
  *   external texture's two planes per sample made 'ext' lose to pass 0 +
- *   kernel on the RTX, the 780M and the M1 alike, P2.3; 'ext' stays for the
- *   lab). `half` runs the up mode's edge path in f16 (`enable f16`: the device
- *   must have 'shader-f16'; worth 9-10 % on the 780M, nothing on NVIDIA); the
- *   vote, the frame, the bound and the down mode stay in f32. `mode` 'down'
- *   is the reduction with `taps` samples (1, 4, 9 or 16; see mwsrRegime()).
+ *   kernel on the RTX, the AMD iGPU and the M1 alike, P2.3; 'ext' stays for
+ *   the lab). `half` runs the up mode's edge path in f16 (`enable f16`: the
+ *   device must have 'shader-f16'; worth 9-10 % on the AMD iGPU, nothing on
+ *   NVIDIA); the vote, the frame, the bound and the down mode stay in f32.
+ *   `mode` 'down' is the reduction with `taps` samples (1, 4, 9 or 16; see
+ *   mwsrRegime()).
  * @returns {string}
  */
 export function mwsrWgsl({ feed = 'tex', half = false, mode = 'up', taps = 4, fine = false } = {}) {

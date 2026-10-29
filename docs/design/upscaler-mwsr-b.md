@@ -132,7 +132,7 @@ de construction, pas une couche de plus :
 - **Étape 2, au feu vert** :
   - le temps GPU de chaque variante : horodatages par lots, comme en P0, chaîne et noyau seul ;
   - à 1080p → 1440p, 720p → 1440p et 1440p → 1440p (V6) ;
-  - sur le RTX 5060 Ti, le 780M, puis les téléphones aux créneaux de Bruno.
+  - sur le RTX 5060 Ti, l'iGPU du Ryzen 9 9900X, puis les téléphones aux créneaux de Bruno.
 - **Le verdict** : une variante ne passe que si elle garde la fidélité de V0 (ou la dépasse) et coûte
   moins. L'intégrer au produit attend le oui de Bruno.
 
@@ -254,7 +254,7 @@ la loi vient de la vérification à ×1,5 et à ×1,75, sur les mêmes images :
 **Conditions.**
 - **Les GPU** : la RTX 5060 Ti du bus 01 (pas celle de l'écran principal) et le GPU intégré du Ryzen 9
   9900X : RDNA2, 2 unités de calcul, id 0x13C0. C'est lui que les documents précédents appellent
-  « 780M ».
+  « 780M ». Le README de `mwsr/` et /mwsr/ le nomment juste depuis le 29/10 (oui de Bruno).
 - **Le Chrome du labo** : épinglé par LUID et sondé avant la mesure. `nvidia-smi` montre que la RTX
   mesurée seule a travaillé.
 - **Le clip** : encodé en logiciel (`enc=sw`), puis décodé en NV12 sur le GPU mesuré. L'encodeur et le
@@ -288,6 +288,8 @@ la loi vient de la vérification à ×1,5 et à ×1,75, sur les mêmes images :
   - le f16, que le produit prend sur les GPU intégrés AMD ;
   - un téléphone ;
   - le natif (D3D11 sur WARP, puis un GPU), où V2 lit les plans du décodeur sans aucune passe 0.
+- **Le vrai Radeon 780M, plus tard** (oui de Bruno, 29/10) : les temps du README, et ceux de V2, sur
+  l'UM790Pro. Ce sera quand elle sera libre ; elle est sous Ubuntu pour les tests du clavier.
 
 ## 10. Netteté adaptative : l'étude (29/10/2026, demande de Bruno)
 

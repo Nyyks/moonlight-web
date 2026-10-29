@@ -20,7 +20,7 @@
 <text x="0" y="235" font-size="13" fill="#52514e" dominant-baseline="middle">NIS *</text>
 <path d="M78.0 226.0 h248.0 a4 4 0 0 1 4 4 v10.0 a4 4 0 0 1 -4 4 h-248.0 z" fill="#9b9a95"/>
 <text x="336.0" y="235.0" font-size="12" fill="#52514e" dominant-baseline="middle">0.904 ms</text>
-<text x="428" y="84" font-size="13" font-weight="600" fill="#0b0b0b">Radeon 780M (integrated)</text>
+<text x="428" y="84" font-size="13" font-weight="600" fill="#0b0b0b">Radeon iGPU (Ryzen 9 9900X)</text>
 <line x1="506.0" y1="96" x2="506.0" y2="250" stroke="#8a8984" stroke-width="1"/>
 <text x="428" y="115" font-size="13" fill="#52514e" dominant-baseline="middle">Bilinear</text>
 <path d="M506.0 106.0 h4.2 a4 4 0 0 1 4 4 v10.0 a4 4 0 0 1 -4 4 h-4.2 z" fill="#c9c8c3"/>
@@ -37,6 +37,6 @@
 <text x="428" y="235" font-size="13" fill="#52514e" dominant-baseline="middle">NIS *</text>
 <path d="M506.0 226.0 h248.0 a4 4 0 0 1 4 4 v10.0 a4 4 0 0 1 -4 4 h-248.0 z" fill="#9b9a95"/>
 <text x="764.0" y="235.0" font-size="12" fill="#52514e" dominant-baseline="middle">13.78 ms</text>
-<text x="0" y="276" font-size="12" fill="#8a8984">WebGPU in Chrome, GPU timestamps around batches of 100 draws; the RTX at P0 throughout, the 780M at its own clock (neither fixed).</text>
+<text x="0" y="276" font-size="12" fill="#8a8984">WebGPU in Chrome, GPU timestamps around batches of 100 draws; the RTX at P0 throughout, the iGPU at its own clock (neither fixed).</text>
 <text x="0" y="294" font-size="12" fill="#8a8984">Each at its faster precision (f32 or f16). * MoonlightWeb's per-fragment port of NIS, not NVIDIA's compute shader.</text>
 </svg>
