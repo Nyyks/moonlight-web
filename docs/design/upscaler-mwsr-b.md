@@ -248,3 +248,98 @@ la loi vient de la vérification à ×1,5 et à ×1,75, sur les mêmes images :
   lieu d'un bilinéaire de bilinéaire.
 - Les temps de SwiftShader sont ceux du processeur : ils ne disent rien d'un GPU. Le classement en
   vitesse attend le feu vert.
+
+## 9. Étape 2 : les temps GPU (29/10/2026, au feu vert de 59)
+
+**Conditions.**
+- **Les GPU** : la RTX 5060 Ti du bus 01 (pas celle de l'écran principal) et le GPU intégré du Ryzen 9
+  9900X : RDNA2, 2 unités de calcul, id 0x13C0. C'est lui que les documents précédents appellent
+  « 780M ».
+- **Le Chrome du labo** : épinglé par LUID et sondé avant la mesure. `nvidia-smi` montre que la RTX
+  mesurée seule a travaillé.
+- **Le clip** : encodé en logiciel (`enc=sw`), puis décodé en NV12 sur le GPU mesuré. L'encodeur et le
+  décodeur ne sont donc jamais sur le même GPU.
+- **Les mesures** : en f32, au p50 des horodatages, sur le jeu et le texte du labo, à 1080p → 1440p et
+  à 720p → 1440p.
+- **Deux temps par variante, comparés à V0** :
+  - la chaîne : de l'image du décodeur à la sortie, avec la passe 0 ;
+  - le noyau seul : sur des plans faits une fois.
+
+| Variante | RTX, chaîne | RTX, noyau | iGPU, chaîne | iGPU, noyau |
+|---|---|---|---|---|
+| V0 (référence) | 0,079 à 0,112 ms | 0,071 à 0,089 ms | 2,41 à 3,09 ms | 2,30 à 2,84 ms |
+| V1 (modèle `vt_metal.mm`) | +14 à +23 % | +13 à +23 % | −1 à −8 % | −7 à −11 % |
+| **V2 (Y en MWSR, UV au bilinéaire)** | **0 à −6 %** | **−3 à −10 %** | **−11 à −16 %** | **−19 à −20 %** |
+| V3 (Y, Cb, Cr en MWSR) | +46 à +58 % | +55 à +63 % | +32 à +73 % | +31 à +73 % |
+| V4 (RGB à chaque prise) | +61 à +80 % | +66 à +85 % | +58 à +106 % | +58 à +107 % |
+| V5 (texture externe directe) | +37 à +69 % | — | +35 à +52 % | — |
+
+- **V2 est la seule qui gagne.** C'est l'idée de Bruno : Y en MWSR, UV au bilinéaire, dans un seul
+  shader. Elle gagne de 11 à 16 % sur le GPU intégré, de 0 à 6 % sur la RTX.
+  - Son prix : un peu de couleur, 0,1 point de SSIM RGB en 4:2:0 et 0,6 en 4:4:4 (§8). La luma ne
+    bouge pas.
+  - Le gain est moindre sur la chaîne que sur le noyau seul : dans le navigateur, la passe 0 en deux
+    plans coûte un peu plus que la copie RGBA (iGPU 0,41 contre 0,25 ms à 1080p).
+- **10 bits et 4:4:4 coûtent autant que 4:2:0 en 8 bits**, à 2 % près, pour chaque variante.
+- **V1 perd sur la RTX et gagne un peu sur l'iGPU.** V3 et V4 sont écartées.
+- **V5 confirme P0 et P2** : lire la texture externe à chaque prise coûte plus que la passe 0.
+- **V6** (la chroma d'après Y) **et V7** (le fondu HDR) ne sont pas codées : pas de temps.
+- **Reste à mesurer**, si Bruno veut V2 dans le produit :
+  - le f16, que le produit prend sur les GPU intégrés AMD ;
+  - un téléphone ;
+  - le natif (D3D11 sur WARP, puis un GPU), où V2 lit les plans du décodeur sans aucune passe 0.
+
+## 10. Netteté adaptative : l'étude (29/10/2026, demande de Bruno)
+
+Bruno : une netteté choisie d'après l'image (globale ou par zones), à bas coût, lissée sur 200 à
+400 ms. Étude seule, depuis les 104 images du balayage du §8 (`oracle.py` et `predict*.py`, hors
+dépôt).
+
+**a. Ce qu'on peut gagner, et si une mesure simple le prédit.**
+- **L'oracle global** : la meilleure netteté unique pour chaque image, comparée à la loi.
+  - À ×1,33 : +0,18 à +0,28 point de SSIM de la luma.
+  - À ×2 : +0,09 (0 A.D.) à +0,98 (code coloré).
+- **L'oracle par zones** (tuiles de 160 px) n'ajoute presque rien sur une image homogène : +0,01 à
+  +0,27. Sur une image mixte (moitié texte, moitié jeu), deux zones gagnent de 0,2 à 0,5 point sur une
+  valeur unique.
+- **Une mesure simple ne prédit pas le bon réglage.** Mesures testées sur Y : gradient moyen, part de
+  bords, part d'aplats, amplitude des bords, fond. Pour chacune, une règle `a + b × mesure` est réglée
+  sur trois images, puis jugée sur la quatrième.
+  - Aucune ne tient : le texte écarté perd de 0,2 à 4,6 points.
+  - Le code coloré, du texte lui aussi, veut l'inverse du texte noir sur blanc (0,25 à 0,5 au lieu de
+    2,25 à 2,5).
+- **La fidélité n'est pas l'œil.** L'optimum de la SSIM est plus doux que ce que Bruno juge net (0,83
+  « un poil trop flou »). Un réglage automatique sur la fidélité adoucirait le jeu.
+
+**b. Global ou par tuiles.**
+- Par tuiles : une grille de 16 × 9 valeurs dans une petite texture. La passe `up` la lit au
+  bilinéaire, ce qui interpole entre tuiles : pas de couture.
+- Le coût est le même qu'en global. Seul le risque de mauvaise prédiction change.
+
+**c. Le lissage dans le temps.**
+- Un filtre du premier ordre, comme un condensateur : `s ← s + α (cible − s)`, avec
+  `α = 1 − exp(−Δt / τ)` et τ = 0,3 s.
+- Δt vient de l'horodatage des images : le lissage est le même à 30, 60 ou 120 i/s.
+- Changement de scène : si la luma moyenne ou plus de la moitié des tuiles sautent d'un coup, α = 1.
+
+**d. Le coût.**
+- Une passe qui lit Y au quart de la résolution vers la grille 16 × 9, et une passe minuscule pour le
+  lissage (deux textures en alternance). Tout reste sur le GPU, sans relecture par le processeur.
+  - En WebGPU, la passe `up` de l'image précédente pourrait aussi tenir les statistiques, par des
+    atomiques : une image de retard, sans importance avec 300 ms de lissage.
+- Estimation : quelques % du temps de MWSR, de 2 à 5 %. La séparation UV, à demi-résolution, coûte
+  déjà 0,005 ms sur la RTX et 0,14 ms sur l'iGPU à 1080p ; la statistique lit quatre fois moins.
+
+**e. La validation, si on la fait.**
+- Une cellule du labo qui lit une carte de netteté par tuiles. SSIM contre la loi fixe sur le texte,
+  le jeu, l'étalon et des images mixtes.
+- Puis les séquences de panoramique de P7, à 30, 60 et 120 i/s, pour le pompage, et des coupes de scène.
+- Enfin l'œil de Bruno.
+
+**Recommandation : pas maintenant.**
+- Le gain mesurable est petit : 0,2 à 0,3 point le plus souvent, un point au mieux.
+- Aucune mesure bon marché ne le trouve de façon fiable, et la fidélité tire vers le flou que l'œil
+  refuse.
+- Si Bruno veut l'essayer à l'œil : la version globale lissée, avec deux réglages choisis à l'œil
+  (texte ou jeu), pour 2 à 5 % de temps GPU. Elle attend un détecteur de texte plus solide que ceux
+  testés ici.
