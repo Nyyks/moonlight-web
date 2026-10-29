@@ -62,6 +62,7 @@ function view(overrides = {}) {
         handleKeyUp: P.handleKeyUp,
         _sendKeyEvent: P._sendKeyEvent,
         _reconcileModifiers: P._reconcileModifiers,
+        _markAltGrCtrl: P._markAltGrCtrl,
         _forgetHeldKey: P._forgetHeldKey,
         _holdsThroughStall: P._holdsThroughStall,
         _releaseAllPhysKeys: P._releaseAllPhysKeys,

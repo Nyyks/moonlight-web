@@ -130,6 +130,21 @@ inline LayoutFidelity parseLayoutFidelity(const QString& text)
 /// Linux and macOS hosts have no key for it and drop it.
 constexpr short kMaskVk = 0xE8;
 
+/// VK_MENU, and VK_RMENU: the client's right Alt, AltGr on a European layout.
+constexpr short kVkAlt = 0x12;
+constexpr short kVkRightAlt = 0xA5;
+
+/// The left Ctrl Windows puts under an AltGr, as the client marks it: a
+/// release it sends as the AltGr goes down, and the key in its heartbeats.
+/// A positional host — Wolf, Sunshine on Linux or macOS — must not hold it:
+/// Ctrl with the right Alt is no AltGr there, and AltGr+E typed no € on a
+/// French Wolf (issue #44, 29/10/2026). Windows reads Ctrl and Alt as AltGr,
+/// and the native host keeps it down for its own (WinTextKeys).
+inline bool altGrCtrl(const QJsonObject& msg)
+{
+    return msg["altGrCtrl"].toBool(false);
+}
+
 /// What to do with one key message: press a key, or type a character.
 struct KeyPlan
 {
@@ -229,6 +244,11 @@ inline KeyPlan resolveKey(const QJsonObject& msg, KeyboardMode mode, LayoutFidel
 
     plan.keyCode = static_cast<short>(msg["keyCode"].toInt(0));
     plan.flags = 0;
+    // The right Alt comes as VK_RMENU, AltGr to a Linux host. The native host
+    // keeps it as VK_MENU: it lets the viewer's Alt go for its own AltGr and
+    // puts it back as that Alt (WinTextKeys). Held as the right one, it went
+    // up with the symbol, and the Alt put back stayed down for good.
+    if (mode == KeyboardMode::Native && plan.keyCode == kVkRightAlt) plan.keyCode = kVkAlt;
 
     // The numeric keypad is the same on every layout, and a key of its own:
     // its 1 typed as a character came out as the 1 of the main row — Shift+&
@@ -359,14 +379,29 @@ inline QVector<IMediaEngine::HeldKey> parseHeldKeys(const QJsonObject& msg, Keyb
     QVector<IMediaEngine::HeldKey> keys;
     const QJsonArray arr = msg["keys"].toArray();
     keys.reserve(arr.size());
+    // A positional host holds no AltGr's Ctrl, as a key or in a key's byte,
+    // unless the viewer also holds a Ctrl of their own.
+    bool ghostCtrl = false, ownCtrl = false;
+    if (mode == KeyboardMode::Positional) {
+        for (const QJsonValue& v : arr) {
+            const QJsonObject k = v.toObject();
+            const QString code = k["code"].toString();
+            if (altGrCtrl(k))
+                ghostCtrl = true;
+            else if (code == QLatin1String("ControlLeft") || code == QLatin1String("ControlRight"))
+                ownCtrl = true;
+        }
+    }
     for (const QJsonValue& v : arr) {
         const QJsonObject k = v.toObject();
+        if (ghostCtrl && altGrCtrl(k)) continue;
         const KeyPlan plan = resolveKey(k, mode, fidelity);
         if (plan.isText() || plan.skip) continue;
         IMediaEngine::HeldKey held;
         held.keyCode = plan.keyCode;
         held.flags = plan.flags;
         held.modifiers = modifierMask(k);
+        if (ghostCtrl && !ownCtrl) held.modifiers &= ~MODIFIER_CTRL;
         held.hold = k["hold"].toBool(false);
         keys.append(held);
     }
@@ -590,6 +625,9 @@ inline void sendKey(IMediaEngine& engine, const QJsonObject& msg, bool down, boo
 {
     const KeyboardMode mode = engine.keyboardMode();
     const LayoutFidelity fidelity = engine.layoutFidelity();
+    // The release of an AltGr's Ctrl is for a positional host only: Windows
+    // keeps it down under the right Alt, as a keyboard plugged into it does.
+    if (altGrCtrl(msg) && mode != KeyboardMode::Positional) return;
     // One line when the client's keys move between its two mouse modes: under
     // "auto" that is when they go from characters to positions, or back.
     if (down && msg.contains(QLatin1String("gaming"))) {

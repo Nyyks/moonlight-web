@@ -764,4 +764,53 @@ void run_keyboard_layout_tests()
         CHECK_EQ(InputMsg::positionModifiers(euro, KeyboardMode::Positional),
                  InputMsg::modifierMask(euro));
     }
+
+    // ── The right Alt, and the left Ctrl Windows puts under an AltGr ─────────
+    //
+    // The right Alt comes as VK_RMENU, AltGr to a Linux host; the native host
+    // keeps VK_MENU, the Alt its AltGr symbols let go of and put back (held as
+    // the right one, the Alt put back stayed down). A Windows client's AltGr
+    // also holds the left Ctrl Windows adds to it, marked by the client: a
+    // positional host does not hold it, as a key or in a key's byte, or
+    // AltGr+E typed no € on a French Wolf (issue #44, 29/10/2026).
+    {
+        const QJsonObject rightAlt = key(0xA5, "AltRight");
+        CHECK_EQ(InputMsg::resolveKey(rightAlt, KeyboardMode::Native, LayoutFidelity::Auto).keyCode,
+                 static_cast<short>(0x12));
+        for (KeyboardMode mode : {KeyboardMode::Positional, KeyboardMode::SunshineWindows})
+            CHECK_EQ(InputMsg::resolveKey(rightAlt, mode, LayoutFidelity::Auto).keyCode,
+                     static_cast<short>(0xA5));
+
+        QJsonObject ghost = key(0x11, "ControlLeft");
+        ghost["altGrCtrl"] = true;
+        ghost["ctrlKey"] = true;
+        ghost["altKey"] = true;
+        QJsonObject alt = key(0xA5, "AltRight");
+        alt["altGrCtrl"] = false;
+        alt["ctrlKey"] = true;
+        alt["altKey"] = true;
+        QJsonObject beat;
+        beat["keys"] = QJsonArray{ghost, alt};
+
+        const QVector<IMediaEngine::HeldKey> wolf =
+            InputMsg::parseHeldKeys(beat, KeyboardMode::Positional, LayoutFidelity::Auto);
+        CHECK_EQ(wolf.size(), 1);
+        if (wolf.size() == 1) {
+            CHECK_EQ(wolf[0].keyCode, static_cast<short>(0xA5));
+            CHECK_EQ(wolf[0].modifiers & MODIFIER_CTRL, 0);
+            CHECK((wolf[0].modifiers & MODIFIER_ALT) != 0);
+        }
+        // Windows hosts keep both, Ctrl in the byte too.
+        const QVector<IMediaEngine::HeldKey> native =
+            InputMsg::parseHeldKeys(beat, KeyboardMode::Native, LayoutFidelity::Auto);
+        CHECK_EQ(native.size(), 2);
+        if (native.size() == 2) CHECK((native[1].modifiers & MODIFIER_CTRL) != 0);
+
+        // A Ctrl of the viewer's own, held with it, stays in the byte.
+        beat["keys"] = QJsonArray{ghost, alt, key(0x11, "ControlRight")};
+        const QVector<IMediaEngine::HeldKey> both =
+            InputMsg::parseHeldKeys(beat, KeyboardMode::Positional, LayoutFidelity::Auto);
+        CHECK_EQ(both.size(), 2);
+        if (both.size() == 2) CHECK((both[0].modifiers & MODIFIER_CTRL) != 0);
+    }
 }
