@@ -76,10 +76,13 @@ struct Zone {
     double tau = 0.02, sharp = 2.5;
 };
 
-// The per-frame defaults, and the scale whose across weight the sharpness law holds.
+// The per-frame defaults, the scale whose across weight the sharpness law holds,
+// and the sharpness from x2 up with the scale its ramp starts from.
 constexpr double kTau = 0.05;
 constexpr double kSharp = 1.85;
 constexpr double kSharpRefScale = 1.3333333333333333;
+constexpr double kSharpX2 = 1.5;
+constexpr double kSharpX2From = 1.75;
 constexpr double kSFull = 1.5;  // MWSR_S_FULL's default
 
 // The reduction's grids, by the smallest scale they serve: {minimum scale, samples, R_DOWN}.
@@ -153,14 +156,18 @@ inline std::string shaderFile(const Regime& r, bool half = false)
 }
 
 // The sharpness law (mwsrSharpness()): sharp up to the reference scale, then
-// held so that the across weight stays the one of that scale.
-inline double sharpness(double scale, double sharp = kSharp, double ref = kSharpRefScale)
+// held so that the across weight stays the one of that scale; from x2From a
+// ramp to x2 at x2, held above (never above sharp).
+inline double sharpness(double scale, double sharp = kSharp, double ref = kSharpRefScale, double x2 = kSharpX2,
+                        double x2From = kSharpX2From)
 {
     auto strength = [](double s) { return std::min(std::max((s - 1.0) / (kSFull - 1.0), 0.0), 1.0); };
     const double at = strength(scale);
     if (at <= 0.0)
         return sharp;
-    return sharp * std::min(1.0, strength(ref) / at);
+    const double held = sharp * std::min(1.0, strength(ref) / at);
+    const double t = std::min(std::max((scale - x2From) / (2.0 - x2From), 0.0), 1.0);
+    return std::min(sharp, held + t * (x2 - held));
 }
 
 struct Options {

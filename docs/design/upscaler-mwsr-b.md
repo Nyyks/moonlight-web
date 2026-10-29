@@ -203,6 +203,26 @@ la fidélité. La « netteté mesurée » est la moyenne du gradient de la luma,
   reste. C'est un plancher dans `mwsrSharpness`. Il faut le vérifier à ×1,5 avant d'y toucher, et
   rien n'entre au produit sans le oui de Bruno.
 
+**Le choix de Bruno (29/10, « netteté à ×2 : => A »)** : 1,85 gardé à ×1,33, 1,5 à ×2. La forme de
+la loi vient de la vérification à ×1,5 et à ×1,75, sur les mêmes images :
+
+| Échelle | Sortie | Texte | Code coloré | 0 A.D. | Étalon |
+|---|---|---|---|---|---|
+| ×1,5 | 1080p | 1,23 (92,30) | ≤ 1,0 (95,04) | 1,0 (83,48) | ≤ 1,0 (92,31) |
+| ×1,5 | 1350p | ≤ 1,0 (96,15) | ≤ 1,0 (97,34) | ≤ 1,0 (87,86) | ≤ 1,0 (94,06) |
+| ×1,75 | 1260p | 1,23 (91,67) | ≤ 1,0 (95,10) | ≤ 1,0 (80,30) | ≤ 1,0 (91,06) |
+
+(meilleure netteté parmi 1,0, 1,23, 1,375, 1,5, 1,75 et 2,0, et sa SSIM de la luma)
+
+- Un plancher à 1,5 dès ×1,41 aurait coûté de 0,3 à 0,4 point au jeu à ×1,5, sans rien rendre au
+  texte. Une montée depuis ×1,5 coûterait encore jusqu'à 0,26 point à ×1,75.
+- Le gain du texte est propre à ×2 (720p → 1440p, 1080p → 2160p). D'où `MWSR_SHARP_X2` : la loi
+  d'avant jusqu'à ×1,75 (1,23 dès ×1,5), puis une rampe jusqu'à 1,5 à ×2, tenue au-delà.
+- Rien ne change à ×1,33, ×1,5 ni ×1,75. Seules les empreintes dorées des trois cas ×2 changent, et la
+  conformité des deux jumeaux tient sur SwiftShader.
+- Le README et le comparateur passent le texte de MWSR à ×2 de 86,1 à 86,5. Le jeu reste à 66,2, et
+  son FLIP passe de 0,065 à 0,071.
+
 **Les variantes YUV** (texte, 1080p → 1440p, plans BT.709 à plage limitée) :
 
 | Cellule | SSIM | SSIM luma | FLIP |

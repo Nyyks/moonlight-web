@@ -55,8 +55,8 @@
 <text x="0" y="317" font-size="13" font-weight="600" fill="#0b0b0b">Game (0 A.D.), 720p → 1440p</text>
 <line x1="78.0" y1="343" x2="392.0" y2="343" stroke="#e4e3df" stroke-width="1"/>
 <text x="0" y="343" font-size="13" fill="#0b0b0b" dominant-baseline="middle" font-weight="600">MWSR</text>
-<circle cx="214.3" cy="343" r="6" fill="#2a78d6"/>
-<text x="225.3" y="343" font-size="12" fill="#52514e" dominant-baseline="middle">66.2</text>
+<circle cx="212.4" cy="343" r="6" fill="#2a78d6"/>
+<text x="223.4" y="343" font-size="12" fill="#52514e" dominant-baseline="middle">66.2</text>
 <line x1="78.0" y1="372" x2="392.0" y2="372" stroke="#e4e3df" stroke-width="1"/>
 <text x="0" y="372" font-size="13" fill="#52514e" dominant-baseline="middle">FSR1</text>
 <circle cx="257.1" cy="372" r="6" fill="#9b9a95"/>
@@ -79,8 +79,8 @@
 <text x="428" y="317" font-size="13" font-weight="600" fill="#0b0b0b">Text, 720p → 1440p</text>
 <line x1="506.0" y1="343" x2="820.0" y2="343" stroke="#e4e3df" stroke-width="1"/>
 <text x="428" y="343" font-size="13" fill="#0b0b0b" dominant-baseline="middle" font-weight="600">MWSR</text>
-<circle cx="671.6" cy="343" r="6" fill="#2a78d6"/>
-<text x="682.6" y="343" font-size="12" fill="#52514e" dominant-baseline="middle">86.1</text>
+<circle cx="682.6" cy="343" r="6" fill="#2a78d6"/>
+<text x="693.6" y="343" font-size="12" fill="#52514e" dominant-baseline="middle">86.5</text>
 <line x1="506.0" y1="372" x2="820.0" y2="372" stroke="#e4e3df" stroke-width="1"/>
 <text x="428" y="372" font-size="13" fill="#52514e" dominant-baseline="middle">FSR1</text>
 <circle cx="627.2" cy="372" r="6" fill="#9b9a95"/>

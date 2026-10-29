@@ -25,6 +25,7 @@ import {
     MWSR_OVERRIDES,
     MWSR_OVERRIDE_SPEC,
     MWSR_SHARP_REF_SCALE,
+    MWSR_SHARP_X2,
     MWSR_UNIFORMS,
     MWSR_ZONE,
     mwsrGlsl,
@@ -153,10 +154,13 @@ struct Zone {
     double tau = ${cppNumber(z.tau)}, sharp = ${cppNumber(z.sharp)};
 };
 
-// The per-frame defaults, and the scale whose across weight the sharpness law holds.
+// The per-frame defaults, the scale whose across weight the sharpness law holds,
+// and the sharpness from x2 up with the scale its ramp starts from.
 constexpr double kTau = ${cppNumber(MWSR_UNIFORMS.tau)};
 constexpr double kSharp = ${cppNumber(MWSR_UNIFORMS.sharp)};
 constexpr double kSharpRefScale = ${cppNumber(MWSR_SHARP_REF_SCALE)};
+constexpr double kSharpX2 = ${cppNumber(MWSR_SHARP_X2.sharp)};
+constexpr double kSharpX2From = ${cppNumber(MWSR_SHARP_X2.from)};
 constexpr double kSFull = ${cppNumber(MWSR_OVERRIDES.S_FULL)};  // MWSR_S_FULL's default
 
 // The reduction's grids, by the smallest scale they serve: {minimum scale, samples, R_DOWN}.
@@ -212,14 +216,18 @@ inline std::string shaderFile(const Regime& r, bool half = false)
 }
 
 // The sharpness law (mwsrSharpness()): sharp up to the reference scale, then
-// held so that the across weight stays the one of that scale.
-inline double sharpness(double scale, double sharp = kSharp, double ref = kSharpRefScale)
+// held so that the across weight stays the one of that scale; from x2From a
+// ramp to x2 at x2, held above (never above sharp).
+inline double sharpness(double scale, double sharp = kSharp, double ref = kSharpRefScale, double x2 = kSharpX2,
+                        double x2From = kSharpX2From)
 {
     auto strength = [](double s) { return std::min(std::max((s - 1.0) / (kSFull - 1.0), 0.0), 1.0); };
     const double at = strength(scale);
     if (at <= 0.0)
         return sharp;
-    return sharp * std::min(1.0, strength(ref) / at);
+    const double held = sharp * std::min(1.0, strength(ref) / at);
+    const double t = std::min(std::max((scale - x2From) / (2.0 - x2From), 0.0), 1.0);
+    return std::min(sharp, held + t * (x2 - held));
 }
 
 struct Options {

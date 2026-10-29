@@ -10,6 +10,7 @@ import {
     MWSR_ZONE,
     mwsrClassOverrides,
     mwsrSharpness,
+    MWSR_SHARP_X2,
     MWSR_SHARP_REF_SCALE,
     mwsrGlsl,
     mwsrHlsl,
@@ -308,7 +309,7 @@ describe('the mwsr shader text', () => {
         expect(u[2]).toBe(2);
         expect(u[3]).toBe(2);
         expect(u[4]).toBeCloseTo(0.05, 6);
-        expect(u[5]).toBeCloseTo((1.85 * 2) / 3, 6); // ×2: the scale law's, the weight of ×1.33 (J40); f32
+        expect(u[5]).toBe(1.5); // ×2: the scale law's (29/10/2026), not the weight of ×1.33 (J40)
         // ×1.33: Bruno's sharpness for every device (24/10/2026, J37)
         expect(mwsrUniforms(1920, 1080, 2560, 1440)[5]).toBeCloseTo(1.85, 6);
         const v = mwsrUniforms(1920, 1080, 2560, 1440, { tau: 0.03, sharp: 0.5 });
@@ -427,17 +428,23 @@ describe('the mwsr shader text', () => {
 
     it('holds the across weight of ×1.33 from there up in the sharpness law (J39, wired since J40)', () => {
         expect(MWSR_SHARP_REF_SCALE).toBeCloseTo(4 / 3, 12);
+        expect(MWSR_SHARP_X2).toEqual({ sharp: 1.5, from: 1.75 });
         // up to the reference scale the constant; the weight sharp × strength from there on
         expect(mwsrSharpness(1)).toBe(1.85);
         expect(mwsrSharpness(1.2)).toBe(1.85);
         expect(mwsrSharpness(4 / 3)).toBeCloseTo(1.85, 9);
         expect(mwsrSharpness(1.4)).toBeCloseTo((1.85 * (2 / 3)) / 0.8, 9);
         expect(mwsrSharpness(1.5)).toBeCloseTo(1.85 * (2 / 3), 9);
-        expect(mwsrSharpness(2)).toBeCloseTo(1.85 * (2 / 3), 9);
-        expect(mwsrSharpness(3)).toBeCloseTo(1.85 * (2 / 3), 9);
-        // the lab's own sharpness and reference
+        expect(mwsrSharpness(1.75)).toBeCloseTo(1.85 * (2 / 3), 9);
+        // then the ramp to 1.5 at ×2 (Bruno's choice of 29/10/2026), held above
+        expect(mwsrSharpness(1.875)).toBeCloseTo((1.85 * (2 / 3) + 1.5) / 2, 9);
+        expect(mwsrSharpness(2)).toBeCloseTo(1.5, 12);
+        expect(mwsrSharpness(3)).toBeCloseTo(1.5, 12);
+        expect(mwsrSharpness(2, { x2: null })).toBeCloseTo(1.85 * (2 / 3), 9);
+        // the lab's own sharpness and reference; never above the sharpness named
         expect(mwsrSharpness(2, { sharp: 1.5, ref: 1.5 })).toBe(1.5);
-        expect(mwsrSharpness(2, { sharp: 1.5, ref: 1.25 })).toBeCloseTo(0.75, 9);
+        expect(mwsrSharpness(2, { sharp: 1.5, ref: 1.25, x2: null })).toBeCloseTo(0.75, 9);
+        expect(mwsrSharpness(2, { sharp: 1 })).toBe(1);
         // the product's uniform block takes it (J40), unless the caller names one
         expect(mwsrUniforms(1280, 720, 2560, 1440)[5]).toBeCloseTo(mwsrSharpness(2), 6);
         expect(mwsrUniforms(1280, 720, 2560, 1440, { sharp: 1.85 })[5]).toBeCloseTo(1.85, 6);

@@ -96,7 +96,7 @@ picture, each at its faster precision.
 
 | | Fidelity, game | Fidelity, text | Overshoot, game | FLIP, game | RTX 5060 Ti | Radeon 780M |
 |---|---|---|---|---|---|---|
-| MWSR | 66.2 | 86.1 | 0.01 % | 0.065 | 0.113 ms | 3.69 ms (f16) |
+| MWSR | 66.2 | 86.5 | 0.01 % | 0.071 | 0.113 ms | 3.69 ms (f16) |
 | FSR1 | 68.0 | 84.7 | 2.9 % | 0.053 | 0.273 ms | 6.32 ms (f16) |
 | NIS * | 69.5 | 87.6 | 41.7 % | 0.116 | 0.614 ms | 12.99 ms |
 | SGSR1 | 66.9 | 87.6 | 6.3 % | 0.062 | 0.118 ms | 2.95 ms (f16) |
@@ -355,14 +355,17 @@ them all.
 | `gaze` | `0` | The gaze zone's weight, 0 to 1. Read only by a text built with `GAZE 1`. |
 
 **The sharpness law** (`mwsrSharpness(s)`, with `s` the smaller axis' scale). The sharpness is `1.85` up to ×1.33.
-Above that, it is held so that the across weight stays the one set by eye at ×1.33:
+Above that, it is held so that the across weight stays the one set by eye at ×1.33, then it ramps to `1.5` at ×2:
 
 ```
 strength(x) = clamp((x - 1) / (S_FULL - 1), 0, 1)
-sharp(s)    = 1.85 * min(1, strength(4/3) / strength(s))     // 1.85 if s <= 4/3
+held(s)     = 1.85 * min(1, strength(4/3) / strength(s))     // 1.85 if s <= 4/3
+t(s)        = clamp((s - 1.75) / (2 - 1.75), 0, 1)
+sharp(s)    = held(s) + t(s) * (1.5 - held(s))
 ```
 
-That gives `1.85` at ×1.33, `1.542` at ×1.4, and `1.233` from ×1.5 up. A reduction does not read it.
+That gives `1.85` at ×1.33, `1.542` at ×1.4, `1.233` from ×1.5 to ×1.75, `1.367` at ×1.875 and `1.5` from ×2 up. At
+×2, `1.233` is softer than text wants. A reduction does not read it.
 
 **Example**, 1920×1080 drawn at 2560×1440:
 `[0.000520833, 0.000925926, 1.333333, 1.333333, 0.05, 1.85, 0, 0, 0.5, 0.5, 0.2, 0.45, 0.75, 0.02, 2.5, 0]`. Floats 8 to
@@ -418,7 +421,7 @@ const pipeline = device.createRenderPipeline({
     },
     primitive: { topology: 'triangle-list' },
 });
-// sharp at ×2 is 1.233 by the law; tau stays 0.05
+// sharp at ×2 is 1.5 by the law; tau stays 0.05
 device.queue.writeBuffer(uniforms, 0, mwsrUniforms(1280, 720, 2560, 1440));
 ```
 

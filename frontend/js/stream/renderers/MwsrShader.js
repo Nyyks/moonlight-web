@@ -163,12 +163,20 @@ export const MWSR_CONSTANTS = Object.freeze({
  *  24/10/2026, Bruno's eye on his iPhone at ×1.33, J37: text near FSR1's,
  *  no overshoot; 2.0 before, from the lab's J31). That value holds up to
  *  ×1.33: mwsrUniforms() takes mwsrSharpness(scale) by default, which keeps
- *  the across weight of ×1.33 from there up (Bruno's yes, 24/10/2026, J40). */
+ *  the across weight of ×1.33 from there up (Bruno's yes, 24/10/2026, J40),
+ *  then ramps to MWSR_SHARP_X2 at ×2 (his choice of 29/10/2026). */
 export const MWSR_UNIFORMS = Object.freeze({ tau: 0.05, sharp: 1.85 });
 
 /** The scale whose across weight the sharpness law holds from there up:
  *  ×1.33, the 1080p → 1440p step Bruno's eye set the sharpness at (J37). */
 export const MWSR_SHARP_REF_SCALE = 4 / 3;
+
+/** The sharpness from ×2 up, and the scale its ramp starts from: Bruno's
+ *  choice of 29/10/2026 (plan B §8). At ×2 holding the across weight of
+ *  ×1.33 alone gives 1.23, and 1.5 takes text +0.35 point of SSIM for 0 A.D.
+ *  −0.08 and the étalon −0.41, the games' edges as sharp as FSR1's; at ×1.5
+ *  and ×1.75 every picture wants 1.23 or less, hence a ramp from ×1.75. */
+export const MWSR_SHARP_X2 = Object.freeze({ sharp: 1.5, from: 1.75 });
 
 /**
  * The sharpness law by the scale (plan §12, journals J39 and J40), the
@@ -179,21 +187,28 @@ export const MWSR_SHARP_REF_SCALE = 4 / 3;
  * stays there at ×2, where the same picture pins to the texels and smears
  * (J39: at ×2 the sharpness 1.25 takes the étalon's centre from 28.8 to
  * 31.0 dB and its FLIP from 0.067 to 0.056, text's FLIP to FSR1's). The law
- * holds that weight from the reference scale up: the same blend at every
- * scale the eye saw, 1.23 from ×1.5 on.
+ * holds that weight from the reference scale up: 1.85 up to ×1.33, 1.542 at
+ * ×1.4, 1.23 from ×1.5. From MWSR_SHARP_X2.from it ramps to MWSR_SHARP_X2's
+ * sharpness at ×2 and holds it above (1.23 at ×1.75, 1.37 at ×1.875, 1.5
+ * from ×2), where 1.23 cost text 0.66 point of SSIM (plan B §8).
  * @param {number} scale output / input, the smaller axis
- * @param {{sharp?: number, ref?: number}} [opts] the sharpness up to the
- *   reference scale (MWSR_UNIFORMS.sharp) and that scale (MWSR_SHARP_REF_SCALE)
+ * @param {{sharp?: number, ref?: number, x2?: {sharp: number, from: number} | null}} [opts]
+ *   the sharpness up to the reference scale (MWSR_UNIFORMS.sharp), that
+ *   scale (MWSR_SHARP_REF_SCALE) and the ×2 end (MWSR_SHARP_X2; null: none);
+ *   the result is never above sharp
  * @returns {number} the per-draw sharpness at that scale
  */
 export function mwsrSharpness(
     scale,
-    { sharp = MWSR_UNIFORMS.sharp, ref = MWSR_SHARP_REF_SCALE } = {},
+    { sharp = MWSR_UNIFORMS.sharp, ref = MWSR_SHARP_REF_SCALE, x2 = MWSR_SHARP_X2 } = {},
 ) {
     const strength = (s) => Math.min(Math.max((s - 1) / (MWSR_OVERRIDES.S_FULL - 1), 0), 1);
     const at = strength(scale);
     if (at <= 0) return sharp;
-    return sharp * Math.min(1, strength(ref) / at);
+    const held = sharp * Math.min(1, strength(ref) / at);
+    if (!x2) return held;
+    const t = Math.min(Math.max((scale - x2.from) / (2 - x2.from), 0), 1);
+    return Math.min(sharp, held + t * (x2.sharp - held));
 }
 
 /**
