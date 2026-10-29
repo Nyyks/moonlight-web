@@ -223,6 +223,18 @@ la loi vient de la vérification à ×1,5 et à ×1,75, sur les mêmes images :
 - Le README et le comparateur passent le texte de MWSR à ×2 de 86,1 à 86,5. Le jeu reste à 66,2, et
   son FLIP passe de 0,065 à 0,071.
 
+**Correction du 29/10 au soir.** Ce tableau a un biais : à ×1,5 et ×1,75, les sorties sont sous 1440p
+(1080p, 1350p, 1260p). Les images du texte et de 0 A.D. n'existent qu'en 1440p, et la référence était
+donc une réduction, plus douce qu'une vraie image native, qui demande moins de netteté. Refait avec les
+contenus que le labo dessine à la taille de sortie (§11, `b-native/`, hors dépôt) :
+- le texte veut 2,5 à ×1,33, 1,25-1,5 à ×1,5, 1,75 à ×1,75 (+0,22 sur la loi) et 2,5 à ×2 ;
+- le code coloré veut 0 à 0,5 partout (la loi lui coûte 0,25 à ×1,5 et 0,74 à ×1,75) ;
+- le jeu dessiné ne bouge presque pas (±0,05).
+
+La loi commitée reste un compromis défendable : monter à ×1,75 rendrait 0,22 au texte et prendrait
+0,5 au code. Mais « toutes les images veulent ≤ 1,23 à ×1,5 et ×1,75 » était faux pour le texte à
+×1,75. C'est justement le conflit que la netteté adaptative résout.
+
 **Les variantes YUV** (texte, 1080p → 1440p, plans BT.709 à plage limitée) :
 
 | Cellule | SSIM | SSIM luma | FLIP |
@@ -407,7 +419,20 @@ de deviner.
   - À ×1,33, elle ne change rien : la loi est déjà au-dessus de ce qu'il demande.
   - À ×2, elle détecte le texte : 2,5 sur le texte (+0,31) ; +0,14 à +0,15 sur les images mixtes avec
     du texte ; rien ailleurs (−0,02 au pire).
-  - Elle n'a donc à tourner qu'à partir de ×1,75 environ.
+  - Où elle sert, refait sur des références vraiment natives (le texte, le code et le jeu que le labo
+    dessine à la taille de sortie ; `b-native/`, hors dépôt) :
+
+| Échelle | Loi | Texte : oracle / auto-test | Gain possible | Gain de l'auto-test (jamais sous la loi) |
+|---|---|---|---|---|
+| ×1,33 | 1,85 | 2,5 / 1,75 | +0,16 | 0 : l'auto-test s'arrête sous la loi |
+| ×1,5 | 1,23 | 1,5 / 1,5 | +0,02 | +0,02 |
+| ×1,75 | 1,23 | 1,75 / 2,0 | +0,22 | +0,19 |
+| ×2 | 1,5 | 2,5 / 2,5 | +0,31 | +0,31 |
+
+  - Le code coloré veut moins que la loi à toutes les échelles, et l'auto-test ne le voit jamais
+    (1,25-1,5 au lieu de 0-0,5) : c'est son angle mort. La version « jamais sous la loi » n'y perd rien.
+  - Le gain n'existe donc qu'à partir de ×1,75 environ : à ×1,5 il est nul, et à ×1,33 l'auto-test ne
+    voit pas ce que le texte voudrait.
 - **Le coût, estimé et pas mesuré.** Par analyse à ×2 vers 1440p :
   - une réduction de L ;
   - trois passes MWSR de 640 × 360 vers 1280 × 720 (la loi, +0,5, +1), chacune le quart de la passe
