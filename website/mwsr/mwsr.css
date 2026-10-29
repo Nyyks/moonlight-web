@@ -25,6 +25,18 @@ small{color:var(--muted); font-size:.78em}
 .check{display:flex; align-items:center; gap:.5em; margin-top:8px; font-size:.88rem; color:var(--muted); cursor:pointer}
 .check input{accent-color:var(--cyan); width:16px; height:16px}
 .check:has(input:disabled){opacity:.45; cursor:default}
+/* a one-line tip: on hover, or on a tap (focus), over the page, never in its
+   flow; as wide as its row, so that it never leaves a phone's screen */
+.check-row{position:relative; display:flex; align-items:center; gap:.45em}
+.check-row .check{margin-top:8px}
+.tip{flex:none; display:inline-grid; place-items:center; width:18px; height:18px; margin-top:8px;
+  border:1px solid var(--line); border-radius:50%; font:700 .7rem/1 var(--mono); color:var(--muted); cursor:help}
+.tip:hover, .tip:focus{color:var(--cyan); border-color:var(--cyan); outline:none}
+.tip::after{content:attr(data-tip); display:none; position:absolute; z-index:5; left:0; right:0; top:calc(100% + 6px);
+  padding:.45rem .6rem; border:1px solid var(--line-glow); border-radius:8px; background:var(--panel-2);
+  color:var(--txt); font:400 .8rem/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; letter-spacing:0;
+  box-shadow:0 6px 24px rgba(0,0,0,.45); pointer-events:none}
+.tip:hover::after, .tip:focus::after{display:block}
 .ab{display:flex; gap:6px; margin-top:8px; align-items:center}
 .ab select, .ab button{font:inherit; font-size:.88rem; color:var(--txt); background:var(--panel-2);
   border:1px solid var(--line); border-radius:8px; padding:.3rem .5rem}

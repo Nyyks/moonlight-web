@@ -256,6 +256,8 @@ onRadio('zoom', (v) => {
   redraw();
   toHash();
 });
+// the tip opens on focus: a tap gives it, Safari on an iPhone included
+$('c444-tip').addEventListener('click', (e) => e.currentTarget.focus());
 $('c444').addEventListener('change', () => {
   S.c444 = $('c444').checked;
   load();

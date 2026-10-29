@@ -84,7 +84,12 @@
         <label><input type="radio" name="chroma" value="444" checked> 4:4:4</label>
         <label><input type="radio" name="chroma" value="420"> 4:2:0</label>
       </div>
-      <label class="check"><input type="checkbox" id="c444"> MWSR reads colour edges: <code>CHROMA444</code></label>
+      <div class="check-row">
+        <label class="check"><input type="checkbox" id="c444"> MWSR sharpens colour edges too</label>
+        <span class="tip" tabindex="0" role="note" id="c444-tip"
+              data-tip="CHROMA444: MWSR finds its edges in the brightness; this mode also finds those between two colours of one brightness, which only 4:4:4 keeps."
+              aria-label="CHROMA444: MWSR finds its edges in the brightness; this mode also finds those between two colours of one brightness, which only 4:4:4 keeps.">?</span>
+      </div>
     </fieldset>
     <fieldset>
       <legend>View</legend>
