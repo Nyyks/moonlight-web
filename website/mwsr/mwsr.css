@@ -68,6 +68,8 @@ small{color:var(--muted); font-size:.78em}
 .pane figcaption .m{color:var(--muted); font-variant-numeric:tabular-nums}
 .pane .side{position:absolute; top:.5rem; font:700 .75rem var(--mono); color:#fff; background:rgba(4,7,11,.75);
   padding:.1rem .45rem; border-radius:6px; pointer-events:none}
+.pane figcaption .next{margin-left:auto}
+.pane canvas:focus-visible{outline:2px solid var(--cyan); outline-offset:-2px}
 .pane .side.l{left:.5rem}
 .pane .side.r{right:.5rem}
 .drop{position:absolute; inset:0; display:grid; place-items:center; border:2px dashed var(--cyan); border-radius:12px;

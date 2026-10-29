@@ -82,6 +82,7 @@ const S = {
   view: 'grid',
   a: 'mwsr',
   b: 'fsr1',
+  flipped: false, // the flip view shows B
   zoom: matchMedia('(max-width: 560px)').matches ? 2 : 4, // a phone's panes are small
   center: [960, 220],
   split: 0.5,
@@ -95,7 +96,7 @@ function fromHash() {
   S.scale = h.get('scale') === '2' ? 2 : 4 / 3;
   S.chroma = h.get('chroma') === '420' ? '420' : '444';
   S.c444 = h.get('c444') === '1' && S.chroma === '444';
-  S.view = ['grid', 'ab', 'wipe'].includes(h.get('view')) ? h.get('view') : 'grid';
+  S.view = ['grid', 'ab', 'flip', 'wipe'].includes(h.get('view')) ? h.get('view') : 'grid';
   for (const k of ['a', 'b']) if (NAMES[h.get(k)] && h.get(k) !== 'input') S[k] = h.get(k);
   if (['1', '2', '4', '8'].includes(h.get('zoom'))) S.zoom = Number(h.get('zoom'));
   const x = Number(h.get('x'));
@@ -439,33 +440,60 @@ function buildPanes() {
   let defs;
   if (S.view === 'grid') defs = [first, ...KERNELS.map((k) => k.id)].map((a) => ({ a }));
   else if (S.view === 'ab') defs = [{ a: pick(S.a) }, { a: pick(S.b) }];
+  else if (S.view === 'flip') defs = [{ a: pick(S.a), b: pick(S.b), flip: true }];
   else defs = [{ a: pick(S.a), b: pick(S.b), wipe: true }];
-  box.className = 'panes' + (S.view === 'ab' ? ' two' : S.view === 'wipe' ? ' one' : '');
+  box.className = 'panes' + (S.view === 'ab' ? ' two' : S.view === 'grid' ? '' : ' one');
   panes = defs.map((d) => {
     const fig = document.createElement('figure');
     fig.className = 'pane';
     const canvas = document.createElement('canvas');
     const cap = document.createElement('figcaption');
     fig.append(canvas, cap);
+    let side = null;
     if (d.wipe) {
       fig.insertAdjacentHTML(
         'beforeend',
         `<span class="side l">${NAMES[d.a]}</span><span class="side r">${NAMES[d.b]}</span>`,
       );
       canvas.setAttribute('aria-label', NAMES[d.a] + ' on the left, ' + NAMES[d.b] + ' on the right');
+    } else if (d.flip) {
+      side = document.createElement('span');
+      side.className = 'side l';
+      fig.append(side);
+      canvas.tabIndex = 0;
+      canvas.addEventListener('keydown', (e) => {
+        if (e.key !== ' ' && e.key !== 'Enter') return;
+        e.preventDefault();
+        flip();
+      });
     } else canvas.setAttribute('aria-label', NAMES[d.a]);
     box.append(fig);
-    const p = { ...d, canvas, cap, gpu: engine.pane(canvas, C.hdr) };
+    const p = { ...d, canvas, cap, side, gpu: engine.pane(canvas, C.hdr) };
     ro.observe(canvas);
-    pan(canvas);
+    pan(canvas, d.flip ? flip : null);
     return p;
   });
   captions();
   hdrNote();
   toHash();
 }
+// the flip view: the one its pane shows, and the other
+const flipped = (p) => (S.flipped ? [p.b, p.a] : [p.a, p.b]);
+const TAP = matchMedia('(pointer: coarse)').matches ? 'tap' : 'click';
+function flip() {
+  S.flipped = !S.flipped;
+  captions();
+  redraw();
+}
 function captions() {
   for (const p of panes) {
+    if (p.flip) {
+      const [on, off] = flipped(p);
+      p.cap.innerHTML = `<b>${NAMES[on]}</b><span class="m">${line(on)}</span><span class="m next">${TAP}: ${NAMES[off]}</span>`;
+      p.side.textContent = NAMES[on];
+      p.canvas.setAttribute('aria-label', `${NAMES[on]}: ${TAP}, or press Space, for ${NAMES[off]}`);
+      continue;
+    }
     if (p.wipe) {
       p.cap.innerHTML = `<b>${NAMES[p.a]}</b><span class="m">${line(p.a)}</span><b>${NAMES[p.b]}</b><span class="m">${line(p.b)}</span>`;
       continue;
@@ -492,15 +520,17 @@ function redraw() {
     queued = false;
     const dpr = devicePixelRatio || 1;
     const z = Math.max(1, Math.round(S.zoom * dpr));
-    for (const p of panes)
+    for (const p of panes) {
+      const a = p.flip ? flipped(p)[0] : p.a;
       p.gpu.draw({
-        a: p.a,
-        b: p.b || p.a,
+        a,
+        b: p.wipe ? p.b : a,
         center: S.center,
         zoom: z,
         split: p.wipe ? Math.round(S.split * p.canvas.width) + 0.5 : -1,
         line: Math.max(1, Math.round(dpr)) + 0.5,
       });
+    }
     drawOverview();
   });
 }
@@ -509,23 +539,31 @@ function clampCenter() {
   if (!S.center) S.center = [C.outW / 2, C.outH / 2];
   S.center = [Math.min(Math.max(S.center[0], 0), C.outW), Math.min(Math.max(S.center[1], 0), C.outH)];
 }
-function pan(canvas) {
+// A drag moves the view; with `onTap`, a click that hardly moves (a few CSS
+// pixels: a finger shakes) calls it instead.
+function pan(canvas, onTap = null) {
   let last = null;
+  let moved = 0;
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
     last = [e.clientX, e.clientY];
+    moved = 0;
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!last) return;
     const dpr = devicePixelRatio || 1;
     const z = Math.max(1, Math.round(S.zoom * dpr));
+    moved += Math.abs(e.clientX - last[0]) + Math.abs(e.clientY - last[1]);
     S.center = [S.center[0] - ((e.clientX - last[0]) * dpr) / z, S.center[1] - ((e.clientY - last[1]) * dpr) / z];
     last = [e.clientX, e.clientY];
     clampCenter();
     redraw();
   });
-  const end = () => {
-    if (last) toHash();
+  const end = (e) => {
+    if (last) {
+      toHash();
+      if (onTap && e.type === 'pointerup' && moved < 6) onTap();
+    }
     last = null;
   };
   canvas.addEventListener('pointerup', end);

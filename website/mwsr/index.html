@@ -96,6 +96,7 @@
       <div class="seg" id="view">
         <label><input type="radio" name="view" value="grid" checked> All</label>
         <label><input type="radio" name="view" value="ab"> Side by side</label>
+        <label><input type="radio" name="view" value="flip"> Flip</label>
         <label><input type="radio" name="view" value="wipe"> Wipe</label>
       </div>
       <div class="ab" id="ab" hidden>
@@ -125,8 +126,9 @@
   </section>
   <div class="under">
     <canvas id="overview" width="240" height="135" aria-label="Where the panes look: click to move"></canvas>
-    <p class="hint">Drag a pane to move all of them. Click the small picture to jump. In the wipe view, the slider moves
-      the line. Each pane shows the pixels as they are, enlarged without smoothing.</p>
+    <p class="hint">Drag a pane to move all of them. Click the small picture to jump. In the flip view, a click on the
+      pane (or Space) shows the other one, in the same place. In the wipe view, the slider moves the line. Each pane
+      shows the pixels as they are, enlarged without smoothing.</p>
     <label class="wipe-slider" id="wipe-slider" hidden>Line <input type="range" id="split" min="0" max="1" step="0.001" value="0.5"></label>
   </div>
 
