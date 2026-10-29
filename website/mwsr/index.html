@@ -67,6 +67,9 @@
     <fieldset>
       <legend>Scale</legend>
       <div class="seg" id="scale">
+        <label><input type="radio" name="scale" value="0.5"> ×0.5 <small>1440p → 720p</small></label>
+        <label><input type="radio" name="scale" value="0.75"> ×0.75 <small>1440p → 1080p</small></label>
+        <label><input type="radio" name="scale" value="1"> ×1 <small>1440p → 1440p</small></label>
         <label><input type="radio" name="scale" value="1.3333333333333333" checked> ×1.33 <small>1080p → 1440p</small></label>
         <label><input type="radio" name="scale" value="2"> ×2 <small>720p → 1440p</small></label>
       </div>
@@ -167,6 +170,15 @@
       <li><strong>The native frame</strong> is the picture at 2560×1440. The input is that frame reduced to 1920×1080 or
         1280×720, by Lanczos-3 in linear light, the same reduction as the README. Each upscaler draws the input back at
         2560×1440.</li>
+      <li><strong>×1</strong> gives every upscaler the frame itself, to draw at its own size. MoonlightWeb copies such a
+        frame whatever the upscaler; the page runs each one all the same, to show what it does to a picture it does not
+        enlarge.</li>
+      <li><strong>×0.75 and ×0.5</strong> give the 2560×1440 frame as the input, drawn at 1920×1080 or 1280×720: a
+        stream larger than its screen. The scores are taken against the <strong>reference</strong>, the frame reduced by
+        the same Lanczos-3 in linear light. MWSR runs its reduction, as the client does: bilinear samples over each
+        pixel's footprint, averaged in linear light (through the textures' sRGB views; on HDR, from the light itself).
+        FSR1, NIS and SGSR1 are made to enlarge (NIS from ×1 to ×2): below ×1 they run as they are, as the client runs
+        them.</li>
       <li><strong>Fidelity</strong> is the SSIM of the luma against the native frame, ×100: the README's measure,
         computed here on what your GPU drew. <strong>Colour</strong> is the mean SSIM of the red, green and blue
         channels, which sees the edges the luma misses: those of the colour text, whose colours all have one luma. On
@@ -176,11 +188,11 @@
         than 2/255. It counts halos and ringing.</li>
       <li><strong>GPU time</strong> is the median of batches of 100 draws, each batch timed by two GPU timestamps. The
         browser rounds those timestamps (to 0.1 ms in Chrome), and a batch of 100 makes the rounding a small share. When
-        your GPU has <code>shader-f16</code>, MWSR, FSR1 and SGSR1 are also timed in 16-bit and the faster of their two
-        precisions is shown. Within 2 % of each other the two are even, <code>f16 ≈ f32</code>: such a gap changes
-        sides from one run to the next. Their 16-bit picture is first held to their 32-bit one: within 4/255 on 99.9 %
-        of the pixels. The pictures and the scores are those of the 32-bit texts. Timings vary with the GPU's clock: run
-        them twice before you trust a small gap.</li>
+        your GPU has <code>shader-f16</code>, MWSR (its enlargement), FSR1 and SGSR1 are also timed in 16-bit and the
+        faster of their two precisions is shown. Within 2 % of each other the two are even, <code>f16 ≈ f32</code>:
+        such a gap changes sides from one run to the next. Their 16-bit picture is first held to their 32-bit one:
+        within 4/255 on 99.9 % of the pixels. The pictures and the scores are those of the 32-bit texts. Timings vary
+        with the GPU's clock: run them twice before you trust a small gap.</li>
       <li><strong>4:2:0</strong> gives every upscaler the input a 4:2:0 stream would give it: its colour averaged over
         2×2 pixels and brought back by interpolation, as a decoder hands it over. <code>CHROMA444</code> is MWSR's mode
         for 4:4:4 streams. It is off by default, as in the README's figures, and the colour text shows what it does.
@@ -194,8 +206,9 @@
         reads past 1.0 (MoonlightWeb's NIS port has no <code>NIS_HDR_MODE</code>, and SGSR1 clamps to 0..1). The tone
         map is not timed.</li>
       <li><strong>Your picture</strong> is decoded in this tab, and a picture larger than 3840×2160 is first reduced to
-        fit. As the native frame, it is reduced and rebuilt, and scored. As the input, it is upscaled as it is and only
-        the overshoot is scored. Pictures are read as 8-bit SDR.</li>
+        fit. As the native frame, it is reduced and rebuilt, and scored (below ×1, it is the input, scored against its
+        own Lanczos-3 reduction). As the input, it is upscaled as it is and only the overshoot is scored. Pictures are
+        read as 8-bit SDR.</li>
     </ul>
     <h2>The ports</h2>
     <p>These are MoonlightWeb's ports, the ones the client runs, not the vendors' own builds. FSR1 is firdawolf's WGSL

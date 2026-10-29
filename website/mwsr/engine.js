@@ -51,6 +51,21 @@ fn fs(in : VSOut) -> @location(0) vec4f {
 }
 `;
 
+// The HDR feed (sRGB-encoded past 1.0) back to linear light, as the client's
+// HDR pass 0 writes it for MWSR's reduction (LINEAR_LIGHT 3, journal J47): the
+// sampler then mixes light, and the reduction encodes once, at its output.
+const LIN =
+  VS +
+  /* wgsl */ `
+@group(0) @binding(0) var tex : texture_2d<f32>;
+@fragment
+fn fs(in : VSOut) -> @location(0) vec4f {
+    let c = max(textureLoad(tex, vec2i(in.pos.xy), 0).rgb, vec3f(0.0));
+    let hi = pow((c + 0.055) / 1.055, vec3f(2.4));
+    return vec4f(select(hi, c / 12.92, c <= vec3f(0.04045)), 1.0);
+}
+`;
+
 // A pane: the output pixels at `zoom` device pixels each, around `center`
 // (output pixels), A left of `split` and B right of it (canvas pixels).
 const VIEW =
@@ -82,7 +97,7 @@ export const KERNELS = [
 ];
 
 export async function createEngine({ K, mwsr, nis, soft = false, onLost = () => {} }) {
-  const { mwsrUniforms, mwsrWgsl } = mwsr;
+  const { mwsrRegime, mwsrUniforms, mwsrWgsl } = mwsr;
   const { nisCoefTexture, nisConfig } = nis;
   if (!navigator.gpu) throw new Error('nogpu');
   const adapter = await navigator.gpu.requestAdapter(
@@ -174,8 +189,15 @@ export async function createEngine({ K, mwsr, nis, soft = false, onLost = () => 
 
   let C = null; // the case: sizes, format, textures, uniforms
   const owned = [];
+  // SDR textures carry their `-srgb` view, which MWSR's reduction reads and
+  // draws through, as the client's do (the hardware makes the linear light)
   const tex = (w, h, format, usage) => {
-    const t = device.createTexture({ size: [w, h], format, usage });
+    const t = device.createTexture({
+      size: [w, h],
+      format,
+      usage,
+      viewFormats: format === 'rgba8unorm' ? ['rgba8unorm-srgb'] : [],
+    });
     owned.push(t);
     return t;
   };
@@ -183,6 +205,11 @@ export async function createEngine({ K, mwsr, nis, soft = false, onLost = () => 
   /** Uploads a case: `native` may be null (a picture taken as the input). */
   function setCase({ outW, outH, inW, inH, hdr, native, input }) {
     for (const t of owned.splice(0)) t.destroy();
+    // MWSR's mode as the client picks it, its reduction below 1:1; at 1:1,
+    // where the client copies, its kernel all the same, as every other one
+    // runs there: the page shows what each does to a picture it keeps the size of
+    const reg =
+      inW === outW && inH === outH ? { mode: 'up' } : mwsrRegime(inW, inH, outW, outH, { srgb: !hdr, linear: hdr });
     const format = hdr ? 'rgba16float' : 'rgba8unorm';
     const bpp = hdr ? 8 : 4;
     const RW = T.TEXTURE_BINDING | T.RENDER_ATTACHMENT | T.COPY_SRC;
@@ -201,12 +228,14 @@ export async function createEngine({ K, mwsr, nis, soft = false, onLost = () => 
       format,
       bpp,
       inTex,
+      reg,
       native: native ? up(outW, outH, native) : null,
       out: Object.fromEntries(KERNELS.map((k) => [k.id, tex(outW, outH, format, RW)])),
       interm: tex(outW, outH, format, RW),
       scratch: tex(outW, outH, format, RW),
       tmIn: hdr ? tex(inW, inH, format, RW) : null,
       tmOut: hdr ? tex(outW, outH, format, RW) : null,
+      linIn: hdr && reg.mode === 'down' ? tex(inW, inH, format, RW) : null,
       u: {
         sgsr: ubo(new Float32Array([1 / inW, 1 / inH, inW, inH])),
         easu: ubo(new Float32Array([inW, inH, outW, outH])),
@@ -234,6 +263,11 @@ export async function createEngine({ K, mwsr, nis, soft = false, onLost = () => 
       const pl = pipeline('srtm', SRTM(false), format, plOne);
       run([{ pipeline: pl, group: bind(pl, [C.inTex.createView()]), view: C.tmIn.createView() }]);
     }
+    if (C.linIn) {
+      // and in linear light, once, for MWSR's reduction (untimed, as the client's pass 0)
+      const pl = pipeline('lin', LIN, format, plOne);
+      run([{ pipeline: pl, group: bind(pl, [C.inTex.createView()]), view: C.linIn.createView() }]);
+    }
   }
 
   /** The passes of an upscaler reading `src`, the last one into `dst`. */
@@ -243,6 +277,27 @@ export async function createEngine({ K, mwsr, nis, soft = false, onLost = () => 
     const dv = dst.createView();
     switch (id) {
       case 'mwsr': {
+        const r = C.reg;
+        if (r.mode === 'down') {
+          // SDR through the `-srgb` views, HDR from the linear light (setCase)
+          const fv = C.hdr ? f : f + '-srgb';
+          const pl = pipeline(
+            `mwsrdown${r.taps}:${r.rDown}:${r.linearLight}`,
+            mwsrWgsl({ feed: 'tex', mode: 'down', taps: r.taps }),
+            fv,
+            plTex,
+            ['vs', 'fs'],
+            { R_DOWN: r.rDown, LINEAR_LIGHT: r.linearLight },
+          );
+          const from = C.hdr ? C.linIn.createView() : src.createView({ format: fv });
+          return [
+            {
+              pipeline: pl,
+              group: bind(pl, [sampler, from, { buffer: C.u.mwsr }]),
+              view: dst.createView({ format: fv }),
+            },
+          ];
+        }
         const constants = c444 ? { CHROMA444: 1 } : {};
         const pl = pipeline(
           'mwsr' + (half ? 'h' : '') + (c444 ? '444' : ''),
@@ -479,6 +534,10 @@ export async function createEngine({ K, mwsr, nis, soft = false, onLost = () => 
     label,
     hasTs,
     hasF16,
+    /** Whether `id` has a 16-bit text for this case (MWSR's reduction has none). */
+    halfOf: (id) => hasF16 && KERNELS.find((k) => k.id === id).half && !(id === 'mwsr' && C.reg.mode === 'down'),
+    /** MWSR's mode for this case: 'up' or 'down'. */
+    mwsrMode: () => C && C.reg.mode,
     setCase,
     draw,
     readOut,

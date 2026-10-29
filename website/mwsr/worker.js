@@ -714,7 +714,13 @@ async function picture(p) {
   return pic;
 }
 
-/** The case: the native frame and the input the upscalers read, in the GPU's form. */
+/**
+ * The case: the native frame and the input the upscalers read, in the GPU's
+ * form. An enlargement (scale > 1) reduces the picture into the input and
+ * scores against the picture; at ×1 the input is the picture itself; a
+ * reduction (scale < 1) takes the picture as the input and scores against
+ * its Lanczos-3 reduction in linear light, the best the output can hold.
+ */
 async function prepare({ pic: p, scale, chroma, role }) {
   const pic = await picture(p);
   const { w, h } = pic;
@@ -724,29 +730,34 @@ async function prepare({ pic: p, scale, chroma, role }) {
     let s = Math.min(1, MAX_W / (w * scale), MAX_H / (h * scale));
     inW = Math.max(1, Math.round(w * s));
     inH = Math.max(1, Math.round(h * s));
-    outW = Math.round(inW * scale);
-    outH = Math.round(inH * scale);
-  } else {
+    outW = Math.max(1, Math.round(inW * scale));
+    outH = Math.max(1, Math.round(inH * scale));
+  } else if (scale >= 1) {
     outW = w;
     outH = h;
     inW = Math.max(1, Math.round(w / scale));
     inH = Math.max(1, Math.round(h / scale));
+  } else {
+    inW = w;
+    inH = h;
+    outW = Math.max(1, Math.round(w * scale));
+    outH = Math.max(1, Math.round(h * scale));
   }
-  const res = { outW, outH, inW, inH, hdr: pic.hdr, reduced: pic.reduced || null };
+  const res = { outW, outH, inW, inH, picW: w, picH: h, hdr: pic.hdr, reduced: pic.reduced || null };
+  const own = (W, H) => W === w && H === h;
   let native = null;
   let input;
   if (!pic.hdr) {
-    if (role === 'input') input = inW === w && inH === h ? pic.rgba : reduceSdr(pic.rgba, w, h, inW, inH);
-    else {
-      native = pic.rgba;
-      input = reduceSdr(pic.rgba, w, h, inW, inH);
-    }
+    const at = (W, H) => (own(W, H) ? pic.rgba : reduceSdr(pic.rgba, w, h, W, H));
+    if (role !== 'input') native = at(outW, outH);
+    input = at(inW, inH);
     if (chroma === '420') input = to420(input, inW, inH);
     res.native = native && new Uint8Array(native);
     res.input = new Uint8Array(input);
   } else {
-    native = encodeHdr(pic.planes, w * h);
-    input = encodeHdr(reduceHdr(pic.planes, w, h, inW, inH), inW * inH);
+    const at = (W, H) => encodeHdr(own(W, H) ? pic.planes : reduceHdr(pic.planes, w, h, W, H), W * H);
+    native = at(outW, outH);
+    input = at(inW, inH);
     if (chroma === '420') input = to420(input, inW, inH);
     // the GPU reads half floats: the metrics read the same values
     res.native = halves(native);

@@ -71,6 +71,23 @@ const NOTES = {
   input: 'what the upscalers read, each texel enlarged',
   nis: "MoonlightWeb's per-fragment port",
 };
+// A reduction scores against the picture reduced by Lanczos-3: no native frame, a reference
+const reducing = () => C && C.outW < C.inW;
+const nameOf = (id) => (id === 'native' && reducing() ? 'Reference' : NAMES[id]);
+const noteOf = (id) =>
+  id === 'native' && reducing()
+    ? 'the picture reduced by Lanczos-3 in linear light'
+    : id === 'input' && reducing()
+      ? 'what the scalers read, at its own size'
+      : NOTES[id];
+// the scales and their keys in the link
+const SCALES = [
+  [0.5, '0.5'],
+  [0.75, '0.75'],
+  [1, '1'],
+  [4 / 3, '1.33'],
+  [2, '2'],
+];
 
 // ── the state, and its mirror in the address (#pic=…&scale=…) ──
 const S = {
@@ -84,7 +101,7 @@ const S = {
   b: 'fsr1',
   flipped: false, // the flip view shows B
   zoom: matchMedia('(max-width: 560px)').matches ? 2 : 4, // a phone's panes are small
-  center: [960, 220],
+  center: [960, 220], // in the picture's pixels, whatever the scale draws it at
   split: 0.5,
   file: null,
 };
@@ -93,7 +110,7 @@ function fromHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   const pic = h.get('pic');
   if (PICS[pic] && pic !== 'file') S.pic = pic;
-  S.scale = h.get('scale') === '2' ? 2 : 4 / 3;
+  S.scale = (SCALES.find(([, k]) => k === h.get('scale')) || [4 / 3])[0];
   S.chroma = h.get('chroma') === '420' ? '420' : '444';
   S.c444 = h.get('c444') === '1' && S.chroma === '444';
   S.view = ['grid', 'ab', 'flip', 'wipe'].includes(h.get('view')) ? h.get('view') : 'grid';
@@ -112,7 +129,7 @@ addEventListener('hashchange', () => {
 function toHash() {
   const h = new URLSearchParams();
   if (S.pic !== 'file') h.set('pic', S.pic);
-  h.set('scale', S.scale === 2 ? '2' : '1.33');
+  h.set('scale', SCALES.find(([v]) => v === S.scale)[1]);
   if (S.chroma === '420') h.set('chroma', '420');
   if (S.c444) h.set('c444', '1');
   h.set('view', S.view);
@@ -400,7 +417,7 @@ async function score(my, ids = KERNELS.map((k) => k.id)) {
   }
   // the 16-bit gate: each 16-bit text held to its 32-bit picture on this GPU
   if (!engine.hasF16) return;
-  for (const k of KERNELS.filter((x) => x.half && ids.includes(x.id))) {
+  for (const k of KERNELS.filter((x) => engine.halfOf(x.id) && ids.includes(x.id))) {
     await engine.draw(k.id, { half: true, c444: S.c444 });
     const a = await engine.readOut(k.id);
     const b = await engine.readScratch();
@@ -431,6 +448,7 @@ function buildPanes() {
   }
   const box = $('panes');
   box.innerHTML = '';
+  for (const sel of [$('a'), $('b')]) sel.options[0].textContent = nameOf('native');
   const first = C.native ? 'native' : 'input';
   const pick = (x) => (x === 'native' && !C.native ? 'input' : x);
   let defs;
@@ -449,9 +467,9 @@ function buildPanes() {
     if (d.wipe) {
       fig.insertAdjacentHTML(
         'beforeend',
-        `<span class="side l">${NAMES[d.a]}</span><span class="side r">${NAMES[d.b]}</span>`,
+        `<span class="side l">${nameOf(d.a)}</span><span class="side r">${nameOf(d.b)}</span>`,
       );
-      canvas.setAttribute('aria-label', NAMES[d.a] + ' on the left, ' + NAMES[d.b] + ' on the right');
+      canvas.setAttribute('aria-label', nameOf(d.a) + ' on the left, ' + nameOf(d.b) + ' on the right');
     } else if (d.flip) {
       side = document.createElement('span');
       side.className = 'side l';
@@ -462,7 +480,7 @@ function buildPanes() {
         e.preventDefault();
         flip();
       });
-    } else canvas.setAttribute('aria-label', NAMES[d.a]);
+    } else canvas.setAttribute('aria-label', nameOf(d.a));
     box.append(fig);
     const p = { ...d, canvas, cap, side, gpu: engine.pane(canvas, C.hdr) };
     ro.observe(canvas);
@@ -485,20 +503,20 @@ function captions() {
   for (const p of panes) {
     if (p.flip) {
       const [on, off] = flipped(p);
-      p.cap.innerHTML = `<b>${NAMES[on]}</b><span class="m">${line(on)}</span><span class="m next">${TAP}: ${NAMES[off]}</span>`;
-      p.side.textContent = NAMES[on];
-      p.canvas.setAttribute('aria-label', `${NAMES[on]}: ${TAP}, or press Space, for ${NAMES[off]}`);
+      p.cap.innerHTML = `<b>${nameOf(on)}</b><span class="m">${line(on)}</span><span class="m next">${TAP}: ${nameOf(off)}</span>`;
+      p.side.textContent = nameOf(on);
+      p.canvas.setAttribute('aria-label', `${nameOf(on)}: ${TAP}, or press Space, for ${nameOf(off)}`);
       continue;
     }
     if (p.wipe) {
-      p.cap.innerHTML = `<b>${NAMES[p.a]}</b><span class="m">${line(p.a)}</span><b>${NAMES[p.b]}</b><span class="m">${line(p.b)}</span>`;
+      p.cap.innerHTML = `<b>${nameOf(p.a)}</b><span class="m">${line(p.a)}</span><b>${nameOf(p.b)}</b><span class="m">${line(p.b)}</span>`;
       continue;
     }
-    p.cap.innerHTML = `<b>${NAMES[p.a]}</b><span class="m">${line(p.a)}</span>`;
+    p.cap.innerHTML = `<b>${nameOf(p.a)}</b><span class="m">${line(p.a)}</span>`;
   }
 }
 function line(id) {
-  if (NOTES[id] && (id === 'native' || id === 'input')) return NOTES[id];
+  if (id === 'native' || id === 'input') return noteOf(id);
   const r = R[id];
   if (!r) return '…';
   const bits = [];
@@ -521,7 +539,7 @@ function redraw() {
       p.gpu.draw({
         a,
         b: p.wipe ? p.b : a,
-        center: S.center,
+        center: outCenter(),
         zoom: z,
         split: p.wipe ? Math.round(S.split * p.canvas.width) + 0.5 : -1,
         line: Math.max(1, Math.round(dpr)) + 0.5,
@@ -530,10 +548,15 @@ function redraw() {
     drawOverview();
   });
 }
+// The centre is kept in the picture's pixels (the places and the link stay
+// right at every scale); the panes and the small picture take the output's.
+const kx = () => C.outW / C.picW;
+const ky = () => C.outH / C.picH;
+const outCenter = () => [S.center[0] * kx(), S.center[1] * ky()];
 function clampCenter() {
   if (!C) return;
-  if (!S.center) S.center = [C.outW / 2, C.outH / 2];
-  S.center = [Math.min(Math.max(S.center[0], 0), C.outW), Math.min(Math.max(S.center[1], 0), C.outH)];
+  if (!S.center) S.center = [C.picW / 2, C.picH / 2];
+  S.center = [Math.min(Math.max(S.center[0], 0), C.picW), Math.min(Math.max(S.center[1], 0), C.picH)];
 }
 // A drag moves the view; with `onTap`, a click that hardly moves (a few CSS
 // pixels: a finger shakes) calls it instead.
@@ -550,7 +573,10 @@ function pan(canvas, onTap = null) {
     const dpr = devicePixelRatio || 1;
     const z = Math.max(1, Math.round(S.zoom * dpr));
     moved += Math.abs(e.clientX - last[0]) + Math.abs(e.clientY - last[1]);
-    S.center = [S.center[0] - ((e.clientX - last[0]) * dpr) / z, S.center[1] - ((e.clientY - last[1]) * dpr) / z];
+    S.center = [
+      S.center[0] - ((e.clientX - last[0]) * dpr) / z / kx(),
+      S.center[1] - ((e.clientY - last[1]) * dpr) / z / ky(),
+    ];
     last = [e.clientX, e.clientY];
     clampCenter();
     redraw();
@@ -636,12 +662,8 @@ function drawOverview() {
   const vh = p.canvas.height / z;
   g.strokeStyle = '#19d3ff';
   g.lineWidth = Math.max(1, dpr);
-  g.strokeRect(
-    ox + (S.center[0] - vw / 2) * s,
-    oy + (S.center[1] - vh / 2) * s,
-    Math.max(2, vw * s),
-    Math.max(2, vh * s),
-  );
+  const [cx, cy] = outCenter();
+  g.strokeRect(ox + (cx - vw / 2) * s, oy + (cy - vh / 2) * s, Math.max(2, vw * s), Math.max(2, vh * s));
 }
 {
   const cv = $('overview');
@@ -652,7 +674,7 @@ function drawOverview() {
     const s = Math.min(r.width / C.outW, r.height / C.outH);
     const ox = (r.width - C.outW * s) / 2;
     const oy = (r.height - C.outH * s) / 2;
-    S.center = [(e.clientX - r.left - ox) / s, (e.clientY - r.top - oy) / s];
+    S.center = [(e.clientX - r.left - ox) / s / kx(), (e.clientY - r.top - oy) / s / ky()];
     clampCenter();
     redraw();
   };
@@ -710,7 +732,9 @@ function renderTable() {
     const star =
       k.id === 'nis'
         ? ' <small title="MoonlightWeb’s per-fragment port of NIS, not NVIDIA’s compute shader">port</small>'
-        : '';
+        : k.id === 'mwsr' && engine.mwsrMode() === 'down'
+          ? ' <small title="MWSR’s reduction, as the client runs it: bilinear samples over each pixel’s footprint, averaged in linear light">reduction</small>'
+          : '';
     return `<tr><th scope="row">${k.name}${star}</th><td class="num fid">${f}</td><td class="num">${col}</td><td class="num">${o}</td><td class="num">${time}${gate}</td></tr>`;
   }).join('');
 }
@@ -736,7 +760,7 @@ $('measure').addEventListener('click', async () => {
   const vars = [];
   for (const k of KERNELS) {
     vars.push({ id: k.id, half: false, t: [] });
-    if (k.half && engine.hasF16 && R[k.id] && R[k.id].f16 === 'ok') vars.push({ id: k.id, half: true, t: [] });
+    if (engine.halfOf(k.id) && R[k.id] && R[k.id].f16 === 'ok') vars.push({ id: k.id, half: true, t: [] });
   }
   const opts = { c444: S.c444 };
   const total = vars.length * rounds * batches;
