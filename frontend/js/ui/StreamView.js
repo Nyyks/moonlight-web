@@ -9949,7 +9949,10 @@ export class StreamView {
             MetaLeft: 0x5b,
             ControlRight: 0x11,
             ShiftRight: 0x10,
-            AltRight: 0x12,
+            // VK_RMENU, not VK_MENU: on a European layout the right Alt is
+            // AltGr. As 0x12 it reached Wolf and Sunshine as the LEFT Alt, and
+            // AltGr+E on a French host typed no € (issue #44, 29/10/2026).
+            AltRight: 0xa5,
             MetaRight: 0x5c,
             // Context menu
             ContextMenu: 0x5d,

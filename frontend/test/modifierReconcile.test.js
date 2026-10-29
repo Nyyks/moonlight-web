@@ -273,7 +273,7 @@ describe('a Windows AltGr', () => {
     // neither Control nor Alt. Read as up, the Ctrl was let go of as the Alt
     // went down, then the Alt at the next key with nothing between: Notepad
     // turned its KeyTips on at each @ (29/10/2026).
-    const VK_MENU = 0x12;
+    const VK_RMENU = 0xa5; // the right Alt: AltGr on a European layout
 
     function pressAltGr(v) {
         v.handleKeyDown(evState('ControlLeft', 'Control', ['Control'], { ctrlKey: true }));
@@ -290,7 +290,7 @@ describe('a Windows AltGr', () => {
         expect(v.sent.filter((m) => m.type === 'keyup')).toEqual([]);
         expect(v.sent.slice(0, 2).map((m) => [m.type, m.keyCode])).toEqual([
             ['keydown', VK_LCTRL],
-            ['keydown', VK_MENU],
+            ['keydown', VK_RMENU],
         ]);
         expect(v._heldPhysKeys.has('ControlLeft')).toBe(true);
         expect(v._heldPhysKeys.has('AltRight')).toBe(true);
@@ -321,6 +321,6 @@ describe('a Windows AltGr', () => {
                 .filter((m) => m.type === 'keyup')
                 .map((m) => m.keyCode)
                 .sort(),
-        ).toEqual([VK_LCTRL, VK_MENU].sort());
+        ).toEqual([VK_LCTRL, VK_RMENU].sort());
     });
 });

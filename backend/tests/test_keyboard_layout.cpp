@@ -741,4 +741,27 @@ void run_keyboard_layout_tests()
         }
         CHECK(planText(QString(), KeyboardMode::Positional).isEmpty());
     }
+
+    // ── AltGr on a positional host ───────────────────────────────────────────
+    //
+    // Chrome on Windows reports AltGr as Ctrl+Alt. Wolf presses what the
+    // modifier byte names around the key, and Ctrl plus the left Alt took the
+    // host's AltGr away: AltGr+E typed no € on a French Wolf (issue #44). The
+    // right Alt is held as a key of its own, so the byte drops both there.
+    {
+        QJsonObject euro = key(0x45, "KeyE", QStringLiteral("€"), true);
+        euro["ctrlKey"] = true;
+        euro["altKey"] = true;
+        euro["shiftKey"] = true;
+        euro["altGraph"] = true;
+        CHECK_EQ(InputMsg::positionModifiers(euro, KeyboardMode::Positional),
+                 static_cast<char>(MODIFIER_SHIFT));
+        // Every other host keeps the byte as it was.
+        for (KeyboardMode mode : {KeyboardMode::Native, KeyboardMode::SunshineWindows})
+            CHECK_EQ(InputMsg::positionModifiers(euro, mode), InputMsg::modifierMask(euro));
+        // A real Ctrl+Alt shortcut, no AltGr, keeps its modifiers everywhere.
+        euro["altGraph"] = false;
+        CHECK_EQ(InputMsg::positionModifiers(euro, KeyboardMode::Positional),
+                 InputMsg::modifierMask(euro));
+    }
 }

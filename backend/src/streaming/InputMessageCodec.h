@@ -330,6 +330,21 @@ inline char modifierMask(const QJsonObject& msg)
     return mods;
 }
 
+/// The modifier byte of a key sent by its position. A character typed under
+/// AltGr carries Ctrl and Alt in its DOM flags (Chrome on Windows reports
+/// AltGraph as both), and a positional host — Wolf, Sunshine on Linux —
+/// presses whatever the byte names around the key: Ctrl and the LEFT Alt went
+/// down with the E, the host's AltGr no longer applied, and AltGr+E typed no €
+/// on a French Wolf (issue #44, 29/10/2026). The right Alt is held as a key of
+/// its own, which is all the host's layout needs. Other hosts keep the byte.
+inline char positionModifiers(const QJsonObject& msg, KeyboardMode mode)
+{
+    char mods = modifierMask(msg);
+    if (mode == KeyboardMode::Positional && msg["altGraph"].toBool(false))
+        mods &= ~(MODIFIER_CTRL | MODIFIER_ALT);
+    return mods;
+}
+
 /// Read an 'inputstate' heartbeat's key list — the client's authoritative set
 /// of keys it is still holding (see the media engine's input watchdog).
 ///
@@ -615,7 +630,7 @@ inline void sendKey(IMediaEngine& engine, const QJsonObject& msg, bool down, boo
     }
     // `hold`: a movement key the client wants kept down through a brief stall
     // instead of released at the short grace period (see the shim).
-    engine.sendKeyEvent(plan.keyCode, down, modifierMask(msg), plan.flags,
+    engine.sendKeyEvent(plan.keyCode, down, positionModifiers(msg, mode), plan.flags,
                         withHold && msg["hold"].toBool(false));
 }
 
