@@ -41,7 +41,8 @@ const LANGS = [
 const TRANSLATED = LANGS.filter((l) => l.code !== 'en');
 
 /* Every page of the site: its source file, its public path, and the nav entry
-   it lights up. A page missing here is neither translated nor in the sitemap. */
+   it lights up. A page missing here is neither translated nor in the sitemap,
+   unless it is in ENGLISH_ONLY below. */
 const PAGES = [
   { src: 'index.html', url: '/', nav: 'home' },
   { src: 'guides/index.html', url: '/guides/', nav: 'guides' },
@@ -59,6 +60,10 @@ const PAGES = [
   { src: 'controllers.html', url: '/controllers.html', nav: null },
 ];
 const PAGE_URLS = new Set(PAGES.map((p) => p.url));
+
+/* Pages in English alone, with a header of their own and outside the menu:
+   in the sitemap, without alternates, and nothing else. */
+const ENGLISH_ONLY = [{ src: 'mwsr/index.html', url: '/mwsr/' }];
 
 const localUrl = (lang, url) => (lang === 'en' ? url : `/${lang}${url}`);
 const pageId = (p) => p.src.replace(/\.html$/, '');
@@ -295,6 +300,8 @@ for (const page of PAGES) {
     urls.push(`  <url>\n    <loc>${ORIGIN}${localUrl(code, page.url)}</loc>\n    <lastmod>${lastChange(sources)}</lastmod>\n${alts}\n  </url>`);
   }
 }
+for (const page of ENGLISH_ONLY)
+  urls.push(`  <url>\n    <loc>${ORIGIN}${page.url}</loc>\n    <lastmod>${lastChange([path.join(SITE, page.src), builder])}</lastmod>\n  </url>`);
 outputs.set(
   path.join(SITE, 'sitemap.xml'),
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -305,11 +312,11 @@ outputs.set(
 );
 
 /* ── The MWSR comparison (website/mwsr/) ───────────────────────────────────
-   A tool page in English, outside PAGES: neither translated, nor in the menu,
-   nor in the sitemap. It runs what MoonlightWeb ships: its kernels are written
-   here from the product's modules (and the lab's 16-bit ports of FSR1 and
-   SGSR1, so that each runs at its best precision), so a shader changed in the
-   product and not rebuilt here fails --check. */
+   A tool page in English, outside PAGES: neither translated nor in the menu,
+   in the sitemap through ENGLISH_ONLY. It runs what MoonlightWeb ships: its
+   kernels are written here from the product's modules (and the lab's 16-bit
+   ports of FSR1 and SGSR1, so that each runs at its best precision), so a
+   shader changed in the product and not rebuilt here fails --check. */
 {
   const REPO = path.dirname(SITE);
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8').replace(/\r\n/g, '\n');
