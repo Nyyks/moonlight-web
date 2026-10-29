@@ -113,6 +113,11 @@
         },
         {
           "@type": "Question",
+          "name": "What is MWSR?",
+          "acceptedAnswer": {"@type": "Answer", "text": "MWSR (MoonlightWeb Super Resolution) is MoonlightWeb's own real-time upscaler, the one Video Enhancement runs in Auto. It rebuilds each decoded frame at your screen's size from that frame alone, in one GPU pass: no frame history and no neural network, so it adds no frame of delay and stays light enough for a phone. It sharpens edges without halos, reduces a stream larger than the screen, and works in HDR. Its code is open under the MIT License, so any program may use it. Compare it with FSR1, NIS and SGSR1 on your own GPU at https://moonlightweb.top/mwsr/."}
+        },
+        {
+          "@type": "Question",
           "name": "Does it work with game controllers?",
           "acceptedAnswer": {"@type": "Answer", "text": "Yes — Xbox and PlayStation controllers work with rumble, alongside keyboard, pointer-lock mouse, touch trackpad and a virtual keyboard. Most other pads are recognized automatically, and any pad can be remapped in Settings (Switch Pro controllers: over USB). Racing wheels, flight sticks and RC radios work too: from Chrome or Edge on a computer, MoonlightWeb's own host can hand the game the real device, every axis included, with force feedback for wheels on Windows and Linux hosts."}
         },
@@ -233,6 +238,15 @@
     <div class="a" data-i18n-html="q10.a"><p>GPU upscaling and sharpening running in the browser via WebGL2 or WebGPU (MoonlightWeb's own upscaler).
       Stream at 720p over 4G or hotel Wi-Fi and display near-1440p quality — with zero extra load on the
       gaming PC, since it runs client-side.</p></div>
+  </details>
+  <details>
+    <summary data-i18n="q18.s">What is MWSR?</summary>
+    <div class="a" data-i18n-html="q18.a"><p>MWSR (MoonlightWeb Super Resolution) is MoonlightWeb's own real-time upscaler, the one
+      Video Enhancement runs in Auto. It rebuilds each decoded frame at your screen's size from that frame alone, in one
+      GPU pass: no frame history and no neural network, so it adds no frame of delay and stays light enough for a phone.
+      It sharpens edges without halos, reduces a stream larger than the screen, and works in HDR. Its code is open under
+      the MIT License, so any program may use it. <a href="/mwsr/">Compare it with FSR1, NIS and SGSR1 on your own
+      GPU</a>.</p></div>
   </details>
   <details>
     <summary data-i18n="q11.s">What happens on strict firewalls or hotel Wi-Fi?</summary>

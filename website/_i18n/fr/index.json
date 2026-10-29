@@ -53,7 +53,7 @@
   "s2.li3": "<strong>Rien depuis l’App Store</strong> — Safari ou Chrome suffit",
   "s3.kicker": "03 · Améliorer",
   "s3.h3": "Streamez léger.<br>Affichez net.",
-  "s3.p": "L’amélioration vidéo upscale et affine le flux sur le GPU de votre appareil — WebGL2 ou WebGPU exécutant l’upscaler de MoonlightWeb. Streamez en 720p en 4G, profitez d’une image nette sur une dalle 1440p.",
+  "s3.p": "L’amélioration vidéo upscale et affine le flux sur le GPU de votre appareil — WebGL2 ou WebGPU exécutant <a href=\"/mwsr/\">MWSR (MoonlightWeb Super Resolution)</a>, l’upscaler de MoonlightWeb. Streamez en 720p en 4G, profitez d’une image nette sur une dalle 1440p.",
   "s3.li1": "<strong>Moins de bande passante, plus de détail</strong> — parfait en 4G et sur le Wi‑Fi d’hôtel",
   "s3.li2": "<strong>Exécuté côté client</strong> — aucune charge supplémentaire sur le PC gamer",
   "s3.li3": "<strong>Faites glisser le curseur</strong> — flux 720p vs. sortie améliorée →",

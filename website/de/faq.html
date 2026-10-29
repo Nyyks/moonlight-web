@@ -114,6 +114,11 @@
         },
         {
           "@type": "Question",
+          "name": "What is MWSR?",
+          "acceptedAnswer": {"@type": "Answer", "text": "MWSR (MoonlightWeb Super Resolution) is MoonlightWeb's own real-time upscaler, the one Video Enhancement runs in Auto. It rebuilds each decoded frame at your screen's size from that frame alone, in one GPU pass: no frame history and no neural network, so it adds no frame of delay and stays light enough for a phone. It sharpens edges without halos, reduces a stream larger than the screen, and works in HDR. Its code is open under the MIT License, so any program may use it. Compare it with FSR1, NIS and SGSR1 on your own GPU at https://moonlightweb.top/mwsr/."}
+        },
+        {
+          "@type": "Question",
           "name": "Does it work with game controllers?",
           "acceptedAnswer": {"@type": "Answer", "text": "Yes — Xbox and PlayStation controllers work with rumble, alongside keyboard, pointer-lock mouse, touch trackpad and a virtual keyboard. Most other pads are recognized automatically, and any pad can be remapped in Settings (Switch Pro controllers: over USB). Racing wheels, flight sticks and RC radios work too: from Chrome or Edge on a computer, MoonlightWeb's own host can hand the game the real device, every axis included, with force feedback for wheels on Windows and Linux hosts."}
         },
@@ -203,6 +208,10 @@
   <details>
     <summary data-i18n="q10.s">Was ist Video Enhancement?</summary>
     <div class="a" data-i18n-html="q10.a"><p>GPU-Upscaling und -Schärfung, die über WebGL2 oder WebGPU im Browser laufen (MoonlightWebs eigener Upscaler). Streame in 720p über 4G oder Hotel-WLAN und genieße fast 1440p-Qualität — ganz ohne Zusatzlast auf dem Gaming-PC, weil alles auf dem Client läuft.</p></div>
+  </details>
+  <details>
+    <summary data-i18n="q18.s">Was ist MWSR?</summary>
+    <div class="a" data-i18n-html="q18.a"><p>MWSR (MoonlightWeb Super Resolution) ist MoonlightWebs eigener Echtzeit-Upscaler, den Video Enhancement im Modus Auto nutzt. Er baut jedes dekodierte Bild allein aus diesem Bild in der Größe deines Bildschirms neu auf, in einem einzigen GPU-Durchgang: ohne Bildverlauf und ohne neuronales Netz, also ohne ein zusätzliches Bild Verzögerung und leicht genug für ein Smartphone. Er schärft Kanten ohne Halos, verkleinert einen Stream, der größer als der Bildschirm ist, und funktioniert in HDR. Sein Code steht unter der MIT-Lizenz: Jedes Programm darf ihn nutzen. <a href="/mwsr/">Vergleiche ihn auf deiner eigenen GPU mit FSR1, NIS und SGSR1</a>.</p></div>
   </details>
   <details>
     <summary data-i18n="q11.s">Was passiert bei strengen Firewalls oder Hotel-WLAN?</summary>
