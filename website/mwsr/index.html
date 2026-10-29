@@ -163,9 +163,10 @@
       <li><strong>GPU time</strong> is the median of batches of 100 draws, each batch timed by two GPU timestamps. The
         browser rounds those timestamps (to 0.1 ms in Chrome), and a batch of 100 makes the rounding a small share. When
         your GPU has <code>shader-f16</code>, MWSR, FSR1 and SGSR1 are also timed in 16-bit and the faster of their two
-        precisions is shown. Their 16-bit picture is first held to their 32-bit one: within 4/255 on 99.9 % of the
-        pixels. The pictures and the scores are those of the 32-bit texts. Timings vary with the GPU's clock: run them
-        twice before you trust a small gap.</li>
+        precisions is shown. Within 2 % of each other the two are even, <code>f16 ≈ f32</code>: such a gap changes
+        sides from one run to the next. Their 16-bit picture is first held to their 32-bit one: within 4/255 on 99.9 %
+        of the pixels. The pictures and the scores are those of the 32-bit texts. Timings vary with the GPU's clock: run
+        them twice before you trust a small gap.</li>
       <li><strong>4:2:0</strong> gives every upscaler the input a 4:2:0 stream would give it: its colour averaged over
         2×2 pixels and brought back by interpolation, as a decoder hands it over. <code>CHROMA444</code> is MWSR's mode
         for 4:4:4 streams. It is off by default, as in the README's figures, and the colour text shows what it does.</li>

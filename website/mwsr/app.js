@@ -479,7 +479,7 @@ function line(id) {
   if (r.ssimY != null) bits.push(fid(r.ssimY));
   if (r.overshoot != null) bits.push(pct(r.overshoot) + ' over');
   const t = best(id);
-  if (t) bits.push(t.ms.toFixed(t.ms < 1 ? 3 : 2) + ' ms');
+  if (t) bits.push(ms3(t.ms) + ' ms');
   return bits.join(' · ');
 }
 let queued = false;
@@ -640,12 +640,18 @@ function pct(x) {
   if (p < 0.005) return '< 0.01 %';
   return (p < 0.1 ? p.toFixed(2) : p.toFixed(1)) + ' %';
 }
+// Within 2 % the two precisions are even: such a gap changes sides from one
+// run to the next (0.435 against 0.439 ms on a Mac), so no winner is named.
+const EVEN = 0.02;
 function best(id) {
   const r = R[id];
   if (!r || r.t32 == null) return null;
-  if (r.t16 != null && r.t16 < r.t32) return { ms: r.t16, tag: 'f16' };
-  return { ms: r.t32, tag: r.t16 != null ? 'f32' : '' };
+  if (r.t16 == null) return { ms: r.t32, tag: '' };
+  const ms = Math.min(r.t16, r.t32);
+  const tag = Math.abs(r.t16 - r.t32) <= EVEN * Math.max(r.t16, r.t32) ? 'f16 ≈ f32' : r.t16 < r.t32 ? 'f16' : 'f32';
+  return { ms, tag, both: `32-bit ${ms3(r.t32)} ms, 16-bit ${ms3(r.t16)} ms` };
 }
+const ms3 = (ms) => ms.toFixed(ms < 1 ? 3 : 2);
 function renderTable() {
   const times = KERNELS.map((k) => best(k.id)).filter(Boolean);
   const max = Math.max(...times.map((t) => t.ms), 0);
@@ -659,7 +665,8 @@ function renderTable() {
     let time = '—';
     if (t) {
       const w = max ? Math.max(2, Math.round((t.ms / max) * 90)) : 0;
-      time = `${t.ms.toFixed(t.ms < 1 ? 3 : 2)}<span class="tag">${t.tag}</span><span class="bar" style="width:${w}px"></span>`;
+      const tag = t.tag ? `<span class="tag"${t.both ? ` title="${t.both}"` : ''}>${t.tag}</span>` : '';
+      time = `${ms3(t.ms)}${tag}<span class="bar" style="width:${w}px"></span>`;
     }
     let gate = '';
     if (r.f16 === 'refused')
