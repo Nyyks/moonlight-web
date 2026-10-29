@@ -11,10 +11,11 @@
 //   hdr=1                        the HDR feed: rgba16float textures and targets
 //                                (the renderer's `linear` mode), dumps as .f16
 //   set=feed,base,chain          which cells (see CELL_SETS), or cells=a,b,c
-//   codec=avc|none               VideoFrames from a WebCodecs encode → decode
+//   codec=avc|hevc|vp9|none      VideoFrames from a WebCodecs encode → decode
 //                                loop (the external-texture feed), or none
 //   enc=sw                       that encode in software (plan B §6: never the
-//                                encoder on the GPU that decodes and is timed)
+//                                encoder on the GPU that decodes and is timed);
+//                                vp9 where a phone has no software H.264
 //   pace=back|tick period=16.67  back to back, or one iteration per period
 //   batch=16 batches=8 warm=2 rounds=3   the measurement (ABBA across rounds)
 //   power=high-performance|low-power fallback=1   which adapter
@@ -607,10 +608,20 @@ async function makeFrames(pictures, codec, log, encSw = false) {
   const h = pictures[0].height;
   // H.264 High at the level the picture needs: 5.0 holds 1440p60 (22080
   // macroblocks), 4K60 needs 5.1 (36864); the encoder refuses a level too
-  // small for the frame ("no encoder"), as the 4K reduction case did.
+  // small for the frame ("no encoder"), as the 4K reduction case did. VP9
+  // profile 0 at 5.0 or 5.1 likewise, 8 bits.
   const mbs = Math.ceil(w / 16) * Math.ceil(h / 16);
+  const big = mbs > 22080;
   const codecString =
-    codec === "hevc" ? "hvc1.1.6.L120.B0" : mbs > 22080 ? "avc1.640033" : "avc1.640032";
+    codec === "hevc"
+      ? "hvc1.1.6.L120.B0"
+      : codec === "vp9"
+        ? big
+          ? "vp09.00.51.08"
+          : "vp09.00.50.08"
+        : big
+          ? "avc1.640033"
+          : "avc1.640032";
   const chunks = [];
   const encConfig = {
     codec: codecString,
@@ -621,8 +632,8 @@ async function makeFrames(pictures, codec, log, encSw = false) {
     latencyMode: "realtime",
     hardwareAcceleration: encSw ? "prefer-software" : "prefer-hardware",
   };
-  if (codec !== "hevc") encConfig.avc = { format: "annexb" };
-  else encConfig.hevc = { format: "annexb" };
+  if (codec === "hevc") encConfig.hevc = { format: "annexb" };
+  else if (codec !== "vp9") encConfig.avc = { format: "annexb" };
   let sup = await VideoEncoder.isConfigSupported(encConfig);
   if (!sup.supported && !encSw) {
     encConfig.hardwareAcceleration = "no-preference";
