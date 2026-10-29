@@ -68,8 +68,8 @@ de construction, pas une couche de plus :
 | V7 | HDR : la passe YUV de la relecture fondue dans MWSR (plans 10 bits lus par MWSR) | autre idée | 1 |
 
 - En RGB, MWSR applique à R, G et B des poids tirés de la luma. Le même mélange appliqué à Y, U et V
-  donne la même image, à la borne des texels près. V3 doit donc rendre V0 à 1/255 près : c'est son
-  test sur SwiftShader.
+  donne la même image, à la borne des texels près. Mais cette borne compte (§8) : bornés en YUV, les
+  canaux laissent une frange de couleur dépasser en RGB.
 - V2 laisse la couleur au bilinéaire ; c'est ce que fait `vt_metal.mm`, et la fidélité dira ce qu'on
   y perd.
 - La passe 0 de V1 à V4 et de V6 : sur le navigateur, une passe « Y + UV » depuis la texture externe.
@@ -139,7 +139,67 @@ de construction, pas une couche de plus :
 ## 7. L'ordre
 
 1. Le balayage de l'affûtage sur SwiftShader, et ses courbes à Bruno.
-2. Dans `MwsrShader.js` : `INPUT`, `PLANES` et `OUTPUT`, en WGSL d'abord ; puis les cellules du labo ;
-   puis la validation sur SwiftShader ; puis la génération HLSL et l'exemple D3D11 sur WARP.
+2. Les variantes dans le labo d'abord (`scripts/bench/scaler-lab/mwsr-yuv.js`), dérivées du texte du
+   produit, et leur validation sur SwiftShader. Elles n'entrent dans `MwsrShader.js` (`INPUT`,
+   `PLANES`, `OUTPUT`) puis dans le HLSL, avec l'exemple D3D11 sur WARP, que si les temps GPU leur
+   donnent raison.
 3. Au feu vert : les temps GPU.
 4. Le verdict à Bruno, puis l'intégration s'il dit oui.
+
+## 8. Étape 1 sur SwiftShader (29/10/2026)
+
+**L'affûtage.** Échelle du labo (`scaler_lab.py --swiftshader --quality`), sur le texte et sur 0 A.D.
+du comparateur et sur l'étalon de Bruno (`C:\Test\00_Background.png`). Fidélité = SSIM de la luma ×100,
+FLIP plus bas = plus proche.
+
+| Image | Échelle | Netteté | SSIM luma | FLIP | PSNR |
+|---|---|---|---|---|---|
+| Texte | ×1,33 | 1,85 (aujourd'hui) | 95,96 | 0,049 | 22,23 |
+| Texte | ×1,33 | 1,25 | 95,35 | 0,045 | 22,10 |
+| 0 A.D. | ×1,33 | 1,85 | 85,92 | 0,048 | 27,73 |
+| 0 A.D. | ×1,33 | 1,25 | 85,97 | 0,037 | 28,21 |
+| Étalon | ×1,33 | 1,85 | 93,64 | 0,042 | 24,21 |
+| Étalon | ×1,33 | 1,25 | 93,91 | 0,034 | 24,35 |
+| Texte | ×2 | 1,23 (la loi) | 86,12 | 0,068 | 17,81 |
+| Texte | ×2 | 0,83 (la loi depuis 1,25) | 85,16 | 0,066 | 17,64 |
+| 0 A.D. | ×2 | 1,23 | 66,24 | 0,065 | 24,52 |
+| 0 A.D. | ×2 | 0,83 | 65,64 | 0,059 | 24,66 |
+| Étalon | ×2 | 1,23 | 86,10 | 0,056 | 20,57 |
+| Étalon | ×2 | 0,83 | 86,29 | 0,048 | 20,74 |
+
+- Bruno a raison pour les images naturelles. Sur l'étalon et sur 0 A.D., moins d'affûtage rapproche
+  du natif sur presque toutes les mesures : le FLIP baisse de 9 à 23 %, la PSNR monte.
+- Sur le texte, c'est l'inverse : la SSIM de la luma veut plus d'affûtage (son maximum est vers 2,2 à
+  ×1,33), alors que le FLIP en veut moins.
+- Le balayage complet, de 0 à 3, situe les optimums entre 1,0 et 1,5 à ×1,33, et entre 0,5 et 1,0
+  à ×2 sur les images naturelles.
+- La netteté 1,25, avec la loi d'aujourd'hui qui donne 0,83 à ×2, tombe dans ces deux zones à la
+  fois.
+- Le lissage le long du bord (`W_ALONG` 0,22 ou 0,3) et le cubique des zones plates (`FLAT_C` 0,33 ou
+  0,75) ne changent presque rien. On les garde.
+
+**Les variantes YUV** (texte, 1080p → 1440p, plans BT.709 à plage limitée) :
+
+| Cellule | SSIM | SSIM luma | FLIP |
+|---|---|---|---|
+| `mwsr` (RGB complet, 4:4:4) | 95,74 | 95,96 | 0,049 |
+| V0 4:4:4 (RGB refait depuis les plans) | 95,74 | 95,96 | 0,049 |
+| V2 4:4:4 (UV au bilinéaire) | 95,18 | 95,92 | 0,051 |
+| V3 4:4:4 (Y, Cb, Cr en MWSR) | 95,54 | 95,93 | 0,051 |
+| V0 4:2:0 | 94,24 | 95,89 | 0,056 |
+| V1 = V2 4:2:0 | 94,14 | 95,89 | 0,059 |
+| V3 4:2:0 | 94,27 | 95,89 | 0,061 |
+| V4 4:2:0 | 94,40 | 95,92 | 0,056 |
+
+- Toutes les cellules compilent et dessinent sur SwiftShader, en 8 et en 10 bits. Les cellules
+  `split+yuv` tournent aussi sur de vraies images NV12 de décodeur, et rendent `blit+mwsr` à 1 à 2
+  niveaux près en moyenne.
+- En 4:4:4, l'aller-retour par les plans ne change rien : V0 rend `mwsr` aux mesures près.
+- **V3 n'est pas V0.** Borné en YUV, le texte rendu en sous-pixels garde des franges de couleur plus
+  vives, qui dépassent en RGB : 2 % de dépassement contre 0 %.
+- **V2 (et V1) perd un peu de couleur** sur le texte : 0,1 point de SSIM en 4:2:0, 0,6 en 4:4:4. La
+  luma ne bouge pas.
+- **V4 est la plus fidèle** en 4:2:0, parce qu'elle lit la chroma au bilinéaire à chaque prise, au
+  lieu d'un bilinéaire de bilinéaire.
+- Les temps de SwiftShader sont ceux du processeur : ils ne disent rien d'un GPU. Le classement en
+  vitesse attend le feu vert.
