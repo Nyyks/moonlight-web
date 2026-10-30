@@ -965,6 +965,7 @@ bool DataChannelRelay::setRemoteDescription(const std::string& sdp)
     try {
         const rtc::Description answer(sdp);
         m_Pc->setRemoteDescription(answer);
+        logMicAnswer(sdp, "[DataChannelRelay]");
         // A browser without Encoded Transform answers the video track
         // inactive: the video then stays on the DataChannel (U1.4).
         if (m_VideoTrack || m_UltraTrack) {
@@ -1154,11 +1155,13 @@ void DataChannelRelay::createDataChannels()
     // MONO Opus decoder and downmixes the stereo Sunshine stream (L+R)/2, which
     // plays ~-6 dB quieter than moonlight-qt and loses the stereo image.
     {
-        // Sendrecv only for the bench's silent carrier (PacketMarking::carrierOffered).
+        // Sendrecv for the viewer's microphone (RelayBase::setMicUplink), and
+        // for the bench's silent carrier (PacketMarking::carrierOffered).
         const bool carrier = PacketMarking::carrierOffered();
+        const bool sendRecv = carrier || m_Mic;
         auto audioDesc =
-            rtc::Description::Audio("audio", carrier ? rtc::Description::Direction::SendRecv
-                                                     : rtc::Description::Direction::SendOnly);
+            rtc::Description::Audio("audio", sendRecv ? rtc::Description::Direction::SendRecv
+                                                      : rtc::Description::Direction::SendOnly);
         audioDesc.addOpusCodec(111, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1");
 
         // Declared in the description, before addTrack: the PeerConnection
@@ -1177,7 +1180,9 @@ void DataChannelRelay::createDataChannels()
             auto packetizer = std::make_shared<rtc::OpusRtpPacketizer>(rtpConfig);
             packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>(64));
             m_AudioTrack->setMediaHandler(packetizer);
-            if (carrier) {
+            if (m_Mic) {
+                wireMicUplink(*m_AudioTrack, "[DataChannelRelay]");
+            } else if (carrier) {
                 // The carrier's packets carry nothing: dropped as they come.
                 m_AudioTrack->onMessage([](rtc::message_variant) {});
                 qInfo() << "[DataChannelRelay] Audio offered sendrecv (MW_DSCP_CARRIER bench key)";
@@ -3095,6 +3100,9 @@ void DataChannelRelay::stop()
     }
 
     qInfo() << "[DataChannelRelay::stop] ENTER, frameCount=" << m_FrameCount;
+
+    // The microphone's device first: nothing more will come for it.
+    stopMic();
 
     // Stop ICE timeout timer
     if (m_IceCheckTimer) {
