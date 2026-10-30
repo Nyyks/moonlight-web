@@ -137,6 +137,32 @@ void run_mic_uplink_tests()
         CHECK(!mw::mic::readAudioAnswer(head + video).found);
     }
 
+    SECTION("MicRtp — the WebSocket transport's frames");
+    {
+        mw::mic::MicFrame f;
+        const uint8_t opus[] = {0x4D, 1, 0x12, 0x34, 0xAA, 0xBB, 0xCC};
+        CHECK(mw::mic::parseMicFrame(opus, sizeof opus, f));
+        CHECK(f.codec == mw::mic::MicCodec::Opus);
+        CHECK_EQ(f.sequence, 0x1234);
+        CHECK_EQ(f.payloadSize, 3u);
+        CHECK_EQ(f.payload[0], 0xAA);
+        const uint8_t pcm[] = {0x4D, 2, 0, 1, 0x00, 0x40, 0x00, 0xC0};
+        CHECK(mw::mic::parseMicFrame(pcm, sizeof pcm, f));
+        CHECK(f.codec == mw::mic::MicCodec::Pcm16);
+        CHECK_EQ(f.payloadSize, 4u);
+        // Not a frame: another tag, an unknown codec, no payload, PCM cut
+        // through a sample.
+        const uint8_t tag[] = {0x7B, 1, 0, 0, 1};
+        const uint8_t codec[] = {0x4D, 9, 0, 0, 1};
+        const uint8_t empty[] = {0x4D, 1, 0, 0};
+        const uint8_t odd[] = {0x4D, 2, 0, 0, 1, 2, 3};
+        CHECK(!mw::mic::parseMicFrame(tag, sizeof tag, f));
+        CHECK(!mw::mic::parseMicFrame(codec, sizeof codec, f));
+        CHECK(!mw::mic::parseMicFrame(empty, sizeof empty, f));
+        CHECK(!mw::mic::parseMicFrame(odd, sizeof odd, f));
+        CHECK(!mw::mic::parseMicFrame(nullptr, 0, f));
+    }
+
     SECTION("JitterRing — silent until primed, then plays in order");
     {
         mw::mic::JitterRing ring(4, 16);

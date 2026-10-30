@@ -30,17 +30,21 @@ struct OpusDecoder;
 
 // The viewer's microphone, played into this machine's virtual microphone.
 //
-// It rides the stream's own audio track: when the browser asked for it and the
-// session can take it (Session.cpp: the host is this machine, the viewer is the
-// owner, a WebRTC transport), the relay offers that m=audio section sendrecv
-// instead of sendonly, the page answers it with its getUserMedia track, and
-// every RTP packet the browser sends on it lands in onPacket(). No second
-// track, no renegotiation, and the host's own sound is not touched: it keeps
-// the same section the other way, with its NetEq on the browser's side.
+// On WebRTC it rides the stream's own audio track: when the browser asked for
+// it and the session can take it (Session.cpp: the host is this machine, the
+// viewer is the owner), the relay offers that m=audio section sendrecv instead
+// of sendonly, the page answers it with its getUserMedia track, and every RTP
+// packet the browser sends on it lands in onPacket(). No second track, no
+// renegotiation, and the host's own sound is not touched: it keeps the same
+// section the other way, with its NetEq on the browser's side.
 //
-// Here: RTP → Opus (libopus, mono 48 kHz, in-band FEC for a single lost packet
-// and PLC beyond) → JitterRing → the OS's device (MicOutput.h). One instance
-// per session; the relay holds it and stops it with the PeerConnection.
+// On the WebSocket transport — the one a tunnel without UDP leaves — the page
+// encodes the track itself (WebCodecs Opus, else PCM) and sends it on the
+// stream's socket; StreamRelay hands each message to onSocketFrame().
+//
+// Here: Opus (libopus, mono 48 kHz, in-band FEC for a single lost packet and
+// PLC beyond) or PCM → JitterRing → the OS's device (MicOutput.h). One
+// instance per session; the relay holds it and stops it with its connection.
 class MicUplink
 {
 public:
@@ -63,6 +67,11 @@ public:
     /// which is skipped. Any thread; serialised inside.
     void onPacket(const uint8_t* data, size_t size);
 
+    /// One binary message the page sent on the WebSocket transport's socket
+    /// (MicRtp.h, parseMicFrame): Opus from its WebCodecs encoder, or PCM.
+    /// Same thread rules as onPacket.
+    void onSocketFrame(const uint8_t* data, size_t size);
+
     /// What the output plays into, once started.
     std::string deviceName() const;
 
@@ -77,7 +86,15 @@ public:
     static constexpr int kMaxConcealedPackets = 10;
 
 private:
+    /// The socket's frames as one sender, never mistaken for an RTP SSRC
+    /// (a browser draws those at random, and this one it cannot pick).
+    static constexpr uint32_t kSocketSource = 0xFFFFFFFFu;
+
     void decodeLocked(const uint8_t* payload, size_t size, bool fec, int frames);
+    /// One Opus packet in sequence: losses concealed, late ones dropped.
+    void opusLocked(uint16_t sequence, uint32_t source, const uint8_t* payload, size_t size,
+                    const char* road);
+    void countLocked(size_t payloadSize, const char* road);
 
     const std::string m_Device;
     // 40 ms held before playing, 150 ms at most: enough for Wi-Fi's bursts,
@@ -99,6 +116,7 @@ private:
     uint64_t m_Recovered = 0;
     uint64_t m_Late = 0;
     uint64_t m_Bad = 0;
+    uint64_t m_PayloadBytes = 0;
     bool m_LoggedFirst = false;
     bool m_LoggedForeignPt = false;
 };

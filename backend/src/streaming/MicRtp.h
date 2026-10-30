@@ -128,4 +128,46 @@ inline AudioAnswer readAudioAnswer(const std::string& sdp)
     return out;
 }
 
+// ── The microphone on the WebSocket transport ──────────────────────────────
+// That transport has no RTP track to answer, so the page sends its microphone
+// as binary messages on the stream's own socket — the one way in through a
+// tunnel that carries no UDP (Cloudflare Tunnel without a port forward):
+//
+//   [0x4D 'M'][codec:1][sequence:2, big-endian][payload]
+//
+// Opus is one 20 ms packet from the page's WebCodecs AudioEncoder; PCM is
+// 16-bit little-endian mono at 48 kHz, for a browser without one. Every
+// message the page sends otherwise is text, so the first byte cannot collide.
+
+enum class MicCodec : uint8_t
+{
+    Opus = 1,
+    Pcm16 = 2,
+};
+
+constexpr uint8_t kMicFrameTag = 0x4D;
+constexpr size_t kMicFrameHeader = 4;
+
+struct MicFrame
+{
+    MicCodec codec = MicCodec::Opus;
+    uint16_t sequence = 0;
+    const uint8_t* payload = nullptr;
+    size_t payloadSize = 0;
+};
+
+/// False for anything that is not a microphone frame, an unknown codec, an
+/// empty payload, or PCM cut through a sample.
+inline bool parseMicFrame(const uint8_t* data, size_t size, MicFrame& out)
+{
+    if (!data || size <= kMicFrameHeader || data[0] != kMicFrameTag) return false;
+    if (data[1] != uint8_t(MicCodec::Opus) && data[1] != uint8_t(MicCodec::Pcm16)) return false;
+    out.codec = static_cast<MicCodec>(data[1]);
+    out.sequence = static_cast<uint16_t>((data[2] << 8) | data[3]);
+    out.payload = data + kMicFrameHeader;
+    out.payloadSize = size - kMicFrameHeader;
+    if (out.codec == MicCodec::Pcm16 && out.payloadSize % 2 != 0) return false;
+    return true;
+}
+
 } // namespace mw::mic

@@ -16,21 +16,29 @@
  */
 
 /**
- * The viewer's microphone, sent to the host on the stream's own audio track.
+ * The viewer's microphone, sent to the host.
  *
  * Settings → "Send my microphone" asks for it at launch (`mic_enabled`). The
  * host grants it only when the microphone can land where the game is — the
- * host is the machine MoonlightWeb runs on, the viewer is its owner, the
- * transport is WebRTC — and then offers the audio section sendrecv instead of
- * sendonly (/start says `mic: true`, or `mic_why`). This side answers that
- * section sendrecv and puts its getUserMedia track on the sender: no second
- * track, no renegotiation, and the stream's own sound keeps its native player.
+ * host is the machine MoonlightWeb runs on, the viewer is its owner — and says
+ * so (/start's `mic: true`, or `mic_why`). Then, by transport:
+ *   - WebRTC: the host offers the audio section sendrecv instead of sendonly;
+ *     this side answers it sendrecv and puts its getUserMedia track on the
+ *     sender, at the quality's bitrate. No second track, no renegotiation, and
+ *     the stream's own sound keeps its native player;
+ *   - WebSocket (a tunnel with no UDP): MicSocketSender encodes the track and
+ *     sends it on the stream's socket.
+ *
+ * Settings → "Microphone sound" picks the quality (MIC_QUALITY): the call-style
+ * cleanup at 64 kbit/s, or none at all at 128 for a headset or a good mic.
  *
  * The microphone is opened only once the host said yes, so a viewer is never
  * asked for a permission that would lead nowhere. A standby view (seamless
  * quality switch) holds its microphone back until it is promoted, or the host
  * would hear the voice twice for as long as both legs run.
  */
+
+import { MicSocketSender } from './MicSocketSender.js';
 
 /**
  * Whether this browser can capture a microphone at all: a secure context
@@ -58,16 +66,44 @@ export function offerTakesMic(sdp) {
         .some((section) => /^a=mid:audio\r?$/m.test(section) && /^a=sendrecv\r?$/m.test(section));
 }
 
-/** What getUserMedia is asked for: a voice, cleaned the way a call cleans it. */
-export const MIC_CONSTRAINTS = Object.freeze({
-    audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-    },
-    video: false,
+/**
+ * The two ways to sound. `voice` cleans up the way a call does — echo
+ * cancellation (the stream's own sound comes out of this device's speakers),
+ * noise suppression, gain control — which also takes the life out of a voice;
+ * `clean` leaves it as the microphone heard it, at twice the bitrate, for a
+ * headset or a microphone that needs no help. Opus is transparent for a voice
+ * well before 128 kbit/s; what was holding it back was the browser's default of
+ * 32–64 and the processing.
+ */
+export const MIC_QUALITY = Object.freeze({
+    voice: Object.freeze({ processing: true, bitrate: 64000 }),
+    clean: Object.freeze({ processing: false, bitrate: 128000 }),
 });
+
+/** @param {string} [name] @returns {{processing: boolean, bitrate: number}} */
+export function micQuality(name) {
+    return MIC_QUALITY[name] || MIC_QUALITY.voice;
+}
+
+/**
+ * What getUserMedia is asked for, at a quality.
+ *
+ * @param {{processing: boolean}} quality
+ * @returns {MediaStreamConstraints}
+ */
+export function micConstraints(quality) {
+    const p = quality.processing;
+    return {
+        audio: {
+            echoCancellation: p,
+            noiseSuppression: p,
+            autoGainControl: p,
+            channelCount: 1,
+            sampleRate: 48000,
+        },
+        video: false,
+    };
+}
 
 /**
  * Muted or not, carried from a retiring view to the one replacing it, so a
@@ -85,10 +121,18 @@ export class MicUplink {
     /**
      * @param {object} [opts]
      * @param {boolean} [opts.held] - a standby view's: nothing is sent until release().
+     * @param {string} [opts.quality] - a MIC_QUALITY name
      * @param {(c: MediaStreamConstraints) => Promise<MediaStream>} [opts.getUserMedia]
+     * @param {typeof MicSocketSender} [opts.SocketSender] - for tests
      */
     constructor(opts = {}) {
         this._held = opts.held === true;
+        this._quality = micQuality(opts.quality);
+        this._SocketSender = opts.SocketSender || MicSocketSender;
+        /** @type {((bytes: Uint8Array) => boolean)|null} the WebSocket path's sender */
+        this._socketSend = null;
+        /** @type {MicSocketSender|null} */
+        this._socket = null;
         this._getUserMedia =
             opts.getUserMedia || ((c) => globalThis.navigator.mediaDevices.getUserMedia(c));
         // A standby takes over the live view's mute; a new stream starts live.
@@ -147,11 +191,48 @@ export class MicUplink {
         try {
             if (t.sender.track !== track) await t.sender.replaceTrack(track);
             track.enabled = !this._muted;
+            await this._applyBitrate(t.sender);
             this._setState(this._muted ? 'muted' : 'live');
-            console.info('[Mic] sending "' + (track.label || 'microphone') + '" to the host');
+            console.info(
+                '[Mic] sending "' +
+                    (track.label || 'microphone') +
+                    '" to the host, Opus at ' +
+                    this._quality.bitrate / 1000 +
+                    ' kbit/s',
+            );
             return true;
         } catch (e) {
             console.warn('[Mic] could not put the microphone on the stream:', e);
+            this._setState('error');
+            return false;
+        }
+    }
+
+    /**
+     * The WebSocket transport's open socket: the microphone goes on it as
+     * frames (MicSocketSender). Opens the microphone on the first call. Never
+     * throws.
+     *
+     * @param {(bytes: Uint8Array) => boolean} send
+     * @returns {Promise<boolean>} whether it is sending
+     */
+    async attachSocket(send) {
+        this._socketSend = send;
+        if (this._closed || this._held || this._socket) return false;
+        const track = await this._acquire();
+        if (!track || this._closed) return false;
+        track.enabled = !this._muted;
+        const sender = new this._SocketSender(track, send, this._quality);
+        this._socket = sender;
+        try {
+            await sender.start();
+            if (this._closed) return false;
+            this._setState(this._muted ? 'muted' : 'live');
+            return true;
+        } catch (e) {
+            console.warn('[Mic] could not send the microphone on the WebSocket:', e);
+            sender.stop();
+            this._socket = null;
             this._setState('error');
             return false;
         }
@@ -162,7 +243,20 @@ export class MicUplink {
         if (!this._held) return Promise.resolve(false);
         this._held = false;
         this._muted = carriedMute;
-        return this.attach();
+        return this._socketSend ? this.attachSocket(this._socketSend) : this.attach();
+    }
+
+    /** The quality's bitrate on the RTP sender; a browser without it keeps the offer's. */
+    async _applyBitrate(sender) {
+        if (typeof sender.getParameters !== 'function') return;
+        try {
+            const params = sender.getParameters();
+            if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+            params.encodings[0].maxBitrate = this._quality.bitrate;
+            await sender.setParameters(params);
+        } catch (e) {
+            console.info('[Mic] bitrate left to the browser:', e && e.message);
+        }
     }
 
     /** @param {boolean} muted */
@@ -182,6 +276,8 @@ export class MicUplink {
     /** The stream ended: the microphone is closed, its indicator goes out. */
     close() {
         this._closed = true;
+        if (this._socket) this._socket.stop();
+        this._socket = null;
         if (this._track) {
             try {
                 this._track.stop();
@@ -196,7 +292,7 @@ export class MicUplink {
     _acquire() {
         if (this._track && this._track.readyState !== 'ended') return Promise.resolve(this._track);
         if (this._acquiring) return this._acquiring;
-        this._acquiring = this._getUserMedia(MIC_CONSTRAINTS)
+        this._acquiring = this._getUserMedia(micConstraints(this._quality))
             .then((stream) => {
                 const track = stream.getAudioTracks()[0] || null;
                 if (this._closed) {

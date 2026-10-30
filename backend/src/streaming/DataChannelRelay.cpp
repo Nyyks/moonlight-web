@@ -1162,7 +1162,7 @@ void DataChannelRelay::createDataChannels()
         auto audioDesc =
             rtc::Description::Audio("audio", sendRecv ? rtc::Description::Direction::SendRecv
                                                       : rtc::Description::Direction::SendOnly);
-        audioDesc.addOpusCodec(111, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1");
+        audioDesc.addOpusCodec(111, micOpusFmtp());
 
         // Declared in the description, before addTrack: the PeerConnection
         // routes incoming RTCP by the SSRCs it finds there, so an SSRC known

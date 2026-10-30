@@ -150,3 +150,98 @@ describe('recvonlyExceptCarrier with the microphone', () => {
         expect(out).toMatch(/a=mid:video\r\na=recvonly/);
     });
 });
+
+describe('microphone quality', () => {
+    it('asks for a call-style cleanup in voice, and nothing in clean', async () => {
+        const { micConstraints, micQuality } = await import('../js/audio/MicUplink.js');
+        const voice = micConstraints(micQuality('voice')).audio;
+        expect(voice.echoCancellation && voice.noiseSuppression && voice.autoGainControl).toBe(
+            true,
+        );
+        const clean = micConstraints(micQuality('clean')).audio;
+        expect(clean.echoCancellation || clean.noiseSuppression || clean.autoGainControl).toBe(
+            false,
+        );
+        expect(clean.sampleRate).toBe(48000);
+        // Anything unknown is the default.
+        expect(micQuality('nonsense')).toBe(micQuality('voice'));
+    });
+
+    it("puts the quality's bitrate on the RTP sender", async () => {
+        const s = sender();
+        let params = { encodings: [{}] };
+        s.getParameters = () => params;
+        s.setParameters = vi.fn(async (p) => {
+            params = p;
+        });
+        const audio = { mid: 'audio', direction: 'recvonly', sender: s };
+        const mic = new MicUplink({ quality: 'clean', getUserMedia: gum(fakeTrack()) });
+        mic.prepare(pcWith([audio]), OFFER_SENDRECV);
+        expect(await mic.attach()).toBe(true);
+        expect(params.encodings[0].maxBitrate).toBe(128000);
+    });
+});
+
+describe('the WebSocket transport', () => {
+    const fakeSender = () => {
+        const made = [];
+        class Fake {
+            constructor(track, send, quality) {
+                Object.assign(this, { track, send, quality, started: false, stopped: false });
+                made.push(this);
+            }
+            async start() {
+                this.started = true;
+            }
+            stop() {
+                this.stopped = true;
+            }
+        }
+        return { Fake, made };
+    };
+
+    it('sends on the socket with the quality, and stops with the stream', async () => {
+        const { Fake, made } = fakeSender();
+        const track = fakeTrack();
+        const mic = new MicUplink({
+            quality: 'clean',
+            getUserMedia: gum(track),
+            SocketSender: Fake,
+        });
+        const send = vi.fn(() => true);
+        expect(await mic.attachSocket(send)).toBe(true);
+        expect(made).toHaveLength(1);
+        expect(made[0].started).toBe(true);
+        expect(made[0].send).toBe(send);
+        expect(made[0].quality.bitrate).toBe(128000);
+        expect(mic.state).toBe('live');
+        mic.toggleMuted();
+        expect(track.enabled).toBe(false);
+        mic.close();
+        expect(made[0].stopped).toBe(true);
+        expect(track.stop).toHaveBeenCalled();
+    });
+
+    it('a standby leg starts on the socket only when promoted', async () => {
+        const { Fake, made } = fakeSender();
+        const mic = new MicUplink({
+            held: true,
+            getUserMedia: gum(fakeTrack()),
+            SocketSender: Fake,
+        });
+        expect(await mic.attachSocket(() => true)).toBe(false);
+        expect(made).toHaveLength(0);
+        expect(await mic.release()).toBe(true);
+        expect(made).toHaveLength(1);
+    });
+
+    it('frames what it sends the way the host reads it', async () => {
+        const { micFrame, pcm16, MIC_CODEC_OPUS } = await import('../js/audio/MicSocketSender.js');
+        const f = micFrame(MIC_CODEC_OPUS, 0x1234, new Uint8Array([9, 8]));
+        expect(Array.from(f)).toEqual([0x4d, 1, 0x12, 0x34, 9, 8]);
+        // Little-endian, clipped at full scale.
+        expect(Array.from(pcm16(new Float32Array([0, 1, -1, 2])))).toEqual([
+            0, 0, 0xff, 0x7f, 0x00, 0x80, 0xff, 0x7f,
+        ]);
+    });
+});

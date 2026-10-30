@@ -161,8 +161,10 @@ export class SettingsView {
         this._chroma444 = false;
         this._muteHostAudio = true;
         // Send this device's microphone to the host (off by default): opened
-        // only once the host said it can take it (audio/MicUplink.js).
+        // only once the host said it can take it (audio/MicUplink.js), and how
+        // it sounds (MIC_QUALITY: voice cleanup, or none at a higher bitrate).
         this._micEnabled = false;
+        this._micQuality = 'voice';
         this._quitAppOnStop = false;
         // Enter fullscreen at launch (off by default): asked on the launch
         // click, the only moment a browser lets a page go fullscreen.
@@ -612,6 +614,7 @@ export class SettingsView {
         this._chroma444 = data.chroma_444_enabled === true;
         this._muteHostAudio = data.mute_host_audio !== false;
         this._micEnabled = data.mic_enabled === true;
+        this._micQuality = data.mic_quality === 'clean' ? 'clean' : 'voice';
         this._quitAppOnStop = data.quit_app_on_stop === true;
         this._fullscreenOnStart = data.fullscreen_on_start === true;
         this._touchSensitivity =
@@ -824,6 +827,7 @@ export class SettingsView {
             video_enhancement_algo: this._videoEnhancementAlgo,
             // Per-device only (server ignores these unknown fields).
             mic_enabled: this._micEnabled,
+            mic_quality: this._micQuality,
             quit_app_on_stop: this._quitAppOnStop,
             fullscreen_on_start: this._fullscreenOnStart,
             power_save: this._powerSave,
@@ -1328,6 +1332,7 @@ export class SettingsView {
         this._chroma444 = false;
         this._muteHostAudio = true;
         this._micEnabled = false;
+        this._micQuality = 'voice';
         this._quitAppOnStop = false;
         this._fullscreenOnStart = false;
         this._touchSensitivity = 2.2;
@@ -1886,6 +1891,16 @@ export class SettingsView {
                         <span class="setting-desc">${t(
                             micSupported() ? 'settings.micEnabledDesc' : 'settings.micUnsupported',
                         )}</span>
+                        <select id="settings-mic-quality" class="settings-select u-mt-2"
+                                aria-label="${t('settings.micQuality')}"
+                                ${this._micEnabled && micSupported() ? '' : 'disabled'}>
+                            <option value="voice" ${this._micQuality === 'voice' ? 'selected' : ''}>
+                                ${t('settings.micQualityVoice')}
+                            </option>
+                            <option value="clean" ${this._micQuality === 'clean' ? 'selected' : ''}>
+                                ${t('settings.micQualityClean')}
+                            </option>
+                        </select>
                     </div>
 
                     <div class="settings-field">
@@ -2319,9 +2334,18 @@ export class SettingsView {
             });
 
         const micCheck = this.container.querySelector('#settings-mic-enabled');
+        const micQuality = /** @type {HTMLSelectElement|null} */ (
+            this.container.querySelector('#settings-mic-quality')
+        );
         if (micCheck)
             micCheck.addEventListener('change', () => {
                 this._micEnabled = micCheck.checked;
+                if (micQuality) micQuality.disabled = !micCheck.checked;
+                this._autoSave();
+            });
+        if (micQuality)
+            micQuality.addEventListener('change', () => {
+                this._micQuality = micQuality.value === 'clean' ? 'clean' : 'voice';
                 this._autoSave();
             });
 

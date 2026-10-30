@@ -239,6 +239,14 @@ protected:
     /// Closes the microphone's device. Both relays call it from stop().
     void stopMic();
 
+    /// The audio section's Opus parameters. stereo=1;sprop-stereo=1 keep the
+    /// browser's decoder stereo (see the relays). With a microphone, the
+    /// section also says what this side takes from the browser: up to 128
+    /// kbit/s, which Chrome and Firefox use as their encoder's target where
+    /// they would otherwise speak at 32–64; the page sets the rate it wants
+    /// below that per quality (MicUplink.js).
+    std::string micOpusFmtp() const;
+
     /// Written once on the main thread before the relay moves to its own
     /// thread, read-only afterwards — same lifetime discipline as
     /// m_ClipboardEnabled.

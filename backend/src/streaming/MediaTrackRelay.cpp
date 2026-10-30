@@ -441,7 +441,7 @@ void MediaTrackRelay::createTracksAndChannels()
         auto audioDesc =
             rtc::Description::Audio("audio", sendRecv ? rtc::Description::Direction::SendRecv
                                                       : rtc::Description::Direction::SendOnly);
-        audioDesc.addOpusCodec(111, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1");
+        audioDesc.addOpusCodec(111, micOpusFmtp());
 
         // Declared before addTrack for the same reason as the video SSRC above:
         // without it the audio NACK responder below never sees a NACK either.

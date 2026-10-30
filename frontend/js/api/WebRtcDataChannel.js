@@ -37,6 +37,7 @@ import { attachRtpVideo, passEncodedAudio, rtpLegacyApi } from './RtpVideo.js';
 import { closeHidChannel, createHidChannel, sendHidFrame } from '../hid/hidWire.js';
 import { setAudioJitterBufferTarget } from '../util/AudioJitter.js';
 import { armDscpCarrier, dscpCarrierMode, prepareDscpCarrier } from '../util/DscpCarrier.js';
+import { MIC_SOCKET_BACKLOG } from '../audio/MicSocketSender.js';
 
 /**
  * Describe a WebSocket close code for diagnostic logging.
@@ -364,6 +365,9 @@ export class WebRtcDataChannel {
                 console.log('[WSS] WS connected, stream ready');
                 this.connected = true;
                 if (this.onOpen) this.onOpen();
+                // No audio track to answer here: the microphone goes on this
+                // socket as frames (audio/MicSocketSender.js). Not awaited.
+                if (this.mic) this.mic.attachSocket((bytes) => this._sendMicFrame(bytes));
             };
 
             this.signalingWs.onmessage = (evt) => this._onWssMessage(evt);
@@ -519,6 +523,22 @@ export class WebRtcDataChannel {
     /** One HID passthrough report frame; false when the channel is not open. */
     sendHid(frame) {
         return sendHidFrame(this._hidDc, frame);
+    }
+
+    /**
+     * One microphone frame on the WSS socket. Dropped while the socket is
+     * backed up: a voice that arrives late is worse than one missing 20 ms.
+     *
+     * @param {Uint8Array} bytes
+     * @returns {boolean} whether it was sent
+     */
+    _sendMicFrame(bytes) {
+        const ws = this.signalingWs;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+        if (typeof ws.bufferedAmount === 'number' && ws.bufferedAmount > MIC_SOCKET_BACKLOG)
+            return false;
+        ws.send(bytes);
+        return true;
     }
 
     send(obj) {

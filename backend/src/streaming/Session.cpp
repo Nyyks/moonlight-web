@@ -768,10 +768,10 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
     // it is only worth anything when the streamed host is this machine: a
     // remote Sunshine would never hear it (GameStream carries no microphone),
     // and the voice would come out on the wrong PC. Same gate as the clipboard
-    // otherwise: the owner's, never an invited player's. And a WebRTC
-    // transport: the WebSocket one has no audio track to answer. The native
-    // host is this machine by construction, and its entry carries no address
-    // for isSelfAddress() to recognise.
+    // otherwise: the owner's, never an invited player's. Every transport
+    // carries it: the WebRTC ones on the audio track, the WebSocket one as
+    // frames on its socket. The native host is this machine by construction,
+    // and its entry carries no address for isSelfAddress() to recognise.
     if (m_MicRequested) {
         const bool micHostHere = media.type == MediaType::NativeHost || hostIsSelf;
         std::string why;
@@ -780,9 +780,6 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
                   "MoonlightWeb runs on";
         else if (!m_InputPolicy.unrestricted())
             why = "an invited player cannot send a microphone";
-        else if (m_Transport == QLatin1String("wss"))
-            why = "this connection fell back to the WebSocket transport, which carries no "
-                  "microphone";
         else
             why = MicUplink::unavailable(m_MicDevice.toStdString());
         if (why.empty()) {
@@ -841,6 +838,7 @@ void StreamSession::onLaunchResult(bool ok, const BackendError& err, const Media
         streamRelay->setWsPath(m_WsPath);
         streamRelay->setClipboardEnabled(clipboardLocal);
         streamRelay->setInputPolicy(m_InputPolicy);
+        streamRelay->setMicUplink(m_Mic);
 
         connect(m_Engine, &IMediaEngine::connectionStarted, this,
                 &StreamSession::onShimConnectionStarted);

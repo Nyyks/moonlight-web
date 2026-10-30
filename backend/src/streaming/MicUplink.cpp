@@ -96,11 +96,18 @@ void MicUplink::stop()
         m_Decoder = nullptr;
     }
     const auto ring = m_Ring.stats();
-    logLine("closed: " + std::to_string(m_Packets) + " packets, " + std::to_string(m_Lost) +
-            " lost (" + std::to_string(m_Recovered) + " recovered by FEC), " +
-            std::to_string(m_Late) + " late, " + std::to_string(m_Bad) + " malformed; " +
-            std::to_string(ring.underruns) + " underruns, " + std::to_string(ring.trims) +
-            " trims (" + std::to_string(ring.trimmed * 1000 / kRate) + " ms dropped)");
+    // What the browser really sent, in the unit its encoder is set in.
+    const double seconds = double(ring.pushed) / kRate;
+    const std::string rate =
+        seconds >= 1.0
+            ? ", " + std::to_string(int(m_PayloadBytes * 8 / 1000.0 / seconds + 0.5)) + " kbit/s"
+            : std::string();
+    logLine("closed: " + std::to_string(m_Packets) + " packets" + rate + ", " +
+            std::to_string(m_Lost) + " lost (" + std::to_string(m_Recovered) +
+            " recovered by FEC), " + std::to_string(m_Late) + " late, " + std::to_string(m_Bad) +
+            " malformed; " + std::to_string(ring.underruns) + " underruns, " +
+            std::to_string(ring.trims) + " trims (" + std::to_string(ring.trimmed * 1000 / kRate) +
+            " ms dropped)");
 }
 
 std::string MicUplink::deviceName() const
@@ -131,23 +138,70 @@ void MicUplink::onPacket(const uint8_t* data, size_t size)
         }
         return;
     }
-    ++m_Packets;
-    if (!m_LoggedFirst) {
-        m_LoggedFirst = true;
-        logLine("first packet from the browser (SSRC " + std::to_string(rtp.ssrc) + ")");
-    }
+    opusLocked(rtp.sequence, rtp.ssrc, rtp.payload, rtp.payloadSize, "Opus over RTP");
+}
 
-    // A new sender (the page swapped its track, or a reconnect) starts its
-    // own sequence: nothing to conceal across that.
-    if (!m_HaveSequence || rtp.ssrc != m_Ssrc) {
-        m_HaveSequence = true;
-        m_Ssrc = rtp.ssrc;
-        m_LastSequence = rtp.sequence;
-        decodeLocked(rtp.payload, rtp.payloadSize, false, kMaxFrames);
+void MicUplink::onSocketFrame(const uint8_t* data, size_t size)
+{
+    mw::mic::MicFrame frame;
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    if (!mw::mic::parseMicFrame(data, size, frame)) {
+        ++m_Bad;
+        return;
+    }
+    if (!m_Started || !m_Decoder) return;
+    if (frame.codec == mw::mic::MicCodec::Opus) {
+        opusLocked(frame.sequence, kSocketSource, frame.payload, frame.payloadSize,
+                   "Opus over the WebSocket");
         return;
     }
 
-    const int delta = mw::mic::sequenceDelta(m_LastSequence, rtp.sequence);
+    // PCM: a reliable socket loses nothing, so there is nothing to conceal;
+    // only the order is checked, as for Opus.
+    countLocked(frame.payloadSize, "16-bit PCM over the WebSocket");
+    if (m_HaveSequence && m_Ssrc == kSocketSource &&
+        mw::mic::sequenceDelta(m_LastSequence, frame.sequence) <= 0) {
+        ++m_Late;
+        return;
+    }
+    m_HaveSequence = true;
+    m_Ssrc = kSocketSource;
+    m_LastSequence = frame.sequence;
+    const size_t samples = frame.payloadSize / 2;
+    if (m_Pcm.size() < samples) m_Pcm.resize(samples);
+    for (size_t i = 0; i < samples; ++i) {
+        const auto s = static_cast<int16_t>(frame.payload[2 * i] | (frame.payload[2 * i + 1] << 8));
+        m_Pcm[i] = s / 32768.0f;
+    }
+    m_Ring.push(m_Pcm.data(), samples);
+}
+
+void MicUplink::countLocked(size_t payloadSize, const char* road)
+{
+    ++m_Packets;
+    m_PayloadBytes += payloadSize;
+    if (!m_LoggedFirst) {
+        m_LoggedFirst = true;
+        logLine(std::string("first packet from the browser: ") + road);
+    }
+}
+
+void MicUplink::opusLocked(uint16_t sequence, uint32_t source, const uint8_t* payload, size_t size,
+                           const char* road)
+{
+    countLocked(size, road);
+
+    // A new sender (the page swapped its track, or a reconnect) starts its
+    // own sequence: nothing to conceal across that.
+    if (!m_HaveSequence || source != m_Ssrc) {
+        m_HaveSequence = true;
+        m_Ssrc = source;
+        m_LastSequence = sequence;
+        decodeLocked(payload, size, false, kMaxFrames);
+        return;
+    }
+
+    const int delta = mw::mic::sequenceDelta(m_LastSequence, sequence);
     if (delta <= 0) {
         // Already played, or concealed in its place: too late to matter.
         ++m_Late;
@@ -161,12 +215,12 @@ void MicUplink::onPacket(const uint8_t* data, size_t size)
             // this one (the offer's useinbandfec=1 asks the browser for it).
             for (int i = 0; i < missing - 1; ++i)
                 decodeLocked(nullptr, 0, false, m_LastFrames);
-            decodeLocked(rtp.payload, rtp.payloadSize, true, m_LastFrames);
+            decodeLocked(payload, size, true, m_LastFrames);
             ++m_Recovered;
         }
     }
-    m_LastSequence = rtp.sequence;
-    decodeLocked(rtp.payload, rtp.payloadSize, false, kMaxFrames);
+    m_LastSequence = sequence;
+    decodeLocked(payload, size, false, kMaxFrames);
 }
 
 void MicUplink::decodeLocked(const uint8_t* payload, size_t size, bool fec, int frames)

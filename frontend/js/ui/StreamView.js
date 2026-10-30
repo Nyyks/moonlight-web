@@ -1067,14 +1067,15 @@ export class StreamView {
         this.webrtc._unpairedGuest = this._playerMode;
 
         // The viewer's microphone, when the host took it (/start's `mic`): it
-        // answers the stream's audio section. A standby leg holds it back
-        // until activate(), or the host would hear the voice twice.
+        // answers the stream's audio section, or rides the WSS socket. A
+        // standby leg holds it back until activate(), or the host would hear
+        // the voice twice.
         /** @type {MicUplink|null} */
         this._mic = null;
         /** @type {HTMLButtonElement|null} */
         this._micBtn = null;
-        if (opts.mic === true && this._transport !== 'wss' && micSupported()) {
-            this._mic = new MicUplink({ held: this._standby });
+        if (opts.mic === true && micSupported()) {
+            this._mic = new MicUplink({ held: this._standby, quality: opts.micQuality });
             this._mic.onStateChange = (state) => this._onMicState(state);
             this.webrtc.mic = this._mic;
         }

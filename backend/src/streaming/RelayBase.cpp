@@ -136,6 +136,13 @@ void RelayBase::stopMic()
     if (m_Mic) m_Mic->stop();
 }
 
+std::string RelayBase::micOpusFmtp() const
+{
+    std::string fmtp = "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1";
+    if (m_Mic) fmtp += ";maxaveragebitrate=128000;maxplaybackrate=48000";
+    return fmtp;
+}
+
 void RelayBase::emitLocalCandidate(const rtc::Candidate& candidate, const char* logTag)
 {
     rtc::Candidate modCandidate = candidate;

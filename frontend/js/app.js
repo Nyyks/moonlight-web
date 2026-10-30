@@ -3416,6 +3416,8 @@ export const MoonlightApp = {
             // The host took this viewer's microphone (audio/MicUplink.js): the
             // view answers the audio section with it. Never a guest's.
             mic: viewOpts.playerMode !== true && result.mic === true,
+            // How it sounds (Settings → Microphone sound): MIC_QUALITY's name.
+            micQuality: streamingSettings.mic_quality,
             // The virtual display drawn by another GPU than the display it
             // replaced, when the host says so: the view tells the user to
             // restart a stuttering app, once the stream shows the stall —
