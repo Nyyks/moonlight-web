@@ -125,6 +125,10 @@ export class WebRtcDataChannel {
         this.audioElement = null;
         // Cleanup for the autoplay gesture retry, when play() was rejected.
         this._audioRetryCleanup = null;
+        // The viewer's microphone (audio/MicUplink.js), when the host took it:
+        // it answers the same audio section sendrecv. Set by StreamView.
+        /** @type {import('../audio/MicUplink.js').MicUplink|null} */
+        this.mic = null;
 
         // WSS mode: legacy StreamRelay WebSocket passthrough.
         // When true, this class acts as a simple WS client that receives
@@ -1237,8 +1241,11 @@ export class WebRtcDataChannel {
             console.log('[WebRTC] Remote description set (offer)');
             await this._flushPendingCandidates();
 
-            // The bench's silent carrier (DscpCarrier.js), off by default.
-            const carrier = dscpCarrierMode();
+            // The viewer's microphone, when the host offered to take it.
+            const micOn = this.mic ? this.mic.prepare(this.pc, sdp) : false;
+            // The bench's silent carrier (DscpCarrier.js), off by default; the
+            // microphone holds that sender when both are asked.
+            const carrier = micOn ? null : dscpCarrierMode();
             prepareDscpCarrier(this.pc, carrier);
 
             // Create answer. Stereo Opus decode for the RTP audio track:
@@ -1252,6 +1259,8 @@ export class WebRtcDataChannel {
             await this.pc.setLocalDescription(modifiedAnswer);
             console.log('[WebRTC] Local description set (answer), sending...');
             armDscpCarrier(this.pc, carrier);
+            // Not awaited: a permission prompt must not hold the answer back.
+            if (micOn) this.mic.attach();
 
             // Start ICE timeout: if ICE doesn't reach connected/completed
             // within ICE_TIMEOUT_MS, the connection has failed (likely UDP

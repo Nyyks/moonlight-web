@@ -100,6 +100,7 @@ import {
     pyrowaveBlocker,
 } from '../util/PyrowaveCodec.js';
 import { CODEC_AUTO, codecAfterAutoMigration } from '../util/CodecAuto.js';
+import { micSupported } from '../audio/MicUplink.js';
 
 const STORAGE_KEY = 'mw-streaming-settings';
 
@@ -159,6 +160,9 @@ export class SettingsView {
         this._hdrEnabled = false;
         this._chroma444 = false;
         this._muteHostAudio = true;
+        // Send this device's microphone to the host (off by default): opened
+        // only once the host said it can take it (audio/MicUplink.js).
+        this._micEnabled = false;
         this._quitAppOnStop = false;
         // Enter fullscreen at launch (off by default): asked on the launch
         // click, the only moment a browser lets a page go fullscreen.
@@ -607,6 +611,7 @@ export class SettingsView {
         this._hdrEnabled = data.hdr_enabled === true;
         this._chroma444 = data.chroma_444_enabled === true;
         this._muteHostAudio = data.mute_host_audio !== false;
+        this._micEnabled = data.mic_enabled === true;
         this._quitAppOnStop = data.quit_app_on_stop === true;
         this._fullscreenOnStart = data.fullscreen_on_start === true;
         this._touchSensitivity =
@@ -818,6 +823,7 @@ export class SettingsView {
             video_enhancement: this._videoEnhancement,
             video_enhancement_algo: this._videoEnhancementAlgo,
             // Per-device only (server ignores these unknown fields).
+            mic_enabled: this._micEnabled,
             quit_app_on_stop: this._quitAppOnStop,
             fullscreen_on_start: this._fullscreenOnStart,
             power_save: this._powerSave,
@@ -1321,6 +1327,7 @@ export class SettingsView {
         this._hdrEnabled = false;
         this._chroma444 = false;
         this._muteHostAudio = true;
+        this._micEnabled = false;
         this._quitAppOnStop = false;
         this._fullscreenOnStart = false;
         this._touchSensitivity = 2.2;
@@ -1867,6 +1874,20 @@ export class SettingsView {
                         <span class="setting-desc">${t('settings.muteHostDesc')}</span>
                     </div>
 
+                    <div class="settings-field${micSupported() ? '' : ' settings-field-locked'}">
+                        <label class="settings-checkbox-label">
+                            <input type="checkbox" id="settings-mic-enabled"
+                                ${this._micEnabled && micSupported() ? 'checked' : ''}
+                                ${micSupported() ? '' : 'disabled'} />
+                            <span class="settings-checkbox-text">
+                                <strong>${t('settings.micEnabled')}</strong>
+                            </span>
+                        </label>
+                        <span class="setting-desc">${t(
+                            micSupported() ? 'settings.micEnabledDesc' : 'settings.micUnsupported',
+                        )}</span>
+                    </div>
+
                     <div class="settings-field">
                         <label class="settings-checkbox-label">
                             <input type="checkbox" id="settings-quit-app-on-stop"
@@ -2294,6 +2315,13 @@ export class SettingsView {
         if (muteHostCheck)
             muteHostCheck.addEventListener('change', () => {
                 this._muteHostAudio = muteHostCheck.checked;
+                this._autoSave();
+            });
+
+        const micCheck = this.container.querySelector('#settings-mic-enabled');
+        if (micCheck)
+            micCheck.addEventListener('change', () => {
+                this._micEnabled = micCheck.checked;
                 this._autoSave();
             });
 
